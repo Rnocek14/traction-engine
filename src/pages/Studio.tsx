@@ -87,8 +87,11 @@ export default function Studio() {
   const statusInfo = scriptRun ? getStatusInfo(scriptRun) : null;
   const isHardBlock = scriptRun ? hasHardBlocks(scriptRun) : false;
 
-  // Loading state (including role check in progress)
-  if (authLoading || scriptLoading || (user && userHasAccess === null)) {
+  // DEV MODE: Skip auth checks for development
+  const DEV_SKIP_AUTH = true;
+
+  // Loading state
+  if (scriptLoading) {
     return (
       <div className="min-h-screen bg-background">
         <StudioHeader />
@@ -96,54 +99,9 @@ export default function Studio() {
           <div className="flex items-center justify-center py-12">
             <div className="text-center">
               <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto mb-3" />
-              <p className="text-sm text-muted-foreground">
-                {user ? "Checking access..." : "Loading..."}
-              </p>
+              <p className="text-sm text-muted-foreground">Loading...</p>
             </div>
           </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Auth required
-  if (!user) {
-    return (
-      <div className="min-h-screen bg-background">
-        <StudioHeader />
-        <div className="container mx-auto px-4 py-12">
-          <Card className="glass-card max-w-md mx-auto">
-            <CardContent className="pt-6 text-center">
-              <AlertTriangle className="h-12 w-12 text-warning mx-auto mb-4" />
-              <h2 className="text-lg font-semibold mb-2">Authentication Required</h2>
-              <p className="text-sm text-muted-foreground mb-4">
-                Sign in with a QA or admin role to access the Studio.
-              </p>
-              <Button asChild>
-                <Link to="/login">Sign In</Link>
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-    );
-  }
-
-  // Role check
-  if (userHasAccess === false) {
-    return (
-      <div className="min-h-screen bg-background">
-        <StudioHeader />
-        <div className="container mx-auto px-4 py-12">
-          <Card className="glass-card max-w-md mx-auto">
-            <CardContent className="pt-6 text-center">
-              <AlertTriangle className="h-12 w-12 text-destructive mx-auto mb-4" />
-              <h2 className="text-lg font-semibold mb-2">Access Denied</h2>
-              <p className="text-sm text-muted-foreground">
-                You need admin or QA role to access the Studio.
-              </p>
-            </CardContent>
-          </Card>
         </div>
       </div>
     );
