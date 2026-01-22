@@ -58,11 +58,13 @@ Deno.serve(async (req) => {
       auth: { persistSession: false }
     });
 
-    // Check for admin or qa role
-    const { data: hasAdminRole } = await supabaseAdmin.rpc('has_role', { _user_id: user.id, _role: 'admin' });
-    const { data: hasQaRole } = await supabaseAdmin.rpc('has_role', { _user_id: user.id, _role: 'qa' });
+    // Single RPC call to check for admin OR qa role
+    const { data: hasRole } = await supabaseAdmin.rpc('has_any_role', { 
+      _user_id: user.id, 
+      _roles: ['admin', 'qa']
+    });
 
-    if (!hasAdminRole && !hasQaRole) {
+    if (!hasRole) {
       console.warn({ requestId, event: "role_denied", user_id: user.id });
       return new Response(
         JSON.stringify({ success: false, error: "Insufficient permissions", request_id: requestId }),
@@ -109,21 +111,24 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Call generate-script internally (server-to-server)
-    // We'll invoke the function directly using Supabase Functions
+    // ============================================
+    // Call generate-script with proper service role headers
+    // ============================================
     const generateUrl = `${supabaseUrl}/functions/v1/generate-script`;
     
     const generateResponse = await fetch(generateUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${serviceRoleKey}`, // Service role for internal call
+        'apikey': serviceRoleKey,
+        'Authorization': `Bearer ${serviceRoleKey}`,
+        'x-internal-call': 'regenerate-script', // Marker for logging
       },
       body: JSON.stringify({
         account_id: original.account_id,
         preferred_pillar: preferredPillar,
         mode,
-        regenerated_from_id: script_id, // Link to original
+        regenerated_from_id: script_id,
       }),
     });
 

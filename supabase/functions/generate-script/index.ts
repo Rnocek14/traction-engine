@@ -465,29 +465,34 @@ Deno.serve(async (req) => {
 
   try {
     // ============================================
-    // Pipeline Key Gate (prevent public abuse)
     // ============================================
-    // ============================================
-    // Auth: Accept either pipeline key OR service role JWT (for internal calls)
+    // Auth Gate: pipeline key OR service role (internal calls)
+    // Service role check: apikey header must match service role key
+    // This is the proper Supabase pattern for function-to-function calls
     // ============================================
     const pipelineKey = Deno.env.get("PIPELINE_KEY");
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     const clientPipelineKey = req.headers.get("x-pipeline-key");
-    const authHeader = req.headers.get("Authorization");
+    const apiKeyHeader = req.headers.get("apikey");
     
-    // Check if caller is authorized via pipeline key
+    // Path 1: External caller with pipeline key
     const hasPipelineKey = pipelineKey && clientPipelineKey === pipelineKey;
     
-    // Check if caller is using service role (internal server-to-server)
-    const hasServiceRole = authHeader?.includes(serviceRoleKey || "NEVER_MATCH");
+    // Path 2: Internal service-to-service call (apikey header = service role key)
+    // This is the correct pattern - don't check Authorization header content
+    const hasServiceRole = serviceRoleKey && apiKeyHeader === serviceRoleKey;
+    
+    const internalCaller = req.headers.get("x-internal-call"); // For logging only
     
     if (!hasPipelineKey && !hasServiceRole) {
-      console.warn({ requestId, event: "unauthorized", reason: "invalid credentials" });
+      console.warn({ requestId, event: "unauthorized", reason: "missing valid credentials" });
       return new Response(
         JSON.stringify({ success: false, error: "Unauthorized", warnings: [], request_id: requestId }),
         { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+    
+    console.log({ requestId, event: "auth_passed", path: hasServiceRole ? "service_role" : "pipeline_key", internal_caller: internalCaller });
 
     const supabaseAdmin = getSupabaseAdmin();
     const { account_id, preferred_pillar, mode, regenerated_from_id }: GenerateRequest = await req.json();
