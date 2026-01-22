@@ -9,6 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { AuthHeader } from "@/components/auth/AuthHeader";
 import { VersionTimeline } from "@/components/studio/VersionTimeline";
+import { StudioActionPanel } from "@/components/studio/StudioActionPanel";
 import {
   useScriptRunDetail,
   useScriptVersionChain,
@@ -344,25 +345,9 @@ export default function Studio() {
             )}
           </div>
 
-          {/* Right Rail - Actions (Placeholder for Phase 2+) */}
+          {/* Right Rail - Actions */}
           <div className="col-span-3">
-            <Card className="glass-card sticky top-6">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">Actions</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="text-xs text-muted-foreground text-center py-8">
-                  <Loader2 className="h-5 w-5 mx-auto mb-2 animate-spin opacity-50" />
-                  Actions coming in Phase 2
-                  <div className="mt-2 space-y-1 text-left opacity-60">
-                    <div>• Regenerate presets</div>
-                    <div>• Generate variants</div>
-                    <div>• Approve override</div>
-                    <div>• Queue video job</div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+            <StudioActionPanel script={scriptRun} isLoading={scriptLoading} />
           </div>
         </div>
       </div>

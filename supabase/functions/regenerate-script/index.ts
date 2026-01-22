@@ -7,9 +7,14 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
+type RegenPreset = 'keep_topic' | 'new_topic_same_pillar' | 'fix_flags' | 'template_keep_topic';
+
 interface RegenerateRequest {
   script_id: string;
   mode: 'ai' | 'template';
+  regen_preset?: RegenPreset;
+  constraint?: string; // Used for fix_flags mode to guide the LLM
+  topic_id?: string; // Force a specific topic
 }
 
 Deno.serve(async (req) => {
@@ -72,7 +77,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    const { script_id, mode }: RegenerateRequest = await req.json();
+    const { script_id, mode, regen_preset, constraint, topic_id: forcedTopicId }: RegenerateRequest = await req.json();
 
     if (!script_id || !mode) {
       return new Response(
@@ -81,12 +86,13 @@ Deno.serve(async (req) => {
       );
     }
 
-    console.log({ requestId, event: "regenerate_start", script_id, mode, user_id: user.id });
+    const preset = regen_preset || 'keep_topic';
+    console.log({ requestId, event: "regenerate_start", script_id, mode, preset, user_id: user.id });
 
     // Fetch the original script to get account and topic info
     const { data: original, error: fetchError } = await supabaseAdmin
       .from('script_runs')
-      .select('account_id, topic_id')
+      .select('account_id, topic_id, safety_flags, hard_block_flags, qa_failed_reason')
       .eq('id', script_id)
       .single();
 
@@ -97,8 +103,10 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Fetch topic to get pillar for relevance
+    // Determine topic handling based on preset
     let preferredPillar: string | undefined;
+    let useTopicId: string | null = null;
+
     if (original.topic_id) {
       const { data: topic } = await supabaseAdmin
         .from('topic_bank')
@@ -109,6 +117,48 @@ Deno.serve(async (req) => {
       if (topic) {
         preferredPillar = topic.pillar;
       }
+    }
+
+    // Apply preset logic
+    switch (preset) {
+      case 'keep_topic':
+        // Keep same topic and pillar
+        useTopicId = forcedTopicId || original.topic_id;
+        break;
+      case 'new_topic_same_pillar':
+        // Get a new topic but keep the pillar
+        useTopicId = null; // Let generate-script select a new topic
+        break;
+      case 'fix_flags':
+        // Keep same topic, add constraint based on failure
+        useTopicId = forcedTopicId || original.topic_id;
+        break;
+      case 'template_keep_topic':
+        // Template mode with same topic
+        useTopicId = forcedTopicId || original.topic_id;
+        break;
+    }
+
+    // Build constraint for fix_flags mode
+    let effectiveConstraint = constraint;
+    if (preset === 'fix_flags' && !effectiveConstraint) {
+      const parts: string[] = [];
+      
+      if (original.qa_failed_reason) {
+        parts.push(`Previous attempt failed: ${original.qa_failed_reason}`);
+      }
+      
+      const safetyFlags = original.safety_flags || [];
+      if (safetyFlags.length > 0) {
+        parts.push(`Avoid these issues: ${safetyFlags.join(', ')}`);
+      }
+      
+      const hardBlockFlags = original.hard_block_flags || [];
+      if (hardBlockFlags.length > 0) {
+        parts.push(`CRITICAL - Must fix these hard blocks: ${hardBlockFlags.join(', ')}`);
+      }
+      
+      effectiveConstraint = parts.join('\n');
     }
 
     // ============================================
@@ -122,13 +172,15 @@ Deno.serve(async (req) => {
         'Content-Type': 'application/json',
         'apikey': serviceRoleKey,
         'Authorization': `Bearer ${serviceRoleKey}`,
-        'x-internal-call': 'regenerate-script', // Marker for logging
+        'x-internal-call': 'regenerate-script',
       },
       body: JSON.stringify({
         account_id: original.account_id,
         preferred_pillar: preferredPillar,
-        mode,
+        topic_id: useTopicId,
+        mode: preset === 'template_keep_topic' ? 'template' : mode,
         regenerated_from_id: script_id,
+        constraint: effectiveConstraint,
       }),
     });
 
