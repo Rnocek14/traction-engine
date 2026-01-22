@@ -125,6 +125,45 @@ Return JSON in this exact schema:
 }`;
 }
 
+function sanitizeHashtags(input: unknown): string[] {
+  // Handle string input (model sometimes returns "tag1, tag2" or "#tag1 #tag2")
+  let arr: unknown[];
+  if (typeof input === "string") {
+    arr = input.split(/[,\s]+/).filter(Boolean);
+  } else if (Array.isArray(input)) {
+    arr = input;
+  } else {
+    return [];
+  }
+
+  const cleaned = arr
+    .filter((v): v is string => typeof v === "string")
+    .map((raw) => raw.trim())
+    .filter(Boolean)
+    // remove leading hashes (one or many)
+    .map((tag) => tag.replace(/^#+/, ""))
+    // convert spaces/dashes to underscores
+    .map((tag) => tag.replace(/[\s-]+/g, "_"))
+    // allow only [a-z0-9_]
+    .map((tag) => tag.replace(/[^a-zA-Z0-9_]/g, ""))
+    .map((tag) => tag.toLowerCase())
+    // length limits
+    .filter((tag) => tag.length > 0 && tag.length <= 30);
+
+  // de-dupe while preserving order
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const t of cleaned) {
+    if (!seen.has(t)) {
+      seen.add(t);
+      unique.push(t);
+    }
+  }
+
+  // cap count to something reasonable
+  return unique.slice(0, 12);
+}
+
 async function generateWithOpenAI(
   systemPrompt: string,
   userPrompt: string,
@@ -205,13 +244,18 @@ async function generateWithOpenAI(
   const broll_keywords = Array.isArray(parsed.broll_keywords)
     ? parsed.broll_keywords.filter((s): s is string => typeof s === 'string')
     : [];
-    
-  const hashtags = Array.isArray(parsed.hashtags)
-    ? parsed.hashtags
-        .filter((s): s is string => typeof s === 'string')
-        .map(tag => tag.replace(/^#/, '').replace(/[^a-zA-Z0-9_]/g, '').toLowerCase())
-        .filter(tag => tag.length > 0 && tag.length <= 30)
-    : [];
+
+  // Sanitize hashtags with logging
+  const rawHashtags = parsed.hashtags;
+  const hashtags = sanitizeHashtags(rawHashtags);
+  
+  console.log("[hashtags]", {
+    raw_type: typeof rawHashtags,
+    raw_count: Array.isArray(rawHashtags) ? rawHashtags.length : 0,
+    sanitized_count: hashtags.length,
+    sample_raw: Array.isArray(rawHashtags) ? rawHashtags.slice(0, 5) : rawHashtags,
+    sample_sanitized: hashtags.slice(0, 5),
+  });
 
   return {
     hook: parsed.hook as string,
