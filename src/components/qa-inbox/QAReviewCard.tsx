@@ -47,6 +47,7 @@ export function QAReviewCard({
   const [isExpanded, setIsExpanded] = useState(false);
   const [showOverrideDialog, setShowOverrideDialog] = useState(false);
   const [overrideReason, setOverrideReason] = useState('');
+  const [showFullVoiceover, setShowFullVoiceover] = useState(false);
 
   const content = item.script_content as unknown as ScriptContent | null;
   const qaResults = item.qa_results as unknown as QAResult | null;
@@ -206,13 +207,30 @@ export function QAReviewCard({
               </div>
             )}
 
-            {/* Voiceover Preview */}
+            {/* Voiceover Preview - collapsed by default */}
             {content?.voiceover && (
               <div>
                 <h4 className="text-sm font-semibold mb-2">Voiceover</h4>
-                <p className="text-sm text-muted-foreground bg-secondary/20 p-3 rounded-lg">
-                  {content.voiceover}
-                </p>
+                <div className="text-sm text-muted-foreground bg-secondary/20 p-3 rounded-lg">
+                  {showFullVoiceover ? (
+                    <p>{content.voiceover}</p>
+                  ) : (
+                    <p>
+                      {content.voiceover.slice(0, 200)}
+                      {content.voiceover.length > 200 && '...'}
+                    </p>
+                  )}
+                  {content.voiceover.length > 200 && (
+                    <Button
+                      variant="link"
+                      size="sm"
+                      className="p-0 h-auto text-xs"
+                      onClick={() => setShowFullVoiceover(!showFullVoiceover)}
+                    >
+                      {showFullVoiceover ? 'Show less' : 'Show more'}
+                    </Button>
+                  )}
+                </div>
               </div>
             )}
 

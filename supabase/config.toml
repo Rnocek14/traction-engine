@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.override-qa]
 verify_jwt = false
+
+[functions.regenerate-script]
+verify_jwt = false

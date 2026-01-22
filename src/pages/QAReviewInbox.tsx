@@ -45,18 +45,17 @@ export default function QAReviewInbox() {
   const overrideMutation = useOverrideQA();
   const regenerateMutation = useRegenerateScript();
 
-  // Action handlers
+  // Action handlers - now scriptId-based for proper linking
   const handleOverride = (scriptId: string, reason: string) => {
     overrideMutation.mutate({
       scriptId,
-      overrideBy: 'admin', // In production, use actual user
       reason,
     });
   };
 
-  const handleRegenerate = (accountId: string) => {
+  const handleRegenerate = (scriptId: string) => {
     regenerateMutation.mutate({
-      accountId,
+      scriptId,
       mode: 'ai',
     });
   };
@@ -193,7 +192,7 @@ export default function QAReviewInbox() {
                 key={item.id}
                 item={item}
                 isHardBlock={isHardBlockTab}
-                onRegenerate={() => handleRegenerate(item.account_id)}
+                onRegenerate={() => handleRegenerate(item.id)}
                 onOverride={(reason) => handleOverride(item.id, reason)}
                 isRegenerating={regenerateMutation.isPending}
                 isOverriding={overrideMutation.isPending}
