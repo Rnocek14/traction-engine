@@ -14,6 +14,66 @@ export type Database = {
   }
   public: {
     Tables: {
+      account_configs: {
+        Row: {
+          account_id: string
+          audience: Json
+          banned_topics: string[]
+          claim_policy: Database["public"]["Enums"]["claim_policy_level"]
+          content_pillars: string[]
+          created_at: string
+          cta_destination: string | null
+          cta_phrases: string[]
+          cta_style: Database["public"]["Enums"]["cta_style"]
+          disclaimer_rules: Json
+          id: string
+          persona: Json
+          promise: string
+          style_rules: Json
+          uniqueness_salt: string | null
+          updated_at: string
+          vertical: Database["public"]["Enums"]["content_vertical"]
+        }
+        Insert: {
+          account_id: string
+          audience?: Json
+          banned_topics?: string[]
+          claim_policy?: Database["public"]["Enums"]["claim_policy_level"]
+          content_pillars?: string[]
+          created_at?: string
+          cta_destination?: string | null
+          cta_phrases?: string[]
+          cta_style?: Database["public"]["Enums"]["cta_style"]
+          disclaimer_rules?: Json
+          id?: string
+          persona?: Json
+          promise: string
+          style_rules?: Json
+          uniqueness_salt?: string | null
+          updated_at?: string
+          vertical: Database["public"]["Enums"]["content_vertical"]
+        }
+        Update: {
+          account_id?: string
+          audience?: Json
+          banned_topics?: string[]
+          claim_policy?: Database["public"]["Enums"]["claim_policy_level"]
+          content_pillars?: string[]
+          created_at?: string
+          cta_destination?: string | null
+          cta_phrases?: string[]
+          cta_style?: Database["public"]["Enums"]["cta_style"]
+          disclaimer_rules?: Json
+          id?: string
+          persona?: Json
+          promise?: string
+          style_rules?: Json
+          uniqueness_salt?: string | null
+          updated_at?: string
+          vertical?: Database["public"]["Enums"]["content_vertical"]
+        }
+        Relationships: []
+      }
       career_profiles: {
         Row: {
           alt_pathways: string[] | null
@@ -153,6 +213,42 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      content_policies: {
+        Row: {
+          banned_phrases: string[]
+          created_at: string
+          fact_check_required: boolean
+          id: string
+          prohibited_claim_types: string[]
+          required_disclaimers: string[]
+          safety_rules: Json
+          updated_at: string
+          vertical: Database["public"]["Enums"]["content_vertical"]
+        }
+        Insert: {
+          banned_phrases?: string[]
+          created_at?: string
+          fact_check_required?: boolean
+          id?: string
+          prohibited_claim_types?: string[]
+          required_disclaimers?: string[]
+          safety_rules?: Json
+          updated_at?: string
+          vertical: Database["public"]["Enums"]["content_vertical"]
+        }
+        Update: {
+          banned_phrases?: string[]
+          created_at?: string
+          fact_check_required?: boolean
+          id?: string
+          prohibited_claim_types?: string[]
+          required_disclaimers?: string[]
+          safety_rules?: Json
+          updated_at?: string
+          vertical?: Database["public"]["Enums"]["content_vertical"]
+        }
+        Relationships: []
       }
       course_cri_scores: {
         Row: {
@@ -416,6 +512,112 @@ export type Database = {
         }
         Relationships: []
       }
+      script_fingerprints: {
+        Row: {
+          account_id: string
+          created_at: string
+          hook_hash: string
+          id: string
+          script_id: string
+          similarity_score: number | null
+          topic_id: string | null
+          voiceover_hash: string
+        }
+        Insert: {
+          account_id: string
+          created_at?: string
+          hook_hash: string
+          id?: string
+          script_id: string
+          similarity_score?: number | null
+          topic_id?: string | null
+          voiceover_hash: string
+        }
+        Update: {
+          account_id?: string
+          created_at?: string
+          hook_hash?: string
+          id?: string
+          script_id?: string
+          similarity_score?: number | null
+          topic_id?: string | null
+          voiceover_hash?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "script_fingerprints_script_id_fkey"
+            columns: ["script_id"]
+            isOneToOne: false
+            referencedRelation: "script_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      script_runs: {
+        Row: {
+          account_id: string
+          created_at: string
+          fact_claims: string[]
+          generation_cost_cents: number
+          hook_hash: string | null
+          id: string
+          published_at: string | null
+          qa_failed_reason: string | null
+          qa_passed_at: string | null
+          qa_results: Json | null
+          safety_flags: string[]
+          scene_hash: string | null
+          script_content: Json
+          status: Database["public"]["Enums"]["script_status"]
+          topic_id: string | null
+          voiceover_hash: string | null
+        }
+        Insert: {
+          account_id: string
+          created_at?: string
+          fact_claims?: string[]
+          generation_cost_cents?: number
+          hook_hash?: string | null
+          id?: string
+          published_at?: string | null
+          qa_failed_reason?: string | null
+          qa_passed_at?: string | null
+          qa_results?: Json | null
+          safety_flags?: string[]
+          scene_hash?: string | null
+          script_content?: Json
+          status?: Database["public"]["Enums"]["script_status"]
+          topic_id?: string | null
+          voiceover_hash?: string | null
+        }
+        Update: {
+          account_id?: string
+          created_at?: string
+          fact_claims?: string[]
+          generation_cost_cents?: number
+          hook_hash?: string | null
+          id?: string
+          published_at?: string | null
+          qa_failed_reason?: string | null
+          qa_passed_at?: string | null
+          qa_results?: Json | null
+          safety_flags?: string[]
+          scene_hash?: string | null
+          script_content?: Json
+          status?: Database["public"]["Enums"]["script_status"]
+          topic_id?: string | null
+          voiceover_hash?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "script_runs_topic_id_fkey"
+            columns: ["topic_id"]
+            isOneToOne: false
+            referencedRelation: "topic_bank"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       skill_graph: {
         Row: {
           category: string | null
@@ -446,6 +648,60 @@ export type Database = {
           level_tier?: number | null
           name?: string
           related_jobs?: string[] | null
+        }
+        Relationships: []
+      }
+      topic_bank: {
+        Row: {
+          claim_sensitivity: number
+          cooldown_days: number
+          created_at: string
+          hook_variants: string[]
+          id: string
+          is_evergreen: boolean
+          last_used_at: string | null
+          motif_hints: string[]
+          pillar: string
+          seasonal_tags: string[]
+          suggested_cta: string | null
+          times_used: number
+          topic_prompt: string
+          trend_keywords: string[]
+          vertical: Database["public"]["Enums"]["content_vertical"]
+        }
+        Insert: {
+          claim_sensitivity?: number
+          cooldown_days?: number
+          created_at?: string
+          hook_variants?: string[]
+          id?: string
+          is_evergreen?: boolean
+          last_used_at?: string | null
+          motif_hints?: string[]
+          pillar: string
+          seasonal_tags?: string[]
+          suggested_cta?: string | null
+          times_used?: number
+          topic_prompt: string
+          trend_keywords?: string[]
+          vertical: Database["public"]["Enums"]["content_vertical"]
+        }
+        Update: {
+          claim_sensitivity?: number
+          cooldown_days?: number
+          created_at?: string
+          hook_variants?: string[]
+          id?: string
+          is_evergreen?: boolean
+          last_used_at?: string | null
+          motif_hints?: string[]
+          pillar?: string
+          seasonal_tags?: string[]
+          suggested_cta?: string | null
+          times_used?: number
+          topic_prompt?: string
+          trend_keywords?: string[]
+          vertical?: Database["public"]["Enums"]["content_vertical"]
         }
         Relationships: []
       }
@@ -513,10 +769,20 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
+      claim_policy_level: "standard" | "moderate" | "strict" | "medical"
+      content_vertical: "privacy" | "education" | "health" | "hyperlocal"
+      cta_style: "soft" | "direct" | "hard_offer"
       delivery_format: "online" | "in_person" | "hybrid" | "self_paced"
       export_format: "pdf" | "json" | "docx"
       learning_style: "video" | "project" | "reading"
       progress_status: "not_started" | "in_progress" | "completed"
+      script_status:
+        | "draft"
+        | "qa_passed"
+        | "qa_failed"
+        | "generating"
+        | "published"
+        | "rejected"
       step_type:
         | "education"
         | "certification"
@@ -657,10 +923,21 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      claim_policy_level: ["standard", "moderate", "strict", "medical"],
+      content_vertical: ["privacy", "education", "health", "hyperlocal"],
+      cta_style: ["soft", "direct", "hard_offer"],
       delivery_format: ["online", "in_person", "hybrid", "self_paced"],
       export_format: ["pdf", "json", "docx"],
       learning_style: ["video", "project", "reading"],
       progress_status: ["not_started", "in_progress", "completed"],
+      script_status: [
+        "draft",
+        "qa_passed",
+        "qa_failed",
+        "generating",
+        "published",
+        "rejected",
+      ],
       step_type: [
         "education",
         "certification",
