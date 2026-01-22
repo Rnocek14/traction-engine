@@ -4,6 +4,7 @@ import { PipelineVisualizer } from "@/components/dashboard/PipelineVisualizer";
 import { AccountsGrid } from "@/components/dashboard/AccountsGrid";
 import { RecentVideos } from "@/components/dashboard/RecentVideos";
 import { VerticalPerformance } from "@/components/dashboard/VerticalPerformance";
+import { CostOverlay } from "@/components/dashboard/CostOverlay";
 import { 
   Users, 
   Video, 
@@ -73,6 +74,11 @@ const Index = () => {
         {/* Pipeline */}
         <section>
           <PipelineVisualizer />
+        </section>
+
+        {/* Cost Monitor */}
+        <section>
+          <CostOverlay />
         </section>
 
         {/* Verticals */}
