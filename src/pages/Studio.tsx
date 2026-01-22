@@ -1,36 +1,24 @@
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { ArrowLeft, Copy, Check, AlertTriangle, Loader2, Sparkles } from "lucide-react";
+import { AlertTriangle, Loader2, Sparkles } from "lucide-react";
 import { useState, useEffect } from "react";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
-import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { AuthHeader } from "@/components/auth/AuthHeader";
-import { VersionTimeline } from "@/components/studio/VersionTimeline";
-import { StudioActionPanel } from "@/components/studio/StudioActionPanel";
 import { StudioLauncher } from "@/components/studio/StudioLauncher";
-import { VideoGenerator } from "@/components/studio/VideoGenerator";
+import { StudioLayout } from "@/components/studio/StudioLayout";
 import {
   useScriptRunDetail,
   useScriptVersionChain,
-  useAccountConfigForScript,
-  getStatusInfo,
-  hasHardBlocks,
 } from "@/hooks/use-studio";
 
 export default function Studio() {
   const { scriptRunId } = useParams<{ scriptRunId: string }>();
   const navigate = useNavigate();
-  const { toast } = useToast();
-  const { user, isLoading: authLoading, hasRole } = useAuth();
+  const { user, hasRole } = useAuth();
 
   const [selectedVersionId, setSelectedVersionId] = useState<string | undefined>(scriptRunId);
-  const [copiedId, setCopiedId] = useState(false);
   const [userHasAccess, setUserHasAccess] = useState<boolean | null>(null);
 
-  // Check role access with proper useEffect
+  // Check role access
   useEffect(() => {
     let alive = true;
 
@@ -55,7 +43,11 @@ export default function Studio() {
     }
   }, [scriptRunId, navigate]);
 
-  // Use selected version or fall back to URL param
+  // Sync selectedVersionId with URL changes
+  useEffect(() => {
+    setSelectedVersionId(scriptRunId);
+  }, [scriptRunId]);
+
   const activeScriptId = selectedVersionId || scriptRunId;
 
   const {
@@ -69,44 +61,18 @@ export default function Studio() {
     isLoading: chainLoading,
   } = useScriptVersionChain(scriptRunId);
 
-  const { data: accountConfig } = useAccountConfigForScript(scriptRun?.account_id);
-
-  const handleCopyId = () => {
-    if (activeScriptId) {
-      navigator.clipboard.writeText(activeScriptId);
-      setCopiedId(true);
-      toast({ title: "Copied script ID" });
-      setTimeout(() => setCopiedId(false), 2000);
-    }
-  };
-
   const handleVersionSelect = (scriptId: string) => {
     setSelectedVersionId(scriptId);
-    // Update URL using React Router (keeps state consistent)
     navigate(`/studio/${scriptId}`, { replace: true });
   };
 
-  // Parse script content safely
-  const scriptContent = scriptRun?.script_content as Record<string, unknown> | null;
-  const hook = (scriptContent?.hook as string) || "";
-  const voiceover = (scriptContent?.voiceover as string) || "";
-  const cta = (scriptContent?.cta as string) || "";
-  const hashtags = (scriptContent?.hashtags as string[]) || [];
-  const scenePrompts = (scriptContent?.scene_prompts as string[]) || [];
-
-  const statusInfo = scriptRun ? getStatusInfo(scriptRun) : null;
-  const isHardBlock = scriptRun ? hasHardBlocks(scriptRun) : false;
-
-  // DEV MODE: Skip auth checks for development
-  const DEV_SKIP_AUTH = true;
-
-  // No script ID - show launcher (not an error, just the entry point)
+  // No script ID - show launcher
   if (!scriptRunId) {
     return (
-      <div className="min-h-screen bg-background">
+      <div className="min-h-screen bg-background flex flex-col">
         <StudioHeader />
-        <div className="container mx-auto px-4 py-6">
-          <div className="max-w-3xl mx-auto">
+        <div className="flex-1 flex items-center justify-center p-6">
+          <div className="max-w-3xl w-full">
             <div className="text-center mb-8">
               <h1 className="text-3xl font-bold mb-2 flex items-center justify-center gap-3">
                 <Sparkles className="h-8 w-8 text-primary" />
@@ -123,30 +89,28 @@ export default function Studio() {
     );
   }
 
-  // Have an ID but still loading
+  // Loading state
   if (scriptLoading) {
     return (
-      <div className="min-h-screen bg-background">
+      <div className="min-h-screen bg-background flex flex-col">
         <StudioHeader />
-        <div className="container mx-auto px-4 py-6">
-          <div className="flex items-center justify-center py-12">
-            <div className="text-center">
-              <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto mb-3" />
-              <p className="text-sm text-muted-foreground">Loading script...</p>
-            </div>
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto mb-3" />
+            <p className="text-sm text-muted-foreground">Loading script...</p>
           </div>
         </div>
       </div>
     );
   }
 
-  // Have an ID but failed to load - actual not found
+  // Not found
   if (scriptError || !scriptRun) {
     return (
-      <div className="min-h-screen bg-background">
+      <div className="min-h-screen bg-background flex flex-col">
         <StudioHeader />
-        <div className="container mx-auto px-4 py-6">
-          <div className="max-w-3xl mx-auto">
+        <div className="flex-1 flex items-center justify-center p-6">
+          <div className="max-w-3xl w-full">
             <div className="text-center mb-8">
               <AlertTriangle className="h-12 w-12 text-warning mx-auto mb-4" />
               <h1 className="text-2xl font-bold mb-2">Script Not Found</h1>
@@ -161,241 +125,33 @@ export default function Studio() {
     );
   }
 
+  // Main DaVinci-style studio layout
   return (
-    <div className="min-h-screen bg-background">
+    <div className="h-screen bg-[hsl(222_47%_4%)] flex flex-col overflow-hidden">
       <StudioHeader />
-
-      <div className="container mx-auto px-4 py-6">
-        {/* Breadcrumb */}
-        <div className="flex items-center gap-2 mb-6 text-sm">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="gap-2"
-            onClick={() => navigate("/qa-review")}
-          >
-            <ArrowLeft className="h-4 w-4" />
-            QA Review
-          </Button>
-          <span className="text-muted-foreground">/</span>
-          <span className="text-muted-foreground">Studio</span>
-          <span className="text-muted-foreground">/</span>
-          <button
-            onClick={handleCopyId}
-            className="flex items-center gap-1 text-foreground hover:text-primary transition-colors font-mono text-xs"
-          >
-            {activeScriptId?.slice(0, 8)}...
-            {copiedId ? (
-              <Check className="h-3 w-3 text-success" />
-            ) : (
-              <Copy className="h-3 w-3" />
-            )}
-          </button>
-        </div>
-
-        {/* Three column layout */}
-        <div className="grid grid-cols-12 gap-6">
-          {/* Left Rail - Version Timeline */}
-          <div className="col-span-3">
-            <Card className="glass-card h-[calc(100vh-200px)] sticky top-6">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">Versions</CardTitle>
-              </CardHeader>
-              <CardContent className="p-0 h-[calc(100%-60px)]">
-                <VersionTimeline
-                  chain={versionChain || []}
-                  currentScriptId={activeScriptId || ""}
-                  onSelectVersion={handleVersionSelect}
-                  isLoading={chainLoading}
-                />
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Center - Script Content (Read-only for Phase 1) */}
-          <div className="col-span-6 space-y-4">
-            {/* Status & Meta */}
-            <Card className="glass-card">
-              <CardContent className="pt-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    {statusInfo && (
-                      <Badge
-                        variant={
-                          statusInfo.variant === "destructive"
-                            ? "destructive"
-                            : "outline"
-                        }
-                        className={
-                          statusInfo.variant === "success"
-                            ? "bg-success text-success-foreground"
-                            : statusInfo.variant === "warning"
-                            ? "bg-warning/20 text-warning border-warning/30"
-                            : ""
-                        }
-                      >
-                        {statusInfo.label}
-                      </Badge>
-                    )}
-                    {accountConfig && (
-                      <Badge variant="outline" className="capitalize">
-                        {accountConfig.vertical}
-                      </Badge>
-                    )}
-                    <span className="text-xs text-muted-foreground">
-                      {scriptRun.account_id}
-                    </span>
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    Created {new Date(scriptRun.created_at).toLocaleDateString()}
-                  </div>
-                </div>
-
-                {/* Flags display */}
-                {(scriptRun.safety_flags?.length > 0 ||
-                  scriptRun.hard_block_flags?.length > 0) && (
-                  <div className="mt-3 flex flex-wrap gap-1.5">
-                    {scriptRun.hard_block_flags?.map((flag, i) => (
-                      <Badge key={`hb-${i}`} variant="destructive" className="text-[10px]">
-                        {flag}
-                      </Badge>
-                    ))}
-                    {scriptRun.safety_flags?.map((flag, i) => (
-                      <Badge
-                        key={`sf-${i}`}
-                        variant="outline"
-                        className="text-[10px] border-warning/50 text-warning"
-                      >
-                        {flag}
-                      </Badge>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Hook */}
-            <Card className="glass-card">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium flex items-center gap-2">
-                  Hook
-                  <span className="text-xs text-muted-foreground font-normal">
-                    ({hook.length} chars)
-                  </span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm leading-relaxed">{hook || "No hook content"}</p>
-              </CardContent>
-            </Card>
-
-            {/* Voiceover */}
-            <Card className="glass-card">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium flex items-center gap-2">
-                  Voiceover
-                  <span className="text-xs text-muted-foreground font-normal">
-                    ({voiceover.split(/\s+/).filter(Boolean).length} words)
-                  </span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm leading-relaxed whitespace-pre-wrap">
-                  {voiceover || "No voiceover content"}
-                </p>
-              </CardContent>
-            </Card>
-
-            {/* CTA */}
-            <Card className="glass-card">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">Call to Action</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm">{cta || "No CTA"}</p>
-              </CardContent>
-            </Card>
-
-            {/* Hashtags */}
-            {hashtags.length > 0 && (
-              <Card className="glass-card">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium">Hashtags</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex flex-wrap gap-1.5">
-                    {hashtags.map((tag, i) => (
-                      <Badge key={i} variant="secondary" className="text-xs">
-                        #{tag}
-                      </Badge>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Scene Prompts */}
-            {scenePrompts.length > 0 && (
-              <Card className="glass-card">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium">
-                    Scene Prompts ({scenePrompts.length})
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-2">
-                    {scenePrompts.map((prompt, i) => (
-                      <div
-                        key={i}
-                        className="p-2 rounded bg-secondary/30 text-xs text-muted-foreground"
-                      >
-                        <span className="text-foreground font-medium mr-2">
-                          Scene {i + 1}:
-                        </span>
-                        {prompt}
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* QA Results */}
-            {scriptRun.qa_results && (
-              <Card className="glass-card">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium">QA Results</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <pre className="text-xs text-muted-foreground overflow-auto max-h-48 p-2 rounded bg-secondary/30">
-                    {JSON.stringify(scriptRun.qa_results, null, 2)}
-                  </pre>
-                </CardContent>
-              </Card>
-            )}
-          </div>
-
-          {/* Right Rail - Actions */}
-          <div className="col-span-3 space-y-4">
-            <StudioActionPanel script={scriptRun} isLoading={scriptLoading} />
-            <VideoGenerator script={scriptRun} />
-          </div>
-        </div>
-      </div>
+      <StudioLayout
+        script={scriptRun}
+        versionChain={versionChain || []}
+        chainLoading={chainLoading}
+        onVersionSelect={handleVersionSelect}
+        currentScriptId={activeScriptId || ""}
+      />
     </div>
   );
 }
 
 function StudioHeader() {
   return (
-    <header className="sticky top-0 z-50 border-b border-border/50 bg-background/80 backdrop-blur-xl">
-      <div className="container mx-auto px-4 h-14 flex items-center justify-between">
+    <header className="h-14 flex-shrink-0 border-b border-border/30 bg-[hsl(222_47%_6%)]/80 backdrop-blur-xl">
+      <div className="h-full px-4 flex items-center justify-between">
         <div className="flex items-center gap-4">
           <Link to="/" className="text-lg font-semibold text-foreground hover:text-primary transition-colors">
             Content Engine
           </Link>
           <span className="text-muted-foreground">/</span>
-          <span className="text-sm font-medium text-primary">Rendition Studio</span>
+          <Link to="/studio" className="text-sm font-medium text-primary hover:text-primary/80 transition-colors">
+            Rendition Studio
+          </Link>
         </div>
         <AuthHeader />
       </div>
