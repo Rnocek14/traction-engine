@@ -245,15 +245,25 @@ async function generateWithOpenAI(
     ? parsed.broll_keywords.filter((s): s is string => typeof s === 'string')
     : [];
 
-  // Sanitize hashtags with logging
+  // Sanitize hashtags with accurate logging
   const rawHashtags = parsed.hashtags;
+  
+  // Derive a previewable "raw array" the same way sanitizeHashtags would
+  const rawArr =
+    typeof rawHashtags === "string"
+      ? rawHashtags.split(/[,\s]+/).filter(Boolean).slice(0, 50)
+      : Array.isArray(rawHashtags)
+        ? rawHashtags.slice(0, 50)
+        : [];
+
   const hashtags = sanitizeHashtags(rawHashtags);
   
   console.log("[hashtags]", {
-    raw_type: typeof rawHashtags,
-    raw_count: Array.isArray(rawHashtags) ? rawHashtags.length : 0,
+    raw_type: Array.isArray(rawHashtags) ? "array" : typeof rawHashtags,
+    raw_count: rawArr.length,
     sanitized_count: hashtags.length,
-    sample_raw: Array.isArray(rawHashtags) ? rawHashtags.slice(0, 5) : rawHashtags,
+    removed_count: Math.max(0, rawArr.length - hashtags.length),
+    sample_raw: rawArr.slice(0, 5),
     sample_sanitized: hashtags.slice(0, 5),
   });
 
