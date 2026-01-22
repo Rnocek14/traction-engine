@@ -38,10 +38,11 @@ export function PreviewCanvas({
   const thumbnailUrl = (videoJob as unknown as { thumbnail_url?: string })?.thumbnail_url;
   const spritesheetUrl = (videoJob as unknown as { spritesheet_url?: string })?.spritesheet_url;
 
-  // Determine aspect ratio from video settings
+  // Determine aspect ratio from video settings (fixed: proper dimension parsing)
   const settings = (videoJob?.settings ?? {}) as Record<string, unknown>;
   const videoSize = typeof settings.size === "string" ? settings.size : "720x1280";
-  const isVertical = videoSize.includes("1280") || videoSize.includes("1792");
+  const [w, h] = videoSize.split("x").map(Number);
+  const isVertical = h > w;
 
   const togglePlay = useCallback(() => {
     if (!videoRef.current) return;

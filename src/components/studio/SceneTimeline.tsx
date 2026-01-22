@@ -1,4 +1,22 @@
-import { useRef, useState, useCallback, useEffect } from "react";
+import { useRef, useState, useCallback, useEffect, useMemo } from "react";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  horizontalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { GripVertical } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 
@@ -6,42 +24,80 @@ interface SceneTimelineProps {
   scenePrompts: string[];
   currentSceneIndex: number;
   onSceneSelect: (index: number) => void;
-  scrubPosition: number; // 0-1 representing video progress
+  onSceneReorder: (fromIndex: number, toIndex: number) => void;
+  scrubPosition: number;
   onScrubPositionChange?: (position: number) => void;
+  voiceover?: string;
   className?: string;
 }
 
 /**
- * Horizontal timeline with scene clips and draggable playhead.
- * DaVinci Resolve-inspired design.
+ * Horizontal timeline with draggable scene clips and synthetic waveform.
+ * DaVinci Resolve-inspired design with dnd-kit for reordering.
  */
 export function SceneTimeline({
   scenePrompts,
   currentSceneIndex,
   onSceneSelect,
+  onSceneReorder,
   scrubPosition,
   onScrubPositionChange,
+  voiceover = "",
   className,
 }: SceneTimelineProps) {
   const timelineRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [hoverPosition, setHoverPosition] = useState<number | null>(null);
+  const [isDndActive, setIsDndActive] = useState(false);
+
+  // Generate scene IDs for dnd-kit
+  const sceneIds = useMemo(
+    () => scenePrompts.map((_, i) => `scene-${i}`),
+    [scenePrompts]
+  );
+
+  // DnD sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  const handleDragStart = () => {
+    setIsDndActive(true);
+  };
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    setIsDndActive(false);
+    const { active, over } = event;
+
+    if (over && active.id !== over.id) {
+      const oldIndex = sceneIds.indexOf(active.id as string);
+      const newIndex = sceneIds.indexOf(over.id as string);
+      onSceneReorder(oldIndex, newIndex);
+    }
+  };
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if (!timelineRef.current) return;
+    if (isDndActive || !timelineRef.current) return;
     setIsDragging(true);
-    
+
     const rect = timelineRef.current.getBoundingClientRect();
     const position = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     onScrubPositionChange?.(position);
-  }, [onScrubPositionChange]);
+  }, [isDndActive, onScrubPositionChange]);
 
   const handleMouseMove = useCallback((e: MouseEvent) => {
     if (!timelineRef.current) return;
-    
+
     const rect = timelineRef.current.getBoundingClientRect();
     const position = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    
+
     if (isDragging) {
       onScrubPositionChange?.(position);
     }
@@ -87,15 +143,18 @@ export function SceneTimeline({
             {scenePrompts.length} scenes
           </span>
         </div>
-        
+
         {/* Timecode display */}
         <div className="font-mono text-xs text-primary tabular-nums">
-          Scene {playheadSceneIndex + 1} / {scenePrompts.length}
+          Scene {Math.max(1, playheadSceneIndex + 1)} / {scenePrompts.length || 1}
         </div>
       </div>
 
+      {/* Synthetic waveform */}
+      <SyntheticWaveform voiceover={voiceover} scrubPosition={scrubPosition} />
+
       {/* Timeline track area */}
-      <div className="relative p-4">
+      <div className="relative p-4 pt-2">
         {/* Time markers */}
         <div className="flex justify-between mb-2 text-[10px] font-mono text-muted-foreground">
           {scenePrompts.map((_, i) => (
@@ -105,7 +164,7 @@ export function SceneTimeline({
           ))}
         </div>
 
-        {/* Track with playhead */}
+        {/* Track with draggable scenes */}
         <div
           ref={timelineRef}
           className="relative h-20 cursor-pointer"
@@ -113,46 +172,38 @@ export function SceneTimeline({
           onMouseMove={handleTimelineHover}
           onMouseLeave={() => setHoverPosition(null)}
         >
-          {/* Scene clips */}
-          <ScrollArea className="h-full w-full">
-            <div className="flex gap-1 h-full pr-4">
-              {scenePrompts.map((prompt, i) => (
-                <button
-                  key={i}
-                  onClick={() => onSceneSelect(i)}
-                  className={cn(
-                    "flex-1 min-w-[120px] h-full rounded",
-                    "bg-secondary/30 hover:bg-secondary/50",
-                    "border transition-all duration-150",
-                    "flex flex-col items-start justify-center p-2",
-                    "text-left overflow-hidden",
-                    i === currentSceneIndex
-                      ? "border-primary bg-primary/10 shadow-[0_0_10px_hsl(var(--primary)/0.3)]"
-                      : "border-border/30 hover:border-border/50"
-                  )}
-                >
-                  <span className="text-[10px] font-mono text-primary mb-1">
-                    Scene {i + 1}
-                  </span>
-                  <span className="text-[11px] text-muted-foreground line-clamp-2">
-                    {prompt}
-                  </span>
-                </button>
-              ))}
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext items={sceneIds} strategy={horizontalListSortingStrategy}>
+              <div className="flex gap-1 h-full">
+                {scenePrompts.map((prompt, i) => (
+                  <SortableSceneClip
+                    key={sceneIds[i]}
+                    id={sceneIds[i]}
+                    index={i}
+                    prompt={prompt}
+                    isSelected={i === currentSceneIndex}
+                    onClick={() => onSceneSelect(i)}
+                  />
+                ))}
 
-              {scenePrompts.length === 0 && (
-                <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
-                  No scenes available
-                </div>
-              )}
-            </div>
-            <ScrollBar orientation="horizontal" />
-          </ScrollArea>
+                {scenePrompts.length === 0 && (
+                  <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
+                    No scenes available
+                  </div>
+                )}
+              </div>
+            </SortableContext>
+          </DndContext>
 
           {/* Playhead */}
           <div
             className={cn(
-              "absolute top-0 bottom-0 w-0.5 bg-primary z-10",
+              "absolute top-0 bottom-0 w-0.5 bg-primary z-10 pointer-events-none",
               "transition-all duration-75",
               isDragging && "shadow-[0_0_15px_hsl(var(--primary)/0.8)]"
             )}
@@ -164,16 +215,13 @@ export function SceneTimeline({
               "w-3 h-3 bg-primary rounded-sm rotate-45",
               "shadow-[0_0_10px_hsl(var(--primary)/0.5)]"
             )} />
-            
-            {/* Playhead glow when playing */}
-            <div className={cn(
-              "absolute inset-0 w-1 bg-primary/50 blur-sm",
-              "-left-0.5"
-            )} />
+
+            {/* Playhead glow */}
+            <div className="absolute inset-0 w-1 bg-primary/50 blur-sm -left-0.5" />
           </div>
 
           {/* Hover indicator */}
-          {hoverPosition !== null && !isDragging && (
+          {hoverPosition !== null && !isDragging && !isDndActive && (
             <div
               className="absolute top-0 bottom-0 w-px bg-muted-foreground/30 pointer-events-none"
               style={{ left: `${hoverPosition * 100}%` }}
@@ -185,9 +233,143 @@ export function SceneTimeline({
         <div className="flex justify-center gap-4 mt-3 text-[10px] text-muted-foreground">
           <span><kbd className="px-1 py-0.5 bg-secondary/50 rounded text-[9px]">Space</kbd> Play/Pause</span>
           <span><kbd className="px-1 py-0.5 bg-secondary/50 rounded text-[9px]">←</kbd><kbd className="px-1 py-0.5 bg-secondary/50 rounded text-[9px]">→</kbd> Frame step</span>
-          <span><kbd className="px-1 py-0.5 bg-secondary/50 rounded text-[9px]">M</kbd> Mute</span>
+          <span><kbd className="px-1 py-0.5 bg-secondary/50 rounded text-[9px]">Drag</kbd> Reorder scenes</span>
         </div>
       </div>
+    </div>
+  );
+}
+
+interface SortableSceneClipProps {
+  id: string;
+  index: number;
+  prompt: string;
+  isSelected: boolean;
+  onClick: () => void;
+}
+
+function SortableSceneClip({ id, index, prompt, isSelected, onClick }: SortableSceneClipProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={cn(
+        "flex-1 min-w-[120px] h-full rounded",
+        "bg-secondary/30 hover:bg-secondary/50",
+        "border transition-all duration-150",
+        "flex flex-col items-start justify-center p-2",
+        "text-left overflow-hidden",
+        isSelected
+          ? "border-primary bg-primary/10 shadow-[0_0_10px_hsl(var(--primary)/0.3)]"
+          : "border-border/30 hover:border-border/50",
+        isDragging && "opacity-50 scale-105 shadow-lg z-50"
+      )}
+      onClick={onClick}
+    >
+      <div className="flex items-center gap-1 w-full">
+        {/* Drag handle */}
+        <button
+          className="p-0.5 -ml-1 cursor-grab active:cursor-grabbing touch-none"
+          {...attributes}
+          {...listeners}
+        >
+          <GripVertical className="h-3 w-3 text-muted-foreground" />
+        </button>
+        <span className="text-[10px] font-mono text-primary">
+          Scene {index + 1}
+        </span>
+      </div>
+      <span className="text-[11px] text-muted-foreground line-clamp-2 mt-1">
+        {prompt}
+      </span>
+    </div>
+  );
+}
+
+interface SyntheticWaveformProps {
+  voiceover: string;
+  scrubPosition: number;
+}
+
+/**
+ * Generates a synthetic waveform visualization from voiceover text.
+ * Uses punctuation and word length to simulate audio cadence.
+ */
+function SyntheticWaveform({ voiceover, scrubPosition }: SyntheticWaveformProps) {
+  const waveformData = useMemo(() => {
+    if (!voiceover) return [];
+
+    // Split into words and generate amplitude based on word characteristics
+    const words = voiceover.split(/\s+/).filter(Boolean);
+    const bars: number[] = [];
+
+    // Generate ~60 bars
+    const targetBars = 60;
+    const wordsPerBar = Math.max(1, Math.ceil(words.length / targetBars));
+
+    for (let i = 0; i < targetBars; i++) {
+      const startWord = i * wordsPerBar;
+      const endWord = Math.min(startWord + wordsPerBar, words.length);
+      const chunk = words.slice(startWord, endWord).join(" ");
+
+      if (!chunk) {
+        bars.push(0.1);
+        continue;
+      }
+
+      // Base amplitude from average word length
+      const avgWordLen = chunk.length / Math.max(1, endWord - startWord);
+      let amplitude = Math.min(1, avgWordLen / 8);
+
+      // Boost for punctuation (emphasis, pauses)
+      if (/[!?]/.test(chunk)) amplitude = Math.min(1, amplitude + 0.3);
+      if (/[,;:]/.test(chunk)) amplitude = Math.max(0.2, amplitude * 0.8);
+      if (/\./.test(chunk)) amplitude = Math.max(0.15, amplitude * 0.6);
+
+      // Add some randomness for natural look
+      amplitude += (Math.random() - 0.5) * 0.2;
+      amplitude = Math.max(0.1, Math.min(1, amplitude));
+
+      bars.push(amplitude);
+    }
+
+    return bars;
+  }, [voiceover]);
+
+  if (waveformData.length === 0) {
+    return null;
+  }
+
+  const playheadIndex = Math.floor(scrubPosition * waveformData.length);
+
+  return (
+    <div className="h-8 px-4 py-1 flex items-center gap-px border-b border-border/20">
+      {waveformData.map((amplitude, i) => (
+        <div
+          key={i}
+          className={cn(
+            "flex-1 rounded-sm transition-colors duration-75",
+            i <= playheadIndex
+              ? "bg-primary/70"
+              : "bg-muted-foreground/20"
+          )}
+          style={{ height: `${amplitude * 100}%` }}
+        />
+      ))}
     </div>
   );
 }
