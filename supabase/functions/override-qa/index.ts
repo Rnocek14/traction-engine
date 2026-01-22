@@ -39,7 +39,6 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Create client with user's auth to get their identity
     const supabaseAuth = createClient(supabaseUrl, anonKey, {
       auth: { persistSession: false },
       global: { headers: { Authorization: authHeader } }
@@ -55,22 +54,17 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Admin client for privileged operations
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
       auth: { persistSession: false }
     });
 
-    // Check if user has admin or qa role
-    const { data: hasRole } = await supabaseAdmin.rpc('has_role', { 
+    // Single RPC call to check for admin OR qa role
+    const { data: hasRole } = await supabaseAdmin.rpc('has_any_role', { 
       _user_id: user.id, 
-      _role: 'admin' 
-    });
-    const { data: hasQaRole } = await supabaseAdmin.rpc('has_role', { 
-      _user_id: user.id, 
-      _role: 'qa' 
+      _roles: ['admin', 'qa']
     });
 
-    if (!hasRole && !hasQaRole) {
+    if (!hasRole) {
       console.warn({ requestId, event: "role_denied", user_id: user.id });
       return new Response(
         JSON.stringify({ success: false, error: "Insufficient permissions. Requires admin or qa role.", request_id: requestId }),
