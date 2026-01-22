@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -21,6 +22,7 @@ import {
   ShieldCheck,
   Copy,
   Clock,
+  ExternalLink,
 } from "lucide-react";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
@@ -248,6 +250,17 @@ export function QAReviewCard({
 
             {/* Actions */}
             <div className="flex gap-2 pt-2 border-t border-border/30">
+              <Button
+                asChild
+                variant="outline"
+                className="gap-2"
+              >
+                <Link to={`/studio/${item.id}`}>
+                  <ExternalLink className="w-4 h-4" />
+                  Open in Studio
+                </Link>
+              </Button>
+              
               <Button
                 onClick={onRegenerate}
                 disabled={isRegenerating || actionsDisabled}
