@@ -1,11 +1,11 @@
 // ============================================
-// Script Generator - 3-Phase Pipeline
+// Script Generator - Template-Based Pipeline
+// (AI generation now handled by edge function)
 // ============================================
 import type { 
   ScriptContent, 
   ScriptRun, 
   AccountConfig, 
-  ContentPolicy,
   Topic,
   QAResult 
 } from "@/types/script-types";
@@ -16,8 +16,7 @@ import {
 import { 
   runScriptQA, 
   extractFactClaims, 
-  detectSafetyFlags,
-  checkUniqueness 
+  detectSafetyFlags
 } from "@/lib/content-qa";
 import { 
   getAccountConfig, 
@@ -26,7 +25,6 @@ import {
   TOPIC_BANK 
 } from "@/data/show-bible";
 import { checkHookQuality, checkCtaAlignment } from "@/lib/quality-checks";
-import { generateScriptWithAI } from "@/lib/openai-client";
 
 // ============================================
 // Types
@@ -458,141 +456,8 @@ export function generateBatch(
 }
 
 // ============================================
-// AI-Powered Generator (OpenAI, async)
+// Note: AI-powered generation is now handled by the
+// generate-script edge function via createScriptRun()
+// in script-runs.ts. This file contains only the
+// template-based generator for local/fallback use.
 // ============================================
-export async function generateScriptRunWithAI(
-  accountId: string,
-  options: {
-    preferredPillar?: string;
-    recentFingerprints?: RecentFingerprint[];
-    lastUsedTopics?: Map<string, Date>;
-  } = {}
-): Promise<GenerationResult> {
-  const warnings: string[] = [];
-  
-  // Get account config
-  const config = getAccountConfig(accountId);
-  if (!config) {
-    return {
-      success: false,
-      error: `Account config not found for ID: ${accountId}`,
-      warnings,
-    };
-  }
-  
-  // Phase A: Select topic
-  const topic = selectTopic(
-    accountId, 
-    options.lastUsedTopics || new Map(),
-    options.preferredPillar
-  );
-  
-  if (!topic) {
-    return {
-      success: false,
-      error: `No available topics for account ${accountId} (vertical: ${config.vertical})`,
-      warnings,
-    };
-  }
-  
-  // Phase B: Generate content with OpenAI
-  const aiResponse = await generateScriptWithAI(config, topic);
-  
-  if (!aiResponse.success || !aiResponse.script_content) {
-    return {
-      success: false,
-      error: aiResponse.error || "Failed to generate script with AI",
-      warnings,
-    };
-  }
-  
-  const content = aiResponse.script_content;
-  
-  // Validate structure
-  const validation = validateScriptContent(content);
-  if (!validation.valid) {
-    return {
-      success: false,
-      error: `Content validation failed: ${validation.errors.join(', ')}`,
-      warnings,
-    };
-  }
-  
-  // Phase C: QA Gate
-  const qaGate = runQAGate(
-    content, 
-    config, 
-    options.recentFingerprints || []
-  );
-  
-  warnings.push(...qaGate.qualityWarnings);
-  warnings.push(...qaGate.qaResult.warnings);
-  
-  // Create script run record
-  const scriptRun: ScriptRun = {
-    id: crypto.randomUUID(),
-    account_id: accountId,
-    topic_id: topic.id,
-    status: qaGate.passed ? "qa_passed" : "qa_failed",
-    script_content: content,
-    qa_results: qaGate.qaResult,
-    qa_passed_at: qaGate.passed ? new Date().toISOString() : undefined,
-    qa_failed_reason: !qaGate.passed ? qaGate.qaResult.errors.join('; ') : undefined,
-    safety_flags: qaGate.safetyFlags,
-    fact_claims: qaGate.factClaims,
-    generation_cost_cents: aiResponse.generation_cost_cents || 3,
-    hook_hash: qaGate.fingerprints.hook_hash,
-    voiceover_hash: qaGate.fingerprints.voiceover_hash,
-    scene_hash: qaGate.fingerprints.scene_hash,
-    created_at: new Date().toISOString(),
-  };
-  
-  return {
-    success: true,
-    scriptRun,
-    qaResult: qaGate.qaResult,
-    warnings,
-  };
-}
-
-// ============================================
-// AI Batch Generator
-// ============================================
-export async function generateBatchWithAI(
-  accountId: string,
-  count: number,
-  options: {
-    preferredPillar?: string;
-  } = {}
-): Promise<GenerationResult[]> {
-  const results: GenerationResult[] = [];
-  const fingerprints: RecentFingerprint[] = [];
-  const lastUsedTopics = new Map<string, Date>();
-  
-  for (let i = 0; i < count; i++) {
-    const result = await generateScriptRunWithAI(accountId, {
-      ...options,
-      recentFingerprints: fingerprints,
-      lastUsedTopics,
-    });
-    
-    results.push(result);
-    
-    // Add fingerprint for uniqueness check
-    if (result.scriptRun) {
-      fingerprints.push({
-        hook_hash: result.scriptRun.hook_hash || '',
-        voiceover_hash: result.scriptRun.voiceover_hash || '',
-        account_id: accountId,
-        created_at: result.scriptRun.created_at,
-      });
-      
-      // Track topic usage
-      if (result.scriptRun.topic_id) {
-        lastUsedTopics.set(result.scriptRun.topic_id, new Date());
-      }
-    }
-  }
-  
-  return results;
-}
