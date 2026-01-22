@@ -850,6 +850,7 @@ export type Database = {
           created_at: string
           error: string | null
           id: string
+          openai_status: string | null
           openai_video_id: string | null
           output_url: string | null
           progress: number | null
@@ -857,13 +858,16 @@ export type Database = {
           request_id: string | null
           script_run_id: string
           settings: Json | null
+          spritesheet_url: string | null
           status: string
+          thumbnail_url: string | null
           updated_at: string
         }
         Insert: {
           created_at?: string
           error?: string | null
           id?: string
+          openai_status?: string | null
           openai_video_id?: string | null
           output_url?: string | null
           progress?: number | null
@@ -871,13 +875,16 @@ export type Database = {
           request_id?: string | null
           script_run_id: string
           settings?: Json | null
+          spritesheet_url?: string | null
           status?: string
+          thumbnail_url?: string | null
           updated_at?: string
         }
         Update: {
           created_at?: string
           error?: string | null
           id?: string
+          openai_status?: string | null
           openai_video_id?: string | null
           output_url?: string | null
           progress?: number | null
@@ -885,7 +892,9 @@ export type Database = {
           request_id?: string | null
           script_run_id?: string
           settings?: Json | null
+          spritesheet_url?: string | null
           status?: string
+          thumbnail_url?: string | null
           updated_at?: string
         }
         Relationships: [

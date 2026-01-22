@@ -345,14 +345,28 @@ export function VideoGenerator({ script }: VideoGeneratorProps) {
                     const jobSize = typeof settings.size === "string" ? settings.size : null;
                     const jobSeconds = typeof settings.seconds === "number" ? settings.seconds : null;
                     const progress = (job as unknown as { progress?: number }).progress ?? 0;
+                    const thumbnailUrl = (job as unknown as { thumbnail_url?: string }).thumbnail_url;
 
                     return (
                       <div
                         key={job.id}
                         className="p-2 rounded-lg bg-secondary/30 space-y-2"
                       >
-                        <div className="flex items-center gap-2">
-                          {getJobStatusIcon(job.status)}
+                        <div className="flex items-start gap-2">
+                          {/* Thumbnail preview */}
+                          {thumbnailUrl ? (
+                            <img 
+                              src={thumbnailUrl} 
+                              alt="Video thumbnail" 
+                              className="w-12 h-12 rounded object-cover flex-shrink-0 cursor-pointer hover:opacity-80"
+                              onClick={() => job.output_url && setPreviewUrl(job.output_url)}
+                            />
+                          ) : (
+                            <div className="w-12 h-12 rounded bg-secondary/50 flex items-center justify-center flex-shrink-0">
+                              {getJobStatusIcon(job.status)}
+                            </div>
+                          )}
+                          
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2">
                               {getJobStatusBadge(job.status)}
@@ -365,11 +379,23 @@ export function VideoGenerator({ script }: VideoGeneratorProps) {
                             <p className="text-[10px] text-muted-foreground mt-0.5">
                               {formatDistanceToNow(new Date(job.created_at), { addSuffix: true })}
                             </p>
+                            
+                            {/* Progress bar for active jobs */}
+                            {ACTIVE_STATUSES.includes(job.status) && progress > 0 && (
+                              <Progress value={progress} className="h-1 mt-1" />
+                            )}
+
+                            {/* Error display */}
+                            {job.error && (
+                              <p className="text-[10px] text-destructive truncate mt-1">
+                                {job.error}
+                              </p>
+                            )}
                           </div>
                           
                           {/* Preview/Open buttons */}
                           {job.output_url && (
-                            <div className="flex gap-1">
+                            <div className="flex gap-1 flex-shrink-0">
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -389,18 +415,6 @@ export function VideoGenerator({ script }: VideoGeneratorProps) {
                             </div>
                           )}
                         </div>
-
-                        {/* Progress bar for active jobs */}
-                        {ACTIVE_STATUSES.includes(job.status) && progress > 0 && (
-                          <Progress value={progress} className="h-1" />
-                        )}
-
-                        {/* Error display */}
-                        {job.error && (
-                          <p className="text-[10px] text-destructive truncate">
-                            {job.error}
-                          </p>
-                        )}
                       </div>
                     );
                   })}
