@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -11,10 +11,13 @@ import {
   ShieldCheck,
   ShieldAlert,
   RefreshCw,
+  Lock,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { QAInboxFilters } from "@/components/qa-inbox/QAInboxFilters";
 import { QAReviewCard } from "@/components/qa-inbox/QAReviewCard";
+import { AuthHeader } from "@/components/auth/AuthHeader";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   useQAInbox,
   useAccountConfigs,
@@ -26,6 +29,18 @@ import {
 import type { Enums } from "@/integrations/supabase/types";
 
 export default function QAReviewInbox() {
+  const { user, isLoading: authLoading, hasRole } = useAuth();
+  const [userHasAccess, setUserHasAccess] = useState<boolean | null>(null);
+
+  // Check role access
+  useEffect(() => {
+    if (user) {
+      hasRole(['admin', 'qa']).then(setUserHasAccess);
+    } else {
+      setUserHasAccess(null);
+    }
+  }, [user, hasRole]);
+
   // Filter state
   const [tab, setTab] = useState<QAInboxTab>('qa_failed');
   const [vertical, setVertical] = useState<Enums<'content_vertical'> | 'all'>('all');
@@ -45,22 +60,17 @@ export default function QAReviewInbox() {
   const overrideMutation = useOverrideQA();
   const regenerateMutation = useRegenerateScript();
 
-  // Action handlers - now scriptId-based for proper linking
+  // Action handlers
   const handleOverride = (scriptId: string, reason: string) => {
-    overrideMutation.mutate({
-      scriptId,
-      reason,
-    });
+    overrideMutation.mutate({ scriptId, reason });
   };
 
   const handleRegenerate = (scriptId: string) => {
-    regenerateMutation.mutate({
-      scriptId,
-      mode: 'ai',
-    });
+    regenerateMutation.mutate({ scriptId, mode: 'ai' });
   };
 
   const isHardBlockTab = tab === 'hard_block';
+  const canTakeActions = userHasAccess === true;
 
   return (
     <div className="min-h-screen bg-background">
@@ -91,14 +101,11 @@ export default function QAReviewInbox() {
               </div>
             </div>
 
-            {/* Quick Stats */}
+            {/* Right side: Stats + Auth */}
             <div className="flex items-center gap-4 text-sm">
               <Badge 
                 variant="outline" 
-                className={cn(
-                  "gap-1",
-                  "text-destructive border-destructive/50"
-                )}
+                className="gap-1 text-destructive border-destructive/50"
               >
                 <ShieldAlert className="w-3 h-3" />
                 Hard Blocks: {stats?.hardBlocks || 0}
@@ -116,18 +123,52 @@ export default function QAReviewInbox() {
                 onClick={() => refetch()}
                 className="gap-2"
               >
-                <RefreshCw className={cn(
-                  "w-4 h-4",
-                  itemsLoading && "animate-spin"
-                )} />
+                <RefreshCw className={cn("w-4 h-4", itemsLoading && "animate-spin")} />
                 Refresh
               </Button>
+              <div className="h-6 w-px bg-border" />
+              <AuthHeader />
             </div>
           </div>
         </div>
       </header>
 
       <main className="container mx-auto px-6 py-8 space-y-6">
+        {/* Auth state banners */}
+        {!authLoading && !user && (
+          <Card className="glass-card border-warning/50">
+            <CardContent className="py-6 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Lock className="w-5 h-5 text-warning" />
+                <div>
+                  <p className="font-medium">Sign in to take actions</p>
+                  <p className="text-sm text-muted-foreground">
+                    You can view scripts, but need to sign in to regenerate or override.
+                  </p>
+                </div>
+              </div>
+              <Link to="/login">
+                <Button>Sign In</Button>
+              </Link>
+            </CardContent>
+          </Card>
+        )}
+
+        {!authLoading && user && userHasAccess === false && (
+          <Card className="glass-card border-destructive/50">
+            <CardContent className="py-6 flex items-center gap-3">
+              <ShieldAlert className="w-5 h-5 text-destructive" />
+              <div>
+                <p className="font-medium text-destructive">No QA Access</p>
+                <p className="text-sm text-muted-foreground">
+                  You're signed in as {user.email}, but you don't have the admin or qa role.
+                  Contact an admin to get access.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Tabs */}
         <Tabs value={tab} onValueChange={(v) => setTab(v as QAInboxTab)}>
           <TabsList className="grid w-full max-w-md grid-cols-2">
@@ -160,7 +201,6 @@ export default function QAReviewInbox() {
         {/* Review Items */}
         <div className="space-y-3">
           {itemsLoading ? (
-            // Loading skeletons
             Array.from({ length: 3 }).map((_, i) => (
               <Card key={i} className="glass-card p-4">
                 <div className="space-y-3">
@@ -196,6 +236,7 @@ export default function QAReviewInbox() {
                 onOverride={(reason) => handleOverride(item.id, reason)}
                 isRegenerating={regenerateMutation.isPending}
                 isOverriding={overrideMutation.isPending}
+                actionsDisabled={!canTakeActions}
               />
             ))
           )}
