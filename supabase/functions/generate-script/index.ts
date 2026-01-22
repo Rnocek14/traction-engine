@@ -68,6 +68,7 @@ interface GenerateRequest {
   account_id: string;
   preferred_pillar?: string;
   mode: 'ai' | 'template';
+  regenerated_from_id?: string; // Links to original failed script
 }
 
 interface GenerateResponse {
@@ -466,11 +467,22 @@ Deno.serve(async (req) => {
     // ============================================
     // Pipeline Key Gate (prevent public abuse)
     // ============================================
+    // ============================================
+    // Auth: Accept either pipeline key OR service role JWT (for internal calls)
+    // ============================================
     const pipelineKey = Deno.env.get("PIPELINE_KEY");
-    const clientKey = req.headers.get("x-pipeline-key");
-
-    if (!pipelineKey || clientKey !== pipelineKey) {
-      console.warn({ requestId, event: "unauthorized", reason: "invalid or missing x-pipeline-key" });
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    const clientPipelineKey = req.headers.get("x-pipeline-key");
+    const authHeader = req.headers.get("Authorization");
+    
+    // Check if caller is authorized via pipeline key
+    const hasPipelineKey = pipelineKey && clientPipelineKey === pipelineKey;
+    
+    // Check if caller is using service role (internal server-to-server)
+    const hasServiceRole = authHeader?.includes(serviceRoleKey || "NEVER_MATCH");
+    
+    if (!hasPipelineKey && !hasServiceRole) {
+      console.warn({ requestId, event: "unauthorized", reason: "invalid credentials" });
       return new Response(
         JSON.stringify({ success: false, error: "Unauthorized", warnings: [], request_id: requestId }),
         { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -478,7 +490,7 @@ Deno.serve(async (req) => {
     }
 
     const supabaseAdmin = getSupabaseAdmin();
-    const { account_id, preferred_pillar, mode }: GenerateRequest = await req.json();
+    const { account_id, preferred_pillar, mode, regenerated_from_id }: GenerateRequest = await req.json();
 
     if (!account_id) {
       return new Response(
@@ -487,7 +499,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    console.log({ requestId, event: "pipeline_start", account_id, mode, preferred_pillar });
+    console.log({ requestId, event: "pipeline_start", account_id, mode, preferred_pillar, regenerated_from_id });
 
     // 1. Fetch account config
     const { data: configData, error: configError } = await supabaseAdmin
@@ -657,6 +669,7 @@ Deno.serve(async (req) => {
         scene_hash: fingerprints.scene_hash,
         qa_passed_at: qaResult.passed ? new Date().toISOString() : null,
         qa_failed_reason: qaResult.passed ? null : qaResult.errors.join('; '),
+        regenerated_from_id: regenerated_from_id || null,
       })
       .select()
       .single();

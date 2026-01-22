@@ -7,9 +7,9 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
-interface OverrideRequest {
+interface RegenerateRequest {
   script_id: string;
-  reason: string;
+  mode: 'ai' | 'template';
 }
 
 Deno.serve(async (req) => {
@@ -39,7 +39,6 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Create client with user's auth to get their identity
     const supabaseAuth = createClient(supabaseUrl, anonKey, {
       auth: { persistSession: false },
       global: { headers: { Authorization: authHeader } }
@@ -55,103 +54,112 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Admin client for privileged operations
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
       auth: { persistSession: false }
     });
 
-    // Check if user has admin or qa role
-    const { data: hasRole } = await supabaseAdmin.rpc('has_role', { 
-      _user_id: user.id, 
-      _role: 'admin' 
-    });
-    const { data: hasQaRole } = await supabaseAdmin.rpc('has_role', { 
-      _user_id: user.id, 
-      _role: 'qa' 
-    });
+    // Check for admin or qa role
+    const { data: hasAdminRole } = await supabaseAdmin.rpc('has_role', { _user_id: user.id, _role: 'admin' });
+    const { data: hasQaRole } = await supabaseAdmin.rpc('has_role', { _user_id: user.id, _role: 'qa' });
 
-    if (!hasRole && !hasQaRole) {
+    if (!hasAdminRole && !hasQaRole) {
       console.warn({ requestId, event: "role_denied", user_id: user.id });
       return new Response(
-        JSON.stringify({ success: false, error: "Insufficient permissions. Requires admin or qa role.", request_id: requestId }),
+        JSON.stringify({ success: false, error: "Insufficient permissions", request_id: requestId }),
         { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    const { script_id, reason }: OverrideRequest = await req.json();
+    const { script_id, mode }: RegenerateRequest = await req.json();
 
-    if (!script_id || !reason) {
+    if (!script_id || !mode) {
       return new Response(
-        JSON.stringify({ success: false, error: "Missing required fields: script_id, reason", request_id: requestId }),
+        JSON.stringify({ success: false, error: "Missing required fields: script_id, mode", request_id: requestId }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    console.log({ requestId, event: "override_start", script_id, user_id: user.id });
+    console.log({ requestId, event: "regenerate_start", script_id, mode, user_id: user.id });
 
-    // Fetch script and check constraints
-    const { data: script, error: fetchError } = await supabaseAdmin
+    // Fetch the original script to get account and topic info
+    const { data: original, error: fetchError } = await supabaseAdmin
       .from('script_runs')
-      .select('hard_block_flags, status')
+      .select('account_id, topic_id')
       .eq('id', script_id)
       .single();
 
-    if (fetchError || !script) {
+    if (fetchError || !original) {
       return new Response(
-        JSON.stringify({ success: false, error: "Script not found", request_id: requestId }),
+        JSON.stringify({ success: false, error: "Original script not found", request_id: requestId }),
         { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // Hard blocks cannot be overridden
-    if (script.hard_block_flags && script.hard_block_flags.length > 0) {
-      console.log({ requestId, event: "override_blocked", reason: "hard_block_flags" });
+    // Fetch topic to get pillar for relevance
+    let preferredPillar: string | undefined;
+    if (original.topic_id) {
+      const { data: topic } = await supabaseAdmin
+        .from('topic_bank')
+        .select('pillar')
+        .eq('id', original.topic_id)
+        .single();
+      
+      if (topic) {
+        preferredPillar = topic.pillar;
+      }
+    }
+
+    // Call generate-script internally (server-to-server)
+    // We'll invoke the function directly using Supabase Functions
+    const generateUrl = `${supabaseUrl}/functions/v1/generate-script`;
+    
+    const generateResponse = await fetch(generateUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${serviceRoleKey}`, // Service role for internal call
+      },
+      body: JSON.stringify({
+        account_id: original.account_id,
+        preferred_pillar: preferredPillar,
+        mode,
+        regenerated_from_id: script_id, // Link to original
+      }),
+    });
+
+    const generateResult = await generateResponse.json();
+
+    if (!generateResult.success) {
+      console.error({ requestId, event: "regenerate_failed", error: generateResult.error });
       return new Response(
         JSON.stringify({ 
           success: false, 
-          error: `Cannot override: hard block flags present (${script.hard_block_flags.join(', ')})`,
+          error: generateResult.error || "Regeneration failed",
           request_id: requestId,
         }),
-        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    if (script.status !== 'qa_failed') {
-      return new Response(
-        JSON.stringify({ success: false, error: "Script is not in qa_failed status", request_id: requestId }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // Perform the override - store user UUID as canonical ID
-    const { error: updateError } = await supabaseAdmin
-      .from('script_runs')
-      .update({
-        status: 'qa_passed',
-        qa_override_at: new Date().toISOString(),
-        qa_override_by: user.id, // UUID, not display name
-        qa_override_reason: reason,
-        qa_passed_at: new Date().toISOString(),
-      })
-      .eq('id', script_id);
-
-    if (updateError) {
-      console.error({ requestId, event: "override_error", error: updateError.message });
-      return new Response(
-        JSON.stringify({ success: false, error: updateError.message, request_id: requestId }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    console.log({ requestId, event: "override_complete", script_id, user_id: user.id });
+    console.log({ 
+      requestId, 
+      event: "regenerate_complete", 
+      original_id: script_id,
+      new_id: generateResult.script_run?.id,
+    });
 
     return new Response(
-      JSON.stringify({ success: true, request_id: requestId }),
+      JSON.stringify({
+        success: true,
+        script_run: generateResult.script_run,
+        original_script_id: script_id,
+        request_id: requestId,
+      }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
 
   } catch (error) {
-    console.error({ requestId, event: "override_error", error: error instanceof Error ? error.message : "Unknown" });
+    console.error({ requestId, event: "regenerate_error", error: error instanceof Error ? error.message : "Unknown" });
     return new Response(
       JSON.stringify({ 
         success: false, 

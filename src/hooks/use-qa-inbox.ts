@@ -21,7 +21,6 @@ export interface QAInboxFilters {
 
 // Fetch QA inbox items from DB
 export function useQAInbox(filters: QAInboxFilters) {
-  // First fetch account configs for vertical mapping
   const { data: accountConfigs } = useAccountConfigs();
   const accountVerticalMap = new Map(
     (accountConfigs || []).map(a => [a.account_id, a.vertical])
@@ -38,7 +37,6 @@ export function useQAInbox(filters: QAInboxFilters) {
         .order('created_at', { ascending: false })
         .limit(100);
 
-      // Filter by account
       if (filters.accountId && filters.accountId !== 'all') {
         query.eq('account_id', filters.accountId);
       }
@@ -50,13 +48,12 @@ export function useQAInbox(filters: QAInboxFilters) {
         throw error;
       }
 
-      // Enrich with vertical from account configs
       let results: QAInboxItem[] = (data || []).map(item => ({
         ...item,
         account_vertical: accountVerticalMap.get(item.account_id),
       }));
 
-      // Filter by tab (hard blocks vs overridable) - client side
+      // Filter by tab (hard blocks vs overridable)
       if (filters.tab === 'hard_block') {
         results = results.filter(item => 
           item.hard_block_flags && item.hard_block_flags.length > 0
@@ -67,14 +64,14 @@ export function useQAInbox(filters: QAInboxFilters) {
         );
       }
 
-      // Filter by vertical (client-side)
+      // Filter by vertical
       if (filters.vertical && filters.vertical !== 'all') {
         results = results.filter(item => 
           item.account_vertical === filters.vertical
         );
       }
 
-      // Search filter (client-side)
+      // Search filter
       if (filters.search) {
         const search = filters.search.toLowerCase();
         results = results.filter(item => {
@@ -93,8 +90,8 @@ export function useQAInbox(filters: QAInboxFilters) {
 
       return results;
     },
-    staleTime: 30_000, // 30 seconds
-    enabled: !!accountConfigs, // Wait for account configs
+    staleTime: 30_000,
+    enabled: !!accountConfigs,
   });
 }
 
@@ -115,30 +112,40 @@ export function useAccountConfigs() {
 
       return data || [];
     },
-    staleTime: 5 * 60_000, // 5 minutes
+    staleTime: 5 * 60_000,
   });
 }
 
-// Override QA mutation
+// Get current user for authenticated actions
+export function useCurrentUser() {
+  return useQuery({
+    queryKey: ['current-user'],
+    queryFn: async () => {
+      const { data: { user }, error } = await supabase.auth.getUser();
+      if (error) throw error;
+      return user;
+    },
+    staleTime: 5 * 60_000,
+  });
+}
+
+// Override QA mutation - requires auth
 export function useOverrideQA() {
   const queryClient = useQueryClient();
-  const pipelineKey = import.meta.env.VITE_PIPELINE_KEY;
 
   return useMutation({
     mutationFn: async (params: { 
       scriptId: string; 
-      overrideBy: string; 
       reason: string; 
     }) => {
+      // Uses auth automatically via supabase client
       const { data, error } = await supabase.functions.invoke<{
         success: boolean;
         error?: string;
         request_id?: string;
       }>('override-qa', {
-        headers: pipelineKey ? { 'x-pipeline-key': pipelineKey } : undefined,
         body: {
           script_id: params.scriptId,
-          override_by: params.overrideBy,
           reason: params.reason,
         },
       });
@@ -148,9 +155,10 @@ export function useOverrideQA() {
       
       return data;
     },
-    onSuccess: (_, variables) => {
+    onSuccess: () => {
       toast.success('Script approved via override');
       queryClient.invalidateQueries({ queryKey: ['qa-inbox'] });
+      queryClient.invalidateQueries({ queryKey: ['qa-inbox-stats'] });
     },
     onError: (error) => {
       toast.error(`Override failed: ${error.message}`);
@@ -158,37 +166,37 @@ export function useOverrideQA() {
   });
 }
 
-// Regenerate script mutation
+// Regenerate script mutation - requires auth, links to original
 export function useRegenerateScript() {
   const queryClient = useQueryClient();
-  const pipelineKey = import.meta.env.VITE_PIPELINE_KEY;
 
   return useMutation({
     mutationFn: async (params: { 
-      accountId: string; 
+      scriptId: string; 
       mode: 'ai' | 'template'; 
     }) => {
       const { data, error } = await supabase.functions.invoke<{
         success: boolean;
         script_run?: Tables<'script_runs'>;
+        original_script_id?: string;
         error?: string;
         request_id?: string;
-      }>('generate-script', {
-        headers: pipelineKey ? { 'x-pipeline-key': pipelineKey } : undefined,
+      }>('regenerate-script', {
         body: {
-          account_id: params.accountId,
+          script_id: params.scriptId,
           mode: params.mode,
         },
       });
 
       if (error) throw error;
-      if (!data?.success) throw new Error(data?.error || 'Generation failed');
+      if (!data?.success) throw new Error(data?.error || 'Regeneration failed');
       
       return data;
     },
-    onSuccess: () => {
-      toast.success('New script generated');
+    onSuccess: (data) => {
+      toast.success(`New script generated (linked to ${data.original_script_id?.slice(0, 8)}...)`);
       queryClient.invalidateQueries({ queryKey: ['qa-inbox'] });
+      queryClient.invalidateQueries({ queryKey: ['qa-inbox-stats'] });
     },
     onError: (error) => {
       toast.error(`Regeneration failed: ${error.message}`);
@@ -196,14 +204,14 @@ export function useRegenerateScript() {
   });
 }
 
-// Get inbox stats
+// Get inbox stats - consistent hard block logic
 export function useQAInboxStats() {
   return useQuery({
     queryKey: ['qa-inbox-stats'],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('script_runs')
-        .select('id, hard_block_flags, safety_flags')
+        .select('id, hard_block_flags')
         .eq('status', 'qa_failed')
         .is('qa_override_at', null);
 
@@ -213,6 +221,7 @@ export function useQAInboxStats() {
       }
 
       const items = data || [];
+      // Same logic as list filter
       const hardBlocks = items.filter(i => 
         i.hard_block_flags && i.hard_block_flags.length > 0
       ).length;

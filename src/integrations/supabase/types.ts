@@ -569,6 +569,7 @@ export type Database = {
           qa_override_reason: string | null
           qa_passed_at: string | null
           qa_results: Json | null
+          regenerated_from_id: string | null
           safety_flags: string[]
           scene_hash: string | null
           script_content: Json
@@ -591,6 +592,7 @@ export type Database = {
           qa_override_reason?: string | null
           qa_passed_at?: string | null
           qa_results?: Json | null
+          regenerated_from_id?: string | null
           safety_flags?: string[]
           scene_hash?: string | null
           script_content?: Json
@@ -613,6 +615,7 @@ export type Database = {
           qa_override_reason?: string | null
           qa_passed_at?: string | null
           qa_results?: Json | null
+          regenerated_from_id?: string | null
           safety_flags?: string[]
           scene_hash?: string | null
           script_content?: Json
@@ -621,6 +624,13 @@ export type Database = {
           voiceover_hash?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "script_runs_regenerated_from_id_fkey"
+            columns: ["regenerated_from_id"]
+            isOneToOne: false
+            referencedRelation: "script_runs"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "script_runs_topic_id_fkey"
             columns: ["topic_id"]
@@ -773,11 +783,83 @@ export type Database = {
           },
         ]
       }
+      user_roles: {
+        Row: {
+          created_at: string
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
+      video_jobs: {
+        Row: {
+          created_at: string
+          error: string | null
+          id: string
+          output_url: string | null
+          provider: string
+          request_id: string | null
+          script_run_id: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          error?: string | null
+          id?: string
+          output_url?: string | null
+          provider?: string
+          request_id?: string | null
+          script_run_id: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          error?: string | null
+          id?: string
+          output_url?: string | null
+          provider?: string
+          request_id?: string | null
+          script_run_id?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "video_jobs_script_run_id_fkey"
+            columns: ["script_run_id"]
+            isOneToOne: false
+            referencedRelation: "script_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
       select_topic: {
         Args: { p_pillar?: string; p_vertical: string }
         Returns: {
@@ -806,6 +888,7 @@ export type Database = {
       }
     }
     Enums: {
+      app_role: "admin" | "qa" | "viewer"
       claim_policy_level: "standard" | "moderate" | "strict" | "medical"
       content_vertical: "privacy" | "education" | "health" | "hyperlocal"
       cta_style: "soft" | "direct" | "hard_offer"
@@ -960,6 +1043,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      app_role: ["admin", "qa", "viewer"],
       claim_policy_level: ["standard", "moderate", "strict", "medical"],
       content_vertical: ["privacy", "education", "health", "hyperlocal"],
       cta_style: ["soft", "direct", "hard_offer"],
