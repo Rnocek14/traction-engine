@@ -465,34 +465,65 @@ Deno.serve(async (req) => {
 
   try {
     // ============================================
-    // ============================================
-    // Auth Gate: pipeline key OR service role (internal calls)
-    // Service role check: apikey header must match service role key
-    // This is the proper Supabase pattern for function-to-function calls
+    // Auth Gate: Three valid paths
+    // 1. JWT + admin/qa role (browser UI)
+    // 2. Service role via apikey header (internal function-to-function)
+    // 3. Pipeline key (external automation/batch - keep for now, remove later)
     // ============================================
     const pipelineKey = Deno.env.get("PIPELINE_KEY");
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    
     const clientPipelineKey = req.headers.get("x-pipeline-key");
     const apiKeyHeader = req.headers.get("apikey");
+    const authHeader = req.headers.get("Authorization");
+    const internalCaller = req.headers.get("x-internal-call");
     
-    // Path 1: External caller with pipeline key
-    const hasPipelineKey = pipelineKey && clientPipelineKey === pipelineKey;
+    let authPath = "none";
+    let authUserId: string | null = null;
     
-    // Path 2: Internal service-to-service call (apikey header = service role key)
-    // This is the correct pattern - don't check Authorization header content
-    const hasServiceRole = serviceRoleKey && apiKeyHeader === serviceRoleKey;
+    // Path 1: Pipeline key (for automation/batch)
+    if (pipelineKey && clientPipelineKey === pipelineKey) {
+      authPath = "pipeline_key";
+    }
+    // Path 2: Service role (internal function-to-function)
+    else if (serviceRoleKey && apiKeyHeader === serviceRoleKey) {
+      authPath = "service_role";
+    }
+    // Path 3: JWT + role check (browser UI)
+    else if (authHeader && anonKey && supabaseUrl) {
+      const supabaseAuth = createClient(supabaseUrl, anonKey, {
+        auth: { persistSession: false },
+        global: { headers: { Authorization: authHeader } }
+      });
+      
+      const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
+      
+      if (!authError && user) {
+        // Check role
+        const supabaseAdmin = getSupabaseAdmin();
+        const { data: hasRole } = await supabaseAdmin.rpc('has_any_role', { 
+          _user_id: user.id, 
+          _roles: ['admin', 'qa']
+        });
+        
+        if (hasRole) {
+          authPath = "jwt_role";
+          authUserId = user.id;
+        }
+      }
+    }
     
-    const internalCaller = req.headers.get("x-internal-call"); // For logging only
-    
-    if (!hasPipelineKey && !hasServiceRole) {
-      console.warn({ requestId, event: "unauthorized", reason: "missing valid credentials" });
+    if (authPath === "none") {
+      console.warn({ requestId, event: "unauthorized", reason: "no valid auth path" });
       return new Response(
         JSON.stringify({ success: false, error: "Unauthorized", warnings: [], request_id: requestId }),
         { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
     
-    console.log({ requestId, event: "auth_passed", path: hasServiceRole ? "service_role" : "pipeline_key", internal_caller: internalCaller });
+    console.log({ requestId, event: "auth_passed", path: authPath, user_id: authUserId, internal_caller: internalCaller });
 
     const supabaseAdmin = getSupabaseAdmin();
     const { account_id, preferred_pillar, mode, regenerated_from_id }: GenerateRequest = await req.json();

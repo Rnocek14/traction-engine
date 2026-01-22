@@ -34,6 +34,7 @@ interface QAReviewCardProps {
   onOverride: (reason: string) => void;
   isRegenerating?: boolean;
   isOverriding?: boolean;
+  actionsDisabled?: boolean;
 }
 
 export function QAReviewCard({
@@ -43,6 +44,7 @@ export function QAReviewCard({
   onOverride,
   isRegenerating,
   isOverriding,
+  actionsDisabled = false,
 }: QAReviewCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [showOverrideDialog, setShowOverrideDialog] = useState(false);
@@ -248,7 +250,7 @@ export function QAReviewCard({
             <div className="flex gap-2 pt-2 border-t border-border/30">
               <Button
                 onClick={onRegenerate}
-                disabled={isRegenerating}
+                disabled={isRegenerating || actionsDisabled}
                 className="gap-2"
               >
                 <RefreshCw className={cn("w-4 h-4", isRegenerating && "animate-spin")} />
@@ -259,7 +261,7 @@ export function QAReviewCard({
                 <Button
                   variant="outline"
                   onClick={() => setShowOverrideDialog(true)}
-                  disabled={isOverriding}
+                  disabled={isOverriding || actionsDisabled}
                   className="gap-2"
                 >
                   <ShieldCheck className="w-4 h-4" />
@@ -270,6 +272,12 @@ export function QAReviewCard({
               {isHardBlock && (
                 <span className="text-xs text-destructive self-center ml-2">
                   Hard blocks cannot be overridden
+                </span>
+              )}
+              
+              {actionsDisabled && !isHardBlock && (
+                <span className="text-xs text-muted-foreground self-center ml-2">
+                  Sign in with QA role to take actions
                 </span>
               )}
             </div>
