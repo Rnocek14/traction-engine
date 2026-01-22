@@ -1,5 +1,5 @@
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { ArrowLeft, Copy, Check, AlertTriangle, Loader2 } from "lucide-react";
+import { ArrowLeft, Copy, Check, AlertTriangle, Loader2, Sparkles } from "lucide-react";
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -10,6 +10,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { AuthHeader } from "@/components/auth/AuthHeader";
 import { VersionTimeline } from "@/components/studio/VersionTimeline";
 import { StudioActionPanel } from "@/components/studio/StudioActionPanel";
+import { StudioLauncher } from "@/components/studio/StudioLauncher";
+import { VideoGenerator } from "@/components/studio/VideoGenerator";
 import {
   useScriptRunDetail,
   useScriptVersionChain,
@@ -108,24 +110,24 @@ export default function Studio() {
     );
   }
 
-  // Script not found
-  if (scriptError || !scriptRun) {
+  // No script ID or script not found - show launcher
+  if (!scriptRunId || scriptError || !scriptRun) {
     return (
       <div className="min-h-screen bg-background">
         <StudioHeader />
-        <div className="container mx-auto px-4 py-12">
-          <Card className="glass-card max-w-md mx-auto">
-            <CardContent className="pt-6 text-center">
-              <AlertTriangle className="h-12 w-12 text-warning mx-auto mb-4" />
-              <h2 className="text-lg font-semibold mb-2">Script Not Found</h2>
-              <p className="text-sm text-muted-foreground mb-4">
-                The requested script could not be found.
+        <div className="container mx-auto px-4 py-6">
+          <div className="max-w-3xl mx-auto">
+            <div className="text-center mb-8">
+              <h1 className="text-3xl font-bold mb-2 flex items-center justify-center gap-3">
+                <Sparkles className="h-8 w-8 text-primary" />
+                Rendition Studio
+              </h1>
+              <p className="text-muted-foreground">
+                Generate scripts, iterate on content, and create videos
               </p>
-              <Button variant="outline" asChild>
-                <Link to="/qa-review">Back to QA Review</Link>
-              </Button>
-            </CardContent>
-          </Card>
+            </div>
+            <StudioLauncher />
+          </div>
         </div>
       </div>
     );
@@ -346,8 +348,9 @@ export default function Studio() {
           </div>
 
           {/* Right Rail - Actions */}
-          <div className="col-span-3">
+          <div className="col-span-3 space-y-4">
             <StudioActionPanel script={scriptRun} isLoading={scriptLoading} />
+            <VideoGenerator script={scriptRun} />
           </div>
         </div>
       </div>
