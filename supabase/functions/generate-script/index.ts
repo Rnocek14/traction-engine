@@ -4,7 +4,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+    "authorization, x-client-info, apikey, content-type, x-pipeline-key",
 };
 
 // ============================================
@@ -129,24 +129,28 @@ function sanitizeHashtags(input: unknown): string[] {
 }
 
 // ============================================
-// Simple Hash Function
+// SHA-256 Hash Function (collision-resistant)
 // ============================================
-function simpleHash(str: string): string {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash;
-  }
-  return Math.abs(hash).toString(16).padStart(8, '0');
+async function sha256Hex(input: string): Promise<string> {
+  const data = new TextEncoder().encode(input);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(digest))
+    .map(b => b.toString(16).padStart(2, "0"))
+    .join("")
+    .slice(0, 16); // 16 hex chars = 64 bits, enough for fingerprinting
 }
 
-function generateFingerprints(content: ScriptContent) {
-  return {
-    hook_hash: simpleHash(content.hook.toLowerCase().trim()),
-    voiceover_hash: simpleHash(content.voiceover.toLowerCase().trim()),
-    scene_hash: simpleHash(content.scene_prompts.join('|').toLowerCase()),
-  };
+async function generateFingerprints(content: ScriptContent): Promise<{
+  hook_hash: string;
+  voiceover_hash: string;
+  scene_hash: string;
+}> {
+  const [hook_hash, voiceover_hash, scene_hash] = await Promise.all([
+    sha256Hex(content.hook.toLowerCase().trim()),
+    sha256Hex(content.voiceover.toLowerCase().trim()),
+    sha256Hex(content.scene_prompts.join('|').toLowerCase()),
+  ]);
+  return { hook_hash, voiceover_hash, scene_hash };
 }
 
 // ============================================
@@ -242,10 +246,15 @@ function runQA(
     }
   }
 
-  // CTA alignment check
-  const ctaMatches = config.cta_phrases.some(phrase => 
-    content.cta.toLowerCase().includes(phrase.toLowerCase().substring(0, 20))
-  );
+  // CTA alignment check (normalized comparison)
+  const normalizeCta = (s: string) => s.toLowerCase().trim().replace(/\s+/g, ' ').replace(/[^\w\s]/g, '');
+  const normalizedCta = normalizeCta(content.cta);
+  const ctaMatches = config.cta_phrases.some(phrase => {
+    const normalizedPhrase = normalizeCta(phrase);
+    return normalizedCta === normalizedPhrase || 
+           normalizedCta.startsWith(normalizedPhrase) ||
+           normalizedPhrase.startsWith(normalizedCta);
+  });
   if (!ctaMatches) {
     warnings.push("CTA doesn't match configured phrases");
   }
@@ -452,6 +461,20 @@ Deno.serve(async (req) => {
   const warnings: string[] = [];
 
   try {
+    // ============================================
+    // Pipeline Key Gate (prevent public abuse)
+    // ============================================
+    const pipelineKey = Deno.env.get("PIPELINE_KEY");
+    const clientKey = req.headers.get("x-pipeline-key");
+
+    if (!pipelineKey || clientKey !== pipelineKey) {
+      console.warn("[pipeline] Unauthorized request - invalid or missing x-pipeline-key");
+      return new Response(
+        JSON.stringify({ success: false, error: "Unauthorized", warnings: [] }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     const supabaseAdmin = getSupabaseAdmin();
     const { account_id, preferred_pillar, mode }: GenerateRequest = await req.json();
 
@@ -587,7 +610,7 @@ Deno.serve(async (req) => {
     console.log(`[pipeline] QA result: passed=${qaResult.passed}, errors=${qaResult.errors.length}`);
 
     // 6. Generate fingerprints
-    const fingerprints = generateFingerprints(content);
+    const fingerprints = await generateFingerprints(content);
 
     // 7. Insert script_run
     const finalStatus = qaResult.passed ? 'qa_passed' : 'qa_failed';

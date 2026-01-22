@@ -119,12 +119,15 @@ export async function fetchRecentFingerprints(
 // ============================================
 export async function createScriptRun(options: CreateScriptOptions): Promise<ScriptRunResult> {
   try {
+    const pipelineKey = import.meta.env.VITE_PIPELINE_KEY;
+    
     const { data, error } = await supabase.functions.invoke<{
       success: boolean;
       script_run?: DbScriptRun;
       error?: string;
       warnings: string[];
     }>('generate-script', {
+      headers: pipelineKey ? { 'x-pipeline-key': pipelineKey } : undefined,
       body: {
         account_id: options.accountId,
         preferred_pillar: options.preferredPillar,
@@ -272,10 +275,13 @@ export async function overrideQa(options: {
   }
 
   // Call edge function for the actual update
+  const pipelineKey = import.meta.env.VITE_PIPELINE_KEY;
+  
   const { data, error } = await supabase.functions.invoke<{
     success: boolean;
     error?: string;
   }>('override-qa', {
+    headers: pipelineKey ? { 'x-pipeline-key': pipelineKey } : undefined,
     body: {
       script_id: options.scriptId,
       override_by: options.overrideBy,
