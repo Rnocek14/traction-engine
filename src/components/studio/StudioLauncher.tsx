@@ -76,7 +76,10 @@ export function StudioLauncher({ onScriptCreated }: StudioLauncherProps) {
   // Generate script mutation
   const generateMutation = useMutation({
     mutationFn: async () => {
+      const pipelineKey = import.meta.env.VITE_PIPELINE_KEY;
+      
       const { data, error } = await supabase.functions.invoke("generate-script", {
+        headers: pipelineKey ? { "x-pipeline-key": pipelineKey } : undefined,
         body: {
           account_id: selectedAccount,
           preferred_pillar: selectedPillar || undefined,
