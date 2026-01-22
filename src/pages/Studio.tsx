@@ -48,6 +48,13 @@ export default function Studio() {
     };
   }, [user, hasRole]);
 
+  // Validate scriptRunId format and redirect if malformed
+  useEffect(() => {
+    if (scriptRunId && !scriptRunId.match(/^[0-9a-f-]{36}$/i)) {
+      navigate("/studio", { replace: true });
+    }
+  }, [scriptRunId, navigate]);
+
   // Use selected version or fall back to URL param
   const activeScriptId = selectedVersionId || scriptRunId;
 
