@@ -196,15 +196,15 @@ export default function ScriptGenerator() {
               <div className="space-y-2 min-w-[200px]">
                 <label className="text-sm text-muted-foreground">Pillar (optional)</label>
                 <Select 
-                  value={selectedPillar} 
-                  onValueChange={setSelectedPillar}
+                  value={selectedPillar || "__any__"} 
+                  onValueChange={(val) => setSelectedPillar(val === "__any__" ? "" : val)}
                   disabled={!selectedAccount}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Any pillar" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">Any pillar</SelectItem>
+                    <SelectItem value="__any__">Any pillar</SelectItem>
                     {availablePillars.map(pillar => (
                       <SelectItem key={pillar} value={pillar}>
                         {pillar}
