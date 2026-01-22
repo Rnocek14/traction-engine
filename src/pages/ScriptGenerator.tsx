@@ -9,6 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import {
   Play,
@@ -21,11 +22,15 @@ import {
   ChevronUp,
   RefreshCw,
   ArrowLeft,
+  Sparkles,
+  Zap,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { 
   generateScriptRun, 
-  generateBatch, 
+  generateBatch,
+  generateScriptRunWithAI,
+  generateBatchWithAI,
   type GenerationResult 
 } from "@/lib/script-generator";
 import { ACCOUNT_CONFIGS, TOPIC_BANK } from "@/data/show-bible";
@@ -37,6 +42,7 @@ export default function ScriptGenerator() {
   const [results, setResults] = useState<GenerationResult[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [useAI, setUseAI] = useState(true); // Default to AI mode
 
   // Get available pillars for selected account
   const selectedConfig = ACCOUNT_CONFIGS.find(c => c.account_id === selectedAccount);
@@ -53,23 +59,45 @@ export default function ScriptGenerator() {
     
     setIsGenerating(true);
     
-    // Simulate async delay for UX
-    await new Promise(resolve => setTimeout(resolve, 500));
-    
-    if (count === 1) {
-      const result = generateScriptRun(selectedAccount, {
-        preferredPillar: selectedPillar || undefined,
-      });
-      setResults(prev => [result, ...prev]);
-    } else {
-      const batchResults = generateBatch(selectedAccount, count, {
-        preferredPillar: selectedPillar || undefined,
-      });
-      setResults(prev => [...batchResults, ...prev]);
+    try {
+      if (useAI) {
+        // Use OpenAI-powered generation
+        if (count === 1) {
+          const result = await generateScriptRunWithAI(selectedAccount, {
+            preferredPillar: selectedPillar || undefined,
+          });
+          setResults(prev => [result, ...prev]);
+        } else {
+          const batchResults = await generateBatchWithAI(selectedAccount, count, {
+            preferredPillar: selectedPillar || undefined,
+          });
+          setResults(prev => [...batchResults, ...prev]);
+        }
+      } else {
+        // Use template-based generation (fast, no API)
+        if (count === 1) {
+          const result = generateScriptRun(selectedAccount, {
+            preferredPillar: selectedPillar || undefined,
+          });
+          setResults(prev => [result, ...prev]);
+        } else {
+          const batchResults = generateBatch(selectedAccount, count, {
+            preferredPillar: selectedPillar || undefined,
+          });
+          setResults(prev => [...batchResults, ...prev]);
+        }
+      }
+    } catch (error) {
+      console.error("Generation error:", error);
+      setResults(prev => [{
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+        warnings: [],
+      }, ...prev]);
     }
     
     setIsGenerating(false);
-  }, [selectedAccount, selectedPillar]);
+  }, [selectedAccount, selectedPillar, useAI]);
 
   const toggleExpanded = (id: string) => {
     setExpandedIds(prev => {
@@ -186,6 +214,24 @@ export default function ScriptGenerator() {
                 </Select>
               </div>
 
+              {/* AI Toggle */}
+              <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-secondary/30 border border-border/50">
+                <div className="flex items-center gap-2">
+                  {useAI ? (
+                    <Sparkles className="w-4 h-4 text-primary" />
+                  ) : (
+                    <Zap className="w-4 h-4 text-muted-foreground" />
+                  )}
+                  <span className="text-sm font-medium">
+                    {useAI ? "GPT-4" : "Templates"}
+                  </span>
+                </div>
+                <Switch 
+                  checked={useAI} 
+                  onCheckedChange={setUseAI}
+                />
+              </div>
+
               {/* Generate Buttons */}
               <div className="flex gap-2">
                 <Button
@@ -195,6 +241,8 @@ export default function ScriptGenerator() {
                 >
                   {isGenerating ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : useAI ? (
+                    <Sparkles className="w-4 h-4" />
                   ) : (
                     <Play className="w-4 h-4" />
                   )}
