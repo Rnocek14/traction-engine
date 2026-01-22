@@ -91,8 +91,11 @@ export default function AccountDetail() {
   const { accountId } = useParams<{ accountId: string }>();
   const account = getAccountData(accountId || "1");
 
-  const roi = ((account.monthlyRevenue - account.monthlyCost) / account.monthlyCost * 100).toFixed(0);
-  const roiPositive = parseFloat(roi) > 0;
+  // Guard against division by zero for ROI calculation
+  const roi = account.monthlyCost > 0
+    ? ((account.monthlyRevenue - account.monthlyCost) / account.monthlyCost) * 100
+    : null;
+  const roiPositive = roi !== null && roi > 0;
 
   return (
     <div className="min-h-screen bg-background">
@@ -186,8 +189,8 @@ export default function AccountDetail() {
           />
           <MetricCard 
             label="ROI" 
-            value={`${roiPositive ? '+' : ''}${roi}%`} 
-            variant={roiPositive ? "success" : "destructive"}
+            value={roi !== null ? `${roiPositive ? '+' : ''}${roi.toFixed(0)}%` : '—'} 
+            variant={roi === null ? undefined : roiPositive ? "success" : "destructive"}
             icon={<TrendingUp className="w-4 h-4" />}
           />
         </div>

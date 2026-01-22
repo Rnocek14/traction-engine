@@ -3,23 +3,21 @@ import { DollarSign, TrendingUp, TrendingDown, AlertCircle } from "lucide-react"
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 
+import { centsToDisplay, getTopCostDriver, type CostBreakdown } from "@/types/content-engine";
+
+// Using cents to avoid float precision issues
 interface CostData {
   daily: {
-    spent: number;
-    budget: number;
-    breakdown: {
-      llm: number;
-      tts: number;
-      video: number;
-      other: number;
-    };
+    spentCents: number;
+    budgetCents: number;
+    breakdown: CostBreakdown;
   };
   weekly: {
-    spent: number;
+    spentCents: number;
     trend: number;
   };
   perVideo: {
-    average: number;
+    averageCents: number;
     trend: number;
   };
   roi: {
@@ -30,21 +28,21 @@ interface CostData {
 
 const costData: CostData = {
   daily: {
-    spent: 24.80,
-    budget: 35.00,
+    spentCents: 2480, // $24.80
+    budgetCents: 3500, // $35.00
     breakdown: {
-      llm: 4.20,
-      tts: 8.40,
-      video: 11.20,
-      other: 1.00,
+      llmCents: 420,    // $4.20
+      ttsCents: 840,    // $8.40
+      videoCents: 1120, // $11.20
+      otherCents: 100,  // $1.00
     },
   },
   weekly: {
-    spent: 156.40,
+    spentCents: 15640, // $156.40
     trend: -8.2,
   },
   perVideo: {
-    average: 0.42,
+    averageCents: 42, // $0.42
     trend: -5.1,
   },
   roi: {
@@ -54,16 +52,24 @@ const costData: CostData = {
 };
 
 export function CostOverlay() {
-  const budgetPercentage = (costData.daily.spent / costData.daily.budget) * 100;
+  const budgetPercentage = (costData.daily.spentCents / costData.daily.budgetCents) * 100;
   const isOverBudget = budgetPercentage > 100;
   const isNearBudget = budgetPercentage > 85;
+  
+  // Get top cost driver for immediate insight
+  const topDriver = getTopCostDriver(costData.daily.breakdown);
 
   return (
     <div className="glass-card p-6">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
           <DollarSign className="w-5 h-5 text-warning" />
-          <h3 className="text-lg font-semibold">Cost Monitor</h3>
+          <div>
+            <h3 className="text-lg font-semibold">Cost Monitor</h3>
+            <p className="text-xs text-muted-foreground">
+              Top driver: <span className="text-warning font-medium">{topDriver.label}</span> ({centsToDisplay(topDriver.cents)})
+            </p>
+          </div>
         </div>
         <Badge 
           variant="outline" 
@@ -84,7 +90,7 @@ export function CostOverlay() {
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm text-muted-foreground">Daily Budget</span>
               <span className="text-sm font-mono">
-                ${costData.daily.spent.toFixed(2)} / ${costData.daily.budget.toFixed(2)}
+                {centsToDisplay(costData.daily.spentCents)} / {centsToDisplay(costData.daily.budgetCents)}
               </span>
             </div>
             <Progress 
@@ -105,10 +111,10 @@ export function CostOverlay() {
 
           {/* Breakdown */}
           <div className="space-y-2">
-            <CostBreakdownRow label="LLM (GPT-4)" value={costData.daily.breakdown.llm} total={costData.daily.spent} color="bg-cyan-500" />
-            <CostBreakdownRow label="TTS (Eleven)" value={costData.daily.breakdown.tts} total={costData.daily.spent} color="bg-emerald-500" />
-            <CostBreakdownRow label="Video (Sora)" value={costData.daily.breakdown.video} total={costData.daily.spent} color="bg-violet-500" />
-            <CostBreakdownRow label="Other" value={costData.daily.breakdown.other} total={costData.daily.spent} color="bg-muted-foreground" />
+            <CostBreakdownRow label="LLM (GPT-4)" valueCents={costData.daily.breakdown.llmCents} totalCents={costData.daily.spentCents} color="bg-cyan-500" />
+            <CostBreakdownRow label="TTS (Eleven)" valueCents={costData.daily.breakdown.ttsCents} totalCents={costData.daily.spentCents} color="bg-emerald-500" />
+            <CostBreakdownRow label="Video (Sora)" valueCents={costData.daily.breakdown.videoCents} totalCents={costData.daily.spentCents} color="bg-violet-500" />
+            <CostBreakdownRow label="Other" valueCents={costData.daily.breakdown.otherCents} totalCents={costData.daily.spentCents} color="bg-muted-foreground" />
           </div>
         </div>
 
@@ -116,7 +122,7 @@ export function CostOverlay() {
         <div className="glass-card p-4 bg-secondary/20">
           <span className="text-xs text-muted-foreground">Weekly Spend</span>
           <div className="flex items-end gap-2 mt-1">
-            <span className="text-2xl font-mono font-semibold">${costData.weekly.spent.toFixed(2)}</span>
+            <span className="text-2xl font-mono font-semibold">{centsToDisplay(costData.weekly.spentCents)}</span>
             <TrendIndicator value={costData.weekly.trend} inverted />
           </div>
           <p className="text-xs text-muted-foreground mt-2">
@@ -128,7 +134,7 @@ export function CostOverlay() {
         <div className="glass-card p-4 bg-secondary/20">
           <span className="text-xs text-muted-foreground">Avg Cost per Video</span>
           <div className="flex items-end gap-2 mt-1">
-            <span className="text-2xl font-mono font-semibold">${costData.perVideo.average.toFixed(2)}</span>
+            <span className="text-2xl font-mono font-semibold">{centsToDisplay(costData.perVideo.averageCents)}</span>
             <TrendIndicator value={costData.perVideo.trend} inverted />
           </div>
           <p className="text-xs text-muted-foreground mt-2">
@@ -140,18 +146,18 @@ export function CostOverlay() {
   );
 }
 
-function CostBreakdownRow({ label, value, total, color }: { 
+function CostBreakdownRow({ label, valueCents, totalCents, color }: { 
   label: string; 
-  value: number; 
-  total: number; 
+  valueCents: number; 
+  totalCents: number; 
   color: string;
 }) {
-  const percentage = (value / total) * 100;
+  const percentage = totalCents > 0 ? (valueCents / totalCents) * 100 : 0;
   return (
     <div className="flex items-center gap-3">
       <div className={cn("w-2 h-2 rounded-full", color)} />
       <span className="text-xs text-muted-foreground flex-1">{label}</span>
-      <span className="text-xs font-mono">${value.toFixed(2)}</span>
+      <span className="text-xs font-mono">{centsToDisplay(valueCents)}</span>
       <span className="text-xs text-muted-foreground w-10 text-right">{percentage.toFixed(0)}%</span>
     </div>
   );

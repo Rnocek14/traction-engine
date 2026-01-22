@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import {
   FileText,
@@ -14,26 +14,44 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PipelineStageDrawer } from "./PipelineStageDrawer";
+import type { PipelineStage, StageStatus } from "@/types/content-engine";
 
-interface PipelineStep {
-  id: string;
-  label: string;
-  icon: typeof FileText;
-  status: "completed" | "active" | "pending" | "error";
-  count?: number;
-}
-
-const steps: PipelineStep[] = [
-  { id: "script", label: "Script Gen", icon: FileText, status: "completed", count: 12 },
-  { id: "voice", label: "Voice TTS", icon: Mic, status: "completed", count: 12 },
-  { id: "video", label: "Sora Clips", icon: Film, status: "active", count: 8 },
-  { id: "assembly", label: "FFmpeg", icon: Scissors, status: "pending", count: 0 },
-  { id: "publish", label: "Publish", icon: Upload, status: "pending", count: 0 },
+const initialSteps: PipelineStage[] = [
+  { id: "script", label: "Script Gen", status: "completed", count: 12 },
+  { id: "voice", label: "Voice TTS", status: "completed", count: 12 },
+  { id: "video", label: "Sora Clips", status: "active", count: 8 },
+  { id: "assembly", label: "FFmpeg", status: "pending", count: 0 },
+  { id: "publish", label: "Publish", status: "pending", count: 0 },
 ];
 
+const stepIcons: Record<string, typeof FileText> = {
+  script: FileText,
+  voice: Mic,
+  video: Film,
+  assembly: Scissors,
+  publish: Upload,
+};
+
 export function PipelineVisualizer() {
-  const [selectedStage, setSelectedStage] = useState<PipelineStep | null>(null);
+  const [selectedStage, setSelectedStage] = useState<PipelineStage | null>(null);
   const [isPaused, setIsPaused] = useState(false);
+  const [pausedStages, setPausedStages] = useState<Record<string, boolean>>({});
+
+  const handlePauseStage = useCallback((stageId: string, paused: boolean) => {
+    setPausedStages(prev => ({
+      ...prev,
+      [stageId]: paused,
+    }));
+  }, []);
+
+  // Get effective status considering paused state
+  const getEffectiveStatus = (step: PipelineStage): StageStatus => {
+    if (pausedStages[step.id]) return "paused";
+    return step.status;
+  };
+
+  // Check if any active stages are paused
+  const hasActivePausedStages = Object.values(pausedStages).some(Boolean);
 
   return (
     <>
@@ -77,38 +95,52 @@ export function PipelineVisualizer() {
           <div className="absolute top-1/2 left-0 right-0 h-0.5 bg-border -translate-y-1/2 z-0" />
           
           {/* Active flow animation */}
-          {!isPaused && (
+          {!isPaused && !hasActivePausedStages && (
             <div className="absolute top-1/2 left-0 h-0.5 bg-gradient-to-r from-primary via-primary to-transparent -translate-y-1/2 z-0 animate-flow" 
                 style={{ width: '60%' }} />
           )}
 
           {/* Steps */}
           <div className="relative z-10 flex items-center justify-between">
-            {steps.map((step) => (
-              <button
-                key={step.id}
-                className="flex flex-col items-center gap-2 group cursor-pointer"
-                onClick={() => setSelectedStage(step)}
-              >
-                <StepIndicator step={step} isPaused={isPaused} />
-                <span
-                  className={cn(
-                    "text-xs font-medium transition-colors group-hover:text-primary",
-                    step.status === "active" && "text-primary",
-                    step.status === "completed" && "text-success",
-                    step.status === "pending" && "text-muted-foreground",
-                    step.status === "error" && "text-destructive"
-                  )}
+            {initialSteps.map((step) => {
+              const effectiveStatus = getEffectiveStatus(step);
+              const isStagePaused = pausedStages[step.id];
+              
+              return (
+                <button
+                  key={step.id}
+                  className="flex flex-col items-center gap-2 group cursor-pointer"
+                  onClick={() => setSelectedStage(step)}
+                  aria-label={`View ${step.label} stage details`}
                 >
-                  {step.label}
-                </span>
-                {step.count !== undefined && step.count > 0 && (
-                  <span className="text-xs font-mono text-muted-foreground">
-                    {step.count} items
+                  <StepIndicator 
+                    step={{ ...step, status: effectiveStatus }} 
+                    isPaused={isPaused || isStagePaused} 
+                    icon={stepIcons[step.id]}
+                  />
+                  <span
+                    className={cn(
+                      "text-xs font-medium transition-colors group-hover:text-primary",
+                      effectiveStatus === "active" && "text-primary",
+                      effectiveStatus === "completed" && "text-success",
+                      effectiveStatus === "pending" && "text-muted-foreground",
+                      effectiveStatus === "error" && "text-destructive",
+                      effectiveStatus === "paused" && "text-warning"
+                    )}
+                  >
+                    {step.label}
                   </span>
-                )}
-              </button>
-            ))}
+                  {isStagePaused && (
+                    <span className="text-xs text-warning font-medium">PAUSED</span>
+                  )}
+                  {step.count !== undefined && step.count > 0 && !isStagePaused && (
+                    <span className="text-xs font-mono text-muted-foreground">
+                      {step.count} items
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -143,15 +175,15 @@ export function PipelineVisualizer() {
         open={!!selectedStage} 
         onOpenChange={(open) => !open && setSelectedStage(null)}
         stage={selectedStage}
+        isPaused={selectedStage ? pausedStages[selectedStage.id] : false}
+        onPauseStage={handlePauseStage}
       />
     </>
   );
 }
 
-function StepIndicator({ step, isPaused }: { step: PipelineStep; isPaused: boolean }) {
-  const Icon = step.icon;
-  
-  const statusClasses = {
+function StepIndicator({ step, isPaused, icon: Icon }: { step: PipelineStage; isPaused: boolean; icon: typeof FileText }) {
+  const statusClasses: Record<StageStatus, string> = {
     completed: "bg-success text-success-foreground shadow-glow-success",
     active: cn(
       "bg-primary text-primary-foreground",
@@ -159,6 +191,7 @@ function StepIndicator({ step, isPaused }: { step: PipelineStep; isPaused: boole
     ),
     pending: "bg-secondary text-muted-foreground",
     error: "bg-destructive text-destructive-foreground",
+    paused: "bg-warning text-warning-foreground",
   };
 
   return (
@@ -172,6 +205,8 @@ function StepIndicator({ step, isPaused }: { step: PipelineStep; isPaused: boole
         <CheckCircle className="w-5 h-5" />
       ) : step.status === "active" && !isPaused ? (
         <Loader2 className="w-5 h-5 animate-spin" />
+      ) : step.status === "paused" ? (
+        <Pause className="w-5 h-5" />
       ) : (
         <Icon className="w-5 h-5" />
       )}

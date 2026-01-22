@@ -21,48 +21,25 @@ import {
   Zap,
   DollarSign,
 } from "lucide-react";
-
-interface Job {
-  id: string;
-  name: string;
-  account: string;
-  status: "processing" | "queued" | "completed" | "failed" | "retrying";
-  progress?: number;
-  retries: number;
-  maxRetries: number;
-  startedAt?: string;
-  error?: string;
-  cost?: number;
-}
-
-interface StageConfig {
-  model: string;
-  provider: string;
-  avgLatency: string;
-  costPerUnit: string;
-  successRate: number;
-  queueDepth: number;
-}
+import type { PipelineStage, PipelineJob, StageConfig, JobStatus } from "@/types/content-engine";
+import { centsToDisplay } from "@/types/content-engine";
 
 interface PipelineStageDrawerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  stage: {
-    id: string;
-    label: string;
-    status: "completed" | "active" | "pending" | "error";
-    count?: number;
-  } | null;
+  stage: PipelineStage | null;
+  isPaused?: boolean;
+  onPauseStage?: (stageId: string, paused: boolean) => void;
 }
 
 // Mock data - would come from real API
-const getStageData = (stageId: string): { jobs: Job[]; config: StageConfig } => {
+const getStageData = (stageId: string): { jobs: PipelineJob[]; config: StageConfig } => {
   const configs: Record<string, StageConfig> = {
     script: {
       model: "GPT-4 Turbo",
       provider: "OpenAI",
       avgLatency: "2.3s",
-      costPerUnit: "$0.012",
+      costPerUnitCents: 1, // $0.01
       successRate: 99.2,
       queueDepth: 4,
     },
@@ -70,7 +47,7 @@ const getStageData = (stageId: string): { jobs: Job[]; config: StageConfig } => 
       model: "Eleven Turbo v2",
       provider: "ElevenLabs",
       avgLatency: "4.1s",
-      costPerUnit: "$0.024",
+      costPerUnitCents: 2, // $0.02
       successRate: 98.7,
       queueDepth: 8,
     },
@@ -78,7 +55,7 @@ const getStageData = (stageId: string): { jobs: Job[]; config: StageConfig } => 
       model: "Sora",
       provider: "OpenAI",
       avgLatency: "45s",
-      costPerUnit: "$0.18",
+      costPerUnitCents: 18, // $0.18
       successRate: 94.5,
       queueDepth: 12,
     },
@@ -86,7 +63,7 @@ const getStageData = (stageId: string): { jobs: Job[]; config: StageConfig } => 
       model: "FFmpeg 6.1",
       provider: "Local",
       avgLatency: "8.2s",
-      costPerUnit: "$0.001",
+      costPerUnitCents: 0,
       successRate: 99.9,
       queueDepth: 2,
     },
@@ -94,26 +71,27 @@ const getStageData = (stageId: string): { jobs: Job[]; config: StageConfig } => 
       model: "API v2",
       provider: "TikTok/Instagram",
       avgLatency: "1.8s",
-      costPerUnit: "$0.00",
+      costPerUnitCents: 0,
       successRate: 97.3,
       queueDepth: 0,
     },
   };
 
-  const jobs: Record<string, Job[]> = {
+  const jobs: Record<string, PipelineJob[]> = {
     script: [
-      { id: "s1", name: "Privacy Tip #47", account: "@FootprintFinder", status: "completed", retries: 0, maxRetries: 3, cost: 0.012 },
-      { id: "s2", name: "Resume Red Flag #12", account: "@CareerBoostHQ", status: "completed", retries: 0, maxRetries: 3, cost: 0.011 },
+      { id: "s1", name: "Privacy Tip #47", account: "@FootprintFinder", status: "completed", retries: 0, maxRetries: 3, costCents: 1 },
+      { id: "s2", name: "Resume Red Flag #12", account: "@CareerBoostHQ", status: "completed", retries: 0, maxRetries: 3, costCents: 1 },
     ],
     voice: [
       { id: "v1", name: "Privacy Tip #47", account: "@FootprintFinder", status: "processing", progress: 67, retries: 0, maxRetries: 3, startedAt: "2m ago" },
       { id: "v2", name: "Data Broker Alert", account: "@PrivacyShield", status: "queued", retries: 0, maxRetries: 3 },
     ],
     video: [
-      { id: "vd1", name: "Privacy Tip #45", account: "@FootprintFinder", status: "processing", progress: 34, retries: 0, maxRetries: 3, startedAt: "12m ago", cost: 0.18 },
-      { id: "vd2", name: "Interview Script #8", account: "@InterviewAce", status: "processing", progress: 78, retries: 1, maxRetries: 3, startedAt: "8m ago", cost: 0.18 },
-      { id: "vd3", name: "Career Tip #22", account: "@CareerBoostHQ", status: "retrying", retries: 2, maxRetries: 3, error: "Generation timeout", cost: 0.36 },
+      { id: "vd1", name: "Privacy Tip #45", account: "@FootprintFinder", status: "processing", progress: 34, retries: 0, maxRetries: 3, startedAt: "12m ago", costCents: 18 },
+      { id: "vd2", name: "Interview Script #8", account: "@InterviewAce", status: "processing", progress: 78, retries: 1, maxRetries: 3, startedAt: "8m ago", costCents: 18 },
+      { id: "vd3", name: "Career Tip #22", account: "@CareerBoostHQ", status: "retrying", retries: 2, maxRetries: 3, error: "Generation timeout", costCents: 36 },
       { id: "vd4", name: "Stroke Recovery #5", account: "@StrokeRecovery", status: "queued", retries: 0, maxRetries: 3 },
+      { id: "vd5", name: "Privacy Settings #12", account: "@DataEraserPro", status: "failed", retries: 3, maxRetries: 3, error: "Max retries exceeded", costCents: 54 },
     ],
     assembly: [],
     publish: [],
@@ -125,13 +103,22 @@ const getStageData = (stageId: string): { jobs: Job[]; config: StageConfig } => 
   };
 };
 
-export function PipelineStageDrawer({ open, onOpenChange, stage }: PipelineStageDrawerProps) {
+export function PipelineStageDrawer({ open, onOpenChange, stage, isPaused, onPauseStage }: PipelineStageDrawerProps) {
   if (!stage) return null;
 
   const { jobs, config } = getStageData(stage.id);
   const activeJobs = jobs.filter(j => j.status === "processing" || j.status === "retrying");
   const queuedJobs = jobs.filter(j => j.status === "queued");
   const failedJobs = jobs.filter(j => j.status === "failed");
+
+  const handlePauseStage = () => {
+    onPauseStage?.(stage.id, !isPaused);
+  };
+
+  const handleRetryFailed = () => {
+    // TODO: Implement retry failed jobs
+    console.log("Retrying failed jobs for stage:", stage.id);
+  };
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
@@ -148,24 +135,46 @@ export function PipelineStageDrawer({ open, onOpenChange, stage }: PipelineStage
                       stage.status === "active" && "border-primary text-primary",
                       stage.status === "completed" && "border-success text-success",
                       stage.status === "error" && "border-destructive text-destructive",
-                      stage.status === "pending" && "border-muted-foreground text-muted-foreground"
+                      stage.status === "pending" && "border-muted-foreground text-muted-foreground",
+                      stage.status === "paused" && "border-warning text-warning"
                     )}
                   >
-                    {stage.status}
+                    {isPaused ? "paused" : stage.status}
                   </Badge>
                 </DrawerTitle>
                 <DrawerDescription className="mt-1">
                   {stage.count} items in queue • {activeJobs.length} active • {queuedJobs.length} waiting
+                  {failedJobs.length > 0 && <span className="text-destructive"> • {failedJobs.length} failed</span>}
                 </DrawerDescription>
               </div>
               <div className="flex gap-2">
-                <Button variant="outline" size="sm" className="gap-2">
-                  <Pause className="w-4 h-4" />
-                  Pause Stage
+                <Button 
+                  variant={isPaused ? "default" : "outline"} 
+                  size="sm" 
+                  className="gap-2"
+                  onClick={handlePauseStage}
+                >
+                  {isPaused ? (
+                    <>
+                      <Play className="w-4 h-4" />
+                      Resume Stage
+                    </>
+                  ) : (
+                    <>
+                      <Pause className="w-4 h-4" />
+                      Pause Stage
+                    </>
+                  )}
                 </Button>
-                <Button variant="outline" size="sm" className="gap-2">
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="gap-2"
+                  onClick={handleRetryFailed}
+                  disabled={failedJobs.length === 0}
+                >
                   <RefreshCw className="w-4 h-4" />
-                  Retry Failed
+                  Retry Failed ({failedJobs.length})
                 </Button>
               </div>
             </div>
@@ -177,7 +186,7 @@ export function PipelineStageDrawer({ open, onOpenChange, stage }: PipelineStage
               <ConfigCard label="Model" value={config.model} icon={<Zap className="w-4 h-4 text-primary" />} />
               <ConfigCard label="Provider" value={config.provider} />
               <ConfigCard label="Avg Latency" value={config.avgLatency} icon={<Clock className="w-4 h-4 text-muted-foreground" />} />
-              <ConfigCard label="Cost/Unit" value={config.costPerUnit} icon={<DollarSign className="w-4 h-4 text-warning" />} />
+              <ConfigCard label="Cost/Unit" value={centsToDisplay(config.costPerUnitCents)} icon={<DollarSign className="w-4 h-4 text-warning" />} />
             </div>
 
             {/* Success Rate Bar */}
@@ -188,6 +197,21 @@ export function PipelineStageDrawer({ open, onOpenChange, stage }: PipelineStage
               </div>
               <Progress value={config.successRate} className="h-2" />
             </div>
+
+            {/* Failed Jobs - Show prominently at top when there are failures */}
+            {failedJobs.length > 0 && (
+              <div className="space-y-3">
+                <h4 className="text-sm font-semibold text-destructive uppercase tracking-wider flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4" />
+                  Failed Jobs ({failedJobs.length})
+                </h4>
+                <div className="space-y-2">
+                  {failedJobs.map(job => (
+                    <JobCard key={job.id} job={job} />
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Active Jobs */}
             {activeJobs.length > 0 && (
@@ -244,8 +268,8 @@ function ConfigCard({ label, value, icon }: { label: string; value: string; icon
   );
 }
 
-function JobCard({ job }: { job: Job }) {
-  const statusConfig = {
+function JobCard({ job }: { job: PipelineJob }) {
+  const statusConfig: Record<JobStatus, { icon: typeof Loader2; color: string; bg: string; animate: boolean }> = {
     processing: { icon: Loader2, color: "text-primary", bg: "bg-primary/10", animate: true },
     queued: { icon: Clock, color: "text-muted-foreground", bg: "bg-muted", animate: false },
     completed: { icon: CheckCircle, color: "text-success", bg: "bg-success/10", animate: false },
@@ -272,17 +296,24 @@ function JobCard({ job }: { job: Job }) {
               Retry {job.retries}/{job.maxRetries}
             </Badge>
           )}
-          {job.cost && (
+          {job.costCents !== undefined && job.costCents > 0 && (
             <span className="text-xs font-mono text-muted-foreground">
-              ${job.cost.toFixed(3)}
+              {centsToDisplay(job.costCents)}
             </span>
           )}
           {job.startedAt && (
             <span className="text-xs text-muted-foreground">{job.startedAt}</span>
           )}
-          <Button variant="ghost" size="sm" className="h-7 w-7 p-0">
-            <XCircle className="w-4 h-4" />
-          </Button>
+          {job.status === "failed" ? (
+            <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs">
+              <RefreshCw className="w-3 h-3" />
+              Retry
+            </Button>
+          ) : (
+            <Button variant="ghost" size="sm" className="h-7 w-7 p-0">
+              <XCircle className="w-4 h-4" />
+            </Button>
+          )}
         </div>
       </div>
       {job.progress !== undefined && (
