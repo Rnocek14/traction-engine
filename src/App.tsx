@@ -26,6 +26,7 @@ const App = () => (
             <Route path="/account/:accountId" element={<AccountDetail />} />
             <Route path="/scripts" element={<ScriptGenerator />} />
             <Route path="/qa-review" element={<QAReviewInbox />} />
+            <Route path="/studio" element={<Studio />} />
             <Route path="/studio/:scriptRunId" element={<Studio />} />
             <Route path="/login" element={<Login />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
