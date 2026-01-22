@@ -327,7 +327,7 @@ function ScriptResultCard({
   isExpanded, 
   onToggle 
 }: { 
-  result: GenerationResult; 
+  result: DisplayResult; 
   isExpanded: boolean; 
   onToggle: () => void;
 }) {
