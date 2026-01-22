@@ -49,11 +49,10 @@ export function VideoGenerator({ script }: VideoGeneratorProps) {
   const scenePrompts = (content?.scene_prompts as string[]) || [];
   const hook = (content?.hook as string) || "";
 
-  // Queue video mutation
+  // Queue video mutation with settings
   const queueMutation = useMutation({
     mutationFn: async () => {
-      // For now, we'll directly insert into video_jobs
-      // Later this should call a queue-video edge function
+      // Insert video job - settings can be added once column exists
       const { data, error } = await supabase
         .from("video_jobs")
         .insert({
