@@ -207,7 +207,10 @@ async function generateWithOpenAI(
     : [];
     
   const hashtags = Array.isArray(parsed.hashtags)
-    ? parsed.hashtags.filter((s): s is string => typeof s === 'string')
+    ? parsed.hashtags
+        .filter((s): s is string => typeof s === 'string')
+        .map(tag => tag.replace(/^#/, '').replace(/[^a-zA-Z0-9_]/g, '').toLowerCase())
+        .filter(tag => tag.length > 0 && tag.length <= 30)
     : [];
 
   return {
