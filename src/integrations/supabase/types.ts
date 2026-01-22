@@ -778,7 +778,32 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      select_topic: {
+        Args: { p_pillar?: string; p_vertical: string }
+        Returns: {
+          claim_sensitivity: number
+          cooldown_days: number
+          created_at: string
+          hook_variants: string[]
+          id: string
+          is_evergreen: boolean
+          last_used_at: string | null
+          motif_hints: string[]
+          pillar: string
+          seasonal_tags: string[]
+          suggested_cta: string | null
+          times_used: number
+          topic_prompt: string
+          trend_keywords: string[]
+          vertical: Database["public"]["Enums"]["content_vertical"]
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "topic_bank"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
     }
     Enums: {
       claim_policy_level: "standard" | "moderate" | "strict" | "medical"

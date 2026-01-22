@@ -210,55 +210,45 @@ export async function selectTopicFromDB(
   vertical: ContentVertical,
   preferredPillar?: string
 ): Promise<MappedTopic | null> {
-  // Get topics that are past their cooldown
-  const cooldownDate = new Date();
-  
-  let query = supabase
-    .from('topic_bank')
-    .select('*')
-    .eq('vertical', vertical)
-    .or(`last_used_at.is.null,last_used_at.lt.${cooldownDate.toISOString()}`);
+  // Use the select_topic RPC function for proper cooldown filtering
+  const { data, error } = await supabase.rpc('select_topic', {
+    p_vertical: vertical,
+    p_pillar: preferredPillar ?? null,
+  });
 
-  if (preferredPillar) {
-    query = query.eq('pillar', preferredPillar);
-  }
-
-  const { data: topics, error } = await query
-    .order('times_used', { ascending: true })
-    .limit(20);
-
-  if (error || !topics || topics.length === 0) {
-    console.error('Failed to fetch topics:', error);
+  if (error) {
+    console.error('Failed to select topic via RPC:', error);
     
-    // Fallback: get any topic from the vertical
-    const { data: fallbackTopics } = await supabase
+    // Fallback: direct query (less accurate cooldown)
+    const { data: fallbackData } = await supabase
       .from('topic_bank')
       .select('*')
       .eq('vertical', vertical)
       .order('times_used', { ascending: true })
-      .limit(10);
+      .limit(1)
+      .single();
 
-    if (!fallbackTopics || fallbackTopics.length === 0) return null;
-    
-    const topic = fallbackTopics[Math.floor(Math.random() * fallbackTopics.length)];
-    return mapDbTopic(topic);
+    if (!fallbackData) return null;
+    return mapDbTopic(fallbackData);
   }
 
-  // Weight by times_used (favor less-used topics)
-  const weightedTopics = topics.map(topic => ({
-    topic,
-    weight: 1 / (topic.times_used + 1),
-  }));
+  // RPC returns an array, get first item
+  const topic = Array.isArray(data) ? data[0] : data;
+  if (!topic) {
+    // No topics available after cooldown filtering, try without cooldown
+    const { data: anyTopic } = await supabase
+      .from('topic_bank')
+      .select('*')
+      .eq('vertical', vertical)
+      .order('times_used', { ascending: true })
+      .limit(1)
+      .single();
 
-  const totalWeight = weightedTopics.reduce((sum, c) => sum + c.weight, 0);
-  let random = Math.random() * totalWeight;
-
-  for (const { topic, weight } of weightedTopics) {
-    random -= weight;
-    if (random <= 0) return mapDbTopic(topic);
+    if (!anyTopic) return null;
+    return mapDbTopic(anyTopic);
   }
 
-  return mapDbTopic(topics[0]);
+  return mapDbTopic(topic as DbTopic);
 }
 
 // ============================================
