@@ -559,10 +559,14 @@ export type Database = {
           created_at: string
           fact_claims: string[]
           generation_cost_cents: number
+          hard_block_flags: string[]
           hook_hash: string | null
           id: string
           published_at: string | null
           qa_failed_reason: string | null
+          qa_override_at: string | null
+          qa_override_by: string | null
+          qa_override_reason: string | null
           qa_passed_at: string | null
           qa_results: Json | null
           safety_flags: string[]
@@ -577,10 +581,14 @@ export type Database = {
           created_at?: string
           fact_claims?: string[]
           generation_cost_cents?: number
+          hard_block_flags?: string[]
           hook_hash?: string | null
           id?: string
           published_at?: string | null
           qa_failed_reason?: string | null
+          qa_override_at?: string | null
+          qa_override_by?: string | null
+          qa_override_reason?: string | null
           qa_passed_at?: string | null
           qa_results?: Json | null
           safety_flags?: string[]
@@ -595,10 +603,14 @@ export type Database = {
           created_at?: string
           fact_claims?: string[]
           generation_cost_cents?: number
+          hard_block_flags?: string[]
           hook_hash?: string | null
           id?: string
           published_at?: string | null
           qa_failed_reason?: string | null
+          qa_override_at?: string | null
+          qa_override_by?: string | null
+          qa_override_reason?: string | null
           qa_passed_at?: string | null
           qa_results?: Json | null
           safety_flags?: string[]

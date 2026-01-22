@@ -1,5 +1,7 @@
-import { Activity, Bell, Settings, Zap } from "lucide-react";
+import { Activity, Bell, Settings, Zap, FileText, ShieldCheck } from "lucide-react";
+import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 
 export function Header() {
   return (
@@ -20,8 +22,24 @@ export function Header() {
             </div>
           </div>
 
+          {/* Nav Links */}
+          <div className="hidden md:flex items-center gap-2">
+            <Link to="/scripts">
+              <Button variant="ghost" size="sm" className="gap-2">
+                <FileText className="w-4 h-4" />
+                Scripts
+              </Button>
+            </Link>
+            <Link to="/qa-review">
+              <Button variant="ghost" size="sm" className="gap-2">
+                <ShieldCheck className="w-4 h-4" />
+                QA Review
+              </Button>
+            </Link>
+          </div>
+
           {/* Status bar */}
-          <div className="hidden md:flex items-center gap-6">
+          <div className="hidden lg:flex items-center gap-6">
             <StatusPill 
               icon={Activity} 
               label="Pipeline" 
