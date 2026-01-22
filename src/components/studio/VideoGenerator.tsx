@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import {
@@ -11,6 +11,7 @@ import {
   Clock,
   ExternalLink,
   AlertCircle,
+  RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -38,6 +39,8 @@ type VideoResolution = "480p" | "720p" | "1080p";
 type VideoAspect = "16:9" | "9:16" | "1:1";
 type VideoDuration = 5 | 10;
 
+const ACTIVE_STATUSES = ["queued", "running", "rendering"];
+
 export function VideoGenerator({ script }: VideoGeneratorProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -64,6 +67,43 @@ export function VideoGenerator({ script }: VideoGeneratorProps) {
       return data ?? [];
     },
   });
+
+  // Check if there's an active job (for polling + disable button)
+  const hasActiveJob = jobs.some((j) => ACTIVE_STATUSES.includes(j.status));
+
+  // Poll while there's an active job
+  useEffect(() => {
+    if (!hasActiveJob) return;
+
+    const interval = setInterval(() => {
+      queryClient.invalidateQueries({ queryKey: ["video-jobs", script.id] });
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [hasActiveJob, script.id, queryClient]);
+
+  // Realtime subscription for instant updates
+  useEffect(() => {
+    const channel = supabase
+      .channel(`video-jobs-${script.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "video_jobs",
+          filter: `script_run_id=eq.${script.id}`,
+        },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ["video-jobs", script.id] });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [script.id, queryClient]);
 
   // Queue video mutation with settings
   const queueMutation = useMutation({
@@ -238,15 +278,22 @@ export function VideoGenerator({ script }: VideoGeneratorProps) {
             <div className="space-y-2">
               <Button
                 className="w-full gap-2"
-                disabled={queueMutation.isPending}
+                disabled={queueMutation.isPending || hasActiveJob}
                 onClick={() => queueMutation.mutate()}
               >
                 {queueMutation.isPending ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
+                ) : hasActiveJob ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Rendering in progress...
+                  </>
                 ) : (
-                  <Film className="h-4 w-4" />
+                  <>
+                    <Film className="h-4 w-4" />
+                    Generate Video (Sora)
+                  </>
                 )}
-                Generate Video (Sora)
               </Button>
 
               <Button variant="outline" className="w-full gap-2" disabled>
@@ -260,7 +307,7 @@ export function VideoGenerator({ script }: VideoGeneratorProps) {
 
             {/* Info */}
             <p className="text-[10px] text-muted-foreground text-center">
-              Video generation uses OpenAI Sora API. Typical render: 30-60 seconds.
+              Render time varies based on queue and settings.
             </p>
           </>
         )}
@@ -270,9 +317,19 @@ export function VideoGenerator({ script }: VideoGeneratorProps) {
           <>
             <Separator />
             <div className="space-y-2">
-              <label className="text-xs font-medium text-muted-foreground flex items-center gap-2">
-                Video Jobs ({jobs.length})
-              </label>
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-medium text-muted-foreground">
+                  Video Jobs ({jobs.length})
+                </label>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 w-6 p-0"
+                  onClick={() => queryClient.invalidateQueries({ queryKey: ["video-jobs", script.id] })}
+                >
+                  <RefreshCw className={`h-3 w-3 ${jobsLoading ? "animate-spin" : ""}`} />
+                </Button>
+              </div>
               <div className="space-y-2 max-h-48 overflow-auto">
                 {jobs.map((job) => {
                   const settings = job.settings as Record<string, unknown> | null;
