@@ -91,9 +91,14 @@ export function useScriptVersionChain(scriptId: string | undefined) {
         return allDescendants;
       };
 
-      // Find all descendants from the current script
-      const descendants = await findDescendants(scriptId);
+      // Find all descendants from the ROOT (oldest ancestor), not the current script
+      // This ensures we get the full tree even when viewing a mid-chain node
+      const rootId = chain[0].id;
+      const descendants = await findDescendants(rootId);
       chain.push(...descendants);
+
+      // Sort by created_at to ensure proper order
+      chain.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
 
       return chain;
     },

@@ -1,6 +1,6 @@
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { ArrowLeft, Copy, Check, AlertTriangle, Loader2 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,10 +27,23 @@ export default function Studio() {
   const [copiedId, setCopiedId] = useState(false);
   const [userHasAccess, setUserHasAccess] = useState<boolean | null>(null);
 
-  // Check role access
-  useState(() => {
-    hasRole(["admin", "qa"]).then(setUserHasAccess);
-  });
+  // Check role access with proper useEffect
+  useEffect(() => {
+    let alive = true;
+
+    if (!user) {
+      setUserHasAccess(null);
+      return;
+    }
+
+    hasRole(["admin", "qa"]).then((ok) => {
+      if (alive) setUserHasAccess(ok);
+    });
+
+    return () => {
+      alive = false;
+    };
+  }, [user, hasRole]);
 
   // Use selected version or fall back to URL param
   const activeScriptId = selectedVersionId || scriptRunId;
@@ -59,8 +72,8 @@ export default function Studio() {
 
   const handleVersionSelect = (scriptId: string) => {
     setSelectedVersionId(scriptId);
-    // Update URL without navigation
-    window.history.replaceState(null, "", `/studio/${scriptId}`);
+    // Update URL using React Router (keeps state consistent)
+    navigate(`/studio/${scriptId}`, { replace: true });
   };
 
   // Parse script content safely
@@ -74,21 +87,18 @@ export default function Studio() {
   const statusInfo = scriptRun ? getStatusInfo(scriptRun) : null;
   const isHardBlock = scriptRun ? hasHardBlocks(scriptRun) : false;
 
-  // Loading state
-  if (authLoading || scriptLoading) {
+  // Loading state (including role check in progress)
+  if (authLoading || scriptLoading || (user && userHasAccess === null)) {
     return (
       <div className="min-h-screen bg-background">
         <StudioHeader />
         <div className="container mx-auto px-4 py-6">
-          <div className="grid grid-cols-12 gap-6">
-            <div className="col-span-3">
-              <Skeleton className="h-96 w-full" />
-            </div>
-            <div className="col-span-6">
-              <Skeleton className="h-96 w-full" />
-            </div>
-            <div className="col-span-3">
-              <Skeleton className="h-96 w-full" />
+          <div className="flex items-center justify-center py-12">
+            <div className="text-center">
+              <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto mb-3" />
+              <p className="text-sm text-muted-foreground">
+                {user ? "Checking access..." : "Loading..."}
+              </p>
             </div>
           </div>
         </div>
