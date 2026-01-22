@@ -67,8 +67,10 @@ interface ContentPolicy {
 interface GenerateRequest {
   account_id: string;
   preferred_pillar?: string;
+  topic_id?: string; // Force a specific topic
   mode: 'ai' | 'template';
   regenerated_from_id?: string; // Links to original failed script
+  constraint?: string; // Additional guidance for LLM (e.g., fix specific issues)
 }
 
 interface GenerateResponse {
@@ -318,9 +320,13 @@ OUTPUT RULES:
 7. Return ONLY valid JSON, no markdown`;
 }
 
-function buildUserPrompt(topic: Topic, config: AccountConfig): string {
+function buildUserPrompt(topic: Topic, config: AccountConfig, constraint?: string): string {
   const hookOptions = topic.hook_variants.length > 0
     ? `\n\nHook inspiration:\n${topic.hook_variants.map((h, i) => `${i + 1}. ${h}`).join("\n")}`
+    : "";
+
+  const constraintSection = constraint
+    ? `\n\nCRITICAL CONSTRAINTS (must follow):\n${constraint}`
     : "";
 
   return `Generate a script for this topic:
@@ -328,7 +334,7 @@ function buildUserPrompt(topic: Topic, config: AccountConfig): string {
 TOPIC: ${topic.topic_prompt}
 PILLAR: ${topic.pillar}
 VISUAL HINTS: ${topic.motif_hints.join(", ") || "none specified"}
-${hookOptions}
+${hookOptions}${constraintSection}
 
 Return JSON in this exact schema:
 {
@@ -347,10 +353,11 @@ Return JSON in this exact schema:
 async function generateWithOpenAI(
   config: AccountConfig,
   topic: Topic,
-  apiKey: string
+  apiKey: string,
+  constraint?: string
 ): Promise<ScriptContent> {
   const systemPrompt = buildSystemPrompt(config);
-  const userPrompt = buildUserPrompt(topic, config);
+  const userPrompt = buildUserPrompt(topic, config, constraint);
 
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -526,7 +533,7 @@ Deno.serve(async (req) => {
     console.log({ requestId, event: "auth_passed", path: authPath, user_id: authUserId, internal_caller: internalCaller });
 
     const supabaseAdmin = getSupabaseAdmin();
-    const { account_id, preferred_pillar, mode, regenerated_from_id }: GenerateRequest = await req.json();
+    const { account_id, preferred_pillar, topic_id: forcedTopicId, mode, regenerated_from_id, constraint }: GenerateRequest = await req.json();
 
     if (!account_id) {
       return new Response(
@@ -535,7 +542,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    console.log({ requestId, event: "pipeline_start", account_id, mode, preferred_pillar, regenerated_from_id });
+    console.log({ requestId, event: "pipeline_start", account_id, mode, preferred_pillar, forcedTopicId, regenerated_from_id, hasConstraint: !!constraint });
 
     // 1. Fetch account config
     const { data: configData, error: configError } = await supabaseAdmin
@@ -582,24 +589,50 @@ Deno.serve(async (req) => {
       safety_rules: policyData.safety_rules as Record<string, unknown>,
     } : null;
 
-    // 3. Select topic via RPC
-    const { data: topicData, error: topicError } = await supabaseAdmin.rpc('select_topic', {
-      p_vertical: config.vertical,
-      p_pillar: preferred_pillar ?? null,
-    });
-
+    // 3. Select topic - use forced topic_id if provided, otherwise RPC
     let topic: Topic | null = null;
-    if (!topicError && topicData && Array.isArray(topicData) && topicData.length > 0) {
-      const t = topicData[0];
-      topic = {
-        id: t.id,
-        topic_prompt: t.topic_prompt,
-        hook_variants: t.hook_variants,
-        pillar: t.pillar,
-        motif_hints: t.motif_hints,
-        suggested_cta: t.suggested_cta,
-        times_used: t.times_used,
-      };
+
+    if (forcedTopicId) {
+      // Use specific topic (for regeneration with same topic)
+      const { data: forcedTopic, error: forcedError } = await supabaseAdmin
+        .from('topic_bank')
+        .select('*')
+        .eq('id', forcedTopicId)
+        .single();
+
+      if (!forcedError && forcedTopic) {
+        topic = {
+          id: forcedTopic.id,
+          topic_prompt: forcedTopic.topic_prompt,
+          hook_variants: forcedTopic.hook_variants,
+          pillar: forcedTopic.pillar,
+          motif_hints: forcedTopic.motif_hints,
+          suggested_cta: forcedTopic.suggested_cta,
+          times_used: forcedTopic.times_used,
+        };
+        console.log("[pipeline] Using forced topic_id:", forcedTopicId);
+      }
+    }
+
+    if (!topic) {
+      // Select via RPC (respects cooldown and usage weighting)
+      const { data: topicData, error: topicError } = await supabaseAdmin.rpc('select_topic', {
+        p_vertical: config.vertical,
+        p_pillar: preferred_pillar ?? null,
+      });
+
+      if (!topicError && topicData && Array.isArray(topicData) && topicData.length > 0) {
+        const t = topicData[0];
+        topic = {
+          id: t.id,
+          topic_prompt: t.topic_prompt,
+          hook_variants: t.hook_variants,
+          pillar: t.pillar,
+          motif_hints: t.motif_hints,
+          suggested_cta: t.suggested_cta,
+          times_used: t.times_used,
+        };
+      }
     }
 
     if (!topic) {
@@ -645,9 +678,9 @@ Deno.serve(async (req) => {
         );
       }
 
-      content = await generateWithOpenAI(config, topic, apiKey);
+      content = await generateWithOpenAI(config, topic, apiKey, constraint);
       generationCost = 3;
-      console.log("[pipeline] AI generation complete");
+      console.log("[pipeline] AI generation complete", { hasConstraint: !!constraint });
     } else {
       content = generateTemplateContent(config, topic);
       console.log("[pipeline] Template generation complete");
