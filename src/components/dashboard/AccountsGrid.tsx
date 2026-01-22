@@ -1,5 +1,7 @@
+import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import { TrendingUp, TrendingDown, Play, Pause, AlertCircle } from "lucide-react";
+import { TrendingUp, TrendingDown, Play, Pause, AlertCircle, DollarSign } from "lucide-react";
+import { CostBadge } from "./CostOverlay";
 
 interface Account {
   id: string;
@@ -12,17 +14,18 @@ interface Account {
   status: "active" | "paused" | "warmup" | "flagged";
   videosToday: number;
   trend: number;
+  monthlyCost: number;
 }
 
 const accounts: Account[] = [
-  { id: "1", name: "Footprint Finder", handle: "@FootprintFinder", platform: "tiktok", vertical: "privacy", followers: 45200, engagement: 8.2, status: "active", videosToday: 3, trend: 12 },
-  { id: "2", name: "Privacy Shield", handle: "@PrivacyShield", platform: "instagram", vertical: "privacy", followers: 32100, engagement: 6.8, status: "active", videosToday: 2, trend: 8 },
-  { id: "3", name: "Career Boost", handle: "@CareerBoostHQ", platform: "tiktok", vertical: "education", followers: 78500, engagement: 11.4, status: "active", videosToday: 4, trend: 23 },
-  { id: "4", name: "Resume Pro", handle: "@ResumeProTips", platform: "instagram", vertical: "education", followers: 24800, engagement: 7.1, status: "warmup", videosToday: 1, trend: 5 },
-  { id: "5", name: "Stroke Recovery", handle: "@StrokeRecovery", platform: "tiktok", vertical: "health", followers: 18300, engagement: 9.5, status: "active", videosToday: 2, trend: -3 },
-  { id: "6", name: "Data Eraser", handle: "@DataEraserPro", platform: "tiktok", vertical: "privacy", followers: 12400, engagement: 5.2, status: "paused", videosToday: 0, trend: 0 },
-  { id: "7", name: "Interview Ace", handle: "@InterviewAce", platform: "instagram", vertical: "education", followers: 56700, engagement: 10.2, status: "active", videosToday: 3, trend: 18 },
-  { id: "8", name: "Brain Health", handle: "@BrainHealthTips", platform: "instagram", vertical: "health", followers: 9800, engagement: 4.8, status: "flagged", videosToday: 0, trend: -8 },
+  { id: "1", name: "Footprint Finder", handle: "@FootprintFinder", platform: "tiktok", vertical: "privacy", followers: 45200, engagement: 8.2, status: "active", videosToday: 3, trend: 12, monthlyCost: 156 },
+  { id: "2", name: "Privacy Shield", handle: "@PrivacyShield", platform: "instagram", vertical: "privacy", followers: 32100, engagement: 6.8, status: "active", videosToday: 2, trend: 8, monthlyCost: 124 },
+  { id: "3", name: "Career Boost", handle: "@CareerBoostHQ", platform: "tiktok", vertical: "education", followers: 78500, engagement: 11.4, status: "active", videosToday: 4, trend: 23, monthlyCost: 198 },
+  { id: "4", name: "Resume Pro", handle: "@ResumeProTips", platform: "instagram", vertical: "education", followers: 24800, engagement: 7.1, status: "warmup", videosToday: 1, trend: 5, monthlyCost: 67 },
+  { id: "5", name: "Stroke Recovery", handle: "@StrokeRecovery", platform: "tiktok", vertical: "health", followers: 18300, engagement: 9.5, status: "active", videosToday: 2, trend: -3, monthlyCost: 89 },
+  { id: "6", name: "Data Eraser", handle: "@DataEraserPro", platform: "tiktok", vertical: "privacy", followers: 12400, engagement: 5.2, status: "paused", videosToday: 0, trend: 0, monthlyCost: 0 },
+  { id: "7", name: "Interview Ace", handle: "@InterviewAce", platform: "instagram", vertical: "education", followers: 56700, engagement: 10.2, status: "active", videosToday: 3, trend: 18, monthlyCost: 167 },
+  { id: "8", name: "Brain Health", handle: "@BrainHealthTips", platform: "instagram", vertical: "health", followers: 9800, engagement: 4.8, status: "flagged", videosToday: 0, trend: -8, monthlyCost: 0 },
 ];
 
 const verticalColors = {
@@ -67,76 +70,80 @@ export function AccountsGrid() {
 }
 
 function AccountCard({ account, index }: { account: Account; index: number }) {
-  const StatusIcon = account.status === "active" ? Play : 
-                     account.status === "paused" ? Pause : 
-                     account.status === "flagged" ? AlertCircle : Play;
-
   return (
-    <div
-      className={cn(
-        "relative p-4 rounded-lg border bg-gradient-to-br transition-all duration-300 hover:scale-[1.02] cursor-pointer animate-fade-in",
-        verticalColors[account.vertical]
-      )}
-      style={{ animationDelay: `${index * 50}ms` }}
-    >
-      {/* Status indicator */}
-      <div className="absolute top-3 right-3">
-        <div
-          className={cn(
-            "w-2 h-2 rounded-full",
-            account.status === "active" && "bg-success status-pulse",
-            account.status === "paused" && "bg-muted-foreground",
-            account.status === "warmup" && "bg-warning",
-            account.status === "flagged" && "bg-destructive status-pulse"
-          )}
-        />
-      </div>
-
-      {/* Platform badge */}
-      <div className={cn("platform-badge mb-3", account.platform)}>
-        {account.platform === "tiktok" ? "TikTok" : "Instagram"}
-      </div>
-
-      {/* Account info */}
-      <h4 className="font-semibold text-sm mb-0.5">{account.name}</h4>
-      <p className="text-xs text-muted-foreground mb-3">{account.handle}</p>
-
-      {/* Metrics */}
-      <div className="grid grid-cols-2 gap-2 text-xs">
-        <div>
-          <p className="text-muted-foreground">Followers</p>
-          <p className="font-mono font-medium">{formatNumber(account.followers)}</p>
-        </div>
-        <div>
-          <p className="text-muted-foreground">Engagement</p>
-          <p className="font-mono font-medium">{account.engagement}%</p>
-        </div>
-      </div>
-
-      {/* Trend and videos */}
-      <div className="flex items-center justify-between mt-3 pt-3 border-t border-border/30">
-        <div className="flex items-center gap-1">
-          {account.trend > 0 ? (
-            <TrendingUp className="w-3 h-3 text-success" />
-          ) : account.trend < 0 ? (
-            <TrendingDown className="w-3 h-3 text-destructive" />
-          ) : null}
-          <span
+    <Link to={`/account/${account.id}`}>
+      <div
+        className={cn(
+          "relative p-4 rounded-lg border bg-gradient-to-br transition-all duration-300 hover:scale-[1.02] cursor-pointer animate-fade-in",
+          verticalColors[account.vertical]
+        )}
+        style={{ animationDelay: `${index * 50}ms` }}
+      >
+        {/* Status indicator */}
+        <div className="absolute top-3 right-3">
+          <div
             className={cn(
-              "text-xs font-mono",
-              account.trend > 0 && "text-success",
-              account.trend < 0 && "text-destructive",
-              account.trend === 0 && "text-muted-foreground"
+              "w-2 h-2 rounded-full",
+              account.status === "active" && "bg-success status-pulse",
+              account.status === "paused" && "bg-muted-foreground",
+              account.status === "warmup" && "bg-warning",
+              account.status === "flagged" && "bg-destructive status-pulse"
             )}
-          >
-            {account.trend > 0 ? "+" : ""}{account.trend}%
-          </span>
+          />
         </div>
-        <span className="text-xs text-muted-foreground">
+
+        {/* Platform badge */}
+        <div className={cn("platform-badge mb-3", account.platform)}>
+          {account.platform === "tiktok" ? "TikTok" : "Instagram"}
+        </div>
+
+        {/* Account info */}
+        <h4 className="font-semibold text-sm mb-0.5">{account.name}</h4>
+        <p className="text-xs text-muted-foreground mb-3">{account.handle}</p>
+
+        {/* Metrics */}
+        <div className="grid grid-cols-2 gap-2 text-xs">
+          <div>
+            <p className="text-muted-foreground">Followers</p>
+            <p className="font-mono font-medium">{formatNumber(account.followers)}</p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">Engagement</p>
+            <p className="font-mono font-medium">{account.engagement}%</p>
+          </div>
+        </div>
+
+        {/* Trend, cost, and videos */}
+        <div className="flex items-center justify-between mt-3 pt-3 border-t border-border/30">
+          <div className="flex items-center gap-2">
+            {account.trend > 0 ? (
+              <TrendingUp className="w-3 h-3 text-success" />
+            ) : account.trend < 0 ? (
+              <TrendingDown className="w-3 h-3 text-destructive" />
+            ) : null}
+            <span
+              className={cn(
+                "text-xs font-mono",
+                account.trend > 0 && "text-success",
+                account.trend < 0 && "text-destructive",
+                account.trend === 0 && "text-muted-foreground"
+              )}
+            >
+              {account.trend > 0 ? "+" : ""}{account.trend}%
+            </span>
+          </div>
+          {account.monthlyCost > 0 && (
+            <span className="text-xs font-mono text-muted-foreground flex items-center gap-1">
+              <DollarSign className="w-3 h-3" />
+              {account.monthlyCost}/mo
+            </span>
+          )}
+        </div>
+        <div className="mt-2 text-xs text-muted-foreground text-right">
           {account.videosToday} videos today
-        </span>
+        </div>
       </div>
-    </div>
+    </Link>
   );
 }
 
