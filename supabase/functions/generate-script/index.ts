@@ -603,6 +603,29 @@ Deno.serve(async (req) => {
       console.log("[pipeline] Template generation complete");
     }
 
+    // ============================================
+    // Debug Toggles (for deterministic testing)
+    // Only active when pipeline key is valid
+    // ============================================
+    const debugForceExercise = req.headers.get("x-debug-force-exercise") === "1";
+    const debugFixedContent = req.headers.get("x-debug-fixed-content") === "1";
+
+    if (debugForceExercise && config.vertical === "health") {
+      content.voiceover += " Hold for 30 seconds and repeat 10 times daily for best results.";
+      console.log("[debug] Injected exercise instruction for hard block test");
+    }
+
+    if (debugFixedContent) {
+      content.hook = "FIXED HOOK 12345 - deterministic test content";
+      content.voiceover = "FIXED VOICEOVER 12345 - this is deterministic test content for fingerprint collision testing. It contains enough words to pass minimum length validation.";
+      content.scene_prompts = ["FIXED SCENE 12345 - test scene prompt"];
+      content.cta = config.cta_phrases[0] || "Follow for more";
+      if (config.vertical === "health") {
+        content.disclaimer = "This is not professional advice. Consult a qualified professional.";
+      }
+      console.log("[debug] Using fixed content for fingerprint collision test");
+    }
+
     // 5. Run QA
     const qaResult = runQA(content, config, policy);
     warnings.push(...qaResult.warnings);
