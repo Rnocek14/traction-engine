@@ -75,6 +75,7 @@ interface GenerateResponse {
   script_run?: Record<string, unknown>;
   error?: string;
   warnings: string[];
+  request_id: string;
 }
 
 // ============================================
@@ -459,6 +460,7 @@ Deno.serve(async (req) => {
   }
 
   const warnings: string[] = [];
+  const requestId = crypto.randomUUID();
 
   try {
     // ============================================
@@ -468,9 +470,9 @@ Deno.serve(async (req) => {
     const clientKey = req.headers.get("x-pipeline-key");
 
     if (!pipelineKey || clientKey !== pipelineKey) {
-      console.warn("[pipeline] Unauthorized request - invalid or missing x-pipeline-key");
+      console.warn({ requestId, event: "unauthorized", reason: "invalid or missing x-pipeline-key" });
       return new Response(
-        JSON.stringify({ success: false, error: "Unauthorized", warnings: [] }),
+        JSON.stringify({ success: false, error: "Unauthorized", warnings: [], request_id: requestId }),
         { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -480,12 +482,12 @@ Deno.serve(async (req) => {
 
     if (!account_id) {
       return new Response(
-        JSON.stringify({ success: false, error: "Missing account_id", warnings }),
+        JSON.stringify({ success: false, error: "Missing account_id", warnings, request_id: requestId }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    console.log(`[pipeline] Starting for account: ${account_id}, mode: ${mode}`);
+    console.log({ requestId, event: "pipeline_start", account_id, mode, preferred_pillar });
 
     // 1. Fetch account config
     const { data: configData, error: configError } = await supabaseAdmin
@@ -564,7 +566,7 @@ Deno.serve(async (req) => {
 
       if (!fallbackTopic) {
         return new Response(
-          JSON.stringify({ success: false, error: "No topics available", warnings }),
+          JSON.stringify({ success: false, error: "No topics available", warnings, request_id: requestId }),
           { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
@@ -605,14 +607,15 @@ Deno.serve(async (req) => {
 
     // ============================================
     // Debug Toggles (for deterministic testing)
-    // Only active when pipeline key is valid
+    // Guarded by ALLOW_DEBUG_TOGGLES env var + pipeline key
     // ============================================
-    const debugForceExercise = req.headers.get("x-debug-force-exercise") === "1";
-    const debugFixedContent = req.headers.get("x-debug-fixed-content") === "1";
+    const allowDebug = Deno.env.get("ALLOW_DEBUG_TOGGLES") === "true";
+    const debugForceExercise = allowDebug && req.headers.get("x-debug-force-exercise") === "1";
+    const debugFixedContent = allowDebug && req.headers.get("x-debug-fixed-content") === "1";
 
     if (debugForceExercise && config.vertical === "health") {
       content.voiceover += " Hold for 30 seconds and repeat 10 times daily for best results.";
-      console.log("[debug] Injected exercise instruction for hard block test");
+      console.log({ requestId, event: "debug_inject", type: "exercise_instruction" });
     }
 
     if (debugFixedContent) {
@@ -623,14 +626,14 @@ Deno.serve(async (req) => {
       if (config.vertical === "health") {
         content.disclaimer = "This is not professional advice. Consult a qualified professional.";
       }
-      console.log("[debug] Using fixed content for fingerprint collision test");
+      console.log({ requestId, event: "debug_inject", type: "fixed_content" });
     }
 
     // 5. Run QA
     const qaResult = runQA(content, config, policy);
     warnings.push(...qaResult.warnings);
 
-    console.log(`[pipeline] QA result: passed=${qaResult.passed}, errors=${qaResult.errors.length}`);
+    console.log({ requestId, event: "qa_complete", passed: qaResult.passed, errors: qaResult.errors.length, warnings: qaResult.warnings.length });
 
     // 6. Generate fingerprints
     const fingerprints = await generateFingerprints(content);
@@ -692,17 +695,18 @@ Deno.serve(async (req) => {
             })
             .eq('id', scriptRun.id);
 
-          console.log("[pipeline] Fingerprint collision detected");
+          console.log({ requestId, event: "fingerprint_collision", script_id: scriptRun.id });
           return new Response(
             JSON.stringify({ 
               success: false, 
               error: "Fingerprint collision - duplicate content", 
-              warnings 
+              warnings,
+              request_id: requestId,
             }),
             { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } }
           );
         }
-        console.error("[pipeline] Fingerprint insert error:", fpError);
+        console.error({ requestId, event: "fingerprint_error", error: fpError });
       }
 
       // Update topic usage
@@ -714,25 +718,28 @@ Deno.serve(async (req) => {
         })
         .eq('id', topic.id);
 
-      console.log("[pipeline] Topic usage updated");
+      console.log({ requestId, event: "topic_updated", topic_id: topic.id });
     }
 
+    console.log({ requestId, event: "pipeline_complete", status: finalStatus, script_id: scriptRun?.id });
     return new Response(
       JSON.stringify({
         success: true,
         script_run: scriptRun,
         warnings,
+        request_id: requestId,
       } as GenerateResponse),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
 
   } catch (error) {
-    console.error("[pipeline] Error:", error);
+    console.error({ requestId, event: "pipeline_error", error: error instanceof Error ? error.message : "Unknown" });
     return new Response(
       JSON.stringify({ 
         success: false, 
         error: error instanceof Error ? error.message : "Unknown error",
         warnings,
+        request_id: requestId,
       }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

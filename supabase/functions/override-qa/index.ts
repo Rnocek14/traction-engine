@@ -18,6 +18,8 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  const requestId = crypto.randomUUID();
+
   try {
     // ============================================
     // Pipeline Key Gate
@@ -26,9 +28,9 @@ Deno.serve(async (req) => {
     const clientKey = req.headers.get("x-pipeline-key");
 
     if (!pipelineKey || clientKey !== pipelineKey) {
-      console.warn("[override-qa] Unauthorized request");
+      console.warn({ requestId, event: "unauthorized" });
       return new Response(
-        JSON.stringify({ success: false, error: "Unauthorized" }),
+        JSON.stringify({ success: false, error: "Unauthorized", request_id: requestId }),
         { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -48,10 +50,12 @@ Deno.serve(async (req) => {
 
     if (!script_id || !override_by || !reason) {
       return new Response(
-        JSON.stringify({ success: false, error: "Missing required fields" }),
+        JSON.stringify({ success: false, error: "Missing required fields", request_id: requestId }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+
+    console.log({ requestId, event: "override_start", script_id, override_by });
 
     // Fetch script and check constraints
     const { data: script, error: fetchError } = await supabaseAdmin
@@ -62,17 +66,19 @@ Deno.serve(async (req) => {
 
     if (fetchError || !script) {
       return new Response(
-        JSON.stringify({ success: false, error: "Script not found" }),
+        JSON.stringify({ success: false, error: "Script not found", request_id: requestId }),
         { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
     // Hard blocks cannot be overridden
     if (script.hard_block_flags && script.hard_block_flags.length > 0) {
+      console.log({ requestId, event: "override_blocked", reason: "hard_block_flags" });
       return new Response(
         JSON.stringify({ 
           success: false, 
-          error: `Cannot override: hard block flags present (${script.hard_block_flags.join(', ')})` 
+          error: `Cannot override: hard block flags present (${script.hard_block_flags.join(', ')})`,
+          request_id: requestId,
         }),
         { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
@@ -80,7 +86,7 @@ Deno.serve(async (req) => {
 
     if (script.status !== 'qa_failed') {
       return new Response(
-        JSON.stringify({ success: false, error: "Script is not in qa_failed status" }),
+        JSON.stringify({ success: false, error: "Script is not in qa_failed status", request_id: requestId }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -98,26 +104,27 @@ Deno.serve(async (req) => {
       .eq('id', script_id);
 
     if (updateError) {
-      console.error("Update error:", updateError);
+      console.error({ requestId, event: "override_error", error: updateError.message });
       return new Response(
-        JSON.stringify({ success: false, error: updateError.message }),
+        JSON.stringify({ success: false, error: updateError.message, request_id: requestId }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    console.log(`[override-qa] Script ${script_id} overridden by ${override_by}`);
+    console.log({ requestId, event: "override_complete", script_id });
 
     return new Response(
-      JSON.stringify({ success: true }),
+      JSON.stringify({ success: true, request_id: requestId }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
 
   } catch (error) {
-    console.error("Error:", error);
+    console.error({ requestId, event: "override_error", error: error instanceof Error ? error.message : "Unknown" });
     return new Response(
       JSON.stringify({ 
         success: false, 
-        error: error instanceof Error ? error.message : "Unknown error" 
+        error: error instanceof Error ? error.message : "Unknown error",
+        request_id: requestId,
       }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
