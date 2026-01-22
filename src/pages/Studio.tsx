@@ -93,25 +93,8 @@ export default function Studio() {
   // DEV MODE: Skip auth checks for development
   const DEV_SKIP_AUTH = true;
 
-  // Loading state
-  if (scriptLoading) {
-    return (
-      <div className="min-h-screen bg-background">
-        <StudioHeader />
-        <div className="container mx-auto px-4 py-6">
-          <div className="flex items-center justify-center py-12">
-            <div className="text-center">
-              <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto mb-3" />
-              <p className="text-sm text-muted-foreground">Loading...</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // No script ID or script not found - show launcher
-  if (!scriptRunId || scriptError || !scriptRun) {
+  // No script ID - show launcher (not an error, just the entry point)
+  if (!scriptRunId) {
     return (
       <div className="min-h-screen bg-background">
         <StudioHeader />
@@ -124,6 +107,44 @@ export default function Studio() {
               </h1>
               <p className="text-muted-foreground">
                 Generate scripts, iterate on content, and create videos
+              </p>
+            </div>
+            <StudioLauncher />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Have an ID but still loading
+  if (scriptLoading) {
+    return (
+      <div className="min-h-screen bg-background">
+        <StudioHeader />
+        <div className="container mx-auto px-4 py-6">
+          <div className="flex items-center justify-center py-12">
+            <div className="text-center">
+              <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto mb-3" />
+              <p className="text-sm text-muted-foreground">Loading script...</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Have an ID but failed to load - actual not found
+  if (scriptError || !scriptRun) {
+    return (
+      <div className="min-h-screen bg-background">
+        <StudioHeader />
+        <div className="container mx-auto px-4 py-6">
+          <div className="max-w-3xl mx-auto">
+            <div className="text-center mb-8">
+              <AlertTriangle className="h-12 w-12 text-warning mx-auto mb-4" />
+              <h1 className="text-2xl font-bold mb-2">Script Not Found</h1>
+              <p className="text-muted-foreground mb-6">
+                The script "{scriptRunId.slice(0, 8)}..." could not be loaded.
               </p>
             </div>
             <StudioLauncher />
