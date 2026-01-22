@@ -29,11 +29,18 @@ import {
 import type { Enums } from "@/integrations/supabase/types";
 
 export default function QAReviewInbox() {
-  const { user, isLoading: authLoading, hasRole } = useAuth();
-  const [userHasAccess, setUserHasAccess] = useState<boolean | null>(null);
+  // DEV MODE: Skip auth checks for development
+  const DEV_SKIP_AUTH = true;
 
-  // Check role access
+  const { user, isLoading: authLoading, hasRole } = useAuth();
+  const [userHasAccess, setUserHasAccess] = useState<boolean | null>(DEV_SKIP_AUTH ? true : null);
+
+  // Check role access (skipped in dev mode)
   useEffect(() => {
+    if (DEV_SKIP_AUTH) {
+      setUserHasAccess(true);
+      return;
+    }
     if (user) {
       hasRole(['admin', 'qa']).then(setUserHasAccess);
     } else {
@@ -70,7 +77,7 @@ export default function QAReviewInbox() {
   };
 
   const isHardBlockTab = tab === 'hard_block';
-  const canTakeActions = userHasAccess === true;
+  const canTakeActions = DEV_SKIP_AUTH || userHasAccess === true;
 
   return (
     <div className="min-h-screen bg-background">
