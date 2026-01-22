@@ -1,4 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -6,6 +7,9 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
+// ============================================
+// Types
+// ============================================
 interface AccountConfig {
   account_id: string;
   vertical: string;
@@ -36,6 +40,7 @@ interface Topic {
   pillar: string;
   motif_hints: string[];
   suggested_cta?: string;
+  times_used: number;
 }
 
 interface ScriptContent {
@@ -50,11 +55,219 @@ interface ScriptContent {
   disclaimer?: string;
 }
 
-interface GenerateRequest {
-  account_config: AccountConfig;
-  topic: Topic;
+interface ContentPolicy {
+  vertical: string;
+  banned_phrases: string[];
+  prohibited_claim_types: string[];
+  required_disclaimers: string[];
+  fact_check_required: boolean;
+  safety_rules: Record<string, unknown>;
 }
 
+interface GenerateRequest {
+  account_id: string;
+  preferred_pillar?: string;
+  mode: 'ai' | 'template';
+}
+
+interface GenerateResponse {
+  success: boolean;
+  script_run?: Record<string, unknown>;
+  error?: string;
+  warnings: string[];
+}
+
+// ============================================
+// Supabase Admin Client (service role)
+// ============================================
+function getSupabaseAdmin() {
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  
+  if (!supabaseUrl || !serviceRoleKey) {
+    throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+  }
+  
+  return createClient(supabaseUrl, serviceRoleKey, {
+    auth: { persistSession: false }
+  });
+}
+
+// ============================================
+// Hashtag Sanitizer
+// ============================================
+function sanitizeHashtags(input: unknown): string[] {
+  let arr: unknown[];
+  if (typeof input === "string") {
+    arr = input.slice(0, 2000).split(/[,\s]+/).filter(Boolean);
+  } else if (Array.isArray(input)) {
+    arr = input.slice(0, 50);
+  } else {
+    return [];
+  }
+
+  const cleaned = arr
+    .filter((v): v is string => typeof v === "string")
+    .map((raw) => raw.trim().slice(0, 100))
+    .filter(Boolean)
+    .map((tag) => tag.replace(/^#+/, ""))
+    .map((tag) => tag.replace(/[\s-]+/g, "_"))
+    .map((tag) => tag.replace(/[^a-zA-Z0-9_]/g, ""))
+    .map((tag) => tag.toLowerCase())
+    .filter((tag) => tag.length > 0 && tag.length <= 30);
+
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const t of cleaned) {
+    if (!seen.has(t)) {
+      seen.add(t);
+      unique.push(t);
+    }
+  }
+
+  return unique.slice(0, 12);
+}
+
+// ============================================
+// Simple Hash Function
+// ============================================
+function simpleHash(str: string): string {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return Math.abs(hash).toString(16).padStart(8, '0');
+}
+
+function generateFingerprints(content: ScriptContent) {
+  return {
+    hook_hash: simpleHash(content.hook.toLowerCase().trim()),
+    voiceover_hash: simpleHash(content.voiceover.toLowerCase().trim()),
+    scene_hash: simpleHash(content.scene_prompts.join('|').toLowerCase()),
+  };
+}
+
+// ============================================
+// QA Checks
+// ============================================
+const MEDICAL_CLAIM_PATTERNS = [
+  /\bcure\b/i, /\bheal\b/i, /\btreatment\b/i, /\bdiagnos/i,
+  /guaranteed\s+recovery/i, /miracle\s+cure/i,
+];
+
+const EXERCISE_PATTERNS = [
+  /do\s+this\s+exercise/i, /try\s+this\s+stretch/i,
+  /repeat\s+\d+\s+times/i, /hold\s+for\s+\d+\s+seconds/i,
+  /sets?\s+of\s+\d+/i, /reps?\s+of/i, /daily\s+exercise/i,
+];
+
+const VAGUE_HOOK_PATTERNS = [
+  /^did\s+you\s+know\s+this\??$/i, /^here's\s+a\s+tip\.?$/i,
+  /^check\s+this\s+out\.?$/i, /^you\s+need\s+to\s+see\s+this\.?$/i,
+];
+
+function runQA(
+  content: ScriptContent,
+  config: AccountConfig,
+  policy: ContentPolicy | null
+): {
+  passed: boolean;
+  errors: string[];
+  warnings: string[];
+  safetyFlags: string[];
+  hardBlockFlags: string[];
+  factClaims: string[];
+} {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const safetyFlags: string[] = [];
+  const hardBlockFlags: string[] = [];
+  const factClaims: string[] = [];
+
+  // Structure validation
+  if (!content.hook || content.hook.length < 10) {
+    errors.push("Hook is too short (minimum 10 characters)");
+  }
+  if (!content.voiceover || content.voiceover.length < 50) {
+    errors.push("Voiceover is too short (minimum 50 characters)");
+  }
+  if (!content.cta) {
+    errors.push("CTA is required");
+  }
+
+  // Vague hook detection
+  for (const pattern of VAGUE_HOOK_PATTERNS) {
+    if (pattern.test(content.hook)) {
+      errors.push(`Hook is too vague: matches pattern "${pattern.source}"`);
+      break;
+    }
+  }
+
+  // Health-specific checks
+  if (config.vertical === "health") {
+    // Medical claim detection
+    const fullText = `${content.hook} ${content.voiceover}`;
+    for (const pattern of MEDICAL_CLAIM_PATTERNS) {
+      if (pattern.test(fullText)) {
+        safetyFlags.push(`MEDICAL_CLAIM: ${pattern.source}`);
+        if (!content.disclaimer) {
+          hardBlockFlags.push("TREATMENT_CLAIM_NO_DISCLAIMER");
+        }
+      }
+    }
+
+    // Exercise instruction detection
+    for (const pattern of EXERCISE_PATTERNS) {
+      if (pattern.test(content.voiceover)) {
+        safetyFlags.push(`EXERCISE_INSTRUCTION: ${pattern.source}`);
+        hardBlockFlags.push(`EXERCISE_INSTRUCTION_HEALTH`);
+      }
+    }
+
+    // Disclaimer required for health
+    if (!content.disclaimer) {
+      errors.push("Health content requires a disclaimer");
+    }
+  }
+
+  // Policy checks
+  if (policy) {
+    for (const phrase of policy.banned_phrases) {
+      if (content.voiceover.toLowerCase().includes(phrase.toLowerCase())) {
+        errors.push(`Banned phrase detected: "${phrase}"`);
+        safetyFlags.push(`BANNED_PHRASE: ${phrase}`);
+      }
+    }
+  }
+
+  // CTA alignment check
+  const ctaMatches = config.cta_phrases.some(phrase => 
+    content.cta.toLowerCase().includes(phrase.toLowerCase().substring(0, 20))
+  );
+  if (!ctaMatches) {
+    warnings.push("CTA doesn't match configured phrases");
+  }
+
+  // Hard blocks override everything
+  if (hardBlockFlags.length > 0) {
+    errors.push(`Hard block flags: ${hardBlockFlags.join(', ')}`);
+  }
+
+  return {
+    passed: errors.length === 0 && hardBlockFlags.length === 0,
+    errors,
+    warnings,
+    safetyFlags,
+    hardBlockFlags,
+    factClaims,
+  };
+}
+
+// ============================================
+// OpenAI Generation
+// ============================================
 function buildSystemPrompt(config: AccountConfig): string {
   const disclaimerNote = config.vertical === "health" 
     ? "\n\nCRITICAL: This is health content. You MUST include a disclaimer. NEVER use words like 'cure', 'heal', 'treatment', 'diagnosis', or make medical claims. Focus on emotional support, community, and general wellness. Always suggest consulting healthcare providers."
@@ -85,7 +298,7 @@ ${bannedNote}${disclaimerNote}
 APPROVED CTAs (use one of these): ${config.cta_phrases.join(" | ")}
 
 OUTPUT RULES:
-1. Hook MUST be specific - include concrete objects (phone, settings, resume, etc.) or numbers
+1. Hook MUST be specific - include concrete objects or numbers
 2. Hook should NOT be vague like "Did you know this?" or "Here's a tip"
 3. Voiceover should be conversational and match the persona tone
 4. Keep voiceover under ${Math.round(config.style_rules.max_length_seconds * 2.5)} words
@@ -96,7 +309,7 @@ OUTPUT RULES:
 
 function buildUserPrompt(topic: Topic, config: AccountConfig): string {
   const hookOptions = topic.hook_variants.length > 0
-    ? `\n\nHook inspiration (use as starting point, improve it):\n${topic.hook_variants.map((h, i) => `${i + 1}. ${h}`).join("\n")}`
+    ? `\n\nHook inspiration:\n${topic.hook_variants.map((h, i) => `${i + 1}. ${h}`).join("\n")}`
     : "";
 
   return `Generate a script for this topic:
@@ -110,68 +323,24 @@ Return JSON in this exact schema:
 {
   "hook": "Opening 2 seconds - specific, attention-grabbing",
   "voiceover": "Full script text for TTS",
-  "on_screen_text": [
-    {"timestamp": 0, "text": "Key phrase 1"},
-    {"timestamp": 5, "text": "Key phrase 2"}
-  ],
-  "scene_prompts": [
-    "Detailed scene description for AI video generation"
-  ],
+  "on_screen_text": [{"timestamp": 0, "text": "Key phrase"}],
+  "scene_prompts": ["Detailed scene description"],
   "broll_keywords": ["keyword1", "keyword2"],
   "caption": "Caption for the post",
   "hashtags": ["tag1", "tag2"],
   "cta": "One of the approved CTAs",
-  "disclaimer": ${config.vertical === "health" || config.disclaimer_rules.always_required ? '"Required disclaimer text"' : "null or omit if not needed"}
+  "disclaimer": ${config.vertical === "health" || config.disclaimer_rules.always_required ? '"Required disclaimer text"' : "null"}
 }`;
 }
 
-function sanitizeHashtags(input: unknown): string[] {
-  // Handle string input (model sometimes returns "tag1, tag2" or "#tag1 #tag2")
-  let arr: unknown[];
-  if (typeof input === "string") {
-    arr = input.split(/[,\s]+/).filter(Boolean);
-  } else if (Array.isArray(input)) {
-    arr = input;
-  } else {
-    return [];
-  }
-
-  const cleaned = arr
-    .filter((v): v is string => typeof v === "string")
-    .map((raw) => raw.trim())
-    .filter(Boolean)
-    // remove leading hashes (one or many)
-    .map((tag) => tag.replace(/^#+/, ""))
-    // convert spaces/dashes to underscores
-    .map((tag) => tag.replace(/[\s-]+/g, "_"))
-    // allow only [a-z0-9_]
-    .map((tag) => tag.replace(/[^a-zA-Z0-9_]/g, ""))
-    .map((tag) => tag.toLowerCase())
-    // length limits
-    .filter((tag) => tag.length > 0 && tag.length <= 30);
-
-  // de-dupe while preserving order
-  const seen = new Set<string>();
-  const unique: string[] = [];
-  for (const t of cleaned) {
-    if (!seen.has(t)) {
-      seen.add(t);
-      unique.push(t);
-    }
-  }
-
-  // cap count to something reasonable
-  return unique.slice(0, 12);
-}
-
 async function generateWithOpenAI(
-  systemPrompt: string,
-  userPrompt: string,
+  config: AccountConfig,
+  topic: Topic,
   apiKey: string
 ): Promise<ScriptContent> {
-  // Use stable model name - gpt-4o is the current recommended model
-  const model = "gpt-4o";
-  
+  const systemPrompt = buildSystemPrompt(config);
+  const userPrompt = buildUserPrompt(topic, config);
+
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -179,7 +348,7 @@ async function generateWithOpenAI(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model,
+      model: "gpt-4o",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
@@ -202,62 +371,20 @@ async function generateWithOpenAI(
     throw new Error("No content returned from OpenAI");
   }
 
-  let parsed: Record<string, unknown>;
-  try {
-    parsed = JSON.parse(content);
-  } catch (e) {
-    throw new Error(`Failed to parse OpenAI response as JSON: ${e}`);
-  }
-  
-  // Validate required fields with detailed errors
-  const requiredFields = ['hook', 'voiceover', 'cta'];
-  const missingFields = requiredFields.filter(f => !parsed[f]);
-  if (missingFields.length > 0) {
-    throw new Error(`Missing required fields in generated script: ${missingFields.join(', ')}`);
-  }
-  
-  // Validate types
-  if (typeof parsed.hook !== 'string' || parsed.hook.length < 10) {
-    throw new Error('Hook must be a string with at least 10 characters');
-  }
-  if (typeof parsed.voiceover !== 'string' || parsed.voiceover.length < 50) {
-    throw new Error('Voiceover must be a string with at least 50 characters');
-  }
-  if (typeof parsed.cta !== 'string') {
-    throw new Error('CTA must be a string');
+  const parsed = JSON.parse(content);
+
+  // Validate and sanitize
+  if (!parsed.hook || !parsed.voiceover || !parsed.cta) {
+    throw new Error("Missing required fields from OpenAI response");
   }
 
-  // Validate arrays with type safety
-  const on_screen_text = Array.isArray(parsed.on_screen_text) 
-    ? parsed.on_screen_text.filter((item): item is { timestamp: number; text: string } => 
-        typeof item === 'object' && 
-        item !== null &&
-        typeof (item as Record<string, unknown>).timestamp === 'number' && 
-        typeof (item as Record<string, unknown>).text === 'string'
-      )
-    : [];
-    
-  const scene_prompts = Array.isArray(parsed.scene_prompts) 
-    ? parsed.scene_prompts.filter((s): s is string => typeof s === 'string')
-    : [];
-    
-  const broll_keywords = Array.isArray(parsed.broll_keywords)
-    ? parsed.broll_keywords.filter((s): s is string => typeof s === 'string')
-    : [];
-
-  // Sanitize hashtags with accurate logging
+  // Log hashtag sanitization
   const rawHashtags = parsed.hashtags;
-  
-  // Derive a previewable "raw array" the same way sanitizeHashtags would
-  const rawArr =
-    typeof rawHashtags === "string"
-      ? rawHashtags.split(/[,\s]+/).filter(Boolean).slice(0, 50)
-      : Array.isArray(rawHashtags)
-        ? rawHashtags.slice(0, 50)
-        : [];
-
+  const rawArr = typeof rawHashtags === "string"
+    ? rawHashtags.split(/[,\s]+/).filter(Boolean).slice(0, 50)
+    : Array.isArray(rawHashtags) ? rawHashtags.slice(0, 50) : [];
   const hashtags = sanitizeHashtags(rawHashtags);
-  
+
   console.log("[hashtags]", {
     raw_type: Array.isArray(rawHashtags) ? "array" : typeof rawHashtags,
     raw_count: rawArr.length,
@@ -268,63 +395,298 @@ async function generateWithOpenAI(
   });
 
   return {
-    hook: parsed.hook as string,
-    voiceover: parsed.voiceover as string,
-    on_screen_text,
-    scene_prompts,
-    broll_keywords,
+    hook: String(parsed.hook),
+    voiceover: String(parsed.voiceover),
+    on_screen_text: Array.isArray(parsed.on_screen_text) 
+      ? parsed.on_screen_text.filter((item: unknown): item is { timestamp: number; text: string } => 
+          typeof item === 'object' && item !== null &&
+          typeof (item as Record<string, unknown>).timestamp === 'number' && 
+          typeof (item as Record<string, unknown>).text === 'string'
+        )
+      : [],
+    scene_prompts: Array.isArray(parsed.scene_prompts) 
+      ? parsed.scene_prompts.filter((s: unknown): s is string => typeof s === 'string')
+      : [],
+    broll_keywords: Array.isArray(parsed.broll_keywords)
+      ? parsed.broll_keywords.filter((s: unknown): s is string => typeof s === 'string')
+      : [],
     caption: typeof parsed.caption === 'string' ? parsed.caption : "",
     hashtags,
-    cta: parsed.cta as string,
+    cta: String(parsed.cta),
     disclaimer: typeof parsed.disclaimer === 'string' ? parsed.disclaimer : undefined,
   };
 }
 
+// ============================================
+// Template Generation (fallback)
+// ============================================
+function generateTemplateContent(config: AccountConfig, topic: Topic): ScriptContent {
+  const hook = topic.hook_variants[0] || `Here's something about ${topic.pillar} you should know...`;
+  const cta = config.cta_phrases[0] || "Follow for more";
+
+  return {
+    hook,
+    voiceover: `${hook} ${topic.topic_prompt} Remember, ${config.promise}. ${cta}`,
+    on_screen_text: [{ timestamp: 0, text: hook.substring(0, 50) }],
+    scene_prompts: topic.motif_hints.length > 0 
+      ? [`Scene showing: ${topic.motif_hints.join(', ')}`]
+      : [`Scene related to: ${topic.pillar}`],
+    broll_keywords: topic.motif_hints.slice(0, 5),
+    caption: `${topic.topic_prompt.substring(0, 100)}...`,
+    hashtags: [config.vertical, topic.pillar.replace(/\s+/g, '')],
+    cta,
+    disclaimer: config.vertical === "health" || config.disclaimer_rules.always_required
+      ? "This is not professional advice. Consult a qualified professional for guidance."
+      : undefined,
+  };
+}
+
+// ============================================
+// Main Handler
+// ============================================
 Deno.serve(async (req) => {
-  // Handle CORS preflight
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
+  const warnings: string[] = [];
+
   try {
-    const apiKey = Deno.env.get("OPENAI_API_KEY");
-    if (!apiKey) {
-      throw new Error("OPENAI_API_KEY not configured");
-    }
+    const supabaseAdmin = getSupabaseAdmin();
+    const { account_id, preferred_pillar, mode }: GenerateRequest = await req.json();
 
-    const { account_config, topic }: GenerateRequest = await req.json();
-
-    if (!account_config || !topic) {
+    if (!account_id) {
       return new Response(
-        JSON.stringify({ error: "Missing account_config or topic" }),
+        JSON.stringify({ success: false, error: "Missing account_id", warnings }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    const systemPrompt = buildSystemPrompt(account_config);
-    const userPrompt = buildUserPrompt(topic, account_config);
+    console.log(`[pipeline] Starting for account: ${account_id}, mode: ${mode}`);
 
-    console.log("Generating script for account:", account_config.account_id);
-    console.log("Topic:", topic.topic_prompt);
+    // 1. Fetch account config
+    const { data: configData, error: configError } = await supabaseAdmin
+      .from('account_configs')
+      .select('*')
+      .eq('account_id', account_id)
+      .single();
 
-    const scriptContent = await generateWithOpenAI(systemPrompt, userPrompt, apiKey);
+    if (configError || !configData) {
+      return new Response(
+        JSON.stringify({ success: false, error: `Account not found: ${account_id}`, warnings }),
+        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
-    console.log("Script generated successfully");
+    const config: AccountConfig = {
+      account_id: configData.account_id,
+      vertical: configData.vertical,
+      persona: configData.persona as { tone: string; vibe: string },
+      audience: configData.audience as { who: string; pain_points: string[] },
+      promise: configData.promise,
+      content_pillars: configData.content_pillars,
+      banned_topics: configData.banned_topics,
+      claim_policy: configData.claim_policy,
+      cta_style: configData.cta_style,
+      cta_phrases: configData.cta_phrases,
+      style_rules: configData.style_rules as AccountConfig['style_rules'],
+      disclaimer_rules: configData.disclaimer_rules as AccountConfig['disclaimer_rules'],
+    };
+
+    // 2. Fetch content policy
+    const { data: policyData } = await supabaseAdmin
+      .from('content_policies')
+      .select('*')
+      .eq('vertical', config.vertical)
+      .single();
+
+    const policy: ContentPolicy | null = policyData ? {
+      vertical: policyData.vertical,
+      banned_phrases: policyData.banned_phrases,
+      prohibited_claim_types: policyData.prohibited_claim_types,
+      required_disclaimers: policyData.required_disclaimers,
+      fact_check_required: policyData.fact_check_required,
+      safety_rules: policyData.safety_rules as Record<string, unknown>,
+    } : null;
+
+    // 3. Select topic via RPC
+    const { data: topicData, error: topicError } = await supabaseAdmin.rpc('select_topic', {
+      p_vertical: config.vertical,
+      p_pillar: preferred_pillar ?? null,
+    });
+
+    let topic: Topic | null = null;
+    if (!topicError && topicData && Array.isArray(topicData) && topicData.length > 0) {
+      const t = topicData[0];
+      topic = {
+        id: t.id,
+        topic_prompt: t.topic_prompt,
+        hook_variants: t.hook_variants,
+        pillar: t.pillar,
+        motif_hints: t.motif_hints,
+        suggested_cta: t.suggested_cta,
+        times_used: t.times_used,
+      };
+    }
+
+    if (!topic) {
+      // Fallback: get any topic
+      const { data: fallbackTopic } = await supabaseAdmin
+        .from('topic_bank')
+        .select('*')
+        .eq('vertical', config.vertical)
+        .order('times_used', { ascending: true })
+        .limit(1)
+        .single();
+
+      if (!fallbackTopic) {
+        return new Response(
+          JSON.stringify({ success: false, error: "No topics available", warnings }),
+          { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      topic = {
+        id: fallbackTopic.id,
+        topic_prompt: fallbackTopic.topic_prompt,
+        hook_variants: fallbackTopic.hook_variants,
+        pillar: fallbackTopic.pillar,
+        motif_hints: fallbackTopic.motif_hints,
+        suggested_cta: fallbackTopic.suggested_cta,
+        times_used: fallbackTopic.times_used,
+      };
+    }
+
+    console.log(`[pipeline] Topic selected: ${topic.topic_prompt.substring(0, 50)}...`);
+
+    // 4. Generate content
+    let content: ScriptContent;
+    let generationCost = 1;
+
+    if (mode === 'ai') {
+      const apiKey = Deno.env.get("OPENAI_API_KEY");
+      if (!apiKey) {
+        return new Response(
+          JSON.stringify({ success: false, error: "OPENAI_API_KEY not configured", warnings }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      content = await generateWithOpenAI(config, topic, apiKey);
+      generationCost = 3;
+      console.log("[pipeline] AI generation complete");
+    } else {
+      content = generateTemplateContent(config, topic);
+      console.log("[pipeline] Template generation complete");
+    }
+
+    // 5. Run QA
+    const qaResult = runQA(content, config, policy);
+    warnings.push(...qaResult.warnings);
+
+    console.log(`[pipeline] QA result: passed=${qaResult.passed}, errors=${qaResult.errors.length}`);
+
+    // 6. Generate fingerprints
+    const fingerprints = generateFingerprints(content);
+
+    // 7. Insert script_run
+    const finalStatus = qaResult.passed ? 'qa_passed' : 'qa_failed';
+    const { data: scriptRun, error: insertError } = await supabaseAdmin
+      .from('script_runs')
+      .insert({
+        account_id,
+        topic_id: topic.id,
+        status: finalStatus,
+        script_content: content,
+        qa_results: qaResult,
+        safety_flags: qaResult.safetyFlags,
+        fact_claims: qaResult.factClaims,
+        hard_block_flags: qaResult.hardBlockFlags,
+        generation_cost_cents: generationCost,
+        hook_hash: fingerprints.hook_hash,
+        voiceover_hash: fingerprints.voiceover_hash,
+        scene_hash: fingerprints.scene_hash,
+        qa_passed_at: qaResult.passed ? new Date().toISOString() : null,
+        qa_failed_reason: qaResult.passed ? null : qaResult.errors.join('; '),
+      })
+      .select()
+      .single();
+
+    if (insertError) {
+      console.error("[pipeline] Insert error:", insertError);
+      return new Response(
+        JSON.stringify({ success: false, error: `Failed to save: ${insertError.message}`, warnings }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    console.log(`[pipeline] Script saved with id: ${scriptRun.id}, status: ${finalStatus}`);
+
+    // 8. If QA passed, insert fingerprint and update topic
+    if (qaResult.passed && scriptRun) {
+      const { error: fpError } = await supabaseAdmin
+        .from('script_fingerprints')
+        .insert({
+          script_id: scriptRun.id,
+          account_id,
+          topic_id: topic.id,
+          hook_hash: fingerprints.hook_hash,
+          voiceover_hash: fingerprints.voiceover_hash,
+        });
+
+      if (fpError) {
+        if (fpError.code === '23505') {
+          // Fingerprint collision
+          await supabaseAdmin
+            .from('script_runs')
+            .update({
+              status: 'qa_failed',
+              qa_failed_reason: 'Fingerprint collision - duplicate content',
+              qa_passed_at: null,
+            })
+            .eq('id', scriptRun.id);
+
+          console.log("[pipeline] Fingerprint collision detected");
+          return new Response(
+            JSON.stringify({ 
+              success: false, 
+              error: "Fingerprint collision - duplicate content", 
+              warnings 
+            }),
+            { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+        console.error("[pipeline] Fingerprint insert error:", fpError);
+      }
+
+      // Update topic usage
+      await supabaseAdmin
+        .from('topic_bank')
+        .update({
+          times_used: topic.times_used + 1,
+          last_used_at: new Date().toISOString(),
+        })
+        .eq('id', topic.id);
+
+      console.log("[pipeline] Topic usage updated");
+    }
 
     return new Response(
       JSON.stringify({
         success: true,
-        script_content: scriptContent,
-        generation_cost_cents: 3, // Approximate cost for GPT-4 turbo
-      }),
+        script_run: scriptRun,
+        warnings,
+      } as GenerateResponse),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
+
   } catch (error) {
-    console.error("Error generating script:", error);
+    console.error("[pipeline] Error:", error);
     return new Response(
       JSON.stringify({ 
         success: false, 
-        error: error instanceof Error ? error.message : "Unknown error" 
+        error: error instanceof Error ? error.message : "Unknown error",
+        warnings,
       }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
