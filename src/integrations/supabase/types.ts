@@ -850,7 +850,9 @@ export type Database = {
           created_at: string
           error: string | null
           id: string
+          openai_video_id: string | null
           output_url: string | null
+          progress: number | null
           provider: string
           request_id: string | null
           script_run_id: string
@@ -862,7 +864,9 @@ export type Database = {
           created_at?: string
           error?: string | null
           id?: string
+          openai_video_id?: string | null
           output_url?: string | null
+          progress?: number | null
           provider?: string
           request_id?: string | null
           script_run_id: string
@@ -874,7 +878,9 @@ export type Database = {
           created_at?: string
           error?: string | null
           id?: string
+          openai_video_id?: string | null
           output_url?: string | null
+          progress?: number | null
           provider?: string
           request_id?: string | null
           script_run_id?: string
