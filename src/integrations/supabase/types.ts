@@ -854,6 +854,7 @@ export type Database = {
           provider: string
           request_id: string | null
           script_run_id: string
+          settings: Json | null
           status: string
           updated_at: string
         }
@@ -865,6 +866,7 @@ export type Database = {
           provider?: string
           request_id?: string | null
           script_run_id: string
+          settings?: Json | null
           status?: string
           updated_at?: string
         }
@@ -876,6 +878,7 @@ export type Database = {
           provider?: string
           request_id?: string | null
           script_run_id?: string
+          settings?: Json | null
           status?: string
           updated_at?: string
         }

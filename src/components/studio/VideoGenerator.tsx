@@ -1,17 +1,16 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import {
   Video,
-  Play,
   Loader2,
   Film,
   ImagePlus,
-  Clock,
   CheckCircle2,
   XCircle,
+  Clock,
   ExternalLink,
+  AlertCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -25,9 +24,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { formatDistanceToNow } from "date-fns";
 import type { Tables } from "@/integrations/supabase/types";
 
 type ScriptRun = Tables<"script_runs">;
+type VideoJob = Tables<"video_jobs">;
 
 interface VideoGeneratorProps {
   script: ScriptRun;
@@ -49,16 +50,37 @@ export function VideoGenerator({ script }: VideoGeneratorProps) {
   const scenePrompts = (content?.scene_prompts as string[]) || [];
   const hook = (content?.hook as string) || "";
 
+  // Fetch existing video jobs for this script
+  const { data: jobs = [], isLoading: jobsLoading } = useQuery({
+    queryKey: ["video-jobs", script.id],
+    queryFn: async (): Promise<VideoJob[]> => {
+      const { data, error } = await supabase
+        .from("video_jobs")
+        .select("*")
+        .eq("script_run_id", script.id)
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
   // Queue video mutation with settings
   const queueMutation = useMutation({
     mutationFn: async () => {
-      // Insert video job - settings can be added once column exists
       const { data, error } = await supabase
         .from("video_jobs")
         .insert({
           script_run_id: script.id,
           status: "queued",
           provider: "sora",
+          settings: {
+            resolution,
+            aspect,
+            duration,
+            hook,
+            scene_prompts: scenePrompts,
+          },
         })
         .select()
         .single();
@@ -82,6 +104,36 @@ export function VideoGenerator({ script }: VideoGeneratorProps) {
     },
   });
 
+  const getJobStatusIcon = (status: string) => {
+    switch (status) {
+      case "succeeded":
+      case "done":
+        return <CheckCircle2 className="h-4 w-4 text-success" />;
+      case "failed":
+        return <XCircle className="h-4 w-4 text-destructive" />;
+      case "running":
+      case "rendering":
+        return <Loader2 className="h-4 w-4 animate-spin text-primary" />;
+      default:
+        return <Clock className="h-4 w-4 text-muted-foreground" />;
+    }
+  };
+
+  const getJobStatusBadge = (status: string) => {
+    switch (status) {
+      case "succeeded":
+      case "done":
+        return <Badge variant="outline" className="bg-success/20 text-success border-success/30">Done</Badge>;
+      case "failed":
+        return <Badge variant="destructive">Failed</Badge>;
+      case "running":
+      case "rendering":
+        return <Badge variant="outline" className="bg-primary/20 text-primary border-primary/30">Rendering</Badge>;
+      default:
+        return <Badge variant="secondary">Queued</Badge>;
+    }
+  };
+
   return (
     <Card className="glass-card">
       <CardHeader className="pb-2">
@@ -93,7 +145,7 @@ export function VideoGenerator({ script }: VideoGeneratorProps) {
       <CardContent className="space-y-4">
         {!isPassed ? (
           <div className="text-center py-4">
-            <XCircle className="h-8 w-8 text-warning mx-auto mb-2" />
+            <AlertCircle className="h-8 w-8 text-warning mx-auto mb-2" />
             <p className="text-sm text-muted-foreground">
               Script must pass QA before generating video
             </p>
@@ -210,6 +262,59 @@ export function VideoGenerator({ script }: VideoGeneratorProps) {
             <p className="text-[10px] text-muted-foreground text-center">
               Video generation uses OpenAI Sora API. Typical render: 30-60 seconds.
             </p>
+          </>
+        )}
+
+        {/* Video Jobs Status Tracker */}
+        {jobs.length > 0 && (
+          <>
+            <Separator />
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-muted-foreground flex items-center gap-2">
+                Video Jobs ({jobs.length})
+              </label>
+              <div className="space-y-2 max-h-48 overflow-auto">
+                {jobs.map((job) => {
+                  const settings = job.settings as Record<string, unknown> | null;
+                  return (
+                    <div
+                      key={job.id}
+                      className="p-2 rounded-lg bg-secondary/30 flex items-center gap-2"
+                    >
+                      {getJobStatusIcon(job.status)}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          {getJobStatusBadge(job.status)}
+                          {settings?.resolution && (
+                            <span className="text-[10px] text-muted-foreground">
+                              {settings.resolution as string} • {settings.aspect as string}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-muted-foreground mt-0.5">
+                          {formatDistanceToNow(new Date(job.created_at), { addSuffix: true })}
+                        </p>
+                        {job.error && (
+                          <p className="text-[10px] text-destructive mt-1 truncate">
+                            {job.error}
+                          </p>
+                        )}
+                      </div>
+                      {job.output_url && (
+                        <a
+                          href={job.output_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-primary hover:text-primary/80"
+                        >
+                          <ExternalLink className="h-4 w-4" />
+                        </a>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </>
         )}
       </CardContent>
