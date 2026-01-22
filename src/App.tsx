@@ -8,6 +8,7 @@ import Index from "./pages/Index";
 import AccountDetail from "./pages/AccountDetail";
 import ScriptGenerator from "./pages/ScriptGenerator";
 import QAReviewInbox from "./pages/QAReviewInbox";
+import Studio from "./pages/Studio";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
 
@@ -25,6 +26,7 @@ const App = () => (
             <Route path="/account/:accountId" element={<AccountDetail />} />
             <Route path="/scripts" element={<ScriptGenerator />} />
             <Route path="/qa-review" element={<QAReviewInbox />} />
+            <Route path="/studio/:scriptRunId" element={<Studio />} />
             <Route path="/login" element={<Login />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />

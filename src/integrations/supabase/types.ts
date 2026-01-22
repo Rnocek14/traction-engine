@@ -557,6 +557,7 @@ export type Database = {
         Row: {
           account_id: string
           created_at: string
+          draft_edits: Json | null
           fact_claims: string[]
           generation_cost_cents: number
           hard_block_flags: string[]
@@ -580,6 +581,7 @@ export type Database = {
         Insert: {
           account_id: string
           created_at?: string
+          draft_edits?: Json | null
           fact_claims?: string[]
           generation_cost_cents?: number
           hard_block_flags?: string[]
@@ -603,6 +605,7 @@ export type Database = {
         Update: {
           account_id?: string
           created_at?: string
+          draft_edits?: Json | null
           fact_claims?: string[]
           generation_cost_cents?: number
           hard_block_flags?: string[]
@@ -636,6 +639,44 @@ export type Database = {
             columns: ["topic_id"]
             isOneToOne: false
             referencedRelation: "topic_bank"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      script_variants: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          parent_script_id: string
+          selected: boolean
+          variant_content: string
+          variant_type: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          parent_script_id: string
+          selected?: boolean
+          variant_content: string
+          variant_type: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          parent_script_id?: string
+          selected?: boolean
+          variant_content?: string
+          variant_type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "script_variants_parent_script_id_fkey"
+            columns: ["parent_script_id"]
+            isOneToOne: false
+            referencedRelation: "script_runs"
             referencedColumns: ["id"]
           },
         ]
