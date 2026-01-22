@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { formatDistanceToNow } from "date-fns";
+import { SpritesheetScrubber } from "./SpritesheetScrubber";
 import type { Tables } from "@/integrations/supabase/types";
 
 type ScriptRun = Tables<"script_runs">;
@@ -346,6 +347,7 @@ export function VideoGenerator({ script }: VideoGeneratorProps) {
                     const jobSeconds = typeof settings.seconds === "number" ? settings.seconds : null;
                     const progress = (job as unknown as { progress?: number }).progress ?? 0;
                     const thumbnailUrl = (job as unknown as { thumbnail_url?: string }).thumbnail_url;
+                    const spritesheetUrl = (job as unknown as { spritesheet_url?: string }).spritesheet_url;
 
                     return (
                       <div
@@ -353,16 +355,25 @@ export function VideoGenerator({ script }: VideoGeneratorProps) {
                         className="p-2 rounded-lg bg-secondary/30 space-y-2"
                       >
                         <div className="flex items-start gap-2">
-                          {/* Thumbnail preview */}
-                          {thumbnailUrl ? (
+                          {/* Thumbnail with spritesheet scrubbing */}
+                          {thumbnailUrl && spritesheetUrl ? (
+                            <SpritesheetScrubber
+                              thumbnailUrl={thumbnailUrl}
+                              spritesheetUrl={spritesheetUrl}
+                              onClick={() => job.output_url && setPreviewUrl(job.output_url)}
+                              className="w-16 h-16 rounded flex-shrink-0"
+                              cols={10}
+                              rows={10}
+                            />
+                          ) : thumbnailUrl ? (
                             <img 
                               src={thumbnailUrl} 
                               alt="Video thumbnail" 
-                              className="w-12 h-12 rounded object-cover flex-shrink-0 cursor-pointer hover:opacity-80"
+                              className="w-16 h-16 rounded object-cover flex-shrink-0 cursor-pointer hover:opacity-80"
                               onClick={() => job.output_url && setPreviewUrl(job.output_url)}
                             />
                           ) : (
-                            <div className="w-12 h-12 rounded bg-secondary/50 flex items-center justify-center flex-shrink-0">
+                            <div className="w-16 h-16 rounded bg-secondary/50 flex items-center justify-center flex-shrink-0">
                               {getJobStatusIcon(job.status)}
                             </div>
                           )}
