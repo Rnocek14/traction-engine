@@ -98,6 +98,7 @@ Style: Professional, engaging, suitable for TikTok/Reels. Smooth transitions bet
         provider: "sora",
         settings: { size, seconds, model },
         progress: 0,
+        openai_status: "pending",
       })
       .select()
       .single();
@@ -106,42 +107,55 @@ Style: Professional, engaging, suitable for TikTok/Reels. Smooth transitions bet
       throw new Error(`Failed to create job: ${jobError.message}`);
     }
 
-    // Build OpenAI request
-    const openaiBody: Record<string, unknown> = {
-      model,
-      input: [{ type: "text", text: videoPrompt }],
-      size,
-      seconds,
-    };
+    // Build FormData for OpenAI Sora API
+    const form = new FormData();
+    form.set("prompt", videoPrompt);
+    form.set("model", model);
+    form.set("size", size);
+    form.set("seconds", String(seconds));
 
-    // Add starting frame if provided
+    // Add starting frame if provided (must be fetched and uploaded as file)
     if (starting_frame_url) {
-      openaiBody.input = [
-        { type: "image_url", image_url: starting_frame_url },
-        { type: "text", text: videoPrompt },
-      ];
+      try {
+        const imgRes = await fetch(starting_frame_url);
+        if (!imgRes.ok) {
+          throw new Error(`Failed to fetch starting frame: ${imgRes.status}`);
+        }
+
+        const mime = imgRes.headers.get("content-type") || "image/jpeg";
+        const blob = await imgRes.blob();
+        
+        // input_reference must be a File with the correct size matching the video
+        form.set("input_reference", new File([blob], "start-frame.jpg", { type: mime }));
+        
+        console.log(`Added starting frame: ${starting_frame_url}, type: ${mime}`);
+      } catch (frameErr) {
+        console.error("Failed to add starting frame:", frameErr);
+        // Continue without starting frame rather than failing entirely
+      }
     }
 
-    // Call OpenAI Videos API
+    // Call OpenAI Videos API with FormData
     const openaiResponse = await fetch("https://api.openai.com/v1/videos", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${openaiApiKey}`,
-        "Content-Type": "application/json",
+        // Do NOT set Content-Type - fetch will set it with boundary for FormData
       },
-      body: JSON.stringify(openaiBody),
+      body: form,
     });
 
     if (!openaiResponse.ok) {
       const errorText = await openaiResponse.text();
-      console.error("OpenAI API error:", errorText);
+      console.error("OpenAI API error:", openaiResponse.status, errorText);
       
       // Update job with error
       await supabase
         .from("video_jobs")
         .update({ 
-          status: "failed", 
-          error: `OpenAI API error: ${openaiResponse.status}` 
+          status: "failed",
+          openai_status: "failed",
+          error: `OpenAI API error: ${openaiResponse.status} - ${errorText.slice(0, 200)}`,
         })
         .eq("id", job.id);
 
@@ -150,6 +164,7 @@ Style: Professional, engaging, suitable for TikTok/Reels. Smooth transitions bet
 
     const openaiData = await openaiResponse.json();
     const openaiVideoId = openaiData.id;
+    const openaiStatus = openaiData.status || "queued";
 
     // Update job with OpenAI video ID
     await supabase
@@ -157,10 +172,11 @@ Style: Professional, engaging, suitable for TikTok/Reels. Smooth transitions bet
       .update({ 
         status: "running",
         openai_video_id: openaiVideoId,
+        openai_status: openaiStatus,
       })
       .eq("id", job.id);
 
-    console.log(`Created OpenAI video job: ${openaiVideoId} for job: ${job.id}`);
+    console.log(`Created OpenAI video job: ${openaiVideoId} (status: ${openaiStatus}) for job: ${job.id}`);
 
     return new Response(
       JSON.stringify({
@@ -169,6 +185,7 @@ Style: Professional, engaging, suitable for TikTok/Reels. Smooth transitions bet
           id: job.id,
           status: "running",
           openai_video_id: openaiVideoId,
+          openai_status: openaiStatus,
         },
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }

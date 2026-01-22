@@ -9,6 +9,61 @@ interface ProcessRequest {
   job_id?: string; // Process specific job, or omit to process all pending
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function downloadAndUpload(
+  supabase: any,
+  openaiApiKey: string,
+  openaiVideoId: string,
+  variant: "mp4" | "thumbnail" | "spritesheet",
+  storagePath: string
+): Promise<string | null> {
+  try {
+    const url = variant === "mp4"
+      ? `https://api.openai.com/v1/videos/${openaiVideoId}/content`
+      : `https://api.openai.com/v1/videos/${openaiVideoId}/content?variant=${variant}`;
+
+    const response = await fetch(url, {
+      headers: { "Authorization": `Bearer ${openaiApiKey}` },
+    });
+
+    if (!response.ok) {
+      console.error(`Failed to download ${variant}: ${response.status}`);
+      return null;
+    }
+
+    const buffer = await response.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+
+    // Determine content type
+    const contentType = variant === "mp4" 
+      ? "video/mp4" 
+      : variant === "spritesheet" 
+        ? "image/png" 
+        : "image/jpeg";
+
+    const { error: uploadError } = await supabase.storage
+      .from("videos")
+      .upload(storagePath, bytes, {
+        contentType,
+        upsert: true,
+      });
+
+    if (uploadError) {
+      console.error(`Failed to upload ${variant}:`, uploadError);
+      return null;
+    }
+
+    const { data: urlData } = supabase.storage
+      .from("videos")
+      .getPublicUrl(storagePath);
+
+    return urlData.publicUrl;
+  } catch (err) {
+    console.error(`Error downloading/uploading ${variant}:`, err);
+    return null;
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -28,7 +83,7 @@ Deno.serve(async (req) => {
     const body: ProcessRequest = await req.json().catch(() => ({}));
     const { job_id } = body;
 
-    // Fetch jobs to process
+    // Fetch jobs to process (only those with openai_video_id)
     let query = supabase
       .from("video_jobs")
       .select("*")
@@ -60,9 +115,7 @@ Deno.serve(async (req) => {
         const statusResponse = await fetch(
           `https://api.openai.com/v1/videos/${job.openai_video_id}`,
           {
-            headers: {
-              "Authorization": `Bearer ${openaiApiKey}`,
-            },
+            headers: { "Authorization": `Bearer ${openaiApiKey}` },
           }
         );
 
@@ -72,10 +125,14 @@ Deno.serve(async (req) => {
           
           await supabase
             .from("video_jobs")
-            .update({ status: "failed", error: `Status check failed: ${statusResponse.status}` })
+            .update({ 
+              status: "failed",
+              openai_status: "error",
+              error: `Status check failed: ${statusResponse.status}`,
+            })
             .eq("id", job.id);
 
-          results.push({ id: job.id, status: "failed", error: `Status check failed` });
+          results.push({ id: job.id, status: "failed", error: "Status check failed" });
           continue;
         }
 
@@ -85,18 +142,18 @@ Deno.serve(async (req) => {
 
         console.log(`Job ${job.id}: OpenAI status=${openaiStatus}, progress=${progress}`);
 
-        // Update progress
+        // Update progress and openai_status
         await supabase
           .from("video_jobs")
-          .update({ progress })
+          .update({ progress, openai_status: openaiStatus })
           .eq("id", job.id);
 
         if (openaiStatus === "failed") {
           await supabase
             .from("video_jobs")
             .update({ 
-              status: "failed", 
-              error: statusData.error?.message || "Video generation failed" 
+              status: "failed",
+              error: statusData.error?.message || "Video generation failed",
             })
             .eq("id", job.id);
 
@@ -104,55 +161,33 @@ Deno.serve(async (req) => {
           continue;
         }
 
-        if (openaiStatus === "completed" || openaiStatus === "succeeded") {
-          // Download the video content
-          const contentResponse = await fetch(
-            `https://api.openai.com/v1/videos/${job.openai_video_id}/content`,
-            {
-              headers: {
-                "Authorization": `Bearer ${openaiApiKey}`,
-              },
-            }
-          );
+        if (openaiStatus === "completed") {
+          // Download and upload all variants in parallel
+          const basePath = `${job.script_run_id}/${job.id}`;
+          
+          const [outputUrl, thumbnailUrl, spritesheetUrl] = await Promise.all([
+            downloadAndUpload(supabase, openaiApiKey, job.openai_video_id, "mp4", `${basePath}.mp4`),
+            downloadAndUpload(supabase, openaiApiKey, job.openai_video_id, "thumbnail", `${basePath}_thumb.jpg`),
+            downloadAndUpload(supabase, openaiApiKey, job.openai_video_id, "spritesheet", `${basePath}_sprite.png`),
+          ]);
 
-          if (!contentResponse.ok) {
-            throw new Error(`Failed to download video: ${contentResponse.status}`);
+          if (!outputUrl) {
+            throw new Error("Failed to download/upload video");
           }
 
-          const videoBuffer = await contentResponse.arrayBuffer();
-          const videoBytes = new Uint8Array(videoBuffer);
-
-          // Upload to Supabase Storage
-          const fileName = `${job.script_run_id}/${job.id}.mp4`;
-          const { error: uploadError } = await supabase.storage
-            .from("videos")
-            .upload(fileName, videoBytes, {
-              contentType: "video/mp4",
-              upsert: true,
-            });
-
-          if (uploadError) {
-            throw new Error(`Failed to upload video: ${uploadError.message}`);
-          }
-
-          // Get public URL
-          const { data: urlData } = supabase.storage
-            .from("videos")
-            .getPublicUrl(fileName);
-
-          const outputUrl = urlData.publicUrl;
-
-          // Update job as completed
+          // Update job as completed with all URLs
           await supabase
             .from("video_jobs")
             .update({ 
               status: "done", 
               progress: 100,
               output_url: outputUrl,
+              thumbnail_url: thumbnailUrl,
+              spritesheet_url: spritesheetUrl,
             })
             .eq("id", job.id);
 
-          console.log(`Job ${job.id} completed! Video URL: ${outputUrl}`);
+          console.log(`Job ${job.id} completed! Video: ${outputUrl}, Thumbnail: ${thumbnailUrl}`);
           results.push({ id: job.id, status: "done" });
         } else {
           // Still processing
