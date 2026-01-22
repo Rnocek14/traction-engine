@@ -130,6 +130,9 @@ async function generateWithOpenAI(
   userPrompt: string,
   apiKey: string
 ): Promise<ScriptContent> {
+  // Use stable model name - gpt-4o is the current recommended model
+  const model = "gpt-4o";
+  
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -137,7 +140,7 @@ async function generateWithOpenAI(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "gpt-4-turbo-preview",
+      model,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
@@ -160,24 +163,63 @@ async function generateWithOpenAI(
     throw new Error("No content returned from OpenAI");
   }
 
-  const parsed = JSON.parse(content);
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(content);
+  } catch (e) {
+    throw new Error(`Failed to parse OpenAI response as JSON: ${e}`);
+  }
   
-  // Validate required fields
-  if (!parsed.hook || !parsed.voiceover || !parsed.cta) {
-    throw new Error("Missing required fields in generated script");
+  // Validate required fields with detailed errors
+  const requiredFields = ['hook', 'voiceover', 'cta'];
+  const missingFields = requiredFields.filter(f => !parsed[f]);
+  if (missingFields.length > 0) {
+    throw new Error(`Missing required fields in generated script: ${missingFields.join(', ')}`);
+  }
+  
+  // Validate types
+  if (typeof parsed.hook !== 'string' || parsed.hook.length < 10) {
+    throw new Error('Hook must be a string with at least 10 characters');
+  }
+  if (typeof parsed.voiceover !== 'string' || parsed.voiceover.length < 50) {
+    throw new Error('Voiceover must be a string with at least 50 characters');
+  }
+  if (typeof parsed.cta !== 'string') {
+    throw new Error('CTA must be a string');
   }
 
-  // Ensure arrays exist
+  // Validate arrays with type safety
+  const on_screen_text = Array.isArray(parsed.on_screen_text) 
+    ? parsed.on_screen_text.filter((item): item is { timestamp: number; text: string } => 
+        typeof item === 'object' && 
+        item !== null &&
+        typeof (item as Record<string, unknown>).timestamp === 'number' && 
+        typeof (item as Record<string, unknown>).text === 'string'
+      )
+    : [];
+    
+  const scene_prompts = Array.isArray(parsed.scene_prompts) 
+    ? parsed.scene_prompts.filter((s): s is string => typeof s === 'string')
+    : [];
+    
+  const broll_keywords = Array.isArray(parsed.broll_keywords)
+    ? parsed.broll_keywords.filter((s): s is string => typeof s === 'string')
+    : [];
+    
+  const hashtags = Array.isArray(parsed.hashtags)
+    ? parsed.hashtags.filter((s): s is string => typeof s === 'string')
+    : [];
+
   return {
-    hook: parsed.hook,
-    voiceover: parsed.voiceover,
-    on_screen_text: parsed.on_screen_text || [],
-    scene_prompts: parsed.scene_prompts || [],
-    broll_keywords: parsed.broll_keywords || [],
-    caption: parsed.caption || "",
-    hashtags: parsed.hashtags || [],
-    cta: parsed.cta,
-    disclaimer: parsed.disclaimer || undefined,
+    hook: parsed.hook as string,
+    voiceover: parsed.voiceover as string,
+    on_screen_text,
+    scene_prompts,
+    broll_keywords,
+    caption: typeof parsed.caption === 'string' ? parsed.caption : "",
+    hashtags,
+    cta: parsed.cta as string,
+    disclaimer: typeof parsed.disclaimer === 'string' ? parsed.disclaimer : undefined,
   };
 }
 

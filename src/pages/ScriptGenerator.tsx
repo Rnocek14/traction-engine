@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,39 +20,65 @@ import {
   Loader2,
   ChevronDown,
   ChevronUp,
-  RefreshCw,
-  ArrowLeft,
   Sparkles,
   Zap,
+  ArrowLeft,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { 
-  generateScriptRun, 
-  generateBatch,
-  generateScriptRunWithAI,
-  generateBatchWithAI,
-  type GenerationResult 
-} from "@/lib/script-generator";
-import { ACCOUNT_CONFIGS, TOPIC_BANK } from "@/data/show-bible";
-import type { ScriptContent } from "@/types/script-types";
+  createScriptRun,
+  listAccountConfigs,
+  listAvailablePillars,
+  type DbAccountConfig,
+  type ScriptRunResult,
+} from "@/lib/script-runs";
+import type { ScriptContent, QAResult } from "@/types/script-types";
+
+// Local result type for UI display
+interface DisplayResult {
+  success: boolean;
+  scriptRun?: {
+    id: string;
+    account_id: string;
+    status: string;
+    script_content: ScriptContent;
+    hook_hash?: string | null;
+    voiceover_hash?: string | null;
+    scene_hash?: string | null;
+    safety_flags: string[];
+  };
+  qaResult?: QAResult;
+  error?: string;
+  warnings: string[];
+}
 
 export default function ScriptGenerator() {
+  const [accounts, setAccounts] = useState<DbAccountConfig[]>([]);
   const [selectedAccount, setSelectedAccount] = useState<string>("");
+  const [availablePillars, setAvailablePillars] = useState<string[]>([]);
   const [selectedPillar, setSelectedPillar] = useState<string>("");
-  const [results, setResults] = useState<GenerationResult[]>([]);
+  const [results, setResults] = useState<DisplayResult[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
-  const [useAI, setUseAI] = useState(true); // Default to AI mode
+  const [useAI, setUseAI] = useState(true);
 
-  // Get available pillars for selected account
-  const selectedConfig = ACCOUNT_CONFIGS.find(c => c.account_id === selectedAccount);
-  const availablePillars = selectedConfig
-    ? [...new Set(
-        TOPIC_BANK
-          .filter(t => t.vertical === selectedConfig.vertical)
-          .map(t => t.pillar)
-      )]
-    : [];
+  // Load accounts from DB on mount
+  useEffect(() => {
+    listAccountConfigs().then(setAccounts);
+  }, []);
+
+  // Load pillars when account changes
+  useEffect(() => {
+    if (selectedAccount) {
+      const account = accounts.find(a => a.account_id === selectedAccount);
+      if (account) {
+        listAvailablePillars(account.vertical).then(setAvailablePillars);
+      }
+    } else {
+      setAvailablePillars([]);
+    }
+    setSelectedPillar("");
+  }, [selectedAccount, accounts]);
 
   const handleGenerate = useCallback(async (count: number) => {
     if (!selectedAccount) return;
@@ -60,32 +86,37 @@ export default function ScriptGenerator() {
     setIsGenerating(true);
     
     try {
-      if (useAI) {
-        // Use OpenAI-powered generation
-        if (count === 1) {
-          const result = await generateScriptRunWithAI(selectedAccount, {
-            preferredPillar: selectedPillar || undefined,
-          });
-          setResults(prev => [result, ...prev]);
-        } else {
-          const batchResults = await generateBatchWithAI(selectedAccount, count, {
-            preferredPillar: selectedPillar || undefined,
-          });
-          setResults(prev => [...batchResults, ...prev]);
+      const mode = useAI ? 'ai' : 'template';
+      
+      for (let i = 0; i < count; i++) {
+        const result: ScriptRunResult = await createScriptRun({
+          accountId: selectedAccount,
+          preferredPillar: selectedPillar || undefined,
+          mode,
+        });
+        
+        // Map to display result
+        const displayResult: DisplayResult = {
+          success: result.success,
+          error: result.error,
+          warnings: result.warnings,
+        };
+        
+        if (result.scriptRun) {
+          displayResult.scriptRun = {
+            id: result.scriptRun.id,
+            account_id: result.scriptRun.account_id,
+            status: result.scriptRun.status,
+            script_content: result.scriptRun.script_content as unknown as ScriptContent,
+            hook_hash: result.scriptRun.hook_hash,
+            voiceover_hash: result.scriptRun.voiceover_hash,
+            scene_hash: result.scriptRun.scene_hash,
+            safety_flags: result.scriptRun.safety_flags,
+          };
+          displayResult.qaResult = result.scriptRun.qa_results as unknown as QAResult;
         }
-      } else {
-        // Use template-based generation (fast, no API)
-        if (count === 1) {
-          const result = generateScriptRun(selectedAccount, {
-            preferredPillar: selectedPillar || undefined,
-          });
-          setResults(prev => [result, ...prev]);
-        } else {
-          const batchResults = generateBatch(selectedAccount, count, {
-            preferredPillar: selectedPillar || undefined,
-          });
-          setResults(prev => [...batchResults, ...prev]);
-        }
+        
+        setResults(prev => [displayResult, ...prev]);
       }
     } catch (error) {
       console.error("Generation error:", error);
@@ -178,7 +209,7 @@ export default function ScriptGenerator() {
                     <SelectValue placeholder="Select account..." />
                   </SelectTrigger>
                   <SelectContent>
-                    {ACCOUNT_CONFIGS.map(config => (
+                    {accounts.map(config => (
                       <SelectItem key={config.account_id} value={config.account_id}>
                         <div className="flex items-center gap-2">
                           <Badge variant="outline" className="text-xs">
