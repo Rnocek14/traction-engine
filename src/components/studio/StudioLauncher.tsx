@@ -162,14 +162,14 @@ export function StudioLauncher({ onScriptCreated }: StudioLauncherProps) {
               <label className="text-sm font-medium">Content Pillar</label>
               <Select
                 value={selectedPillar}
-                onValueChange={setSelectedPillar}
+                onValueChange={(val) => setSelectedPillar(val === "__any__" ? "" : val)}
                 disabled={!selectedAccount}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Any pillar..." />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Any pillar</SelectItem>
+                  <SelectItem value="__any__">Any pillar</SelectItem>
                   {pillars.map((pillar) => (
                     <SelectItem key={pillar} value={pillar}>
                       {pillar}
