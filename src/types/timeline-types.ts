@@ -2,6 +2,11 @@
 // Timeline & Clip Types for DaVinci-style Editor
 // ============================================
 
+// Re-export transition types from beat-map
+export type { TransitionType, ClipTransition } from "./beat-map-types";
+import type { ClipTransition } from "./beat-map-types";
+export { DEFAULT_TRANSITION } from "./beat-map-types";
+
 /**
  * Clip types supported in the timeline
  */
@@ -90,6 +95,8 @@ export interface Clip {
   seed?: number;
   /** Generate as seamless loop for ambient clips */
   loop?: boolean;
+  /** Transition effect when entering this clip */
+  transition_in?: ClipTransition;
 }
 
 /**

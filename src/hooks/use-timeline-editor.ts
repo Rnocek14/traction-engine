@@ -619,6 +619,21 @@ export function useTimelineEditor({
     saveMutation,
   ]);
 
+  // ========== Beat Alignment ==========
+  
+  /**
+   * Align all clips to beat boundaries
+   * This replaces clip timings with beat-snapped versions
+   */
+  const alignClipsToBeats = useCallback(
+    (beatAlignedClips: Clip[]) => {
+      if (beatAlignedClips.length === 0) return;
+      pushToHistory(beatAlignedClips);
+      toast({ title: "Clips aligned to voice rhythm" });
+    },
+    [pushToHistory, toast]
+  );
+
   return {
     // Clips
     clips,
@@ -646,6 +661,7 @@ export function useTimelineEditor({
     updateClipPrompt,
     addClip,
     extendLastClip,
+    alignClipsToBeats,
 
     // History
     undo,
@@ -653,6 +669,7 @@ export function useTimelineEditor({
     canUndo,
     canRedo,
     historyLength: history.past.length,
+    pushToHistory,
 
     // Ripple mode
     rippleMode,
