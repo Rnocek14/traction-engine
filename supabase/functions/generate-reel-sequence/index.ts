@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { Image } from "https://deno.land/x/imagescript@1.2.15/mod.ts";
+import { decode as decodeJpeg } from "https://esm.sh/jpeg-js@0.4.4";
 import { buildCinematicPrompt, type StyleGuideData } from "../_shared/cinematic-prompts.ts";
 
 const corsHeaders = {
@@ -247,7 +248,36 @@ async function extractLastFrame(jobId: string, supabase: any, w: number, h: numb
     }
     
     const imgData = new Uint8Array(await imgResp.arrayBuffer());
-    let img = await Image.decode(imgData);
+    
+    // Detect image format by magic bytes
+    // JPEG: FF D8 FF | PNG: 89 50 4E 47
+    const isJpeg = imgData[0] === 0xFF && imgData[1] === 0xD8;
+    const isPng = imgData[0] === 0x89 && imgData[1] === 0x50;
+    
+    console.log(`Thumbnail format: ${isJpeg ? 'JPEG' : isPng ? 'PNG' : 'unknown'}`);
+    
+    let img: Image;
+    
+    if (isJpeg) {
+      // Use jpeg-js for JPEG decoding (imagescript doesn't handle all JPEG variants)
+      const jpegData = decodeJpeg(imgData, { useTArray: true, formatAsRGBA: true });
+      img = new Image(jpegData.width, jpegData.height);
+      // Copy RGBA data into imagescript Image
+      for (let y = 0; y < jpegData.height; y++) {
+        for (let x = 0; x < jpegData.width; x++) {
+          const idx = (y * jpegData.width + x) * 4;
+          const r = jpegData.data[idx];
+          const g = jpegData.data[idx + 1];
+          const b = jpegData.data[idx + 2];
+          const a = jpegData.data[idx + 3];
+          img.setPixelAt(x + 1, y + 1, Image.rgbaToColor(r, g, b, a));
+        }
+      }
+      console.log(`JPEG decoded: ${img.width}x${img.height}`);
+    } else {
+      // PNG or other formats - use imagescript
+      img = await Image.decode(imgData);
+    }
     
     console.log(`Thumbnail dimensions: ${img.width}x${img.height}`);
     
@@ -281,7 +311,27 @@ async function fetchReferenceImage(url: string, w: number, h: number): Promise<B
     }
     
     const imgData = new Uint8Array(await resp.arrayBuffer());
-    let img = await Image.decode(imgData);
+    
+    // Detect format and decode
+    const isJpeg = imgData[0] === 0xFF && imgData[1] === 0xD8;
+    let img: Image;
+    
+    if (isJpeg) {
+      const jpegData = decodeJpeg(imgData, { useTArray: true, formatAsRGBA: true });
+      img = new Image(jpegData.width, jpegData.height);
+      for (let y = 0; y < jpegData.height; y++) {
+        for (let x = 0; x < jpegData.width; x++) {
+          const idx = (y * jpegData.width + x) * 4;
+          img.setPixelAt(x + 1, y + 1, Image.rgbaToColor(
+            jpegData.data[idx], jpegData.data[idx + 1], 
+            jpegData.data[idx + 2], jpegData.data[idx + 3]
+          ));
+        }
+      }
+    } else {
+      img = await Image.decode(imgData);
+    }
+    
     
     // Resize to target dimensions
     if (img.width !== w || img.height !== h) {
