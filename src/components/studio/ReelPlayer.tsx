@@ -201,9 +201,14 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
   }, [currentClipIndex, totalClips, getPreloadRef, getActiveRef]);
 
   // Video ended handler - only triggers transition
+  // CRITICAL: Set isTransitioningRef IMMEDIATELY to guard against onPause race condition
   const handleVideoEnded = useCallback(() => {
-    if (userWantsPlayingRef.current && !isTransitioningRef.current) {
+    isTransitioningRef.current = true;
+    
+    if (userWantsPlayingRef.current) {
       transitionToNextClip();
+    } else {
+      isTransitioningRef.current = false;
     }
   }, [transitionToNextClip]);
 
@@ -212,18 +217,33 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
     const activeEl = activePlayer === "A" ? videoARef.current : videoBRef.current;
     if (!activeEl) return;
     setCurrentTime(calculateGlobalTime());
+    
+    // Pre-set transition flag when we're near the end of the clip
+    // This prevents onPause from killing playback during clip transitions
+    const timeRemaining = activeEl.duration - activeEl.currentTime;
+    if (timeRemaining < 0.3 && timeRemaining > 0 && userWantsPlayingRef.current && !isNaN(activeEl.duration)) {
+      isTransitioningRef.current = true;
+    }
   }, [calculateGlobalTime, activePlayer]);
 
   // Handle unexpected video pause - sync audio
   const handleVideoPause = useCallback(() => {
+    const activeEl = activePlayer === "A" ? videoARef.current : videoBRef.current;
+    
     // If user wanted playback but video paused unexpectedly (not during transition)
     if (userWantsPlayingRef.current && !isTransitioningRef.current) {
-      // Pause audio to stay in sync
+      // Check if this is a natural end-of-video pause (not unexpected)
+      if (activeEl && !isNaN(activeEl.duration) && activeEl.currentTime >= activeEl.duration - 0.1) {
+        // Video ended naturally - don't treat as unexpected pause
+        return;
+      }
+      
+      // Truly unexpected pause - sync audio
       audioRef.current?.pause();
       setIsPlaying(false);
       userWantsPlayingRef.current = false;
     }
-  }, []);
+  }, [activePlayer]);
 
   // Handle video ready to play - resume if user wants playback
   const handleVideoCanPlay = useCallback(() => {
