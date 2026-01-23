@@ -1,6 +1,6 @@
 # FFmpeg Microservice Implementation (Fly.io)
 
-Complete implementation guide for the FFmpeg assembly microservice that renders reels from clips + voiceover.
+Production-ready implementation for the FFmpeg assembly microservice that renders reels from clips + voiceover.
 
 ## API Contract
 
@@ -55,6 +55,8 @@ interface FFmpegServiceRequest {
 }
 ```
 
+**Idempotency:** If `idempotency_key` matches an existing job, returns current job status instead of starting a new render.
+
 ### `GET /jobs/:job_id`
 
 **Response:**
@@ -83,14 +85,138 @@ ffmpeg-service/
 ├── package.json
 ├── tsconfig.json
 └── src/
-    ├── server.ts      # Express routes
-    ├── jobs.ts        # In-memory job store
-    └── ffmpeg.ts      # Filtergraph builder + render runner
+    ├── server.ts      # Express routes + validation
+    ├── jobs.ts        # In-memory job store + idempotency
+    ├── ffmpeg.ts      # Filtergraph builder + render runner
+    └── validation.ts  # URL allowlist + input validation
 ```
 
 ---
 
 ## Core Implementation
+
+### `src/validation.ts`
+
+```typescript
+import type { FFmpegServiceRequest } from "./ffmpeg.js";
+
+// Allowed Supabase storage URL patterns
+// Update ALLOWED_HOSTS with your actual Supabase project ref
+const ALLOWED_HOSTS = [
+  /^https:\/\/[a-z0-9]+\.supabase\.co$/,
+  /^https:\/\/[a-z0-9]+\.supabase\.in$/,
+];
+
+const BLOCKED_PATTERNS = [
+  /^https?:\/\/localhost/i,
+  /^https?:\/\/127\./,
+  /^https?:\/\/0\./,
+  /^https?:\/\/10\./,
+  /^https?:\/\/172\.(1[6-9]|2[0-9]|3[01])\./,
+  /^https?:\/\/192\.168\./,
+  /^https?:\/\/\[::1\]/,
+  /^https?:\/\/\[fe80:/i,
+];
+
+/**
+ * Validate URL is from allowed Supabase storage domain
+ * Prevents SSRF attacks by blocking internal/private URLs
+ */
+export function validateUrl(url: string, context: string): { valid: boolean; error?: string } {
+  // Must be HTTPS
+  if (!url.startsWith("https://")) {
+    return { valid: false, error: `${context}: must use HTTPS` };
+  }
+
+  // Block private/internal IPs
+  for (const pattern of BLOCKED_PATTERNS) {
+    if (pattern.test(url)) {
+      return { valid: false, error: `${context}: blocked URL pattern` };
+    }
+  }
+
+  // Extract host
+  let host: string;
+  try {
+    const parsed = new URL(url);
+    host = `${parsed.protocol}//${parsed.host}`;
+  } catch {
+    return { valid: false, error: `${context}: invalid URL format` };
+  }
+
+  // Must match allowed Supabase hosts
+  const allowed = ALLOWED_HOSTS.some((pattern) => pattern.test(host));
+  if (!allowed) {
+    return { valid: false, error: `${context}: host not in allowlist` };
+  }
+
+  return { valid: true };
+}
+
+/**
+ * Validate complete render request
+ * Returns array of validation errors (empty = valid)
+ */
+export function validateRenderRequest(req: FFmpegServiceRequest): string[] {
+  const errors: string[] = [];
+
+  // Required fields
+  if (!req.job_id) errors.push("job_id is required");
+  if (!req.clips?.length || req.clips.length < 2) {
+    errors.push("need >= 2 clips");
+  }
+
+  // Per-clip validation
+  const minTrim = Math.min(...req.clips.map((c) => c.trim_seconds));
+
+  for (let i = 0; i < req.clips.length; i++) {
+    const clip = req.clips[i];
+
+    // URL validation (SSRF prevention)
+    const urlCheck = validateUrl(clip.url, `clips[${i}].url`);
+    if (!urlCheck.valid) errors.push(urlCheck.error!);
+
+    // Duration validation
+    if (clip.trim_seconds < 0.3) {
+      errors.push(`clips[${i}]: trim_seconds too short (${clip.trim_seconds}s, min 0.3s)`);
+    }
+
+    // Sanity check: trim should not exceed generated
+    if (clip.trim_seconds > clip.generated_seconds + 0.01) {
+      errors.push(
+        `clips[${i}]: trim_seconds (${clip.trim_seconds}) > generated_seconds (${clip.generated_seconds})`
+      );
+    }
+  }
+
+  // Voiceover URL validation
+  if (req.voiceover_url) {
+    const voCheck = validateUrl(req.voiceover_url, "voiceover_url");
+    if (!voCheck.valid) errors.push(voCheck.error!);
+  }
+
+  // Transition safety: duration must be < min(trim_seconds) - buffer
+  const maxSafeTransition = Math.max(0.05, minTrim - 0.1);
+  if (req.transition.duration > maxSafeTransition) {
+    errors.push(
+      `transition.duration (${req.transition.duration}s) too long for shortest clip ` +
+        `(${minTrim}s, max safe: ${maxSafeTransition.toFixed(2)}s)`
+    );
+  }
+
+  // Hard limits
+  if (req.clips.length > 50) {
+    errors.push(`too many clips (${req.clips.length}, max 50)`);
+  }
+
+  const totalDuration = req.clips.reduce((sum, c) => sum + c.trim_seconds, 0);
+  if (totalDuration > 180) {
+    errors.push(`total duration too long (${totalDuration.toFixed(1)}s, max 180s)`);
+  }
+
+  return errors;
+}
+```
 
 ### `src/jobs.ts`
 
@@ -111,12 +237,23 @@ export interface Job {
 
 const jobs = new Map<string, Job>();
 
+// Idempotency: map idempotency_key -> job_id
+const idempotencyIndex = new Map<string, string>();
+
 export function getJob(job_id: string): Job | undefined {
   return jobs.get(job_id);
 }
 
-export function upsertJob(job: Job): void {
+export function getJobByIdempotencyKey(key: string): Job | undefined {
+  const jobId = idempotencyIndex.get(key);
+  return jobId ? jobs.get(jobId) : undefined;
+}
+
+export function upsertJob(job: Job, idempotencyKey?: string): void {
   jobs.set(job.job_id, job);
+  if (idempotencyKey) {
+    idempotencyIndex.set(idempotencyKey, job.job_id);
+  }
 }
 
 export function setJobStatus(job_id: string, patch: Partial<Job>): void {
@@ -124,13 +261,26 @@ export function setJobStatus(job_id: string, patch: Partial<Job>): void {
   jobs.set(job_id, { ...cur, ...patch });
 }
 
-// Optional: TTL cleanup for old jobs (run on interval)
+// TTL cleanup: remove jobs older than maxAgeMs
 export function cleanupOldJobs(maxAgeMs: number = 3600000): void {
   const now = Date.now();
+  const keysToDelete: string[] = [];
+
   for (const [id, job] of jobs) {
     const completed = job.completed_at ? new Date(job.completed_at).getTime() : 0;
     if (completed && now - completed > maxAgeMs) {
-      jobs.delete(id);
+      keysToDelete.push(id);
+    }
+  }
+
+  for (const id of keysToDelete) {
+    jobs.delete(id);
+    // Also clean up idempotency index
+    for (const [key, jobId] of idempotencyIndex) {
+      if (jobId === id) {
+        idempotencyIndex.delete(key);
+        break;
+      }
     }
   }
 }
@@ -177,14 +327,37 @@ export interface FFmpegServiceRequest {
 }
 
 /**
+ * Probe if a media file has an audio stream
+ * Returns true if audio exists, false otherwise
+ */
+async function hasAudioStream(filePath: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const p = spawn("ffprobe", [
+      "-v", "error",
+      "-select_streams", "a:0",
+      "-show_entries", "stream=codec_type",
+      "-of", "csv=p=0",
+      filePath,
+    ]);
+
+    let stdout = "";
+    p.stdout.on("data", (d) => (stdout += d.toString()));
+    p.on("close", () => resolve(stdout.trim() === "audio"));
+  });
+}
+
+/**
  * Build FFmpeg filtergraph using trim_seconds for all offset math.
  * Includes:
  * - Per-clip video normalization (scale/pad/fps/trim)
  * - xfade transitions with correct offsets
- * - Audio bed from all clips with timeline placement
+ * - Audio bed from all clips with timeline placement (with silence fallback)
  * - Voiceover with optional sidechain ducking
  */
-export function buildFiltergraph(req: FFmpegServiceRequest) {
+export function buildFiltergraph(
+  req: FFmpegServiceRequest,
+  clipHasAudio: boolean[] // which clips have audio streams
+) {
   const { width, height, fps } = req.output;
   const t = req.transition.duration;
 
@@ -235,15 +408,28 @@ export function buildFiltergraph(req: FFmpegServiceRequest) {
   }
 
   // --- Audio: place each clip audio on timeline ---
+  // Handle clips without audio by synthesizing silence
   const audioLabels: string[] = [];
   for (let i = 0; i < req.clips.length; i++) {
     const startMs = Math.round(starts[i] * 1000);
-    filterParts.push(
-      `[${i}:a]aformat=sample_rates=48000:channel_layouts=stereo,` +
-        `atrim=0:${trims[i].toFixed(3)},asetpts=PTS-STARTPTS,` +
-        `adelay=${startMs}|${startMs}` +
-        `[a${i}]`
-    );
+    const trimDur = trims[i].toFixed(3);
+
+    if (clipHasAudio[i]) {
+      // Clip has audio - use it
+      filterParts.push(
+        `[${i}:a]aformat=sample_rates=48000:channel_layouts=stereo,` +
+          `atrim=0:${trimDur},asetpts=PTS-STARTPTS,` +
+          `adelay=${startMs}|${startMs}` +
+          `[a${i}]`
+      );
+    } else {
+      // Clip has no audio - synthesize silence
+      filterParts.push(
+        `anullsrc=r=48000:cl=stereo,atrim=0:${trimDur},` +
+          `adelay=${startMs}|${startMs}` +
+          `[a${i}]`
+      );
+    }
     audioLabels.push(`[a${i}]`);
   }
 
@@ -256,6 +442,7 @@ export function buildFiltergraph(req: FFmpegServiceRequest) {
   const totalDuration = trims.reduce((sum, d) => sum + d, 0) - (trims.length - 1) * t;
 
   // --- Voiceover handling ---
+  // Note: voiceover is the LAST input (index = clips.length)
   if (req.voiceover_url) {
     const voIndex = req.clips.length;
     filterParts.push(
@@ -294,7 +481,14 @@ async function download(url: string, outPath: string): Promise<void> {
 
 async function uploadToSupabase(mp4Path: string, req: FFmpegServiceRequest): Promise<string> {
   const file = await fs.readFile(mp4Path);
-  const url = `${req.upload.supabase_url}/storage/v1/object/${req.upload.bucket}/${req.upload.path}`;
+  
+  // URL-encode the path to handle special characters
+  const encodedPath = req.upload.path
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+  
+  const url = `${req.upload.supabase_url}/storage/v1/object/${req.upload.bucket}/${encodedPath}`;
 
   const resp = await fetch(url, {
     method: "PUT",
@@ -311,13 +505,27 @@ async function uploadToSupabase(mp4Path: string, req: FFmpegServiceRequest): Pro
     throw new Error(`Supabase upload failed: ${resp.status} ${text}`);
   }
 
-  return `${req.upload.supabase_url}/storage/v1/object/public/${req.upload.bucket}/${req.upload.path}`;
+  return `${req.upload.supabase_url}/storage/v1/object/public/${req.upload.bucket}/${encodedPath}`;
 }
 
-function parseFfmpegTimeToSeconds(line: string): number | null {
-  const m = line.match(/time=(\d+):(\d+):(\d+(?:\.\d+)?)/);
-  if (!m) return null;
-  return Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]);
+/**
+ * Parse ffmpeg progress from stderr
+ * Supports both time=HH:MM:SS.xx format and -progress out_time_ms
+ */
+function parseFfmpegProgress(chunk: string): number | null {
+  // Try time= format first (most common)
+  const timeMatch = chunk.match(/time=(\d+):(\d+):(\d+(?:\.\d+)?)/);
+  if (timeMatch) {
+    return Number(timeMatch[1]) * 3600 + Number(timeMatch[2]) * 60 + Number(timeMatch[3]);
+  }
+
+  // Try out_time_ms= format (from -progress)
+  const msMatch = chunk.match(/out_time_ms=(\d+)/);
+  if (msMatch) {
+    return Number(msMatch[1]) / 1_000_000;
+  }
+
+  return null;
 }
 
 // --- Main render job ---
@@ -338,6 +546,12 @@ export async function runRenderJob(req: FFmpegServiceRequest): Promise<void> {
       clipPaths.push(p);
     }
 
+    // Probe each clip for audio streams
+    const clipHasAudio: boolean[] = [];
+    for (const p of clipPaths) {
+      clipHasAudio.push(await hasAudioStream(p));
+    }
+
     // Download voiceover if present
     let voPath: string | null = null;
     if (req.voiceover_url) {
@@ -346,11 +560,15 @@ export async function runRenderJob(req: FFmpegServiceRequest): Promise<void> {
     }
 
     const outPath = `${tmpDir}/out.mp4`;
-    const { filter, duration: expectedDuration } = buildFiltergraph(req);
+    const { filter, duration: expectedDuration } = buildFiltergraph(req, clipHasAudio);
 
     // Build ffmpeg args
     const args: string[] = [];
+    
+    // Add clip inputs
     for (const p of clipPaths) args.push("-i", p);
+    
+    // Add voiceover input (must be last for filtergraph indexing)
     if (voPath) args.push("-i", voPath);
 
     args.push(
@@ -366,6 +584,7 @@ export async function runRenderJob(req: FFmpegServiceRequest): Promise<void> {
       "-b:a", req.output.audio_bitrate,
       "-ar", "48000",
       "-shortest",
+      "-loglevel", "info",  // Ensure progress is emitted
       outPath
     );
 
@@ -378,14 +597,11 @@ export async function runRenderJob(req: FFmpegServiceRequest): Promise<void> {
         const chunk = d.toString();
         stderr += chunk;
 
-        // Parse progress from time=HH:MM:SS.xx
-        const lines = chunk.split("\n");
-        for (const line of lines) {
-          const tSec = parseFfmpegTimeToSeconds(line);
-          if (tSec != null && expectedDuration > 0) {
-            const prog = Math.min(0.99, Math.max(0, tSec / expectedDuration));
-            setJobStatus(jobId, { progress: prog });
-          }
+        // Parse progress
+        const tSec = parseFfmpegProgress(chunk);
+        if (tSec != null && expectedDuration > 0) {
+          const prog = Math.min(0.99, Math.max(0, tSec / expectedDuration));
+          setJobStatus(jobId, { progress: prog });
         }
       });
 
@@ -423,8 +639,9 @@ export async function runRenderJob(req: FFmpegServiceRequest): Promise<void> {
 
 ```typescript
 import express from "express";
-import { getJob, upsertJob, cleanupOldJobs } from "./jobs.js";
+import { getJob, getJobByIdempotencyKey, upsertJob, cleanupOldJobs } from "./jobs.js";
 import { runRenderJob, type FFmpegServiceRequest } from "./ffmpeg.js";
+import { validateRenderRequest } from "./validation.js";
 
 const app = express();
 app.use(express.json({ limit: "50mb" }));
@@ -436,24 +653,34 @@ app.post("/render/reel", async (req, res) => {
   const body = req.body as FFmpegServiceRequest;
 
   try {
-    if (!body?.job_id) {
-      return res.status(400).json({ status: "failed", error: "job_id required" });
-    }
-    if (!body?.clips?.length || body.clips.length < 2) {
-      return res.status(400).json({ status: "failed", error: "need >=2 clips" });
-    }
-
-    // Validate trim_seconds
-    for (const clip of body.clips) {
-      if (clip.trim_seconds < 0.3) {
-        return res.status(400).json({
-          status: "failed",
-          error: `Clip trim_seconds too short: ${clip.trim_seconds}s (min 0.3s)`,
+    // Check idempotency first - return existing job if key matches
+    if (body.idempotency_key) {
+      const existingJob = getJobByIdempotencyKey(body.idempotency_key);
+      if (existingJob) {
+        console.log(`Idempotent request: returning existing job ${existingJob.job_id}`);
+        return res.status(202).json({
+          job_id: existingJob.job_id,
+          status: existingJob.status,
+          progress: existingJob.progress,
+          eta_seconds: existingJob.eta_seconds,
+          output_url: existingJob.output_url,
+          duration: existingJob.duration,
+          error: existingJob.error,
         });
       }
     }
 
-    upsertJob({ job_id: body.job_id, status: "queued" });
+    // Validate request (includes URL allowlist, duration checks, etc.)
+    const errors = validateRenderRequest(body);
+    if (errors.length > 0) {
+      return res.status(400).json({
+        status: "failed",
+        error: errors.join("; "),
+      });
+    }
+
+    // Create job with idempotency key
+    upsertJob({ job_id: body.job_id, status: "queued" }, body.idempotency_key);
 
     // Fire-and-forget async render
     runRenderJob(body).catch((err) => {
@@ -463,7 +690,7 @@ app.post("/render/reel", async (req, res) => {
     return res.status(202).json({
       job_id: body.job_id,
       status: "queued",
-      eta_seconds: Math.ceil(body.clips.length * 10 + 15), // rough estimate
+      eta_seconds: Math.ceil(body.clips.length * 10 + 15),
     });
   } catch (e: any) {
     return res.status(500).json({
@@ -492,9 +719,21 @@ app.listen(port, () => console.log(`ffmpeg-service listening on ${port}`));
 
 ---
 
-## Dockerfile
+## Dockerfile (Multi-stage)
 
 ```dockerfile
+# Stage 1: Build
+FROM node:20-slim AS builder
+
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+
+COPY tsconfig.json ./
+COPY src ./src
+RUN npm run build
+
+# Stage 2: Production
 FROM node:20-slim
 
 RUN apt-get update && apt-get install -y ffmpeg curl && rm -rf /var/lib/apt/lists/*
@@ -503,11 +742,59 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev
 
-COPY dist ./dist
+COPY --from=builder /app/dist ./dist
 
 ENV PORT=8080
 EXPOSE 8080
 CMD ["node", "dist/server.js"]
+```
+
+---
+
+## package.json
+
+```json
+{
+  "name": "ffmpeg-service",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch --loader ts-node/esm src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.14.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.4"
+  }
+}
+```
+
+---
+
+## tsconfig.json
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "declaration": true
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules"]
+}
 ```
 
 ---
@@ -540,7 +827,6 @@ primary_region = "ord"
 
 ```bash
 cd ffmpeg-service
-npm run build
 fly launch
 ```
 
@@ -552,9 +838,42 @@ https://your-ffmpeg-service.fly.dev
 
 ---
 
-## Security Notes
+## Security Checklist
 
-1. **Never log `supabase_service_key`** - it's passed per-request for upload only
-2. **Validate clip URLs** - ensure they match expected Supabase storage domain
-3. **Hard limits**: max 50 clips, max 180s total duration
-4. **TTL cleanup** - jobs are removed from memory after 1 hour
+- ✅ **Never log `supabase_service_key`** - passed per-request for upload only
+- ✅ **URL allowlist** - only accepts Supabase storage URLs, blocks localhost/private IPs
+- ✅ **Idempotency** - duplicate requests return existing job instead of re-rendering
+- ✅ **Input validation** - trim_seconds, transition safety, hard limits on clips/duration
+- ✅ **URL encoding** - upload paths are properly encoded for special characters
+- ✅ **Audio fallback** - clips without audio streams get synthesized silence
+- ✅ **TTL cleanup** - jobs removed from memory after 1 hour
+- ✅ **Hard limits** - max 50 clips, max 180s total duration
+
+---
+
+## Validation Rules
+
+| Field | Rule |
+|-------|------|
+| `clips.length` | >= 2, <= 50 |
+| `clips[i].trim_seconds` | >= 0.3s, <= generated_seconds |
+| `clips[i].url` | HTTPS, Supabase storage domain only |
+| `voiceover_url` | HTTPS, Supabase storage domain only |
+| `transition.duration` | < min(trim_seconds) - 0.1s |
+| Total duration | <= 180s |
+
+---
+
+## Alternative Progress Tracking
+
+If `time=` parsing is unreliable, use FFmpeg's `-progress` option:
+
+```typescript
+const args = [
+  ...existingArgs,
+  "-progress", "pipe:2",  // Send progress to stderr
+  outPath
+];
+```
+
+Then parse `out_time_ms=` from stderr (already supported in `parseFfmpegProgress`).
