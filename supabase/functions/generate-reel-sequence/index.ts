@@ -218,8 +218,9 @@ Deno.serve(async (req) => {
 });
 
 /**
- * Extract the last frame from a completed video job's spritesheet
- * Handles various spritesheet formats (horizontal strips, grids)
+ * Extract the last frame from a completed video job
+ * IMPORTANT: Use thumbnail preferentially - it's full resolution
+ * Spritesheets are often tiny preview thumbnails (154x100) that upscale poorly
  */
 async function extractLastFrame(jobId: string, supabase: any, w: number, h: number): Promise<Blob | null> {
   try {
@@ -229,98 +230,36 @@ async function extractLastFrame(jobId: string, supabase: any, w: number, h: numb
       .eq("id", jobId)
       .single();
     
-    const spritesheetUrl = job?.spritesheet_url;
+    // PREFER THUMBNAIL for frame chaining - it's much higher resolution than spritesheet
+    // Spritesheet frames are often tiny (154x100) while thumbnails are full-res (720x1280)
     const thumbnailUrl = job?.thumbnail_url;
     
-    if (!spritesheetUrl && !thumbnailUrl) {
-      console.warn(`No spritesheet or thumbnail for job ${jobId}`);
+    if (!thumbnailUrl) {
+      console.warn(`No thumbnail for job ${jobId}, cannot chain`);
       return null;
     }
 
-    let img: Image;
-    let usedThumbnail = false;
-    
-    if (spritesheetUrl) {
-      console.log(`Extracting last frame from spritesheet: ${spritesheetUrl}`);
-      const imgData = new Uint8Array(await (await fetch(spritesheetUrl)).arrayBuffer());
-      img = await Image.decode(imgData);
-      
-      console.log(`Spritesheet dimensions: ${img.width}x${img.height}`);
-      
-      // OpenAI spritesheets vary in format - detect based on aspect ratio
-      const aspectRatio = img.width / img.height;
-      
-      let cols: number;
-      let rows: number;
-      
-      if (aspectRatio > 10) {
-        // Very wide horizontal strip (likely 25 frames in single row for 9:16 videos)
-        // For a 720x1280 video, spritesheet would be ~18000x1280
-        cols = Math.round(img.width / (img.height * (9/16)));
-        cols = Math.max(1, Math.min(cols, 30));
-        rows = 1;
-      } else if (aspectRatio > 4) {
-        // Wide horizontal strip
-        cols = Math.round(img.width / (img.height * (16/9)));
-        cols = Math.max(1, Math.min(cols, 25));
-        rows = 1;
-      } else if (aspectRatio > 2) {
-        // Could be 5x1 or similar
-        cols = Math.round(aspectRatio * 2);
-        cols = Math.max(1, Math.min(cols, 10));
-        rows = 1;
-      } else if (aspectRatio < 0.5) {
-        // Tall vertical strip (unlikely but handle it)
-        cols = 1;
-        rows = Math.round(img.height / img.width);
-        rows = Math.max(1, Math.min(rows, 25));
-      } else {
-        // Square-ish grid (assume 5x5 = 25 frames)
-        cols = 5;
-        rows = 5;
-      }
-      
-      const frameWidth = Math.floor(img.width / cols);
-      const frameHeight = Math.floor(img.height / rows);
-      
-      console.log(`Detected ${cols}x${rows} grid, frame size: ${frameWidth}x${frameHeight}`);
-      
-      // Validate frame dimensions are reasonable (at least 50px in each dimension)
-      if (frameWidth < 50 || frameHeight < 50) {
-        console.warn(`Frame size too small: ${frameWidth}x${frameHeight}, using thumbnail instead`);
-        if (thumbnailUrl) {
-          const thumbData = new Uint8Array(await (await fetch(thumbnailUrl)).arrayBuffer());
-          img = await Image.decode(thumbData);
-          usedThumbnail = true;
-        } else {
-          return null;
-        }
-      } else {
-        // Extract last frame (bottom-right of grid)
-        const lastCol = cols - 1;
-        const lastRow = rows - 1;
-        img = img.clone().crop(lastCol * frameWidth, lastRow * frameHeight, frameWidth, frameHeight);
-        console.log(`Extracted frame from position (col=${lastCol}, row=${lastRow})`);
-      }
-    } else {
-      // Use thumbnail directly
-      console.log(`Using thumbnail as frame source: ${thumbnailUrl}`);
-      const thumbData = new Uint8Array(await (await fetch(thumbnailUrl!)).arrayBuffer());
-      img = await Image.decode(thumbData);
-      usedThumbnail = true;
+    console.log(`Extracting frame from thumbnail: ${thumbnailUrl}`);
+    const imgResp = await fetch(thumbnailUrl);
+    if (!imgResp.ok) {
+      console.error(`Failed to fetch thumbnail: ${imgResp.status}`);
+      return null;
     }
     
-    console.log(`Frame before resize: ${img.width}x${img.height}`);
+    const imgData = new Uint8Array(await imgResp.arrayBuffer());
+    let img = await Image.decode(imgData);
     
-    // Resize to target dimensions
+    console.log(`Thumbnail dimensions: ${img.width}x${img.height}`);
+    
+    // Resize to exact target dimensions (required by Sora API)
     if (img.width !== w || img.height !== h) {
-      console.log(`Resizing frame from ${img.width}x${img.height} to ${w}x${h}`);
+      console.log(`Resizing from ${img.width}x${img.height} to ${w}x${h}`);
       img = img.resize(w, h);
     }
     
-    // Encode as PNG for lossless quality in frame chaining
+    // Encode as high-quality PNG
     const pngBytes = await img.encode();
-    console.log(`Extracted frame: ${pngBytes.byteLength} bytes${usedThumbnail ? " (from thumbnail)" : ""}`);
+    console.log(`Frame ready: ${pngBytes.byteLength} bytes`);
     return new Blob([pngBytes.buffer as ArrayBuffer], { type: "image/png" });
     
   } catch (err) {
@@ -412,8 +351,12 @@ async function pollCompletion(videoId: string, jobId: string, supabase: any, api
       }
       
       if (status === "failed") { 
-        console.error(`Video ${videoId} failed`);
-        await supabase.from("video_jobs").update({ status: "failed" }).eq("id", jobId); 
+        const errorMessage = data.error?.message || data.failure_reason || "Video generation failed";
+        console.error(`Video ${videoId} failed: ${errorMessage}`);
+        await supabase.from("video_jobs").update({ 
+          status: "failed",
+          error: errorMessage 
+        }).eq("id", jobId); 
         return false; 
       }
       
