@@ -274,9 +274,6 @@ export function ClipTimeline({
   const hasSelection = selectedClipIds.size > 0;
   const safeDuration = Math.max(duration, 0.0001);
   const safeMasterDuration = Math.max(masterDuration, 0.0001);
-  
-  // Calculate video track width as percentage of master duration
-  const videoTrackWidthPercent = masterDuration > 0 ? (duration / masterDuration) * 100 : 100;
 
   return (
     <div className={cn("bg-[hsl(222_47%_5%)] rounded-lg border border-border/30 overflow-hidden", className)}>
@@ -454,14 +451,13 @@ export function ClipTimeline({
         <div className="flex">
           <TrackLabel label="V1" icon={<Film className="h-2.5 w-2.5" />} />
           <div className="flex-1 min-w-0 relative" style={{ minWidth: `${zoom * 100}%` }}>
-            {/* Video clips container - scaled to video duration within master timeline */}
+            {/* Video clips container - always 100% width, clips scale to master duration */}
             <div
               ref={timelineRef}
-              className="h-[72px] cursor-crosshair"
+              className="h-[72px] cursor-crosshair w-full"
               onMouseDown={handleMouseDown}
               onMouseMove={handleTimelineHover}
               onMouseLeave={() => setHoverPosition(null)}
-              style={{ width: `${videoTrackWidthPercent}%` }}
             >
               <DndContext
                 sensors={sensors}
@@ -795,20 +791,15 @@ function AudioWaveformDisplay({
     );
   }
 
-  // Calculate peak highlighting based on audio-relative position (not master timeline)
-  const audioProgress = duration > 0 ? Math.min(1, playheadPosition / duration) : 0;
+  // Calculate peak highlighting based on master timeline (same scale as video)
+  // This stretches/compresses the audio highlight to match video timeline
+  const audioProgress = masterDuration > 0 ? Math.min(1, playheadPosition / masterDuration) : 0;
   const playheadIndex = Math.floor(audioProgress * peaks.length);
   const isRealAudio = !!audioUrl && duration > 0;
-  
-  // Scale audio waveform width proportionally to master duration
-  const audioWidthPercent = masterDuration > 0 && duration > 0
-    ? (duration / masterDuration) * 100
-    : 100;
 
   return (
     <div 
-      className="h-10 flex items-center gap-px px-2 relative"
-      style={{ width: `${audioWidthPercent}%` }}
+      className="h-10 flex items-center gap-px px-2 relative w-full"
     >
       {isRealAudio && (
         <div className="absolute left-1 top-1/2 -translate-y-1/2 z-10">
