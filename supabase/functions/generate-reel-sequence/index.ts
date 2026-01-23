@@ -1,7 +1,17 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { Image } from "https://deno.land/x/imagescript@1.2.15/mod.ts";
 import { decode as decodeJpeg } from "https://esm.sh/jpeg-js@0.4.4";
+import decodeWebp, { init as initWebpDecode } from "https://esm.sh/@jsquash/webp@1.5.0/decode";
 import { buildCinematicPrompt, type StyleGuideData } from "../_shared/cinematic-prompts.ts";
+
+// WebP decoder initialization
+let webpInitialized = false;
+async function ensureWebpInit() {
+  if (!webpInitialized) {
+    await initWebpDecode();
+    webpInitialized = true;
+  }
+}
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -290,7 +300,7 @@ async function extractLastFrame(jobId: string, supabase: any, w: number, h: numb
 }
 
 /**
- * Decode an image from URL with format detection
+ * Decode an image from URL with format detection (JPEG, PNG, WebP)
  */
 async function decodeImage(url: string, w: number, h: number): Promise<Blob | null> {
   const imgResp = await fetch(url);
@@ -307,13 +317,30 @@ async function decodeImage(url: string, w: number, h: number): Promise<Blob | nu
   // Detect image format by magic bytes
   const isJpeg = imgData[0] === 0xFF && imgData[1] === 0xD8;
   const isPng = imgData[0] === 0x89 && imgData[1] === 0x50;
+  const isWebP = imgData[0] === 0x52 && imgData[1] === 0x49 && imgData[8] === 0x57 && imgData[9] === 0x45; // RIFF...WEBP
   
-  const format = isJpeg ? 'JPEG' : isPng ? 'PNG' : 'unknown';
+  const format = isJpeg ? 'JPEG' : isPng ? 'PNG' : isWebP ? 'WebP' : 'unknown';
   console.log(`Image format: ${format}`);
   
   let img: Image;
   
-  if (isJpeg) {
+  if (isWebP) {
+    // Use @jsquash/webp for WebP decoding
+    console.log(`Decoding WebP image...`);
+    await ensureWebpInit();
+    const decoded = await decodeWebp(imgData.buffer);
+    img = new Image(decoded.width, decoded.height);
+    for (let y = 0; y < decoded.height; y++) {
+      for (let x = 0; x < decoded.width; x++) {
+        const idx = (y * decoded.width + x) * 4;
+        img.setPixelAt(x + 1, y + 1, Image.rgbaToColor(
+          decoded.data[idx], decoded.data[idx + 1], 
+          decoded.data[idx + 2], decoded.data[idx + 3]
+        ));
+      }
+    }
+    console.log(`WebP decoded: ${img.width}x${img.height}`);
+  } else if (isJpeg) {
     // Use jpeg-js for JPEG decoding
     const jpegData = decodeJpeg(imgData, { useTArray: true, formatAsRGBA: true });
     img = new Image(jpegData.width, jpegData.height);
