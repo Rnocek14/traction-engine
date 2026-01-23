@@ -90,6 +90,11 @@ interface FFmpegServiceRequest {
 }
 ```
 
+> **Note on `cut` transition:**
+> - `transition.type: "cut"` uses FFmpeg `concat` filter (no crossfade overlap)
+> - `transition.duration: 0` is recommended; the value is ignored by the service
+> - Total duration = sum of all `trim_seconds` (no overlap subtraction)
+
 ### `GET /jobs/:job_id`
 
 **Response:**
@@ -966,3 +971,33 @@ const args = [
 ```
 
 Then parse `out_time_ms=` from stderr (already supported in `parseFfmpegProgress`).
+
+---
+
+## Troubleshooting
+
+### Preview/Build Fails After Docs-Only Changes
+
+If the preview or build pipeline fails after changes that only touched `docs/`:
+
+1. **Re-run the pipeline** — Use CI "re-run failed jobs" or equivalent
+2. **Hard refresh the preview** — `Cmd/Ctrl+Shift+R` if viewing a deployed preview
+3. **Verify the commit scope** — Confirm last commit only touched `docs/` and didn't modify lockfiles
+4. **Check CI logs** — Look for the first failure (often dependency fetch/network timeout), then re-run once
+
+### Common FFmpeg Errors
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `No such filter: xfade` | FFmpeg < 4.3 | Upgrade to FFmpeg 4.3+ |
+| `Stream specifier ':a' ... matches no streams` | Clip has no audio track | Service synthesizes silence via `anullsrc` |
+| `Output file is empty` | All clips failed to download | Check clip URLs are accessible |
+| `Discarding frame with timestamp ...` | Timestamp discontinuity | `setpts=PTS-STARTPTS` after trim |
+
+### Idempotency Cache Miss When Expected
+
+If the same inputs produce a new render instead of cache hit:
+
+1. Verify `idempotency_key` is computed the same way (clip order, trim values, transition settings)
+2. Check if any `trim_seconds` values changed (even by 0.001s)
+3. Confirm voiceover URL matches exactly (including query params if any)
