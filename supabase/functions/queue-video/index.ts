@@ -7,6 +7,8 @@ const corsHeaders = {
 
 interface VideoRequest {
   script_run_id: string;
+  clip_id?: string; // Optional: generate video for specific clip
+  prompt?: string; // Optional: override prompt
   settings: {
     size: string; // e.g., "720x1280"
     seconds: number; // 4, 8, or 12
@@ -32,7 +34,7 @@ Deno.serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     const body: VideoRequest = await req.json();
-    const { script_run_id, settings, starting_frame_url } = body;
+    const { script_run_id, clip_id, prompt: overridePrompt, settings, starting_frame_url } = body;
 
     if (!script_run_id) {
       throw new Error("script_run_id is required");
@@ -69,14 +71,41 @@ Deno.serve(async (req) => {
       throw new Error("Script must pass QA before video generation");
     }
 
-    // Build the video prompt from script content
+    // Build the video prompt
     const content = script.script_content as Record<string, unknown>;
-    const hook = (content?.hook as string) || "";
-    const voiceover = (content?.voiceover as string) || "";
-    const scenePrompts = (content?.scene_prompts as string[]) || [];
+    let videoPrompt: string;
 
-    // Combine into a cinematic prompt
-    const videoPrompt = `
+    if (overridePrompt) {
+      // Use the override prompt directly (for clip-specific generation)
+      videoPrompt = overridePrompt;
+    } else if (clip_id) {
+      // Try to find clip in timeline and use its prompt
+      const { data: timeline } = await supabase
+        .from("studio_timelines")
+        .select("timeline_json")
+        .eq("script_run_id", script_run_id)
+        .order("version", { ascending: false })
+        .limit(1)
+        .single();
+
+      if (timeline?.timeline_json) {
+        const timelineData = timeline.timeline_json as { clips?: Array<{ id: string; prompt?: string }> };
+        const clip = timelineData.clips?.find(c => c.id === clip_id);
+        if (clip?.prompt) {
+          videoPrompt = clip.prompt;
+        } else {
+          throw new Error("Clip not found or has no prompt");
+        }
+      } else {
+        throw new Error("Timeline not found");
+      }
+    } else {
+      // Build combined prompt from script content (legacy full-script mode)
+      const hook = (content?.hook as string) || "";
+      const voiceover = (content?.voiceover as string) || "";
+      const scenePrompts = (content?.scene_prompts as string[]) || [];
+
+      videoPrompt = `
 Create a cinematic short-form video for social media.
 
 HOOK TEXT (opening): "${hook}"
@@ -87,7 +116,8 @@ VISUAL SCENES:
 ${scenePrompts.map((p, i) => `Scene ${i + 1}: ${p}`).join("\n")}
 
 Style: Professional, engaging, suitable for TikTok/Reels. Smooth transitions between scenes.
-    `.trim();
+      `.trim();
+    }
 
     // Create the video job in database first
     const { data: job, error: jobError } = await supabase
@@ -96,7 +126,13 @@ Style: Professional, engaging, suitable for TikTok/Reels. Smooth transitions bet
         script_run_id,
         status: "queued",
         provider: "sora",
-        settings: { size, seconds, model },
+        settings: { 
+          size, 
+          seconds, 
+          model,
+          clip_id: clip_id || null,
+          prompt: videoPrompt.slice(0, 500), // Store truncated prompt for reference
+        },
         progress: 0,
         openai_status: "pending",
       })
@@ -176,7 +212,7 @@ Style: Professional, engaging, suitable for TikTok/Reels. Smooth transitions bet
       })
       .eq("id", job.id);
 
-    console.log(`Created OpenAI video job: ${openaiVideoId} (status: ${openaiStatus}) for job: ${job.id}`);
+    console.log(`Created OpenAI video job: ${openaiVideoId} (status: ${openaiStatus}) for job: ${job.id}${clip_id ? ` clip: ${clip_id}` : ""}`);
 
     return new Response(
       JSON.stringify({
@@ -186,6 +222,7 @@ Style: Professional, engaging, suitable for TikTok/Reels. Smooth transitions bet
           status: "running",
           openai_video_id: openaiVideoId,
           openai_status: openaiStatus,
+          clip_id: clip_id || null,
         },
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }

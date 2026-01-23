@@ -210,7 +210,7 @@ export function StudioLayout({
                     scriptId={script.id}
                     onClipUpdated={() => {}}
                   />
-                  <ActionDock script={script} />
+                  <ActionDock script={script} clips={timeline.clips} />
                 </div>
               </div>
             </ResizablePanel>
