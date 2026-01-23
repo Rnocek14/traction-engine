@@ -576,7 +576,12 @@ export type Database = {
           script_content: Json
           status: Database["public"]["Enums"]["script_status"]
           topic_id: string | null
+          voiceover_audio_format: string | null
+          voiceover_audio_url: string | null
+          voiceover_generated_at: string | null
           voiceover_hash: string | null
+          voiceover_instructions: string | null
+          voiceover_voice: string | null
         }
         Insert: {
           account_id: string
@@ -600,7 +605,12 @@ export type Database = {
           script_content?: Json
           status?: Database["public"]["Enums"]["script_status"]
           topic_id?: string | null
+          voiceover_audio_format?: string | null
+          voiceover_audio_url?: string | null
+          voiceover_generated_at?: string | null
           voiceover_hash?: string | null
+          voiceover_instructions?: string | null
+          voiceover_voice?: string | null
         }
         Update: {
           account_id?: string
@@ -624,7 +634,12 @@ export type Database = {
           script_content?: Json
           status?: Database["public"]["Enums"]["script_status"]
           topic_id?: string | null
+          voiceover_audio_format?: string | null
+          voiceover_audio_url?: string | null
+          voiceover_generated_at?: string | null
           voiceover_hash?: string | null
+          voiceover_instructions?: string | null
+          voiceover_voice?: string | null
         }
         Relationships: [
           {

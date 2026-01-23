@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -14,17 +14,31 @@ export interface ScriptEdits {
   scene_prompts: string[];
 }
 
+interface HistoryState {
+  past: ScriptEdits[];
+  present: ScriptEdits;
+  future: ScriptEdits[];
+}
+
 interface UseStudioEditorOptions {
   script: ScriptRun;
+  historyLimit?: number;
+  debounceMs?: number;
 }
 
 /**
- * Centralized hook for managing script edits with dirty state tracking.
- * Handles inline editing, scene reordering, and persistence.
+ * Centralized hook for managing script edits with dirty state tracking,
+ * undo/redo history, and persistence.
  */
-export function useStudioEditor({ script }: UseStudioEditorOptions) {
+export function useStudioEditor({
+  script,
+  historyLimit = 50,
+  debounceMs = 500,
+}: UseStudioEditorOptions) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSnapshotRef = useRef<string>("");
 
   // Parse original content
   const originalContent = useMemo(() => {
@@ -38,13 +52,24 @@ export function useStudioEditor({ script }: UseStudioEditorOptions) {
     };
   }, [script.script_content]);
 
-  // Local editable state
-  const [edits, setEdits] = useState<ScriptEdits>(originalContent);
+  // History state
+  const [history, setHistory] = useState<HistoryState>({
+    past: [],
+    present: originalContent,
+    future: [],
+  });
 
-  // Reset edits when script changes
+  // Reset history when script changes
   useEffect(() => {
-    setEdits(originalContent);
+    setHistory({
+      past: [],
+      present: originalContent,
+      future: [],
+    });
+    lastSnapshotRef.current = JSON.stringify(originalContent);
   }, [originalContent]);
+
+  const edits = history.present;
 
   // Check if there are unsaved changes
   const isDirty = useMemo(() => {
@@ -66,28 +91,183 @@ export function useStudioEditor({ script }: UseStudioEditorOptions) {
     scene_prompts: JSON.stringify(edits.scene_prompts) !== JSON.stringify(originalContent.scene_prompts),
   }), [edits, originalContent]);
 
-  // Update individual fields
+  // Push to history (for immediate changes like reorder)
+  const pushToHistory = useCallback((newPresent: ScriptEdits) => {
+    setHistory((prev) => {
+      // Don't push if nothing changed
+      if (JSON.stringify(prev.present) === JSON.stringify(newPresent)) {
+        return prev;
+      }
+
+      const newPast = [...prev.past, prev.present].slice(-historyLimit);
+      return {
+        past: newPast,
+        present: newPresent,
+        future: [], // Clear future on new action
+      };
+    });
+    lastSnapshotRef.current = JSON.stringify(newPresent);
+  }, [historyLimit]);
+
+  // Debounced snapshot for typing
+  const scheduleSnapshot = useCallback(() => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+
+    debounceTimerRef.current = setTimeout(() => {
+      setHistory((prev) => {
+        const currentSnapshot = JSON.stringify(prev.present);
+        if (currentSnapshot === lastSnapshotRef.current) {
+          return prev;
+        }
+
+        lastSnapshotRef.current = currentSnapshot;
+        const newPast = [...prev.past, prev.present].slice(-historyLimit);
+        
+        // Actually we want to update past with the snapshot BEFORE current edits
+        // This is already happening via the last committed present
+        return prev;
+      });
+    }, debounceMs);
+  }, [debounceMs, historyLimit]);
+
+  // Update without pushing to history (for live typing)
+  const updateWithoutHistory = useCallback((newPresent: ScriptEdits) => {
+    setHistory((prev) => ({
+      ...prev,
+      present: newPresent,
+      future: [], // Clear future on any edit
+    }));
+  }, []);
+
+  // Update individual fields (debounced history for typing)
   const updateField = useCallback(<K extends keyof ScriptEdits>(
     field: K,
     value: ScriptEdits[K]
   ) => {
-    setEdits((prev) => ({ ...prev, [field]: value }));
-  }, []);
+    setHistory((prev) => {
+      const newPresent = { ...prev.present, [field]: value };
+      const currentSnapshot = JSON.stringify(prev.present);
+      
+      // If this is the first change since last snapshot, save it first
+      if (currentSnapshot !== lastSnapshotRef.current && prev.past.length === 0) {
+        // Initial snapshot before any edits
+        return {
+          past: [prev.present],
+          present: newPresent,
+          future: [],
+        };
+      }
 
-  // Reorder scenes
+      // Check if we should push a snapshot (debounced)
+      if (currentSnapshot !== lastSnapshotRef.current) {
+        // Time-based snapshotting handled separately
+      }
+
+      return {
+        ...prev,
+        present: newPresent,
+        future: [],
+      };
+    });
+
+    // Schedule a snapshot after typing stops
+    scheduleSnapshot();
+  }, [scheduleSnapshot]);
+
+  // Commit current state to history (e.g., on blur or explicit action)
+  const commitToHistory = useCallback(() => {
+    setHistory((prev) => {
+      const currentSnapshot = JSON.stringify(prev.present);
+      if (currentSnapshot === lastSnapshotRef.current) {
+        return prev;
+      }
+
+      lastSnapshotRef.current = currentSnapshot;
+      const lastPast = prev.past[prev.past.length - 1];
+      
+      // Don't push if same as last history entry
+      if (lastPast && JSON.stringify(lastPast) === currentSnapshot) {
+        return prev;
+      }
+
+      return {
+        past: [...prev.past, prev.present].slice(-historyLimit),
+        present: prev.present,
+        future: [],
+      };
+    });
+  }, [historyLimit]);
+
+  // Reorder scenes (immediate history push)
   const reorderScenes = useCallback((fromIndex: number, toIndex: number) => {
-    setEdits((prev) => {
-      const newScenes = [...prev.scene_prompts];
+    setHistory((prev) => {
+      const newScenes = [...prev.present.scene_prompts];
       const [removed] = newScenes.splice(fromIndex, 1);
       newScenes.splice(toIndex, 0, removed);
-      return { ...prev, scene_prompts: newScenes };
+      
+      const newPresent = { ...prev.present, scene_prompts: newScenes };
+      const newPast = [...prev.past, prev.present].slice(-historyLimit);
+      
+      lastSnapshotRef.current = JSON.stringify(newPresent);
+      
+      return {
+        past: newPast,
+        present: newPresent,
+        future: [],
+      };
     });
-  }, []);
+  }, [historyLimit]);
+
+  // Undo
+  const undo = useCallback(() => {
+    setHistory((prev) => {
+      if (prev.past.length === 0) return prev;
+
+      const newPast = [...prev.past];
+      const previousState = newPast.pop()!;
+      
+      lastSnapshotRef.current = JSON.stringify(previousState);
+
+      return {
+        past: newPast,
+        present: previousState,
+        future: [prev.present, ...prev.future].slice(0, historyLimit),
+      };
+    });
+  }, [historyLimit]);
+
+  // Redo
+  const redo = useCallback(() => {
+    setHistory((prev) => {
+      if (prev.future.length === 0) return prev;
+
+      const newFuture = [...prev.future];
+      const nextState = newFuture.shift()!;
+      
+      lastSnapshotRef.current = JSON.stringify(nextState);
+
+      return {
+        past: [...prev.past, prev.present].slice(-historyLimit),
+        present: nextState,
+        future: newFuture,
+      };
+    });
+  }, [historyLimit]);
 
   // Reset to original
   const resetEdits = useCallback(() => {
-    setEdits(originalContent);
-  }, [originalContent]);
+    pushToHistory(originalContent);
+    setHistory((prev) => ({
+      ...prev,
+      present: originalContent,
+    }));
+  }, [originalContent, pushToHistory]);
+
+  // Can undo/redo
+  const canUndo = history.past.length > 0;
+  const canRedo = history.future.length > 0;
 
   // Save mutation
   const saveMutation = useMutation({
@@ -145,20 +325,61 @@ export function useStudioEditor({ script }: UseStudioEditorOptions) {
     },
   });
 
-  // Keyboard save handler
+  // Keyboard shortcuts for save, undo, redo
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore if in input/textarea (unless it's a global shortcut)
+      const isTextInput = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
+      
+      // Save: Cmd/Ctrl+S (works everywhere)
       if ((e.metaKey || e.ctrlKey) && e.key === "s") {
         e.preventDefault();
         if (isDirty && !saveMutation.isPending) {
           saveMutation.mutate();
         }
+        return;
+      }
+
+      // Undo: Cmd/Ctrl+Z
+      if ((e.metaKey || e.ctrlKey) && e.key === "z" && !e.shiftKey) {
+        // Allow native undo in text inputs if no history
+        if (isTextInput && !canUndo) return;
+        
+        e.preventDefault();
+        undo();
+        return;
+      }
+
+      // Redo: Cmd/Ctrl+Shift+Z or Ctrl+Y
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "z") {
+        if (isTextInput && !canRedo) return;
+        
+        e.preventDefault();
+        redo();
+        return;
+      }
+
+      if (e.ctrlKey && e.key === "y") {
+        if (isTextInput && !canRedo) return;
+        
+        e.preventDefault();
+        redo();
+        return;
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isDirty, saveMutation]);
+  }, [isDirty, saveMutation, canUndo, canRedo, undo, redo]);
+
+  // Cleanup debounce timer
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, []);
 
   return {
     edits,
@@ -170,5 +391,13 @@ export function useStudioEditor({ script }: UseStudioEditorOptions) {
     resetEdits,
     save: () => saveMutation.mutate(),
     isSaving: saveMutation.isPending,
+    // Undo/Redo
+    undo,
+    redo,
+    canUndo,
+    canRedo,
+    historyLength: history.past.length,
+    futureLength: history.future.length,
+    commitToHistory,
   };
 }

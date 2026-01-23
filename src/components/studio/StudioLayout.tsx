@@ -169,6 +169,10 @@ export function StudioLayout({
                 onUpdateField={editor.updateField}
                 onSave={editor.save}
                 onReset={editor.resetEdits}
+                onUndo={editor.undo}
+                onRedo={editor.redo}
+                canUndo={editor.canUndo}
+                canRedo={editor.canRedo}
                 selectedVideoJobId={selectedVideoJobId}
                 onSelectVideoJob={setSelectedVideoJobId}
                 onPreviewVideo={setPreviewVideoUrl}
@@ -189,6 +193,7 @@ export function StudioLayout({
                 scrubPosition={scrubPosition}
                 onScrubPositionChange={handleScrubPositionChange}
                 voiceover={editor.edits.voiceover}
+                audioUrl={(script as unknown as { voiceover_audio_url?: string }).voiceover_audio_url}
               />
             </div>
 
