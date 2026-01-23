@@ -119,11 +119,6 @@ Deno.serve(async (req) => {
       form.set("model", model);
       form.set("size", size);
       form.set("seconds", String(settings.seconds));
-      
-      // Add seed for reproducibility
-      if (settings.seed) {
-        form.set("seed", String(settings.seed));
-      }
 
       // Add image reference for frame chaining (Sora uses "image" parameter)
       if (prevJobId) {
