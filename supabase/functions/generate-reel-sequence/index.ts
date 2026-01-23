@@ -249,12 +249,18 @@ async function extractLastFrame(jobId: string, supabase: any, w: number, h: numb
     
     const imgData = new Uint8Array(await imgResp.arrayBuffer());
     
+    // Log first bytes to debug format detection
+    const magicBytes = Array.from(imgData.slice(0, 12)).map(b => b.toString(16).padStart(2, '0')).join(' ');
+    console.log(`Thumbnail magic bytes: ${magicBytes}`);
+    
     // Detect image format by magic bytes
-    // JPEG: FF D8 FF | PNG: 89 50 4E 47
+    // JPEG: FF D8 FF | PNG: 89 50 4E 47 | WebP: 52 49 46 46 ... 57 45 42 50
     const isJpeg = imgData[0] === 0xFF && imgData[1] === 0xD8;
     const isPng = imgData[0] === 0x89 && imgData[1] === 0x50;
+    const isWebP = imgData[0] === 0x52 && imgData[1] === 0x49 && imgData[2] === 0x46 && imgData[3] === 0x46;
     
-    console.log(`Thumbnail format: ${isJpeg ? 'JPEG' : isPng ? 'PNG' : 'unknown'}`);
+    const format = isJpeg ? 'JPEG' : isPng ? 'PNG' : isWebP ? 'WebP' : 'unknown';
+    console.log(`Thumbnail format: ${format}`);
     
     let img: Image;
     
@@ -275,8 +281,10 @@ async function extractLastFrame(jobId: string, supabase: any, w: number, h: numb
       }
       console.log(`JPEG decoded: ${img.width}x${img.height}`);
     } else {
-      // PNG or other formats - use imagescript
+      // PNG, WebP, or other formats - imagescript can decode PNG and WebP
+      // If this fails, the catch block will handle it
       img = await Image.decode(imgData);
+      console.log(`Decoded via imagescript: ${img.width}x${img.height}`);
     }
     
     console.log(`Thumbnail dimensions: ${img.width}x${img.height}`);
