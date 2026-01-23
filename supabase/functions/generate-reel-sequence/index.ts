@@ -675,7 +675,7 @@ async function pollCompletion(videoId: string, jobId: string, supabase: any, api
         console.log(`Video ${videoId} completed`);
         
         // Trigger process-video to download and create spritesheet
-        await supabase.functions.invoke("process-video", { body: { job_ids: [jobId] } });
+        await supabase.functions.invoke("process-video", { body: { job_id: jobId } });
         
         // Wait for spritesheet to be generated (needed for frame chaining)
         for (let j = 0; j < 24; j++) { // 2 minutes

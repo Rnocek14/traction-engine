@@ -196,11 +196,11 @@ Deno.serve(async (req) => {
             throw new Error("Failed to download/upload video");
           }
 
-          // Update job as completed with all URLs - use canonical "succeeded" status
+          // Update job as completed with all URLs - use "done" to match DB constraint
           await supabase
             .from("video_jobs")
             .update({ 
-              status: "succeeded",  // Canonical status, not "done"
+              status: "done",  // Must match DB CHECK constraint
               progress: 100,
               output_url: outputUrl,
               thumbnail_url: thumbnailUrl,
@@ -209,7 +209,7 @@ Deno.serve(async (req) => {
             .eq("id", job.id);
 
           console.log(`Job ${job.id} completed! Video: ${outputUrl}, Thumbnail: ${thumbnailUrl}`);
-          results.push({ id: job.id, status: "succeeded" });
+          results.push({ id: job.id, status: "done" });
         } else {
           // Still processing
           results.push({ id: job.id, status: "running" });

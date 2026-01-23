@@ -198,8 +198,10 @@ Deno.serve(async (req) => {
 
         console.log(`Luma job ${lumaTaskId} state: ${lumaState} -> ${newStatus}`);
 
+        // Map internal status to DB-allowed status ("done" instead of "succeeded")
+        const dbStatus = newStatus === "succeeded" ? "done" : newStatus;
         const updates: Record<string, unknown> = {
-          status: newStatus,
+          status: dbStatus,
           openai_status: lumaState,
         };
 
@@ -227,7 +229,7 @@ Deno.serve(async (req) => {
 
           results.push({
             job_id: job.id,
-            status: "succeeded",  // Use canonical status
+            status: "done",  // Use DB-allowed status
             luma_state: lumaState,
             output_url: updates.output_url as string,
           });
