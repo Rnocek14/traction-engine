@@ -12,6 +12,7 @@ interface PreviewCanvasProps {
   currentSceneIndex: number;
   onSceneChange?: (index: number) => void;
   onScrubPositionChange?: (position: number) => void;
+  hoveredClipId?: string | null;
   className?: string;
 }
 
@@ -25,6 +26,7 @@ export function PreviewCanvas({
   currentSceneIndex,
   onSceneChange,
   onScrubPositionChange,
+  hoveredClipId,
   className,
 }: PreviewCanvasProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -209,7 +211,28 @@ export function PreviewCanvas({
         )}
       </div>
 
-      {/* Bottom controls bar */}
+      {/* Scene indicator overlay */}
+      {scenePrompts.length > 0 && (
+        <div className={cn(
+          "absolute top-3 left-3 right-3 flex items-start justify-between",
+          "transition-opacity duration-200",
+          showControls || !hasVideo ? "opacity-100" : "opacity-0"
+        )}>
+          {/* Scene badge */}
+          <div className="px-2 py-1 rounded bg-background/60 backdrop-blur-sm border border-border/30">
+            <span className="text-[10px] font-mono text-primary font-semibold">
+              SCENE {currentSceneIndex + 1}/{scenePrompts.length}
+            </span>
+          </div>
+          
+          {/* Current prompt preview */}
+          <div className="max-w-[60%] px-2 py-1 rounded bg-background/60 backdrop-blur-sm border border-border/30">
+            <p className="text-[10px] text-muted-foreground truncate">
+              {scenePrompts[currentSceneIndex] || "No prompt"}
+            </p>
+          </div>
+        </div>
+      )}
       <div
         className={cn(
           "absolute bottom-0 left-0 right-0 p-3",

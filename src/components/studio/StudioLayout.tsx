@@ -50,6 +50,7 @@ export function StudioLayout({
   const [isVersionRailCollapsed, setIsVersionRailCollapsed] = useState(false);
   const [selectedVideoJobId, setSelectedVideoJobId] = useState<string | null>(null);
   const [previewVideoUrl, setPreviewVideoUrl] = useState<string | null>(null);
+  const [hoveredClipId, setHoveredClipId] = useState<string | null>(null);
 
   // Centralized editor state (for script fields)
   const editor = useStudioEditor({ script });
@@ -138,6 +139,7 @@ export function StudioLayout({
                   if (clip) timeline.setPlayheadPosition(clip.start);
                 }}
                 onScrubPositionChange={(pos) => timeline.setPlayheadPosition(pos * timeline.duration)}
+                hoveredClipId={hoveredClipId}
                 className="h-full"
               />
             </ResizablePanel>
@@ -185,6 +187,7 @@ export function StudioLayout({
                 onDuplicate={timeline.duplicateSelected}
                 onToggleDisabled={timeline.toggleDisabled}
                 onAddClip={() => timeline.addClip("New scene prompt")}
+                onClipHover={setHoveredClipId}
               />
             </div>
 
