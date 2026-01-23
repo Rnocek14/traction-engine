@@ -17,3 +17,6 @@ verify_jwt = false
 
 [functions.generate-voiceover]
 verify_jwt = false
+
+[functions.generate-reel-sequence]
+verify_jwt = false
