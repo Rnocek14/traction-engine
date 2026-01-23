@@ -359,6 +359,17 @@ export function useTimelineEditor({
     [clips, pushToHistory]
   );
 
+  /** Update a clip's camera direction */
+  const updateClipCameraDirection = useCallback(
+    (clipId: string, camera_direction: string | undefined) => {
+      const newClips = clips.map((c) =>
+        c.id === clipId ? { ...c, camera_direction } : c
+      );
+      pushToHistory(newClips);
+    },
+    [clips, pushToHistory]
+  );
+
   /** Add a new clip at the end */
   const addClip = useCallback(
     (prompt: string, durationSeconds = defaultSceneDuration) => {
@@ -729,6 +740,7 @@ export function useTimelineEditor({
     replaceClipWithSegments,
     toggleDisabled,
     updateClipPrompt,
+    updateClipCameraDirection,
     addClip,
     extendLastClip,
     alignClipsToBeats,

@@ -29,6 +29,7 @@ import {
   Mic,
   Music,
   AlertTriangle,
+  Camera,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -39,6 +40,8 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useAudioWaveform } from "@/hooks/use-audio-waveform";
+import { ClipCameraSelector } from "./ClipCameraSelector";
+import { PromptQualityDot } from "./PromptQualityBadge";
 import type { Clip } from "@/types/timeline-types";
 import type { Beat } from "@/types/beat-map-types";
 
@@ -80,6 +83,8 @@ interface ClipTimelineProps {
   onAlignToBeats?: () => void;
   /** Whether beat alignment is available */
   hasBeatMap?: boolean;
+  /** Callback when clip camera direction changes */
+  onClipCameraChange?: (clipId: string, cameraDirection: string | undefined) => void;
   className?: string;
 }
 
@@ -111,6 +116,7 @@ export function ClipTimeline({
   beats = [],
   onAlignToBeats,
   hasBeatMap = false,
+  onClipCameraChange,
   className,
 }: ClipTimelineProps) {
   // Build lookup map for video job settings (for trim badge calculation)
@@ -545,6 +551,10 @@ export function ClipTimeline({
                               ? (e, edge) => handleTrimPointerDown(clip, edge, e)
                               : undefined
                             }
+                            onCameraChange={onClipCameraChange 
+                              ? (dir) => onClipCameraChange(clip.id, dir)
+                              : undefined
+                            }
                           />
                         );
                       })}
@@ -720,6 +730,7 @@ interface SortableClipProps {
   onClick: (multi: boolean) => void;
   onHover?: (hovering: boolean) => void;
   onTrimPointerDown?: (e: React.PointerEvent, edge: "left" | "right") => void;
+  onCameraChange?: (cameraDirection: string | undefined) => void;
 }
 
 function SortableClip({ 
@@ -732,6 +743,7 @@ function SortableClip({
   onClick, 
   onHover,
   onTrimPointerDown,
+  onCameraChange,
 }: SortableClipProps) {
   const {
     attributes,
@@ -836,6 +848,21 @@ function SortableClip({
         )}>
           {isVideo ? "V" : "A"}
         </span>
+        
+        {/* Camera direction indicator/selector */}
+        {isVideo && onCameraChange && (
+          <div 
+            className="ml-auto opacity-60 group-hover:opacity-100 transition-opacity"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <ClipCameraSelector
+              value={clip.camera_direction}
+              onChange={(val) => onCameraChange(val || undefined)}
+              compact
+            />
+          </div>
+        )}
+        
         <span className="text-[9px] font-mono text-muted-foreground/50 ml-auto">
           #{index + 1}
         </span>
@@ -843,12 +870,16 @@ function SortableClip({
 
       {/* Main content area */}
       <div className="flex-1 p-1.5 flex flex-col min-h-0">
-        <p className={cn(
-          "text-[11px] leading-tight line-clamp-2 flex-1",
-          isSelected ? "text-foreground" : "text-foreground/80"
-        )}>
-          {clip.prompt || "(empty)"}
-        </p>
+        <div className="flex items-start gap-1">
+          {/* Quality indicator */}
+          {clip.prompt && <PromptQualityDot prompt={clip.prompt} className="mt-0.5" />}
+          <p className={cn(
+            "text-[11px] leading-tight line-clamp-2 flex-1",
+            isSelected ? "text-foreground" : "text-foreground/80"
+          )}>
+            {clip.prompt || "(empty)"}
+          </p>
+        </div>
         
         {/* Footer with duration badge, warnings, and camera direction */}
         <div className="flex items-center justify-between mt-auto pt-1 gap-1">

@@ -61,12 +61,18 @@ export function StudioLayout({
   const [previewVideoUrl, setPreviewVideoUrl] = useState<string | null>(null);
   const [hoveredClipId, setHoveredClipId] = useState<string | null>(null);
   const [isPlayAllMode, setIsPlayAllMode] = useState(false);
+  const [activeInspectorTab, setActiveInspectorTab] = useState<string>("script");
 
   // Centralized editor state (for script fields)
   const editor = useStudioEditor({ script });
   
   // Timeline editor (for clips)
   const timeline = useTimelineEditor({ script });
+  
+  // Navigate to style guide tab
+  const navigateToStyleGuide = useCallback(() => {
+    setActiveInspectorTab("video");
+  }, []);
 
   // Get voiceover URL and text for beat map
   const voiceoverAudioUrl = (script as unknown as { voiceover_audio_url?: string }).voiceover_audio_url;
@@ -323,6 +329,7 @@ export function StudioLayout({
                     beats={cutEligibleBeats}
                     onAlignToBeats={handleAlignToBeats}
                     hasBeatMap={!!beatMap && !beatMapLoading}
+                    onClipCameraChange={timeline.updateClipCameraDirection}
                   />
                 </div>
 
@@ -338,7 +345,13 @@ export function StudioLayout({
                     clips={timeline.clips}
                     videoJobs={allVideoJobs}
                   />
-                  <ActionDock script={script} clips={timeline.clips} />
+                  <ActionDock 
+                    script={script} 
+                    clips={timeline.clips} 
+                    styleGuide={timeline.styleGuide}
+                    onNavigateToStyleGuide={navigateToStyleGuide}
+                    onSelectClip={(clipId) => timeline.selectClip(clipId)}
+                  />
                 </div>
               </div>
             </ResizablePanel>

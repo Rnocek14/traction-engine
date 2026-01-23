@@ -18,6 +18,7 @@ import {
   Download,
   ExternalLink,
   AlertTriangle,
+  Shield,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -49,8 +50,9 @@ import {
 import { useReelAssembly } from "@/hooks/use-reel-assembly";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
+import { QualityGate, analyzeQuality } from "./QualityGate";
 import type { Tables } from "@/integrations/supabase/types";
-import type { Clip } from "@/types/timeline-types";
+import type { Clip, StyleGuide } from "@/types/timeline-types";
 
 type ScriptRun = Tables<"script_runs">;
 
@@ -59,6 +61,9 @@ const ACTIVE_STATUSES = ["queued", "running", "rendering"];
 interface ActionDockProps {
   script: ScriptRun;
   clips?: Clip[];
+  styleGuide?: StyleGuide | null;
+  onNavigateToStyleGuide?: () => void;
+  onSelectClip?: (clipId: string) => void;
   className?: string;
 }
 
@@ -66,7 +71,7 @@ interface ActionDockProps {
  * Floating action dock for regeneration and video generation.
  * Compact design with expandable sections.
  */
-export function ActionDock({ script, clips = [], className }: ActionDockProps) {
+export function ActionDock({ script, clips = [], styleGuide, onNavigateToStyleGuide, onSelectClip, className }: ActionDockProps) {
   const navigate = useNavigate();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -84,10 +89,14 @@ export function ActionDock({ script, clips = [], className }: ActionDockProps) {
   const [qualityTier, setQualityTier] = useState<QualityTier>("standard");
   const [isChainedMode, setIsChainedMode] = useState(true); // Default to chained for best quality
   const [seed, setSeed] = useState<number | undefined>(); // Optional seed for reproducibility
+  const [isQualityOpen, setIsQualityOpen] = useState(true);
 
   const isHardBlock = hasHardBlocks(script);
   const isFailed = script.status === "qa_failed";
   const isPassed = script.status === "qa_passed";
+  
+  // Quality gate analysis
+  const qualityResult = analyzeQuality(clips, styleGuide);
 
   // Get current tier config
   const tierConfig = QUALITY_TIERS.find((t) => t.tier === qualityTier) || QUALITY_TIERS[1];
@@ -259,6 +268,43 @@ export function ActionDock({ script, clips = [], className }: ActionDockProps) {
             disabled={isAnyLoading}
             onClick={() => handleRegenerate("template_keep_topic")}
             subtle
+          />
+        </CollapsibleContent>
+      </Collapsible>
+
+      {/* Quality Gate Section */}
+      <Collapsible open={isQualityOpen} onOpenChange={setIsQualityOpen}>
+        <CollapsibleTrigger className="flex items-center justify-between w-full p-3 hover:bg-secondary/30 transition-colors border-t border-border/30">
+          <div className="flex items-center gap-2">
+            <Shield className="h-4 w-4 text-primary" />
+            <span className="text-xs font-medium">Quality Check</span>
+            <Badge 
+              variant="outline" 
+              className={cn(
+                "text-[10px] h-5 font-mono",
+                qualityResult.overallScore >= 80 
+                  ? "border-success text-success" 
+                  : qualityResult.overallScore >= 50
+                    ? "border-warning text-warning"
+                    : "border-destructive text-destructive"
+              )}
+            >
+              {qualityResult.overallScore}%
+            </Badge>
+          </div>
+          {isQualityOpen ? (
+            <ChevronUp className="h-4 w-4 text-muted-foreground" />
+          ) : (
+            <ChevronDown className="h-4 w-4 text-muted-foreground" />
+          )}
+        </CollapsibleTrigger>
+
+        <CollapsibleContent className="px-3 pb-3">
+          <QualityGate
+            clips={clips}
+            styleGuide={styleGuide}
+            onNavigateToStyleGuide={onNavigateToStyleGuide}
+            onSelectClip={onSelectClip}
           />
         </CollapsibleContent>
       </Collapsible>
