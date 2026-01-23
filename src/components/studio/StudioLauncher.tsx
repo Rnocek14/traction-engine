@@ -234,7 +234,7 @@ export function StudioLauncher({ onScriptCreated }: StudioLauncherProps) {
         </CardContent>
       </Card>
 
-      {/* Recent Scripts */}
+      {/* Recent Scripts - Grouped by Account */}
       <Card className="glass-card">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
@@ -252,42 +252,69 @@ export function StudioLauncher({ onScriptCreated }: StudioLauncherProps) {
               No scripts yet. Generate your first one above!
             </p>
           ) : (
-            <div className="space-y-2">
-              {recentScripts.map((script) => {
-                const content = script.script_content as Record<string, unknown> | null;
-                const reelName = content?.reel_name as string | undefined;
-                const hook = (content?.hook as string) || "No hook";
-                const displayTitle = reelName || hook;
+            <div className="space-y-6">
+              {(() => {
+                // Group scripts by account_id
+                const grouped = recentScripts.reduce((acc, script) => {
+                  const key = script.account_id;
+                  if (!acc[key]) acc[key] = [];
+                  acc[key].push(script);
+                  return acc;
+                }, {} as Record<string, ScriptRun[]>);
 
-                return (
-                  <button
-                    key={script.id}
-                    onClick={() => navigate(`/studio/${script.id}`)}
-                    className="w-full text-left p-3 rounded-lg bg-secondary/30 hover:bg-secondary/50 transition-colors"
-                  >
-                    <div className="flex items-start gap-3">
-                      {getStatusIcon(script.status)}
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{displayTitle}</p>
-                        {reelName && (
-                          <p className="text-xs text-muted-foreground truncate mt-0.5">{hook}</p>
-                        )}
-                        <div className="flex items-center gap-2 mt-1">
-                          <Badge variant="outline" className="text-[10px]">
-                            {script.account_id}
-                          </Badge>
-                          <span className="text-xs text-muted-foreground">
-                            {formatDistanceToNow(new Date(script.created_at), {
-                              addSuffix: true,
-                            })}
-                          </span>
-                        </div>
-                      </div>
-                      <Play className="h-4 w-4 text-muted-foreground" />
+                // Define display names for accounts
+                const accountLabels: Record<string, string> = {
+                  "stroke-recovery": "🧠 Stroke Recovery",
+                  "stroke_recovery_app": "🧠 Stroke Recovery (Legacy)",
+                  "footprint-finder": "🐾 Footprint Finder",
+                  "footprint_finder": "🐾 Footprint Finder (Legacy)",
+                  "lifepath": "🎯 LifePath",
+                  "hyperlocal-news": "📍 Hyperlocal News",
+                  "wellness-app": "💚 Wellness",
+                  "ai-creators": "🤖 AI Creators",
+                };
+
+                return Object.entries(grouped).map(([accountId, scripts]) => (
+                  <div key={accountId} className="space-y-2">
+                    <h3 className="text-sm font-semibold text-muted-foreground border-b border-border/50 pb-1">
+                      {accountLabels[accountId] || accountId}
+                      <span className="ml-2 text-xs font-normal">({scripts.length})</span>
+                    </h3>
+                    <div className="space-y-1.5">
+                      {scripts.map((script) => {
+                        const content = script.script_content as Record<string, unknown> | null;
+                        const reelName = content?.reel_name as string | undefined;
+                        const hook = (content?.hook as string) || "No hook";
+                        const displayTitle = reelName || hook;
+
+                        return (
+                          <button
+                            key={script.id}
+                            onClick={() => navigate(`/studio/${script.id}`)}
+                            className="w-full text-left p-2.5 rounded-lg bg-secondary/30 hover:bg-secondary/50 transition-colors"
+                          >
+                            <div className="flex items-start gap-3">
+                              {getStatusIcon(script.status)}
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium truncate">{displayTitle}</p>
+                                {reelName && (
+                                  <p className="text-xs text-muted-foreground truncate mt-0.5">{hook}</p>
+                                )}
+                                <span className="text-[10px] text-muted-foreground">
+                                  {formatDistanceToNow(new Date(script.created_at), {
+                                    addSuffix: true,
+                                  })}
+                                </span>
+                              </div>
+                              <Play className="h-4 w-4 text-muted-foreground shrink-0" />
+                            </div>
+                          </button>
+                        );
+                      })}
                     </div>
-                  </button>
-                );
-              })}
+                  </div>
+                ));
+              })()}
             </div>
           )}
         </CardContent>
