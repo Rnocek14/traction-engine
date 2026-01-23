@@ -231,80 +231,122 @@ async function extractLastFrame(jobId: string, supabase: any, w: number, h: numb
       .eq("id", jobId)
       .single();
     
-    // PREFER THUMBNAIL for frame chaining - it's much higher resolution than spritesheet
-    // Spritesheet frames are often tiny (154x100) while thumbnails are full-res (720x1280)
+    // Try thumbnail first (higher res), fall back to spritesheet (known PNG format)
     const thumbnailUrl = job?.thumbnail_url;
+    const spritesheetUrl = job?.spritesheet_url;
     
-    if (!thumbnailUrl) {
-      console.warn(`No thumbnail for job ${jobId}, cannot chain`);
+    if (!thumbnailUrl && !spritesheetUrl) {
+      console.warn(`No thumbnail or spritesheet for job ${jobId}, cannot chain`);
       return null;
     }
 
-    console.log(`Extracting frame from thumbnail: ${thumbnailUrl}`);
-    const imgResp = await fetch(thumbnailUrl);
-    if (!imgResp.ok) {
-      console.error(`Failed to fetch thumbnail: ${imgResp.status}`);
-      return null;
-    }
-    
-    const imgData = new Uint8Array(await imgResp.arrayBuffer());
-    
-    // Log first bytes to debug format detection
-    const magicBytes = Array.from(imgData.slice(0, 12)).map(b => b.toString(16).padStart(2, '0')).join(' ');
-    console.log(`Thumbnail magic bytes: ${magicBytes}`);
-    
-    // Detect image format by magic bytes
-    // JPEG: FF D8 FF | PNG: 89 50 4E 47 | WebP: 52 49 46 46 ... 57 45 42 50
-    const isJpeg = imgData[0] === 0xFF && imgData[1] === 0xD8;
-    const isPng = imgData[0] === 0x89 && imgData[1] === 0x50;
-    const isWebP = imgData[0] === 0x52 && imgData[1] === 0x49 && imgData[2] === 0x46 && imgData[3] === 0x46;
-    
-    const format = isJpeg ? 'JPEG' : isPng ? 'PNG' : isWebP ? 'WebP' : 'unknown';
-    console.log(`Thumbnail format: ${format}`);
-    
-    let img: Image;
-    
-    if (isJpeg) {
-      // Use jpeg-js for JPEG decoding (imagescript doesn't handle all JPEG variants)
-      const jpegData = decodeJpeg(imgData, { useTArray: true, formatAsRGBA: true });
-      img = new Image(jpegData.width, jpegData.height);
-      // Copy RGBA data into imagescript Image
-      for (let y = 0; y < jpegData.height; y++) {
-        for (let x = 0; x < jpegData.width; x++) {
-          const idx = (y * jpegData.width + x) * 4;
-          const r = jpegData.data[idx];
-          const g = jpegData.data[idx + 1];
-          const b = jpegData.data[idx + 2];
-          const a = jpegData.data[idx + 3];
-          img.setPixelAt(x + 1, y + 1, Image.rgbaToColor(r, g, b, a));
-        }
+    // First try thumbnail
+    if (thumbnailUrl) {
+      try {
+        console.log(`Trying thumbnail: ${thumbnailUrl}`);
+        const result = await decodeImage(thumbnailUrl, w, h);
+        if (result) return result;
+      } catch (err) {
+        console.warn(`Thumbnail decode failed, trying spritesheet: ${err}`);
       }
-      console.log(`JPEG decoded: ${img.width}x${img.height}`);
-    } else {
-      // PNG, WebP, or other formats - imagescript can decode PNG and WebP
-      // If this fails, the catch block will handle it
-      img = await Image.decode(imgData);
-      console.log(`Decoded via imagescript: ${img.width}x${img.height}`);
     }
     
-    console.log(`Thumbnail dimensions: ${img.width}x${img.height}`);
-    
-    // Resize to exact target dimensions (required by Sora API)
-    if (img.width !== w || img.height !== h) {
-      console.log(`Resizing from ${img.width}x${img.height} to ${w}x${h}`);
-      img = img.resize(w, h);
+    // Fallback to spritesheet (last frame of 5x5 grid)
+    if (spritesheetUrl) {
+      try {
+        console.log(`Trying spritesheet: ${spritesheetUrl}`);
+        const imgResp = await fetch(spritesheetUrl);
+        if (!imgResp.ok) {
+          console.error(`Failed to fetch spritesheet: ${imgResp.status}`);
+          return null;
+        }
+        
+        const imgData = new Uint8Array(await imgResp.arrayBuffer());
+        const sprite = await Image.decode(imgData);
+        
+        // Spritesheet is 5x5 grid, last frame is bottom-right
+        const frameW = Math.floor(sprite.width / 5);
+        const frameH = Math.floor(sprite.height / 5);
+        const lastFrame = sprite.crop(frameW * 4, frameH * 4, frameW, frameH);
+        
+        console.log(`Extracted last frame from spritesheet: ${frameW}x${frameH}`);
+        
+        // Resize to target
+        const resized = lastFrame.resize(w, h);
+        const pngBytes = await resized.encode();
+        console.log(`Spritesheet frame ready: ${pngBytes.byteLength} bytes`);
+        return new Blob([pngBytes.buffer as ArrayBuffer], { type: "image/png" });
+      } catch (err) {
+        console.error(`Spritesheet decode also failed: ${err}`);
+        return null;
+      }
     }
     
-    // Encode as high-quality PNG
-    const pngBytes = await img.encode();
-    console.log(`Frame ready: ${pngBytes.byteLength} bytes`);
-    return new Blob([pngBytes.buffer as ArrayBuffer], { type: "image/png" });
-    
+    return null;
   } catch (err) {
     console.error(`Failed to extract frame from job ${jobId}:`, err);
     return null;
   }
 }
+
+/**
+ * Decode an image from URL with format detection
+ */
+async function decodeImage(url: string, w: number, h: number): Promise<Blob | null> {
+  const imgResp = await fetch(url);
+  if (!imgResp.ok) {
+    throw new Error(`Failed to fetch: ${imgResp.status}`);
+  }
+  
+  const imgData = new Uint8Array(await imgResp.arrayBuffer());
+  
+  // Log first bytes to debug format detection
+  const magicBytes = Array.from(imgData.slice(0, 12)).map(b => b.toString(16).padStart(2, '0')).join(' ');
+  console.log(`Image magic bytes: ${magicBytes}`);
+  
+  // Detect image format by magic bytes
+  const isJpeg = imgData[0] === 0xFF && imgData[1] === 0xD8;
+  const isPng = imgData[0] === 0x89 && imgData[1] === 0x50;
+  
+  const format = isJpeg ? 'JPEG' : isPng ? 'PNG' : 'unknown';
+  console.log(`Image format: ${format}`);
+  
+  let img: Image;
+  
+  if (isJpeg) {
+    // Use jpeg-js for JPEG decoding
+    const jpegData = decodeJpeg(imgData, { useTArray: true, formatAsRGBA: true });
+    img = new Image(jpegData.width, jpegData.height);
+    for (let y = 0; y < jpegData.height; y++) {
+      for (let x = 0; x < jpegData.width; x++) {
+        const idx = (y * jpegData.width + x) * 4;
+        img.setPixelAt(x + 1, y + 1, Image.rgbaToColor(
+          jpegData.data[idx], jpegData.data[idx + 1], 
+          jpegData.data[idx + 2], jpegData.data[idx + 3]
+        ));
+      }
+    }
+    console.log(`JPEG decoded: ${img.width}x${img.height}`);
+  } else if (isPng) {
+    img = await Image.decode(imgData);
+    console.log(`PNG decoded: ${img.width}x${img.height}`);
+  } else {
+    // Unknown format - try imagescript anyway (might work for some formats)
+    img = await Image.decode(imgData);
+    console.log(`Decoded unknown format: ${img.width}x${img.height}`);
+  }
+  
+  // Resize to exact target dimensions
+  if (img.width !== w || img.height !== h) {
+    console.log(`Resizing from ${img.width}x${img.height} to ${w}x${h}`);
+    img = img.resize(w, h);
+  }
+  
+  const pngBytes = await img.encode();
+  console.log(`Frame ready: ${pngBytes.byteLength} bytes`);
+  return new Blob([pngBytes.buffer as ArrayBuffer], { type: "image/png" });
+}
+
 
 /**
  * Fetch and resize a reference image for first-clip anchoring
