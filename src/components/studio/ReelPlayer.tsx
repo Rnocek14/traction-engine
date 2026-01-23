@@ -526,6 +526,10 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
           - During transition: old opacity 1→0, new opacity 0→1 simultaneously
           - pointer-events:none on hidden layer to prevent click interference
           - Both mounted always to enable preloading
+          
+          Z-INDEX FIX: During transitions, INCOMING video is always on top (z-index 10)
+          to prevent 1-frame flash from z-index swap before opacity settles.
+          After transition completes, z-index normalizes.
         */}
         
         {/* Video A */}
@@ -536,13 +540,17 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
             // Opacity logic: active=1, transitioning-out=fading, hidden=0
             activePlayer === "A" && !isTransitioning && "opacity-100",
             activePlayer === "A" && isTransitioning && "opacity-100", // Still visible, incoming fades in on top
-            activePlayer === "B" && isTransitioning && "opacity-0",   // Fading out
+            activePlayer === "B" && isTransitioning && "opacity-0",   // Fading out (will be hidden by incoming B on top)
             activePlayer === "B" && !isTransitioning && "opacity-0 pointer-events-none"
           )}
           style={{
             transition: `opacity ${transitionDuration}s ease-in-out`,
-            // Ensure stacking order: active player on top unless transitioning
-            zIndex: activePlayer === "A" ? 2 : 1,
+            // Z-INDEX FIX: During transition, the INCOMING player is on top
+            // When transitioning TO B, A is outgoing (lower z), B is incoming (higher z)
+            // When transitioning TO A, B is outgoing (lower z), A is incoming (higher z)
+            zIndex: isTransitioning 
+              ? (activePlayer === "B" ? 1 : 10)  // A incoming = 10, A outgoing = 1
+              : (activePlayer === "A" ? 2 : 1),  // Normal: active on top
           }}
           muted={audioSource === "voiceover" || isMuted}
           playsInline
@@ -565,7 +573,10 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
           )}
           style={{
             transition: `opacity ${transitionDuration}s ease-in-out`,
-            zIndex: activePlayer === "B" ? 2 : 1,
+            // Z-INDEX FIX: During transition, the INCOMING player is on top
+            zIndex: isTransitioning 
+              ? (activePlayer === "A" ? 1 : 10)  // B incoming = 10, B outgoing = 1
+              : (activePlayer === "B" ? 2 : 1),  // Normal: active on top
           }}
           muted={audioSource === "voiceover" || isMuted}
           playsInline
