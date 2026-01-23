@@ -185,6 +185,7 @@ Style: Professional short-form video, engaging, smooth transitions.
         status: "queued",
         provider: "runway",
         settings: {
+          // Runway uses : format (e.g., "720:1280")
           size: runwaySize,
           // Store both durations for timeline-driven trimming
           requested_seconds: requestedSeconds ?? legacySeconds ?? runwayDuration,
@@ -196,10 +197,13 @@ Style: Professional short-form video, engaging, smooth transitions.
           prompt: videoPrompt.slice(0, 500),
           seed: settings?.seed,
           camera_direction: clipData?.camera_direction,
+          // Store original Sora format for reference
           original_sora_size: settings?.size,
+          // Provider-neutral task ID (set after API call)
+          provider_job_id: null,
         },
         progress: 0,
-        openai_status: "pending", // Reusing field for runway status
+        openai_status: "pending",
       })
       .select()
       .single();
@@ -270,17 +274,26 @@ Style: Professional short-form video, engaging, smooth transitions.
     const runwayData = await runwayResponse.json();
     const runwayTaskId = runwayData.id;
 
-    // Update job with Runway task ID
+    // Update job with Runway task ID - store in settings.provider_job_id (provider-neutral)
     await supabase
       .from("video_jobs")
       .update({
         status: "running",
-        openai_video_id: runwayTaskId, // Reusing field for Runway task ID
+        settings: {
+          ...job.settings,
+          provider_job_id: runwayTaskId,
+        },
+        // Keep openai_video_id temporarily for backwards compat
+        openai_video_id: runwayTaskId,
         openai_status: "PENDING",
       })
       .eq("id", job.id);
 
-    console.log(`Created Runway video job: ${runwayTaskId} for job: ${job.id}${clip_id ? ` clip: ${clip_id}` : ""}`);
+    console.log(`Created Runway video job: ${runwayTaskId} for job: ${job.id}${clip_id ? ` clip: ${clip_id}` : ""}`, {
+      requestedSeconds: requestedSeconds ?? legacySeconds ?? runwayDuration,
+      providerSeconds: runwayDuration,
+      size: runwaySize,
+    });
 
     return new Response(
       JSON.stringify({
@@ -289,7 +302,9 @@ Style: Professional short-form video, engaging, smooth transitions.
           id: job.id,
           status: "running",
           provider: "runway",
-          runway_task_id: runwayTaskId,
+          provider_job_id: runwayTaskId,
+          requested_seconds: requestedSeconds ?? legacySeconds ?? runwayDuration,
+          provider_seconds: runwayDuration,
           clip_id: clip_id || null,
         },
       }),

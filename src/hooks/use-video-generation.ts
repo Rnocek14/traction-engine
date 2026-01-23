@@ -104,7 +104,10 @@ export interface GenerateChainedParams {
   provider?: VideoProvider;
 }
 
+// Canonical status set - all processors use: queued, running, succeeded, failed
+// "done" is legacy - check for both "succeeded" and "done" for backwards compat
 const ACTIVE_STATUSES = ["queued", "running", "rendering"];
+const COMPLETED_STATUSES = ["succeeded", "done"]; // Canonical + legacy
 
 /**
  * Hook for generating video for a single clip.
@@ -430,6 +433,13 @@ export function useClipVideoJob(scriptId: string, clipId: string | undefined) {
 /**
  * Get video generation status summary for clips
  */
+/**
+ * Get the video generation status for a specific clip.
+ * Maps provider statuses to UI-friendly status.
+ * 
+ * Canonical status set: queued, running, succeeded, failed
+ * Returns "done" for UI backwards compat (maps from "succeeded" or legacy "done")
+ */
 export function getClipVideoStatus(
   jobs: VideoJob[],
   clipId: string
@@ -444,7 +454,8 @@ export function getClipVideoStatus(
   // Get the most recent job
   const latestJob = clipJobs[0];
   
-  if (latestJob.status === "succeeded" || latestJob.status === "done") {
+  // Check for completed status (canonical "succeeded" or legacy "done")
+  if (COMPLETED_STATUSES.includes(latestJob.status)) {
     return { status: "done", job: latestJob };
   }
   if (ACTIVE_STATUSES.includes(latestJob.status)) {

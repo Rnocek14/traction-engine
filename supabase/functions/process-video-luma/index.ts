@@ -15,13 +15,18 @@ interface ProcessRequest {
   job_id?: string;
 }
 
+// Canonical status set: queued, running, succeeded, failed
+// All processors must use these exact values
+type CanonicalStatus = "queued" | "running" | "succeeded" | "failed";
+
 /**
- * Map Luma status to our internal status
+ * Map Luma status to our canonical internal status
+ * Canonical set: queued, running, succeeded, failed
  */
-function mapLumaStatus(lumaState: string): string {
+function mapLumaStatus(lumaState: string): CanonicalStatus {
   switch (lumaState) {
     case "completed":
-      return "done";
+      return "succeeded";  // Use "succeeded" not "done"
     case "failed":
       return "failed";
     case "queued":
@@ -138,7 +143,19 @@ Deno.serve(async (req) => {
     }> = [];
 
     for (const job of jobs) {
-      const lumaTaskId = job.openai_video_id;
+      // Get task ID from settings.provider_job_id (preferred) or legacy openai_video_id
+      const settings = job.settings as Record<string, unknown> | null;
+      const lumaTaskId = (settings?.provider_job_id as string) || job.openai_video_id;
+
+      if (!lumaTaskId) {
+        console.error(`Job ${job.id} has no provider_job_id or openai_video_id`);
+        results.push({
+          job_id: job.id,
+          status: "error",
+          error: "No Luma task ID found",
+        });
+        continue;
+      }
 
       try {
         // Poll Luma API for status
@@ -167,6 +184,18 @@ Deno.serve(async (req) => {
         const lumaState = lumaData.state;
         const newStatus = mapLumaStatus(lumaState);
 
+        // Log state transition and response keys (once per status change)
+        if (job.openai_status !== lumaState) {
+          console.log(`Luma job ${job.id} state changed:`, JSON.stringify({
+            lumaTaskId,
+            oldState: job.openai_status,
+            newState: lumaState,
+            responseKeys: Object.keys(lumaData),
+            hasAssets: !!lumaData.assets,
+            assetKeys: lumaData.assets ? Object.keys(lumaData.assets) : [],
+          }));
+        }
+
         console.log(`Luma job ${lumaTaskId} state: ${lumaState} -> ${newStatus}`);
 
         const updates: Record<string, unknown> = {
@@ -174,7 +203,7 @@ Deno.serve(async (req) => {
           openai_status: lumaState,
         };
 
-        // Handle completion
+        // Handle completion - use "succeeded" status
         if (lumaState === "completed" && lumaData.assets?.video) {
           const videoUrl = lumaData.assets.video;
           
@@ -198,7 +227,7 @@ Deno.serve(async (req) => {
 
           results.push({
             job_id: job.id,
-            status: "done",
+            status: "succeeded",  // Use canonical status
             luma_state: lumaState,
             output_url: updates.output_url as string,
           });

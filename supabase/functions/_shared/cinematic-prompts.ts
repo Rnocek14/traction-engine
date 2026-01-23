@@ -461,6 +461,8 @@ const LUMA_MOTION_KEYWORDS: Record<string, string> = {
  * - Natural physics emphasis
  * - Concise but descriptive
  * - Environment and atmosphere focus
+ * 
+ * For horror/dark: adds lighting continuity + identity preservation hints
  */
 export function buildLumaPrompt(
   styleGuide: StyleGuideData | null,
@@ -508,7 +510,23 @@ export function buildLumaPrompt(
     parts.push(styleGuide.time_of_day.replace(/_/g, " "));
   }
   
-  // Quality directive - emphasize physics and natural motion
+  // Horror/dark genre enhancements - critical for consistency
+  const isHorrorMood = styleGuide?.mood?.toLowerCase().includes("tense") ||
+    styleGuide?.mood?.toLowerCase().includes("horror") ||
+    styleGuide?.mood?.toLowerCase().includes("dark") ||
+    styleGuide?.mood?.toLowerCase().includes("unsettling") ||
+    styleGuide?.lighting === "dramatic";
+  
+  if (isHorrorMood) {
+    // Add specific lighting continuity and identity preservation hints
+    parts.push("low-key lighting with deep shadows");
+    parts.push("motivated practical light source");
+    parts.push("maintain consistent character identity");
+    parts.push("avoid face morphing or distortion");
+    parts.push("smooth deliberate camera movement");
+  }
+  
+  // Quality directive - emphasize physics and natural motion (keep concise)
   parts.push("realistic physics, natural motion, high quality, cinematic");
   
   return parts.filter(Boolean).join(", ");

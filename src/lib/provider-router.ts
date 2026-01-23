@@ -68,7 +68,8 @@ export const GENRE_PRESETS: Record<GenrePreset, GenreConfig> = {
       depth_of_field: "shallow",
       motion_style: "handheld",
       mood: "tense and unsettling",
-      custom_notes: "Low-key lighting, single motivated practical, strong falloff. Cooler shadows, slightly desaturated mids. Slower camera moves, longer lens, avoid fast pans.",
+      // Enhanced horror-specific notes for lighting + identity continuity
+      custom_notes: "Low-key lighting with deep shadows and single motivated practical light source. Strong falloff, cooler shadows, slightly desaturated midtones. Avoid flicker, avoid morphing faces, maintain character identity. Slower deliberate camera moves, longer lens, avoid fast pans or sudden movements.",
     },
     shotTypeRouting: {
       "close-up": "runway",

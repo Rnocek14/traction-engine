@@ -20,10 +20,17 @@ const RUNWAY_API_VERSION = "2024-11-06";
 /**
  * Map Runway status to our internal status
  */
-function mapRunwayStatus(runwayStatus: string): string {
+// Canonical status set: queued, running, succeeded, failed
+type CanonicalStatus = "queued" | "running" | "succeeded" | "failed";
+
+/**
+ * Map Runway status to our canonical internal status
+ * Canonical set: queued, running, succeeded, failed
+ */
+function mapRunwayStatus(runwayStatus: string): CanonicalStatus {
   switch (runwayStatus) {
     case "SUCCEEDED":
-      return "done";
+      return "succeeded";  // Use "succeeded" not "done"
     case "FAILED":
     case "CANCELLED":
       return "failed";

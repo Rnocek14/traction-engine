@@ -137,7 +137,7 @@ Deno.serve(async (req) => {
       clipData?.camera_direction
     );
 
-    // Create video job record
+    // Create video job record - store provider_job_id in settings, not openai_video_id
     const { data: job, error: jobError } = await supabase
       .from("video_jobs")
       .insert({
@@ -153,6 +153,8 @@ Deno.serve(async (req) => {
           provider_seconds: validDuration,
           clip_id: body.clip_id,
           seed: body.settings.seed,
+          // Provider-neutral task ID storage (set after API call)
+          provider_job_id: null,
         },
       })
       .select()
@@ -167,12 +169,13 @@ Deno.serve(async (req) => {
       prompt: videoPrompt,
       aspect_ratio: mapSizeToLumaAspect(body.settings.size),
       loop: false,
+      model: getLumaModel(body.settings.model),
     };
 
-    // Add duration (Luma expects seconds)
-    // Note: Luma Ray2 API may use different params - adjust as needed
+    // Add duration - Luma uses "duration" field with number of seconds
+    // Only add if >5s since 5s is default
     if (validDuration === 10) {
-      lumaRequest.duration = "10s";
+      lumaRequest.duration = 10;
     }
 
     // Add starting frame for image-to-video
@@ -185,12 +188,17 @@ Deno.serve(async (req) => {
       };
     }
 
-    console.log("Calling Luma API:", {
+    // Log exact request for debugging (minus long prompt)
+    console.log("Luma API request:", JSON.stringify({
       jobId: job.id,
+      model: lumaRequest.model,
+      aspect_ratio: lumaRequest.aspect_ratio,
+      duration: lumaRequest.duration,
+      hasKeyframes: !!lumaRequest.keyframes,
+      loop: lumaRequest.loop,
       promptLength: videoPrompt.length,
-      aspectRatio: lumaRequest.aspect_ratio,
-      hasStartFrame: !!body.starting_frame_url,
-    });
+      promptPreview: videoPrompt.slice(0, 100),
+    }));
 
     // Call Luma API
     const lumaResponse = await fetch("https://api.lumalabs.ai/dream-machine/v1/generations", {
@@ -204,9 +212,18 @@ Deno.serve(async (req) => {
 
     const lumaData = await lumaResponse.json();
 
+    // Log full response for debugging
+    console.log("Luma API response:", JSON.stringify({
+      ok: lumaResponse.ok,
+      status: lumaResponse.status,
+      keys: Object.keys(lumaData),
+      id: lumaData.id,
+      state: lumaData.state,
+    }));
+
     if (!lumaResponse.ok) {
       const errorMessage = lumaData.detail || lumaData.message || lumaData.error || "Luma API error";
-      console.error("Luma API error:", lumaData);
+      console.error("Luma API error full:", JSON.stringify(lumaData));
       
       // Update job as failed
       await supabase
@@ -220,14 +237,20 @@ Deno.serve(async (req) => {
       throw new Error(errorMessage);
     }
 
-    // Update job with Luma task ID
+    // Update job with Luma task ID - store in settings.provider_job_id (provider-neutral)
     const lumaTaskId = lumaData.id;
     
     await supabase
       .from("video_jobs")
       .update({
         status: "running",
-        openai_video_id: lumaTaskId, // Reuse this field for task ID
+        // Store in settings for provider-neutral access
+        settings: {
+          ...job.settings,
+          provider_job_id: lumaTaskId,
+        },
+        // Keep openai_video_id temporarily for backwards compat (will be removed)
+        openai_video_id: lumaTaskId,
         openai_status: "pending",
       })
       .eq("id", job.id);
@@ -235,6 +258,8 @@ Deno.serve(async (req) => {
     console.log("Luma job started:", {
       jobId: job.id,
       lumaTaskId,
+      requestedSeconds,
+      providerSeconds: validDuration,
     });
 
     return new Response(
@@ -245,7 +270,9 @@ Deno.serve(async (req) => {
           script_run_id: body.script_run_id,
           status: "running",
           provider: "luma",
-          luma_task_id: lumaTaskId,
+          provider_job_id: lumaTaskId,
+          requested_seconds: requestedSeconds,
+          provider_seconds: validDuration,
         },
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
