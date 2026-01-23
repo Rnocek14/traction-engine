@@ -3,9 +3,9 @@
 // ============================================
 
 // Re-export transition types from beat-map
-export type { TransitionType, ClipTransition } from "./beat-map-types";
+export type { TransitionType, ClipTransition, AlignmentConstraints } from "./beat-map-types";
 import type { ClipTransition } from "./beat-map-types";
-export { DEFAULT_TRANSITION } from "./beat-map-types";
+export { DEFAULT_TRANSITION, DEFAULT_ALIGNMENT_CONSTRAINTS } from "./beat-map-types";
 
 /**
  * Clip types supported in the timeline

@@ -117,6 +117,15 @@ export interface ClipTransition {
   duration: number;
 }
 
+/**
+ * Default transition for clips (0.2s crossfade)
+ * NOTE: This is the SINGLE source of truth - import from timeline-types.ts
+ */
+export const DEFAULT_TRANSITION: ClipTransition = {
+  type: "crossfade",
+  duration: 0.2,
+};
+
 // ============================================
 // Beat Map Utility Functions
 // ============================================
@@ -195,11 +204,17 @@ export function detectBeatsFromWaveform(
   }
   
   // Detect phrase boundaries from punctuation in voiceover text
+  // GUARDRAIL: Only mark as cut-eligible if there's nearby waveform evidence (pause)
   const words = voiceoverText.split(/\s+/).filter(Boolean);
   const wordsPerSecond = words.length / duration;
   
   words.forEach((word, index) => {
     const estimatedTime = (index + 1) / wordsPerSecond;
+    
+    // Check if there's a pause beat within ±0.35s that would validate this punctuation
+    const hasNearbyPause = beats.some(b => 
+      b.type === "pause" && Math.abs(b.time - estimatedTime) <= 0.35
+    );
     
     // Sentence-final punctuation (.!?)
     if (/[.!?]$/.test(word)) {
@@ -210,9 +225,10 @@ export function detectBeatsFromWaveform(
         duration: 0,
         word,
         word_index: index,
-        confidence: 0.8, // High but not perfect (estimated timing)
-        is_cut_point: true,
-        cut_priority: 9,
+        confidence: hasNearbyPause ? 0.9 : 0.6, // Higher if validated by waveform
+        // GUARDRAIL: Only cut-eligible if nearby pause validates the timing
+        is_cut_point: hasNearbyPause,
+        cut_priority: hasNearbyPause ? 9 : 5, // Demote if no waveform evidence
         source: "waveform", // Derived from text, not Whisper
       });
     }
@@ -225,9 +241,9 @@ export function detectBeatsFromWaveform(
         duration: 0,
         word,
         word_index: index,
-        confidence: 0.6,
-        is_cut_point: false,
-        cut_priority: 5,
+        confidence: 0.5,
+        is_cut_point: false, // Clause breaks are suggestions only
+        cut_priority: 4,
         source: "waveform",
       });
     }
@@ -318,15 +334,41 @@ export function enhanceBeatsWithWhisper(
 }
 
 /**
+ * Alignment constraints for beat snapping
+ */
+export interface AlignmentConstraints {
+  /** Maximum stretch per clip (e.g., 0.2 = 20% longer) */
+  maxStretch: number;
+  /** Maximum shrink per clip (e.g., 0.2 = 20% shorter) */
+  maxShrink: number;
+  /** Minimum clip duration in seconds */
+  minClipDuration: number;
+  /** Enforce total end time (audio duration) */
+  totalDuration?: number;
+}
+
+export const DEFAULT_ALIGNMENT_CONSTRAINTS: AlignmentConstraints = {
+  maxStretch: 0.2,  // ±20%
+  maxShrink: 0.2,
+  minClipDuration: 0.5,
+};
+
+/**
  * Calculate suggested clip boundaries that snap to beats
+ * With constraints to prevent drift and micro-clips
  */
 export function suggestCutsFromBeats(
   beats: Beat[],
   targetDurations: number[],
-  tolerance: number = 0.3
+  tolerance: number = 0.3,
+  constraints: AlignmentConstraints = DEFAULT_ALIGNMENT_CONSTRAINTS
 ): SuggestedCut[] {
   const cuts: SuggestedCut[] = [];
   let accumulatedTime = 0;
+  
+  // Calculate total target duration for end-time enforcement
+  const totalTargetDuration = targetDurations.reduce((a, b) => a + b, 0);
+  const enforcedTotalDuration = constraints.totalDuration ?? totalTargetDuration;
   
   // Get cut-eligible beats sorted by priority
   const cutBeats = beats
@@ -335,10 +377,23 @@ export function suggestCutsFromBeats(
   
   for (let i = 0; i < targetDurations.length - 1; i++) {
     const targetCutTime = accumulatedTime + targetDurations[i];
+    const originalDuration = targetDurations[i];
     
-    // Find best beat within ±tolerance of target
+    // Calculate allowed range based on constraints
+    const minDuration = Math.max(
+      constraints.minClipDuration, 
+      originalDuration * (1 - constraints.maxShrink)
+    );
+    const maxDuration = originalDuration * (1 + constraints.maxStretch);
+    
+    const minCutTime = accumulatedTime + minDuration;
+    const maxCutTime = accumulatedTime + maxDuration;
+    
+    // Find best beat within ±tolerance AND within stretch/shrink constraints
     const nearbyBeats = cutBeats.filter(b =>
-      Math.abs(b.time - targetCutTime) <= tolerance
+      Math.abs(b.time - targetCutTime) <= tolerance &&
+      b.time >= minCutTime &&
+      b.time <= maxCutTime
     );
     
     if (nearbyBeats.length > 0) {
@@ -353,14 +408,28 @@ export function suggestCutsFromBeats(
       });
       accumulatedTime = best.time;
     } else {
-      // No beat nearby, use target time
+      // No beat nearby, use target time but enforce constraints
+      const clampedTime = Math.max(minCutTime, Math.min(maxCutTime, targetCutTime));
       cuts.push({
-        time: targetCutTime,
+        time: clampedTime,
         reason: "target_duration",
         confidence: 0.5,
         scene_prompt_index: i + 1,
       });
-      accumulatedTime = targetCutTime;
+      accumulatedTime = clampedTime;
+    }
+  }
+  
+  // GUARDRAIL: Enforce total end time - adjust last cut if drift occurred
+  if (cuts.length > 0 && constraints.totalDuration !== undefined) {
+    const lastCut = cuts[cuts.length - 1];
+    const remainingDuration = enforcedTotalDuration - lastCut.time;
+    const lastOriginalDuration = targetDurations[targetDurations.length - 1];
+    
+    // If last clip would be too short or too long, flag with lower confidence
+    if (remainingDuration < lastOriginalDuration * (1 - constraints.maxShrink) ||
+        remainingDuration > lastOriginalDuration * (1 + constraints.maxStretch)) {
+      lastCut.confidence = Math.max(0.3, lastCut.confidence - 0.2);
     }
   }
   
@@ -409,10 +478,4 @@ export function createEmptyBeatMap(scriptRunId: string): BeatMap {
   };
 }
 
-/**
- * Default transition for clips (0.2s crossfade)
- */
-export const DEFAULT_TRANSITION: ClipTransition = {
-  type: "crossfade",
-  duration: 0.2,
-};
+// DEFAULT_TRANSITION is now defined with ClipTransition interface above (lines 123-127)

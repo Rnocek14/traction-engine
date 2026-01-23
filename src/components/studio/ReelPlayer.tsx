@@ -518,23 +518,31 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
       onMouseEnter={() => setShowControls(true)}
       onMouseLeave={() => setShowControls(false)}
     >
-      {/* Video container - fills parent, videos use object-contain */}
+      {/* Video container - fills parent, BOTH videos absolute-positioned for crossfade stacking */}
       <div className="relative w-full h-full flex items-center justify-center">
-        {/* Video A - muted when voiceover is active */}
+        {/* 
+          CROSSFADE ARCHITECTURE:
+          - Both videos are ALWAYS position:absolute;inset:0 so they stack
+          - During transition: old opacity 1→0, new opacity 0→1 simultaneously
+          - pointer-events:none on hidden layer to prevent click interference
+          - Both mounted always to enable preloading
+        */}
+        
+        {/* Video A */}
         <video
           ref={videoARef}
           className={cn(
-            "max-w-full max-h-full object-contain",
-            activePlayer === "A" 
-              ? "opacity-100" 
-              : isTransitioning 
-                ? "opacity-0" // Fade out during transition
-                : "opacity-0 absolute pointer-events-none"
+            "absolute inset-0 w-full h-full object-contain",
+            // Opacity logic: active=1, transitioning-out=fading, hidden=0
+            activePlayer === "A" && !isTransitioning && "opacity-100",
+            activePlayer === "A" && isTransitioning && "opacity-100", // Still visible, incoming fades in on top
+            activePlayer === "B" && isTransitioning && "opacity-0",   // Fading out
+            activePlayer === "B" && !isTransitioning && "opacity-0 pointer-events-none"
           )}
           style={{
-            transition: isTransitioning || activePlayer === "A"
-              ? `opacity ${transitionDuration}s ease-in-out`
-              : "none",
+            transition: `opacity ${transitionDuration}s ease-in-out`,
+            // Ensure stacking order: active player on top unless transitioning
+            zIndex: activePlayer === "A" ? 2 : 1,
           }}
           muted={audioSource === "voiceover" || isMuted}
           playsInline
@@ -545,21 +553,19 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
           onCanPlay={activePlayer === "A" ? handleVideoCanPlay : undefined}
         />
         
-        {/* Video B (preload/swap) - muted when voiceover is active */}
+        {/* Video B (always mounted for preloading) */}
         <video
           ref={videoBRef}
           className={cn(
-            "max-w-full max-h-full object-contain absolute inset-0 m-auto",
-            activePlayer === "B" 
-              ? "opacity-100" 
-              : isTransitioning 
-                ? "opacity-100" // Fade in during transition
-                : "opacity-0 pointer-events-none"
+            "absolute inset-0 w-full h-full object-contain",
+            activePlayer === "B" && !isTransitioning && "opacity-100",
+            activePlayer === "B" && isTransitioning && "opacity-100",
+            activePlayer === "A" && isTransitioning && "opacity-0",
+            activePlayer === "A" && !isTransitioning && "opacity-0 pointer-events-none"
           )}
           style={{
-            transition: isTransitioning || activePlayer === "B"
-              ? `opacity ${transitionDuration}s ease-in-out`
-              : "none",
+            transition: `opacity ${transitionDuration}s ease-in-out`,
+            zIndex: activePlayer === "B" ? 2 : 1,
           }}
           muted={audioSource === "voiceover" || isMuted}
           playsInline
