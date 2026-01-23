@@ -15,18 +15,18 @@ interface ProcessRequest {
   job_id?: string;
 }
 
-// Canonical status set: queued, running, succeeded, failed
-// All processors must use these exact values
-type CanonicalStatus = "queued" | "running" | "succeeded" | "failed";
+// Canonical DB status set: queued, running, done, failed
+// All processors MUST use these exact values (DB CHECK constraint)
+type DBStatus = "queued" | "running" | "done" | "failed";
 
 /**
- * Map Luma status to our canonical internal status
- * Canonical set: queued, running, succeeded, failed
+ * Map Luma status to our canonical DB status
+ * DB constraint allows: queued, running, done, failed
  */
-function mapLumaStatus(lumaState: string): CanonicalStatus {
+function mapLumaStatus(lumaState: string): DBStatus {
   switch (lumaState) {
     case "completed":
-      return "succeeded";  // Use "succeeded" not "done"
+      return "done";  // DB constraint requires "done" not "succeeded"
     case "failed":
       return "failed";
     case "queued":
@@ -151,7 +151,7 @@ Deno.serve(async (req) => {
         console.error(`Job ${job.id} has no provider_job_id or openai_video_id`);
         results.push({
           job_id: job.id,
-          status: "error",
+          status: "failed",
           error: "No Luma task ID found",
         });
         continue;
@@ -198,14 +198,13 @@ Deno.serve(async (req) => {
 
         console.log(`Luma job ${lumaTaskId} state: ${lumaState} -> ${newStatus}`);
 
-        // Map internal status to DB-allowed status ("done" instead of "succeeded")
-        const dbStatus = newStatus === "succeeded" ? "done" : newStatus;
+        // newStatus is already DB-allowed: queued, running, done, failed
         const updates: Record<string, unknown> = {
-          status: dbStatus,
+          status: newStatus,
           openai_status: lumaState,
         };
 
-        // Handle completion - use "succeeded" status
+        // Handle completion - status is already "done" from mapLumaStatus
         if (lumaState === "completed" && lumaData.assets?.video) {
           const videoUrl = lumaData.assets.video;
           
