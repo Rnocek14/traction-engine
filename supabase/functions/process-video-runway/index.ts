@@ -20,17 +20,17 @@ const RUNWAY_API_VERSION = "2024-11-06";
 /**
  * Map Runway status to our internal status
  */
-// Canonical status set: queued, running, succeeded, failed
-type CanonicalStatus = "queued" | "running" | "succeeded" | "failed";
+// DB-allowed status set: queued, running, done, failed
+type DBStatus = "queued" | "running" | "done" | "failed";
 
 /**
- * Map Runway status to our canonical internal status
- * Canonical set: queued, running, succeeded, failed
+ * Map Runway status to DB-allowed internal status
+ * DB constraint allows: queued, running, done, failed
  */
-function mapRunwayStatus(runwayStatus: string): CanonicalStatus {
+function mapRunwayStatus(runwayStatus: string): DBStatus {
   switch (runwayStatus) {
     case "SUCCEEDED":
-      return "succeeded";  // Use "succeeded" not "done"
+      return "done";  // Use "done" to match DB constraint
     case "FAILED":
     case "CANCELLED":
       return "failed";
