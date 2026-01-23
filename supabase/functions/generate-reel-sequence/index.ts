@@ -1,339 +1,178 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { Image } from "https://deno.land/x/imagescript@1.2.15/mod.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const SUPABASE_URL = "https://jrujlpljluvxewjytuab.supabase.co";
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY")!;
-
 interface SequenceRequest {
   script_run_id: string;
   clip_ids: string[];
-  settings: {
-    size: string;
-    seconds: number;
-    model?: string;
-  };
+  settings: { size: string; seconds: number; model?: string };
 }
 
-interface ClipData {
-  id: string;
-  prompt: string;
+interface StyleGuideData {
+  character?: string; location?: string; lighting?: string; camera_style?: string;
+  color_grade?: string; mood?: string; custom_notes?: string; lens?: string;
+  depth_of_field?: string; motion_style?: string; film_stock?: string;
+  wardrobe?: string; props?: string; time_of_day?: string;
 }
 
-/**
- * Generates videos for clips sequentially, using the last frame of each
- * completed video as the starting frame for the next clip.
- * This ensures visual continuity across the entire reel.
- */
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+const CAMERA_SPECS: Record<string, string> = {
+  documentary: "Handheld camera, intimate close-ups, natural breathing movement",
+  cinematic: "Smooth dolly movements, shallow depth of field, dramatic reveals",
+  vlog: "Wide 24mm POV, direct address, casual framing",
+  static: "Locked-off tripod, minimal movement, tableau compositions",
+  dynamic: "Steadicam tracking, fluid reveals, push-ins on emotion",
+};
+
+const LIGHTING_SPECS: Record<string, string> = {
+  natural: "Soft diffused daylight, ambient bounce, 5600K",
+  golden_hour: "Warm 3200K backlight, long shadows, magic hour glow",
+  studio: "Three-point lighting, key at 45°, soft fill, 4500K",
+  dramatic: "High contrast chiaroscuro, single hard source, deep shadows",
+  soft: "Overcast skylight, minimal shadows, even exposure",
+};
+
+const COLOR_SPECS: Record<string, string> = {
+  warm: "Warm amber grade, lifted shadows, protected skin tones",
+  cool: "Cool teal shadows, clean highlights, modern look",
+  neutral: "True-to-life colors, balanced white point, documentary grade",
+  vintage: "Kodak Portra emulation, subtle grain, muted saturation",
+  high_contrast: "S-curve contrast, crushed blacks, punchy colors",
+};
+
+function buildCinematicPrompt(style: StyleGuideData | null, scene: string, isFirst: boolean): string {
+  const parts: string[] = ["=== DIRECTOR'S BRIEF ===\n"];
+  if (style?.character) parts.push(`SUBJECT: ${style.character}. Maintain EXACT appearance throughout.`);
+  if (style?.wardrobe) parts.push(`WARDROBE: ${style.wardrobe}`);
+  if (style?.location) parts.push(`ENVIRONMENT: ${style.location}`);
+  parts.push("\n--- CINEMATOGRAPHY ---");
+  parts.push(`CAMERA: ${CAMERA_SPECS[style?.camera_style || "documentary"]}`);
+  parts.push(`LENS: ${style?.lens || "50mm"} lens`);
+  parts.push("\n--- LIGHTING ---");
+  parts.push(LIGHTING_SPECS[style?.lighting || "natural"]);
+  parts.push("\n--- COLOR ---");
+  parts.push(COLOR_SPECS[style?.color_grade || "neutral"]);
+  if (style?.mood) parts.push(`\nMOOD: ${style.mood}`);
+  parts.push("\n--- QUALITY ---");
+  parts.push("Natural motion blur. Lifelike physics. Photorealistic. No morphing artifacts.");
+  if (!isFirst) {
+    parts.push("\n--- CONTINUITY ---");
+    parts.push("CRITICAL: Continue seamlessly from reference frame. Same person, wardrobe, environment.");
   }
+  parts.push("\n=== SCENE ===");
+  parts.push(scene);
+  return parts.join("\n");
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
+    const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const openaiApiKey = Deno.env.get("OPENAI_API_KEY")!;
     const { script_run_id, clip_ids, settings } = (await req.json()) as SequenceRequest;
 
-    if (!script_run_id || !clip_ids?.length) {
-      return new Response(
-        JSON.stringify({ success: false, error: "Missing script_run_id or clip_ids" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
+    if (!script_run_id || !clip_ids?.length) throw new Error("Missing script_run_id or clip_ids");
 
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    const { data: timeline } = await supabase.from("studio_timelines").select("timeline_json")
+      .eq("script_run_id", script_run_id).order("version", { ascending: false }).limit(1).single();
 
-    // Fetch timeline to get clip prompts and style guide
-    const { data: timeline, error: timelineError } = await supabase
-      .from("studio_timelines")
-      .select("timeline_json")
-      .eq("script_run_id", script_run_id)
-      .order("version", { ascending: false })
-      .limit(1)
-      .single();
+    const timelineData = timeline?.timeline_json as { clips?: { id: string; prompt?: string }[]; style_guide?: StyleGuideData } || {};
+    const styleGuide = timelineData.style_guide || null;
+    const clipsToGen = clip_ids.map(id => timelineData.clips?.find(c => c.id === id)).filter((c): c is { id: string; prompt: string } => !!c?.prompt);
 
-    if (timelineError || !timeline) {
-      return new Response(
-        JSON.stringify({ success: false, error: "Timeline not found" }),
-        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
+    const model = settings.model || "sora-2";
+    const size = settings.size || "720x1280";
+    const [targetW, targetH] = size.split("x").map(Number);
 
-    const timelineData = timeline.timeline_json as { clips: ClipData[]; style_guide?: Record<string, string> };
-    const styleGuide = timelineData.style_guide;
-
-    // Build style prefix from style guide
-    const buildStylePrefix = (): string => {
-      if (!styleGuide) return "";
-      const parts = ["VISUAL CONSISTENCY REQUIREMENTS:"];
-      if (styleGuide.character) parts.push(`- Subject: ${styleGuide.character}`);
-      if (styleGuide.location) parts.push(`- Location: ${styleGuide.location}`);
-      if (styleGuide.lighting) {
-        const lightingMap: Record<string, string> = {
-          morning: "soft golden morning light from window",
-          golden_hour: "warm golden hour lighting, long shadows",
-          night: "moody nighttime lighting, artificial warm sources",
-          studio: "clean studio lighting, even and professional",
-          natural: "natural daylight, soft and diffused",
-        };
-        parts.push(`- Lighting: ${lightingMap[styleGuide.lighting] || styleGuide.lighting}`);
-      }
-      if (styleGuide.camera_style) {
-        const cameraMap: Record<string, string> = {
-          documentary: "intimate documentary style, handheld, natural movement",
-          cinematic: "cinematic wide shots, smooth dolly movements",
-          vlog: "personal vlog style, direct to camera",
-          static: "locked off tripod shots, minimal movement",
-        };
-        parts.push(`- Camera: ${cameraMap[styleGuide.camera_style] || styleGuide.camera_style}`);
-      }
-      if (styleGuide.color_grade) {
-        const colorMap: Record<string, string> = {
-          warm: "warm amber color grading, cozy feel",
-          cool: "cool blue tones, modern and clean",
-          neutral: "neutral natural colors, balanced",
-          vintage: "vintage film look, slight grain, muted colors",
-        };
-        parts.push(`- Color: ${colorMap[styleGuide.color_grade] || styleGuide.color_grade}`);
-      }
-      if (styleGuide.mood) parts.push(`- Mood: ${styleGuide.mood}`);
-      return parts.join("\n") + "\n\nSCENE: ";
-    };
-
-    const stylePrefix = buildStylePrefix();
-
-    // Get clips in order
-    const clipsToGenerate = clip_ids
-      .map((id) => timelineData.clips.find((c) => c.id === id))
-      .filter((c): c is ClipData => !!c && !!c.prompt);
-
-    if (clipsToGenerate.length === 0) {
-      return new Response(
-        JSON.stringify({ success: false, error: "No valid clips found" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    const model = settings.model || (settings.size.startsWith("1024") || settings.size.startsWith("1792") ? "sora-2-pro" : "sora-2");
     const results: { clip_id: string; job_id: string; status: string }[] = [];
-    let previousVideoUrl: string | null = null;
+    let prevJobId: string | null = null;
 
-    // Process clips sequentially
-    for (let i = 0; i < clipsToGenerate.length; i++) {
-      const clip = clipsToGenerate[i];
-      const videoPrompt = stylePrefix + clip.prompt;
+    for (let i = 0; i < clipsToGen.length; i++) {
+      const clip = clipsToGen[i];
+      const prompt = buildCinematicPrompt(styleGuide, clip.prompt, i === 0);
 
-      console.log(`[Sequence ${i + 1}/${clipsToGenerate.length}] Generating clip ${clip.id}`);
-      if (previousVideoUrl) {
-        console.log(`  Using previous frame from: ${previousVideoUrl.slice(0, 50)}...`);
+      const { data: job } = await supabase.from("video_jobs").insert({
+        script_run_id, status: "queued", provider: "sora",
+        settings: { size, seconds: settings.seconds, model, clip_id: clip.id, chained: true, sequence_index: i },
+        progress: 0, openai_status: "pending",
+      }).select().single();
+
+      if (!job) { results.push({ clip_id: clip.id, job_id: "", status: "failed" }); continue; }
+
+      const form = new FormData();
+      form.set("prompt", prompt);
+      form.set("model", model);
+      form.set("size", size);
+      form.set("seconds", String(settings.seconds));
+
+      if (prevJobId) {
+        const frame = await extractLastFrame(prevJobId, supabase, targetW, targetH);
+        if (frame) form.set("input_reference", new File([frame], "ref.jpg", { type: "image/jpeg" }));
       }
 
-      // Create video job record
-      const { data: job, error: jobError } = await supabase
-        .from("video_jobs")
-        .insert({
-          script_run_id,
-          provider: "sora",
-          status: "queued",
-          settings: {
-            clip_id: clip.id,
-            size: settings.size,
-            seconds: settings.seconds,
-            model,
-            chained: true,
-            sequence_index: i,
-          },
-        })
-        .select()
-        .single();
-
-      if (jobError || !job) {
-        console.error(`Failed to create job for clip ${clip.id}:`, jobError);
-        results.push({ clip_id: clip.id, job_id: "", status: "failed" });
-        continue;
-      }
-
-      try {
-        // Build form data for OpenAI
-        const form = new FormData();
-        form.set("model", model);
-        form.set("prompt", videoPrompt);
-        form.set("size", settings.size);
-        form.set("duration", String(settings.seconds));
-        form.set("n", "1");
-
-        // Add starting frame if we have a previous video
-        if (previousVideoUrl) {
-          console.log(`  Fetching last frame from previous video...`);
-          const frameUrl = await extractLastFrame(previousVideoUrl);
-          if (frameUrl) {
-            const frameResp = await fetch(frameUrl);
-            if (frameResp.ok) {
-              const frameBlob = await frameResp.blob();
-              form.set("input_reference", new File([frameBlob], "start-frame.jpg", { type: "image/jpeg" }));
-              console.log(`  Added starting frame to request`);
-            }
-          }
-        }
-
-        // Update job to running
-        await supabase.from("video_jobs").update({ status: "running" }).eq("id", job.id);
-
-        // Call OpenAI Sora API
-        const soraResp = await fetch("https://api.openai.com/v1/video/generations", {
-          method: "POST",
-          headers: { Authorization: `Bearer ${OPENAI_API_KEY}` },
-          body: form,
-        });
-
-        if (!soraResp.ok) {
-          const errText = await soraResp.text();
-          throw new Error(`Sora API error: ${soraResp.status} - ${errText}`);
-        }
-
-        const soraData = await soraResp.json();
-        const videoId = soraData.id;
-
-        console.log(`  Sora job created: ${videoId}`);
-
-        // Update job with OpenAI ID
-        await supabase.from("video_jobs").update({
-          openai_video_id: videoId,
-          openai_status: soraData.status || "pending",
-        }).eq("id", job.id);
-
-        // Poll for completion (with timeout)
-        const completedVideo = await pollForCompletion(videoId, job.id, supabase as any);
-
-        if (completedVideo?.output_url) {
-          previousVideoUrl = completedVideo.output_url;
-          results.push({ clip_id: clip.id, job_id: job.id, status: "succeeded" });
-          console.log(`  Clip ${clip.id} completed successfully`);
-        } else {
-          results.push({ clip_id: clip.id, job_id: job.id, status: "failed" });
-          console.log(`  Clip ${clip.id} failed or timed out`);
-          // Continue anyway - next clip won't have starting frame but will still generate
-        }
-
-      } catch (clipError) {
-        console.error(`Error generating clip ${clip.id}:`, clipError);
-        await supabase.from("video_jobs").update({
-          status: "failed",
-          error: clipError instanceof Error ? clipError.message : "Unknown error",
-        }).eq("id", job.id);
-        results.push({ clip_id: clip.id, job_id: job.id, status: "failed" });
-      }
-    }
-
-    const succeeded = results.filter((r) => r.status === "succeeded").length;
-    const failed = results.filter((r) => r.status === "failed").length;
-
-    return new Response(
-      JSON.stringify({
-        success: true,
-        results,
-        summary: { total: clipsToGenerate.length, succeeded, failed },
-      }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
-
-  } catch (error) {
-    console.error("Sequence generation error:", error);
-    return new Response(
-      JSON.stringify({ success: false, error: error instanceof Error ? error.message : "Unknown error" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
-  }
-});
-
-/**
- * Extract the last frame from a video URL.
- * For now, we use the spritesheet if available, or just pass the video URL
- * and hope Sora can extract a frame from it.
- */
-async function extractLastFrame(videoUrl: string): Promise<string | null> {
-  // If we have a direct video URL, we can try to create a thumbnail
-  // For now, just return the video URL - Sora may accept it as input_reference
-  // In production, you'd use ffmpeg or a video processing service
-  
-  // Check if there's a spritesheet URL we could use
-  // Spritesheets typically have the last frame at the end
-  
-  // For now, return null to skip frame chaining if we can't extract properly
-  // This is a placeholder - real implementation would use video processing
-  return videoUrl;
-}
-
-/**
- * Poll OpenAI for video completion with exponential backoff
- */
-async function pollForCompletion(
-  videoId: string,
-  jobId: string,
-  supabase: ReturnType<typeof createClient>,
-  maxAttempts = 60, // 5 minutes max
-  intervalMs = 5000
-): Promise<{ output_url: string } | null> {
-  
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    await new Promise((r) => setTimeout(r, intervalMs));
-
-    try {
-      const resp = await fetch(`https://api.openai.com/v1/video/generations/${videoId}`, {
-        headers: { Authorization: `Bearer ${OPENAI_API_KEY}` },
+      const resp = await fetch("https://api.openai.com/v1/videos", {
+        method: "POST", headers: { Authorization: `Bearer ${openaiApiKey}` }, body: form,
       });
 
       if (!resp.ok) {
-        console.log(`  Poll attempt ${attempt + 1}: API error ${resp.status}`);
-        continue;
+        await supabase.from("video_jobs").update({ status: "failed", error: `API ${resp.status}` }).eq("id", job.id);
+        results.push({ clip_id: clip.id, job_id: job.id, status: "failed" }); continue;
       }
 
-      const data = await resp.json();
-      const status = data.status;
+      const { id: videoId } = await resp.json();
+      await supabase.from("video_jobs").update({ status: "running", openai_video_id: videoId }).eq("id", job.id);
 
-      // Update job status - use any to avoid type issues with Supabase client
-      await (supabase as any).from("video_jobs").update({
-        openai_status: status,
-        progress: Math.min(90, (attempt + 1) * 5),
-      }).eq("id", jobId);
-
-      if (status === "succeeded" || status === "completed") {
-        const outputUrl = data.output?.url || data.generations?.[0]?.url;
-        
-        if (outputUrl) {
-          await (supabase as any).from("video_jobs").update({
-            status: "succeeded",
-            output_url: outputUrl,
-            progress: 100,
-          }).eq("id", jobId);
-          
-          return { output_url: outputUrl };
-        }
-      }
-
-      if (status === "failed") {
-        await (supabase as any).from("video_jobs").update({
-          status: "failed",
-          error: data.error || "Generation failed",
-        }).eq("id", jobId);
-        return null;
-      }
-
-      console.log(`  Poll attempt ${attempt + 1}: status=${status}`);
-
-    } catch (pollError) {
-      console.error(`  Poll error:`, pollError);
+      const completed = await pollCompletion(videoId, job.id, supabase, openaiApiKey);
+      results.push({ clip_id: clip.id, job_id: job.id, status: completed ? "succeeded" : "failed" });
+      if (completed) prevJobId = job.id;
     }
-  }
 
-  // Timeout
-  await (supabase as any).from("video_jobs").update({
-    status: "failed",
-    error: "Timeout waiting for video generation",
-  }).eq("id", jobId);
-  
-  return null;
+    return new Response(JSON.stringify({
+      success: true, results,
+      summary: { succeeded: results.filter(r => r.status === "succeeded").length, failed: results.filter(r => r.status === "failed").length },
+    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  } catch (err) {
+    return new Response(JSON.stringify({ success: false, error: String(err) }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }
+});
+
+async function extractLastFrame(jobId: string, supabase: any, w: number, h: number): Promise<Uint8Array | null> {
+  try {
+    const { data: job } = await supabase.from("video_jobs").select("spritesheet_url, thumbnail_url").eq("id", jobId).single();
+    const url = job?.spritesheet_url || job?.thumbnail_url;
+    if (!url) return null;
+    const imgData = new Uint8Array(await (await fetch(url)).arrayBuffer());
+    let img = await Image.decode(imgData);
+    if (job.spritesheet_url) {
+      const fw = Math.floor(img.width / 5), fh = Math.floor(img.height / 5);
+      img = img.clone().crop(4 * fw, 4 * fh, fw, fh);
+    }
+    if (img.width !== w || img.height !== h) img = img.resize(w, h);
+    return await img.encodeJPEG(90);
+  } catch { return null; }
+}
+
+async function pollCompletion(videoId: string, jobId: string, supabase: any, apiKey: string): Promise<boolean> {
+  for (let i = 0; i < 120; i++) {
+    const resp = await fetch(`https://api.openai.com/v1/videos/${videoId}`, { headers: { Authorization: `Bearer ${apiKey}` } });
+    if (!resp.ok) { await new Promise(r => setTimeout(r, 5000)); continue; }
+    const { status, output, outputs } = await resp.json();
+    await supabase.from("video_jobs").update({ openai_status: status, progress: Math.min(i, 99) }).eq("id", jobId);
+    if (status === "succeeded" || status === "completed") {
+      await supabase.functions.invoke("process-video", { body: { job_ids: [jobId] } });
+      for (let j = 0; j < 12; j++) {
+        const { data } = await supabase.from("video_jobs").select("spritesheet_url").eq("id", jobId).single();
+        if (data?.spritesheet_url) return true;
+        await new Promise(r => setTimeout(r, 5000));
+      }
+      return true;
+    }
+    if (status === "failed") { await supabase.from("video_jobs").update({ status: "failed" }).eq("id", jobId); return false; }
+    await new Promise(r => setTimeout(r, 5000));
+  }
+  return false;
 }
