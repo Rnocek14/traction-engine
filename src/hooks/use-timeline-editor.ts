@@ -45,6 +45,7 @@ export function useTimelineEditor({
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const lastSnapshotRef = useRef<string>("");
+  const autoSaveAttemptedRef = useRef(false); // Track if auto-save attempted
 
   // Fetch existing timeline or create from scene_prompts
   const { data: timelineRecord, isLoading: isLoadingTimeline } = useQuery({
@@ -91,9 +92,6 @@ export function useTimelineEditor({
 
   // Style guide state
   const [styleGuide, setStyleGuide] = useState<StyleGuide>(initialStyleGuide);
-
-  // Track if initial auto-save has been attempted
-  const autoSaveAttemptedRef = useRef(false);
 
   // Reset style guide when timeline changes
   useEffect(() => {
