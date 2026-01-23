@@ -117,20 +117,19 @@ export function useGenerateClipVideo() {
       scriptId,
       clip,
       size = "720x1280",
-      duration: manualDuration,
+      duration: manualProviderDuration,
       promptOverride,
       model: modelOverride,
       seed,
       provider = "sora",
     }: GenerateClipVideoParams): Promise<VideoJob> => {
-      // Timeline duration is the source of truth
+      // Timeline duration is ALWAYS the source of truth for requested_seconds
       const timelineDuration = clip.end - clip.start;
+      const requestedSeconds = timelineDuration;
       
-      // If manual duration provided, use it; otherwise compute from timeline
-      const requestedSeconds = manualDuration ?? timelineDuration;
-      
-      // Get the optimal provider duration bucket
-      const { providerSeconds } = getProviderDuration(provider, requestedSeconds);
+      // Manual duration only overrides provider bucket, never requested_seconds
+      const providerSeconds = manualProviderDuration 
+        ?? getProviderDuration(provider, requestedSeconds).providerSeconds;
       
       // Warn if clip is too short
       if (isClipDurationTooShort(timelineDuration)) {
@@ -212,10 +211,11 @@ export function useGenerateAllClipsVideo() {
         clips
           .filter(c => c.type === "video" && c.prompt && !c.disabled)
           .map(async (clip) => {
-            // Each clip uses its own timeline duration, or global override
+            // Timeline duration is ALWAYS requested_seconds
             const timelineDuration = clip.end - clip.start;
-            const requestedSeconds = globalDuration ?? timelineDuration;
-            const { providerSeconds } = getProviderDuration(provider, requestedSeconds);
+            const requestedSeconds = timelineDuration;
+            // Global duration only overrides provider bucket
+            const providerSeconds = globalDuration ?? getProviderDuration(provider, requestedSeconds).providerSeconds;
 
             const { data, error } = await supabase.functions.invoke("queue-video", {
               body: {

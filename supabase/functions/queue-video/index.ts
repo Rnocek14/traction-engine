@@ -65,12 +65,21 @@ Deno.serve(async (req) => {
     
     const size = settings?.size || "720x1280";
     
-    // Resolve duration: prefer provider_seconds, fall back to seconds, require explicit value
+    // Resolve provider duration: prefer provider_seconds, fall back to legacy seconds
     const providerSeconds = settings?.provider_seconds ?? settings?.seconds;
+    
+    // requested_seconds: prefer explicit, fall back to provider_seconds for legacy callers
     const requestedSeconds = settings?.requested_seconds ?? providerSeconds;
     
+    // Legacy fallback: allow callers with just 'seconds' but log
     if (!providerSeconds) {
+      console.error("queue-video called without provider_seconds or seconds - this is a bug");
       throw new Error("provider_seconds or seconds is required - duration must be explicitly provided");
+    }
+    
+    // Log when using legacy field only (helps track migration)
+    if (settings?.seconds && !settings?.provider_seconds) {
+      console.log(`Legacy caller: using seconds=${settings.seconds} without provider_seconds`);
     }
     
     const model = settings?.model || "sora-2";
