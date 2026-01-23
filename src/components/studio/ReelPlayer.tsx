@@ -45,7 +45,9 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
   const userWantsPlayingRef = useRef(false);
   const isTransitioningRef = useRef(false);
   const isNextReadyRef = useRef(false);
-  const loadedVideoUrlRef = useRef<string | null>(null);
+  // Per-player URL tracking to prevent loading conflicts during transitions
+  const loadedUrlARef = useRef<string | null>(null);
+  const loadedUrlBRef = useRef<string | null>(null);
 
   // Map clips to their video jobs
   const clipVideos = clips
@@ -94,19 +96,24 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
   }, [currentClipIndex, clipVideos, getActiveRef]);
 
   // Load initial video when component mounts or clip changes
-  // Use loadedVideoUrlRef to prevent spurious reloads that stop playback
+  // Use per-player URL refs to prevent spurious reloads that stop playback
   useEffect(() => {
+    // Don't interfere during transitions - the preload system handles it
+    if (isTransitioningRef.current) return;
+    
     if (!currentVideo?.job?.output_url) return;
     
     const url = currentVideo.job.output_url;
-    
-    // Skip if we've already loaded this exact URL
-    if (loadedVideoUrlRef.current === url) return;
-    
     const activeEl = activePlayer === "A" ? videoARef.current : videoBRef.current;
+    const loadedUrlRef = activePlayer === "A" ? loadedUrlARef : loadedUrlBRef;
+    
+    // Skip if this player already has this URL loaded
+    if (loadedUrlRef.current === url) return;
+    
     if (!activeEl) return;
     
-    loadedVideoUrlRef.current = url;
+    console.log('[ReelPlayer] Loading video on player', activePlayer, 'url:', url.slice(-30));
+    loadedUrlRef.current = url;
     activeEl.src = url;
     activeEl.load();
   }, [currentVideo, activePlayer]);
@@ -136,21 +143,34 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
 
   // Handle seamless transition to next clip
   const transitionToNextClip = useCallback(() => {
+    console.log('[ReelPlayer] transitionToNextClip called', {
+      currentClipIndex,
+      totalClips,
+      isNextReady: isNextReadyRef.current,
+      activePlayer,
+      nextVideoUrl: nextVideo?.job?.output_url?.slice(-30)
+    });
+    
     if (currentClipIndex >= totalClips - 1) {
       // End of reel - stop and reset
+      console.log('[ReelPlayer] End of reel, resetting');
       userWantsPlayingRef.current = false;
       setIsPlaying(false);
       setCurrentClipIndex(0);
       setActivePlayer("A");
+      loadedUrlARef.current = null;
+      loadedUrlBRef.current = null;
       if (audioRef.current) {
         audioRef.current.pause();
         audioRef.current.currentTime = 0;
       }
+      isTransitioningRef.current = false;
       return;
     }
 
     // Guard: wait for preload to be ready
     if (!isNextReadyRef.current) {
+      console.log('[ReelPlayer] Next not ready, retrying in 50ms');
       // Retry after a short delay
       setTimeout(() => {
         if (userWantsPlayingRef.current) {
@@ -160,14 +180,13 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
       return;
     }
 
-    isTransitioningRef.current = true;
-    
     const preloadRef = getPreloadRef();
     const activeRef = getActiveRef();
     const preloadEl = preloadRef.current;
     const activeEl = activeRef.current;
     
     if (!preloadEl) {
+      console.log('[ReelPlayer] No preload element, aborting transition');
       isTransitioningRef.current = false;
       return;
     }
@@ -178,8 +197,21 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
     
     if (playPromise !== undefined) {
       playPromise.then(() => {
+        // Determine new active player
+        const newActivePlayer = activePlayer === "A" ? "B" : "A";
+        console.log('[ReelPlayer] Swap successful, new active player:', newActivePlayer);
+        
+        // Update URL tracking - the preloaded URL is now the active URL
+        if (newActivePlayer === "B") {
+          loadedUrlBRef.current = nextVideo?.job?.output_url || null;
+          loadedUrlARef.current = null; // Clear old player so it can preload next
+        } else {
+          loadedUrlARef.current = nextVideo?.job?.output_url || null;
+          loadedUrlBRef.current = null;
+        }
+        
         // Now swap the active player
-        setActivePlayer(prev => prev === "A" ? "B" : "A");
+        setActivePlayer(newActivePlayer);
         setCurrentClipIndex(prev => prev + 1);
         
         // Pause old video after swap
@@ -188,29 +220,41 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
         }
         
         isTransitioningRef.current = false;
-      }).catch(() => {
+      }).catch((err) => {
+        console.log('[ReelPlayer] Play promise rejected:', err);
         isTransitioningRef.current = false;
       });
     } else {
       // Fallback for browsers without promise
-      setActivePlayer(prev => prev === "A" ? "B" : "A");
+      const newActivePlayer = activePlayer === "A" ? "B" : "A";
+      if (newActivePlayer === "B") {
+        loadedUrlBRef.current = nextVideo?.job?.output_url || null;
+        loadedUrlARef.current = null;
+      } else {
+        loadedUrlARef.current = nextVideo?.job?.output_url || null;
+        loadedUrlBRef.current = null;
+      }
+      setActivePlayer(newActivePlayer);
       setCurrentClipIndex(prev => prev + 1);
       if (activeEl) activeEl.pause();
       isTransitioningRef.current = false;
     }
-  }, [currentClipIndex, totalClips, getPreloadRef, getActiveRef]);
+  }, [currentClipIndex, totalClips, getPreloadRef, getActiveRef, activePlayer, nextVideo]);
 
   // Video ended handler - only triggers transition
   // CRITICAL: Set isTransitioningRef IMMEDIATELY to guard against onPause race condition
   const handleVideoEnded = useCallback(() => {
+    console.log('[ReelPlayer] Video ended, clip:', currentClipIndex, 'userWantsPlaying:', userWantsPlayingRef.current);
     isTransitioningRef.current = true;
     
     if (userWantsPlayingRef.current) {
+      console.log('[ReelPlayer] User wants playing, transitioning...');
       transitionToNextClip();
     } else {
+      console.log('[ReelPlayer] User paused, not transitioning');
       isTransitioningRef.current = false;
     }
-  }, [transitionToNextClip]);
+  }, [transitionToNextClip, currentClipIndex]);
 
   // Time update handler
   const handleTimeUpdate = useCallback(() => {
