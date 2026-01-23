@@ -9,6 +9,7 @@ import {
   generateClipId,
   scenePromptsToClips,
   splitClip,
+  trimClip,
   rippleDeleteClip,
   deleteClip,
   moveClip,
@@ -320,6 +321,106 @@ export function useTimelineEditor({
     [clips, pushToHistory, toast]
   );
 
+  // ========== Trim Operations ==========
+
+  /** Live trim preview (no history) - for dragging */
+  const previewTrim = useCallback(
+    (clipId: string, newStart?: number, newEnd?: number) => {
+      const idx = clips.findIndex((c) => c.id === clipId);
+      if (idx === -1) return;
+
+      const current = clips[idx];
+      
+      // Calculate new values with constraints
+      let targetStart = newStart ?? current.start;
+      let targetEnd = newEnd ?? current.end;
+      
+      // Prevent inversion and ensure minimum duration
+      const minDuration = 0.1;
+      if (targetEnd - targetStart < minDuration) {
+        if (newStart !== undefined) {
+          targetStart = targetEnd - minDuration;
+        } else {
+          targetEnd = targetStart + minDuration;
+        }
+      }
+      
+      // Clamp start to 0
+      if (targetStart < 0) targetStart = 0;
+
+      const trimmed = { ...current, start: targetStart, end: targetEnd };
+      
+      let next = [...clips];
+      next[idx] = trimmed;
+
+      // If ripple mode and trimming right edge, shift following clips
+      if (rippleMode && newEnd !== undefined) {
+        const before = next.slice(0, idx + 1);
+        const after = next.slice(idx + 1);
+        
+        let t = before[before.length - 1].end;
+        const afterOffset = after.map((c) => {
+          const d = Math.max(0.01, c.end - c.start);
+          const out = { ...c, start: t, end: t + d };
+          t += d;
+          return out;
+        });
+        
+        next = [...before, ...afterOffset];
+      }
+
+      setClips(next);
+    },
+    [clips, setClips, rippleMode]
+  );
+
+  /** Commit trim (creates history entry) */
+  const commitTrim = useCallback(
+    (clipId: string, newStart?: number, newEnd?: number) => {
+      const idx = clips.findIndex((c) => c.id === clipId);
+      if (idx === -1) return;
+
+      const current = clips[idx];
+      
+      let targetStart = newStart ?? current.start;
+      let targetEnd = newEnd ?? current.end;
+      
+      const minDuration = 0.1;
+      if (targetEnd - targetStart < minDuration) {
+        if (newStart !== undefined) {
+          targetStart = targetEnd - minDuration;
+        } else {
+          targetEnd = targetStart + minDuration;
+        }
+      }
+      
+      if (targetStart < 0) targetStart = 0;
+
+      const trimmed = { ...current, start: targetStart, end: targetEnd };
+      
+      let next = [...clips];
+      next[idx] = trimmed;
+
+      if (rippleMode && newEnd !== undefined) {
+        const before = next.slice(0, idx + 1);
+        const after = next.slice(idx + 1);
+        
+        let t = before[before.length - 1].end;
+        const afterOffset = after.map((c) => {
+          const d = Math.max(0.01, c.end - c.start);
+          const out = { ...c, start: t, end: t + d };
+          t += d;
+          return out;
+        });
+        
+        next = [...before, ...afterOffset];
+      }
+
+      pushToHistory(next);
+    },
+    [clips, pushToHistory, rippleMode]
+  );
+
   // ========== Undo/Redo ==========
 
   const undo = useCallback(() => {
@@ -533,6 +634,10 @@ export function useTimelineEditor({
     // Ripple mode
     rippleMode,
     setRippleMode,
+
+    // Trim operations
+    previewTrim,
+    commitTrim,
 
     // Persistence
     isDirty,
