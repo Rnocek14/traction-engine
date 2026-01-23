@@ -37,16 +37,37 @@ Deno.serve(async (req) => {
     if (!script_run_id || !clip_ids?.length) throw new Error("Missing script_run_id or clip_ids");
 
     // Fetch timeline with style guide
-    const { data: timeline } = await supabase.from("studio_timelines").select("timeline_json")
+    const { data: timeline, error: timelineError } = await supabase.from("studio_timelines").select("timeline_json")
       .eq("script_run_id", script_run_id).order("version", { ascending: false }).limit(1).single();
+
+    // ========== EXPLICIT ERROR: No timeline found ==========
+    if (timelineError || !timeline) {
+      console.error(`[generate-reel-sequence] No timeline found for script ${script_run_id}:`, timelineError);
+      throw new Error(`No timeline found for script ${script_run_id}. The timeline must be saved in Studio before generating videos. This usually means the UI failed to auto-save on load.`);
+    }
 
     const timelineData = timeline?.timeline_json as { clips?: ClipData[]; style_guide?: StyleGuideData } || {};
     const styleGuide = timelineData.style_guide || null;
+    
+    // Log timeline state for debugging
+    console.log(`[generate-reel-sequence] Timeline loaded: ${timelineData.clips?.length || 0} clips in DB, ${clip_ids.length} requested`);
     
     // Map clip_ids to clips with prompts
     const clipsToGen = clip_ids
       .map(id => timelineData.clips?.find(c => c.id === id))
       .filter((c): c is ClipData & { prompt: string } => !!c?.prompt);
+
+    // ========== EXPLICIT ERROR: No matching clips ==========
+    if (clipsToGen.length === 0) {
+      const dbClipIds = timelineData.clips?.map(c => c.id) || [];
+      console.error(`[generate-reel-sequence] No matching clips found.`);
+      console.error(`  - Requested clip_ids: ${clip_ids.join(", ")}`);
+      console.error(`  - DB clip_ids: ${dbClipIds.join(", ")}`);
+      console.error(`  - DB clips with prompts: ${timelineData.clips?.filter(c => c.prompt).length || 0}`);
+      throw new Error(`No matching clips found. Timeline has ${timelineData.clips?.length || 0} clips, but none match the ${clip_ids.length} requested clip_ids. This usually means the timeline in the UI is out of sync with the database. Save the timeline (Cmd+S) and try again.`);
+    }
+    
+    console.log(`[generate-reel-sequence] Found ${clipsToGen.length}/${clip_ids.length} clips to generate`);
 
     const model = settings.model || "sora-2";
     const size = settings.size || "720x1280";
