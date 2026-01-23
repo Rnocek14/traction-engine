@@ -3,6 +3,8 @@
  * 
  * Routes video generation requests to the best available provider
  * with automatic fallback on rate limits or quota errors.
+ * 
+ * Supports: Sora 2, Runway Gen-3/Gen-4, Luma Ray2
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -22,13 +24,19 @@ interface SmartVideoRequest {
     seed?: number;
   };
   starting_frame_url?: string;
-  provider?: "sora" | "runway" | "smart"; // Default: smart
+  provider?: "sora" | "runway" | "luma" | "smart"; // Default: smart
   fallback_enabled?: boolean; // Default: true
+  /** Routing hints from frontend */
+  routing_hint?: {
+    shot_type?: string;
+    genre?: string;
+    prefer_fast?: boolean;
+  };
 }
 
 interface ProviderResult {
   success: boolean;
-  provider: "sora" | "runway";
+  provider: "sora" | "runway" | "luma";
   job?: Record<string, unknown>;
   error?: string;
 }
@@ -63,6 +71,49 @@ function isQuotaError(errorMessage: string): boolean {
 
 function shouldFallback(errorMessage: string): boolean {
   return isRateLimitError(errorMessage) || isQuotaError(errorMessage);
+}
+
+/**
+ * Determine the best provider based on shot type and genre
+ */
+function routeByHints(hints?: SmartVideoRequest["routing_hint"]): "sora" | "runway" | "luma" | null {
+  if (!hints) return null;
+  
+  const { shot_type, genre, prefer_fast } = hints;
+  
+  // Fast mode → Luma
+  if (prefer_fast) return "luma";
+  
+  // Genre-based routing
+  if (genre === "horror" || genre === "dark") {
+    // Horror/dark → Runway for character, Luma for environment
+    if (shot_type && ["close-up", "medium-close", "extreme-close", "medium"].includes(shot_type)) {
+      return "runway";
+    }
+    return "luma";
+  }
+  
+  if (genre === "action") {
+    // Action → Luma for motion, Sora for character
+    if (shot_type && ["tracking", "crane", "wide", "extreme-wide"].includes(shot_type)) {
+      return "luma";
+    }
+    return "sora";
+  }
+  
+  // Shot type routing (default genre)
+  if (shot_type) {
+    // Character shots → Runway (best consistency)
+    if (["close-up", "medium-close", "extreme-close", "over-shoulder"].includes(shot_type)) {
+      return "runway";
+    }
+    // Environment/motion shots → Luma
+    if (["extreme-wide", "wide", "crane", "tracking", "high-angle"].includes(shot_type)) {
+      return "luma";
+    }
+  }
+  
+  return null; // No strong preference
 }
 
 /**
@@ -161,6 +212,70 @@ async function tryRunway(
   }
 }
 
+/**
+ * Try Luma provider
+ */
+async function tryLuma(
+  supabaseUrl: string,
+  supabaseKey: string,
+  body: SmartVideoRequest
+): Promise<ProviderResult> {
+  try {
+    const response = await fetch(`${supabaseUrl}/functions/v1/queue-video-luma`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${supabaseKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        script_run_id: body.script_run_id,
+        clip_id: body.clip_id,
+        prompt: body.prompt,
+        settings: body.settings,
+        starting_frame_url: body.starting_frame_url,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok || !data.success) {
+      return {
+        success: false,
+        provider: "luma",
+        error: data.error || `HTTP ${response.status}`,
+      };
+    }
+
+    return {
+      success: true,
+      provider: "luma",
+      job: data.job,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      provider: "luma",
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
+ * Get fallback order for a provider
+ */
+function getFallbackOrder(primary: "sora" | "runway" | "luma"): Array<"sora" | "runway" | "luma"> {
+  switch (primary) {
+    case "sora":
+      return ["runway", "luma"];
+    case "runway":
+      return ["sora", "luma"];
+    case "luma":
+      return ["sora", "runway"];
+    default:
+      return ["runway", "luma"];
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -173,7 +288,7 @@ Deno.serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     const body: SmartVideoRequest = await req.json();
-    const { provider = "smart", fallback_enabled = true } = body;
+    const { provider = "smart", fallback_enabled = true, routing_hint } = body;
 
     // Validate script exists
     const { data: script, error: scriptError } = await supabase
@@ -191,32 +306,58 @@ Deno.serve(async (req) => {
     }
 
     let result: ProviderResult;
-
-    // Explicit provider selection (no fallback)
-    if (provider === "sora") {
-      result = await trySora(supabaseUrl, supabaseServiceKey, body);
-      
-      if (!result.success && fallback_enabled && shouldFallback(result.error || "")) {
-        console.log(`Sora failed with ${result.error}, falling back to Runway`);
-        result = await tryRunway(supabaseUrl, supabaseServiceKey, body);
+    const tryProvider = async (p: "sora" | "runway" | "luma"): Promise<ProviderResult> => {
+      switch (p) {
+        case "sora":
+          return trySora(supabaseUrl, supabaseServiceKey, body);
+        case "runway":
+          return tryRunway(supabaseUrl, supabaseServiceKey, body);
+        case "luma":
+          return tryLuma(supabaseUrl, supabaseServiceKey, body);
       }
-    } else if (provider === "runway") {
-      result = await tryRunway(supabaseUrl, supabaseServiceKey, body);
+    };
+
+    // Explicit provider selection
+    if (provider !== "smart") {
+      const explicitProvider = provider as "sora" | "runway" | "luma";
+      result = await tryProvider(explicitProvider);
       
       if (!result.success && fallback_enabled && shouldFallback(result.error || "")) {
-        console.log(`Runway failed with ${result.error}, falling back to Sora`);
-        result = await trySora(supabaseUrl, supabaseServiceKey, body);
+        const fallbacks = getFallbackOrder(explicitProvider);
+        
+        for (const fallback of fallbacks) {
+          console.log(`${explicitProvider} failed with ${result.error}, trying ${fallback}`);
+          result = await tryProvider(fallback);
+          if (result.success || !shouldFallback(result.error || "")) {
+            break;
+          }
+        }
       }
     } else {
-      // Smart mode: try Sora first (typically higher quality), fallback to Runway
-      result = await trySora(supabaseUrl, supabaseServiceKey, body);
+      // Smart mode: determine best provider
+      const hintedProvider = routeByHints(routing_hint);
+      const primaryProvider = hintedProvider || "sora"; // Default to Sora
+      
+      console.log(`Smart mode: routing to ${primaryProvider}`, {
+        hintedProvider,
+        routing_hint,
+      });
+      
+      result = await tryProvider(primaryProvider);
 
       if (!result.success && fallback_enabled) {
         const shouldTryFallback = shouldFallback(result.error || "");
         
         if (shouldTryFallback) {
-          console.log(`Smart mode: Sora unavailable (${result.error}), trying Runway`);
-          result = await tryRunway(supabaseUrl, supabaseServiceKey, body);
+          const fallbacks = getFallbackOrder(primaryProvider);
+          
+          for (const fallback of fallbacks) {
+            console.log(`Smart mode: ${result.provider} unavailable (${result.error}), trying ${fallback}`);
+            result = await tryProvider(fallback);
+            if (result.success || !shouldFallback(result.error || "")) {
+              break;
+            }
+          }
         }
       }
     }
@@ -228,6 +369,7 @@ Deno.serve(async (req) => {
           provider: result.provider,
           job: result.job,
           fallback_used: provider !== result.provider && provider !== "smart",
+          routing_hint_used: routing_hint !== undefined,
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );

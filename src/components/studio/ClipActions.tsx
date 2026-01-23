@@ -62,10 +62,12 @@ import {
   isClipDurationTooShort,
   isClipDurationTooLong,
   PROVIDER_CAPABILITIES,
+  getProviderDisplayInfo,
   type VideoProvider,
 } from "@/types/video-provider-types";
 import { autoSplitClip, getSplitInfo } from "@/lib/clip-utils";
-import type { Clip } from "@/types/timeline-types";
+import { routeClipToProvider, type GenrePreset } from "@/lib/provider-router";
+import type { Clip, StyleGuide } from "@/types/timeline-types";
 
 interface ClipActionsProps {
   clip: Clip | null;

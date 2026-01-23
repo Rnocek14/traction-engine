@@ -432,11 +432,94 @@ export function buildRunwayPrompt(
 }
 
 /**
+ * =============================================================================
+ * LUMA DREAM MACHINE PROMPT SYSTEM
+ * =============================================================================
+ * Luma Ray2 excels at natural motion and physics.
+ * Prompts should emphasize movement and realistic action.
+ */
+
+/**
+ * Luma-specific camera motion keywords
+ */
+const LUMA_MOTION_KEYWORDS: Record<string, string> = {
+  "static": "static camera",
+  "tracking": "camera tracking the subject",
+  "dolly": "smooth dolly movement",
+  "crane": "crane shot moving upward",
+  "handheld": "natural handheld camera movement",
+  "pan": "smooth horizontal pan",
+  "tilt": "vertical tilt movement",
+  "zoom": "gradual zoom",
+  "orbit": "camera orbiting around subject",
+};
+
+/**
+ * Build a Luma-optimized prompt.
+ * Luma Ray2 prefers:
+ * - Clear motion descriptions
+ * - Natural physics emphasis
+ * - Concise but descriptive
+ * - Environment and atmosphere focus
+ */
+export function buildLumaPrompt(
+  styleGuide: StyleGuideData | null,
+  scenePrompt: string,
+  clipCameraDirection?: string
+): string {
+  const parts: string[] = [];
+  
+  // Camera motion first
+  if (clipCameraDirection && LUMA_MOTION_KEYWORDS[clipCameraDirection]) {
+    parts.push(LUMA_MOTION_KEYWORDS[clipCameraDirection]);
+  } else if (styleGuide?.motion_style && LUMA_MOTION_KEYWORDS[styleGuide.motion_style]) {
+    parts.push(LUMA_MOTION_KEYWORDS[styleGuide.motion_style]);
+  }
+  
+  // Subject description
+  if (styleGuide?.character) {
+    let subjectDesc = styleGuide.character;
+    if (styleGuide.wardrobe) {
+      subjectDesc += ` wearing ${styleGuide.wardrobe}`;
+    }
+    parts.push(subjectDesc);
+  }
+  
+  // Environment
+  if (styleGuide?.location) {
+    parts.push(styleGuide.location);
+  }
+  
+  // The scene action (Luma excels at motion)
+  parts.push(scenePrompt);
+  
+  // Atmosphere/mood
+  if (styleGuide?.mood) {
+    parts.push(`${styleGuide.mood} atmosphere`);
+  }
+  
+  // Lighting (simplified for Luma)
+  if (styleGuide?.lighting) {
+    parts.push(`${styleGuide.lighting.replace(/_/g, " ")} lighting`);
+  }
+  
+  // Time of day
+  if (styleGuide?.time_of_day) {
+    parts.push(styleGuide.time_of_day.replace(/_/g, " "));
+  }
+  
+  // Quality directive - emphasize physics and natural motion
+  parts.push("realistic physics, natural motion, high quality, cinematic");
+  
+  return parts.filter(Boolean).join(", ");
+}
+
+/**
  * Build a provider-aware prompt.
- * Single entry point for both Sora and Runway prompt generation.
+ * Single entry point for Sora, Runway, and Luma prompt generation.
  */
 export function buildProviderPrompt(
-  provider: "sora" | "runway",
+  provider: "sora" | "runway" | "luma",
   styleGuide: StyleGuideData | null,
   scenePrompt: string,
   isFirstClip: boolean,
@@ -444,6 +527,9 @@ export function buildProviderPrompt(
 ): string {
   if (provider === "runway") {
     return buildRunwayPrompt(styleGuide, scenePrompt, clipCameraDirection);
+  }
+  if (provider === "luma") {
+    return buildLumaPrompt(styleGuide, scenePrompt, clipCameraDirection);
   }
   return buildCinematicPrompt(styleGuide, scenePrompt, isFirstClip, clipCameraDirection);
 }
@@ -461,4 +547,17 @@ export function buildRunwayContinuityPrompt(
   
   // Add continuity directive for image-to-video
   return `${basePrompt}, seamlessly continue from the reference image, maintain character consistency, smooth natural motion`;
+}
+
+/**
+ * Continuity prompt for Luma chained clips
+ */
+export function buildLumaContinuityPrompt(
+  styleGuide: StyleGuideData | null,
+  scenePrompt: string,
+  clipCameraDirection?: string
+): string {
+  const basePrompt = buildLumaPrompt(styleGuide, scenePrompt, clipCameraDirection);
+  
+  return `${basePrompt}, continue seamlessly from the starting frame, maintain visual consistency, smooth transition`;
 }
