@@ -110,8 +110,10 @@ Deno.serve(async (req) => {
       form.set("seconds", String(settings.seconds));
 
       if (prevJobId) {
-        const frame = await extractLastFrame(prevJobId, supabase, targetW, targetH);
-        if (frame) form.set("input_reference", new File([frame], "ref.jpg", { type: "image/jpeg" }));
+        const frameBlob = await extractLastFrame(prevJobId, supabase, targetW, targetH);
+        if (frameBlob) {
+          form.set("input_reference", new File([frameBlob], "ref.jpg", { type: "image/jpeg" }));
+        }
       }
 
       const resp = await fetch("https://api.openai.com/v1/videos", {
@@ -140,7 +142,7 @@ Deno.serve(async (req) => {
   }
 });
 
-async function extractLastFrame(jobId: string, supabase: any, w: number, h: number): Promise<Uint8Array | null> {
+async function extractLastFrame(jobId: string, supabase: any, w: number, h: number): Promise<Blob | null> {
   try {
     const { data: job } = await supabase.from("video_jobs").select("spritesheet_url, thumbnail_url").eq("id", jobId).single();
     const url = job?.spritesheet_url || job?.thumbnail_url;
@@ -152,7 +154,9 @@ async function extractLastFrame(jobId: string, supabase: any, w: number, h: numb
       img = img.clone().crop(4 * fw, 4 * fh, fw, fh);
     }
     if (img.width !== w || img.height !== h) img = img.resize(w, h);
-    return await img.encodeJPEG(90);
+    const jpegBytes = await img.encodeJPEG(90);
+    // Type assertion to work around Deno's strict ArrayBuffer typing
+    return new Blob([jpegBytes as unknown as ArrayBuffer], { type: "image/jpeg" });
   } catch { return null; }
 }
 
