@@ -31,6 +31,8 @@ interface SmartVideoRequest {
     shot_type?: string;
     genre?: string;
     prefer_fast?: boolean;
+    /** CRITICAL: When true, prioritize providers with best image-to-video continuity */
+    is_chained?: boolean;
   };
 }
 
@@ -74,20 +76,43 @@ function shouldFallback(errorMessage: string): boolean {
 }
 
 /**
- * Determine the best provider based on shot type and genre
+ * Determine the best provider based on shot type, genre, and chaining mode
+ * 
+ * Chained mode prioritizes:
+ * - Runway for character continuity (close-ups, dialogue)
+ * - Luma for environment continuity (wide, tracking, motion)
  */
 function routeByHints(hints?: SmartVideoRequest["routing_hint"]): "sora" | "runway" | "luma" | null {
   if (!hints) return null;
   
-  const { shot_type, genre, prefer_fast } = hints;
+  const { shot_type, genre, prefer_fast, is_chained } = hints;
   
   // Fast mode → Luma
   if (prefer_fast) return "luma";
   
-  // Genre-based routing
+  // Character shot types (prioritize consistency)
+  const CHARACTER_SHOTS = ["close-up", "medium-close", "extreme-close", "medium", "over-shoulder"];
+  // Environment/motion shot types (prioritize physics/motion)
+  const ENVIRONMENT_SHOTS = ["wide", "extreme-wide", "tracking", "crane", "high-angle"];
+  
+  // CHAINED MODE: Prioritize providers with best image-to-video continuity
+  if (is_chained) {
+    if (shot_type && CHARACTER_SHOTS.includes(shot_type)) {
+      // Runway has best character consistency for close-ups in chained mode
+      return "runway";
+    }
+    if (shot_type && ENVIRONMENT_SHOTS.includes(shot_type)) {
+      // Luma has best motion physics for environment shots
+      return "luma";
+    }
+    // Default chained mode: Runway for consistency
+    return "runway";
+  }
+  
+  // Genre-based routing (non-chained)
   if (genre === "horror" || genre === "dark") {
     // Horror/dark → Runway for character, Luma for environment
-    if (shot_type && ["close-up", "medium-close", "extreme-close", "medium"].includes(shot_type)) {
+    if (shot_type && CHARACTER_SHOTS.includes(shot_type)) {
       return "runway";
     }
     return "luma";
@@ -95,7 +120,7 @@ function routeByHints(hints?: SmartVideoRequest["routing_hint"]): "sora" | "runw
   
   if (genre === "action") {
     // Action → Luma for motion, Sora for character
-    if (shot_type && ["tracking", "crane", "wide", "extreme-wide"].includes(shot_type)) {
+    if (shot_type && ENVIRONMENT_SHOTS.includes(shot_type)) {
       return "luma";
     }
     return "sora";
@@ -104,11 +129,11 @@ function routeByHints(hints?: SmartVideoRequest["routing_hint"]): "sora" | "runw
   // Shot type routing (default genre)
   if (shot_type) {
     // Character shots → Runway (best consistency)
-    if (["close-up", "medium-close", "extreme-close", "over-shoulder"].includes(shot_type)) {
+    if (CHARACTER_SHOTS.includes(shot_type)) {
       return "runway";
     }
     // Environment/motion shots → Luma
-    if (["extreme-wide", "wide", "crane", "tracking", "high-angle"].includes(shot_type)) {
+    if (ENVIRONMENT_SHOTS.includes(shot_type)) {
       return "luma";
     }
   }
