@@ -222,6 +222,8 @@ export function StudioLayout({
                       onSelectVideoJob={setSelectedVideoJobId}
                       onPreviewVideo={setPreviewVideoUrl}
                       versionChainIds={versionChainIds}
+                      styleGuide={timeline.styleGuide}
+                      onUpdateStyleGuide={timeline.updateStyleGuide}
                       className="h-full"
                     />
                   </ResizablePanel>

@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState } from "react";
 import { FileText, Video, ShieldCheck, ChevronRight, Save, RotateCcw, Undo2, Redo2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -9,11 +9,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Separator } from "@/components/ui/separator";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getStatusInfo, hasHardBlocks } from "@/hooks/use-studio";
 import { VideoGallery } from "./VideoGallery";
 import { VoiceoverGenerator } from "./VoiceoverGenerator";
 import type { Tables } from "@/integrations/supabase/types";
 import type { ScriptEdits } from "@/hooks/use-studio-editor";
+import type { StyleGuide } from "@/types/timeline-types";
 
 type ScriptRun = Tables<"script_runs">;
 
@@ -34,6 +36,8 @@ interface InspectorPanelProps {
   onSelectVideoJob: (jobId: string | null) => void;
   onPreviewVideo: (url: string) => void;
   versionChainIds: string[];
+  styleGuide?: StyleGuide;
+  onUpdateStyleGuide?: (guide: StyleGuide) => void;
   className?: string;
 }
 
@@ -58,6 +62,8 @@ export function InspectorPanel({
   onSelectVideoJob,
   onPreviewVideo,
   versionChainIds,
+  styleGuide,
+  onUpdateStyleGuide,
   className,
 }: InspectorPanelProps) {
   const [activeTab, setActiveTab] = useState("script");
@@ -269,8 +275,149 @@ export function InspectorPanel({
             </EditableSection>
           </TabsContent>
 
-          {/* Video Tab - Gallery */}
-          <TabsContent value="video" className="m-0 p-4">
+          {/* Video Tab - Style Guide + Gallery */}
+          <TabsContent value="video" className="m-0 p-4 space-y-4">
+            {/* Style Guide Section */}
+            <InspectorSection title="Style Guide" defaultOpen>
+              <div className="space-y-3">
+                <p className="text-[10px] text-muted-foreground mb-2">
+                  Define visual consistency for all generated clips
+                </p>
+                
+                {/* Character/Subject */}
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                    Subject/Character
+                  </label>
+                  <Input
+                    value={styleGuide?.character || ""}
+                    onChange={(e) => onUpdateStyleGuide?.({ ...styleGuide, character: e.target.value })}
+                    placeholder="e.g., elderly person with weathered hands, wedding ring"
+                    className="text-xs bg-secondary/30 border-border/30"
+                  />
+                </div>
+
+                {/* Location */}
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                    Location
+                  </label>
+                  <Input
+                    value={styleGuide?.location || ""}
+                    onChange={(e) => onUpdateStyleGuide?.({ ...styleGuide, location: e.target.value })}
+                    placeholder="e.g., warm sunlit kitchen with wooden cabinets"
+                    className="text-xs bg-secondary/30 border-border/30"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  {/* Lighting */}
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                      Lighting
+                    </label>
+                    <Select
+                      value={styleGuide?.lighting || ""}
+                      onValueChange={(v) => onUpdateStyleGuide?.({ ...styleGuide, lighting: v })}
+                    >
+                      <SelectTrigger className="text-xs bg-secondary/30 border-border/30 h-8">
+                        <SelectValue placeholder="Select..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="natural">Natural daylight</SelectItem>
+                        <SelectItem value="golden_hour">Golden hour</SelectItem>
+                        <SelectItem value="studio">Studio</SelectItem>
+                        <SelectItem value="dramatic">Dramatic</SelectItem>
+                        <SelectItem value="soft">Soft diffused</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Camera Style */}
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                      Camera Style
+                    </label>
+                    <Select
+                      value={styleGuide?.camera_style || ""}
+                      onValueChange={(v) => onUpdateStyleGuide?.({ ...styleGuide, camera_style: v })}
+                    >
+                      <SelectTrigger className="text-xs bg-secondary/30 border-border/30 h-8">
+                        <SelectValue placeholder="Select..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="documentary">Documentary</SelectItem>
+                        <SelectItem value="cinematic">Cinematic</SelectItem>
+                        <SelectItem value="vlog">Vlog style</SelectItem>
+                        <SelectItem value="static">Static shots</SelectItem>
+                        <SelectItem value="dynamic">Dynamic</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Color Grade */}
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                      Color Grade
+                    </label>
+                    <Select
+                      value={styleGuide?.color_grade || ""}
+                      onValueChange={(v) => onUpdateStyleGuide?.({ ...styleGuide, color_grade: v })}
+                    >
+                      <SelectTrigger className="text-xs bg-secondary/30 border-border/30 h-8">
+                        <SelectValue placeholder="Select..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="warm">Warm amber</SelectItem>
+                        <SelectItem value="cool">Cool blue</SelectItem>
+                        <SelectItem value="neutral">Neutral</SelectItem>
+                        <SelectItem value="vintage">Vintage film</SelectItem>
+                        <SelectItem value="high_contrast">High contrast</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Mood */}
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                      Mood
+                    </label>
+                    <Select
+                      value={styleGuide?.mood || ""}
+                      onValueChange={(v) => onUpdateStyleGuide?.({ ...styleGuide, mood: v })}
+                    >
+                      <SelectTrigger className="text-xs bg-secondary/30 border-border/30 h-8">
+                        <SelectValue placeholder="Select..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="hopeful">Hopeful</SelectItem>
+                        <SelectItem value="dramatic">Dramatic</SelectItem>
+                        <SelectItem value="calm">Calm</SelectItem>
+                        <SelectItem value="energetic">Energetic</SelectItem>
+                        <SelectItem value="intimate">Intimate</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {/* Custom Notes */}
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                    Custom Notes
+                  </label>
+                  <Textarea
+                    value={styleGuide?.custom_notes || ""}
+                    onChange={(e) => onUpdateStyleGuide?.({ ...styleGuide, custom_notes: e.target.value })}
+                    placeholder="Additional style notes for consistency..."
+                    className="text-xs bg-secondary/30 border-border/30 min-h-[60px] resize-y"
+                  />
+                </div>
+              </div>
+            </InspectorSection>
+
+            <Separator className="bg-border/30" />
+
+            {/* Video Gallery */}
             <VideoGallery
               scriptId={script.id}
               versionChainIds={versionChainIds}

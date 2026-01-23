@@ -71,28 +71,105 @@ Deno.serve(async (req) => {
       throw new Error("Script must pass QA before video generation");
     }
 
+    // Style guide type definition
+    interface StyleGuideData {
+      character?: string;
+      location?: string;
+      lighting?: string;
+      camera_style?: string;
+      color_grade?: string;
+      mood?: string;
+      custom_notes?: string;
+    }
+
     // Build the video prompt
     const content = script.script_content as Record<string, unknown>;
     let videoPrompt: string;
+    let styleGuide: StyleGuideData | null = null;
+
+    // Fetch timeline to get style guide and clip data
+    const { data: timeline } = await supabase
+      .from("studio_timelines")
+      .select("timeline_json")
+      .eq("script_run_id", script_run_id)
+      .order("version", { ascending: false })
+      .limit(1)
+      .single();
+
+    if (timeline?.timeline_json) {
+      const timelineData = timeline.timeline_json as {
+        clips?: Array<{ id: string; prompt?: string }>;
+        style_guide?: StyleGuideData;
+      };
+      styleGuide = timelineData.style_guide || null;
+    }
+
+    // Build style consistency prefix from style guide
+    const buildStylePrefix = (): string => {
+      if (!styleGuide) return "";
+      
+      const parts: string[] = ["VISUAL CONSISTENCY REQUIREMENTS:"];
+      
+      if (styleGuide.character) {
+        parts.push(`- Subject: ${styleGuide.character}`);
+      }
+      if (styleGuide.location) {
+        parts.push(`- Location: ${styleGuide.location}`);
+      }
+      if (styleGuide.lighting) {
+        const lightingMap: Record<string, string> = {
+          natural: "soft natural daylight",
+          golden_hour: "warm golden hour lighting with long shadows",
+          studio: "controlled studio lighting, even exposure",
+          dramatic: "high contrast dramatic lighting with deep shadows",
+          soft: "soft diffused lighting, minimal shadows",
+        };
+        parts.push(`- Lighting: ${lightingMap[styleGuide.lighting] || styleGuide.lighting}`);
+      }
+      if (styleGuide.camera_style) {
+        const cameraMap: Record<string, string> = {
+          documentary: "intimate documentary style, handheld feel, close-ups",
+          cinematic: "cinematic wide shots, smooth dolly movements, shallow depth of field",
+          vlog: "first-person vlog style, direct address, casual framing",
+          static: "locked-off static shots, minimal camera movement",
+          dynamic: "dynamic camera movement, tracking shots, reveals",
+        };
+        parts.push(`- Camera: ${cameraMap[styleGuide.camera_style] || styleGuide.camera_style}`);
+      }
+      if (styleGuide.color_grade) {
+        const colorMap: Record<string, string> = {
+          warm: "warm amber/orange color grade, cozy feel",
+          cool: "cool blue/teal color grade, clean modern feel",
+          neutral: "natural balanced colors, true-to-life",
+          vintage: "vintage film look, slight grain, muted colors",
+          high_contrast: "high contrast, punchy colors, bold look",
+        };
+        parts.push(`- Color: ${colorMap[styleGuide.color_grade] || styleGuide.color_grade}`);
+      }
+      if (styleGuide.mood) {
+        parts.push(`- Mood: ${styleGuide.mood}`);
+      }
+      if (styleGuide.custom_notes) {
+        parts.push(`- Notes: ${styleGuide.custom_notes}`);
+      }
+      
+      if (parts.length <= 1) return ""; // Only header, no actual content
+      
+      return parts.join("\n") + "\n\nSCENE: ";
+    };
+
+    const stylePrefix = buildStylePrefix();
 
     if (overridePrompt) {
-      // Use the override prompt directly (for clip-specific generation)
-      videoPrompt = overridePrompt;
+      // Use the override prompt with style prefix
+      videoPrompt = stylePrefix + overridePrompt;
     } else if (clip_id) {
-      // Try to find clip in timeline and use its prompt
-      const { data: timeline } = await supabase
-        .from("studio_timelines")
-        .select("timeline_json")
-        .eq("script_run_id", script_run_id)
-        .order("version", { ascending: false })
-        .limit(1)
-        .single();
-
+      // Find clip in timeline and use its prompt
       if (timeline?.timeline_json) {
         const timelineData = timeline.timeline_json as { clips?: Array<{ id: string; prompt?: string }> };
         const clip = timelineData.clips?.find(c => c.id === clip_id);
         if (clip?.prompt) {
-          videoPrompt = clip.prompt;
+          videoPrompt = stylePrefix + clip.prompt;
         } else {
           throw new Error("Clip not found or has no prompt");
         }
@@ -106,7 +183,7 @@ Deno.serve(async (req) => {
       const scenePrompts = (content?.scene_prompts as string[]) || [];
 
       videoPrompt = `
-Create a cinematic short-form video for social media.
+${stylePrefix}Create a cinematic short-form video for social media.
 
 HOOK TEXT (opening): "${hook}"
 

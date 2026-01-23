@@ -66,12 +66,34 @@ export interface Clip {
 }
 
 /**
+ * Style guide for visual continuity across clips
+ */
+export interface StyleGuide {
+  /** Character/subject description for consistency */
+  character?: string;
+  /** Location/setting description */
+  location?: string;
+  /** Lighting style: "natural", "golden_hour", "studio", "dramatic", "soft" */
+  lighting?: string;
+  /** Camera style: "documentary", "cinematic", "vlog", "static", "dynamic" */
+  camera_style?: string;
+  /** Color grade: "warm", "cool", "neutral", "vintage", "high_contrast" */
+  color_grade?: string;
+  /** Mood: "hopeful", "dramatic", "calm", "energetic", "intimate" */
+  mood?: string;
+  /** Custom style notes */
+  custom_notes?: string;
+}
+
+/**
  * Timeline data structure stored in studio_timelines.timeline_json
  */
 export interface TimelineData {
   clips: Clip[];
   /** Total timeline duration (auto-calculated from clips) */
   duration?: number;
+  /** Style guide for visual continuity */
+  style_guide?: StyleGuide;
   /** Playback settings */
   playback?: {
     fps?: number;
