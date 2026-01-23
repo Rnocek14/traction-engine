@@ -331,6 +331,7 @@ export function StudioLayout({
                     clip={selectedClip}
                     scriptId={script.id}
                     onClipUpdated={() => {}}
+                    onAutoSplit={(clipId, segments) => timeline.replaceClipWithSegments(clipId, segments)}
                   />
                   <ActionDock script={script} clips={timeline.clips} />
                 </div>
