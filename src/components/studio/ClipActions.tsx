@@ -125,8 +125,12 @@ export function ClipActions({ clip, scriptId, onClipUpdated, className }: ClipAc
 
   if (!clip) {
     return (
-      <div className={cn("p-4 text-center text-muted-foreground text-sm", className)}>
-        Select a clip to see actions
+      <div className={cn("p-4 rounded-lg border border-dashed border-border/40 bg-secondary/5", className)}>
+        <div className="text-center space-y-2">
+          <Film className="h-8 w-8 mx-auto text-muted-foreground/30" />
+          <p className="text-sm text-muted-foreground/60">No clip selected</p>
+          <p className="text-xs text-muted-foreground/40">Click a clip in the timeline to edit</p>
+        </div>
       </div>
     );
   }
