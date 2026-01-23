@@ -100,54 +100,81 @@ ffmpeg-service/
 ```typescript
 import type { FFmpegServiceRequest } from "./ffmpeg.js";
 
-// Allowed Supabase storage URL patterns
-// Update ALLOWED_HOSTS with your actual Supabase project ref
-const ALLOWED_HOSTS = [
-  /^https:\/\/[a-z0-9]+\.supabase\.co$/,
-  /^https:\/\/[a-z0-9]+\.supabase\.in$/,
+// SECURITY: Pin to your exact Supabase project hostname
+// This is more secure than regex patterns
+const ALLOWED_HOSTNAMES = new Set([
+  "jrujlpljluvxewjytuab.supabase.co",
+  // Add other project refs if needed (e.g., staging)
+]);
+
+// Alternative: regex pattern for any valid Supabase project ref (allows hyphens)
+// const ALLOWED_HOSTNAME_PATTERNS = [
+//   /^[a-z0-9-]+\.supabase\.co$/i,
+//   /^[a-z0-9-]+\.supabase\.in$/i,
+// ];
+
+// Allowed Storage API path prefixes
+const ALLOWED_PATH_PREFIXES = [
+  "/storage/v1/object/public/",   // public bucket objects
+  "/storage/v1/object/sign/",     // signed URLs
+  "/storage/v1/object/",          // authenticated access
 ];
 
-const BLOCKED_PATTERNS = [
-  /^https?:\/\/localhost/i,
-  /^https?:\/\/127\./,
-  /^https?:\/\/0\./,
-  /^https?:\/\/10\./,
-  /^https?:\/\/172\.(1[6-9]|2[0-9]|3[01])\./,
-  /^https?:\/\/192\.168\./,
-  /^https?:\/\/\[::1\]/,
-  /^https?:\/\/\[fe80:/i,
+// Allowed transition types for FFmpeg xfade
+export const ALLOWED_TRANSITIONS = new Set([
+  "fade", "wipe", "dissolve", "pixelize",
+  "slideup", "slidedown", "slideleft", "slideright",
+]);
+
+// Block private/internal IPs (validate hostname, not full URL)
+const BLOCKED_HOSTNAME_PATTERNS = [
+  /^localhost$/i,
+  /^127\./,
+  /^10\./,
+  /^172\.(1[6-9]|2\d|3[01])\./,
+  /^192\.168\./,
+  /^0\./,
+  /^169\.254\./,    // link-local
+  /^::1$/,          // IPv6 localhost
+  /^fc00:/i,        // IPv6 private
+  /^fe80:/i,        // IPv6 link-local
 ];
 
 /**
- * Validate URL is from allowed Supabase storage domain
- * Prevents SSRF attacks by blocking internal/private URLs
+ * Validate URL is from allowed Supabase storage domain + path
+ * Prevents SSRF attacks by validating hostname AND path prefix
  */
 export function validateUrl(url: string, context: string): { valid: boolean; error?: string } {
-  // Must be HTTPS
-  if (!url.startsWith("https://")) {
-    return { valid: false, error: `${context}: must use HTTPS` };
-  }
-
-  // Block private/internal IPs
-  for (const pattern of BLOCKED_PATTERNS) {
-    if (pattern.test(url)) {
-      return { valid: false, error: `${context}: blocked URL pattern` };
-    }
-  }
-
-  // Extract host
-  let host: string;
+  let parsed: URL;
   try {
-    const parsed = new URL(url);
-    host = `${parsed.protocol}//${parsed.host}`;
+    parsed = new URL(url);
   } catch {
     return { valid: false, error: `${context}: invalid URL format` };
   }
 
-  // Must match allowed Supabase hosts
-  const allowed = ALLOWED_HOSTS.some((pattern) => pattern.test(host));
-  if (!allowed) {
-    return { valid: false, error: `${context}: host not in allowlist` };
+  // Must be HTTPS
+  if (parsed.protocol !== "https:") {
+    return { valid: false, error: `${context}: must use HTTPS` };
+  }
+
+  // Block private/internal IPs (check hostname only, not full URL)
+  for (const pattern of BLOCKED_HOSTNAME_PATTERNS) {
+    if (pattern.test(parsed.hostname)) {
+      return { valid: false, error: `${context}: blocked hostname pattern` };
+    }
+  }
+
+  // Must match allowed Supabase hostnames (exact match)
+  if (!ALLOWED_HOSTNAMES.has(parsed.hostname)) {
+    return { valid: false, error: `${context}: hostname not in allowlist (${parsed.hostname})` };
+  }
+
+  // Must be a Storage API endpoint
+  const pathAllowed = ALLOWED_PATH_PREFIXES.some((prefix) =>
+    parsed.pathname.startsWith(prefix)
+  );
+  if (!pathAllowed) {
+    return { valid: false, error: `${context}: path not a Storage API endpoint (${parsed.pathname})` };
   }
 
   return { valid: true };
@@ -172,7 +199,7 @@ export function validateRenderRequest(req: FFmpegServiceRequest): string[] {
   for (let i = 0; i < req.clips.length; i++) {
     const clip = req.clips[i];
 
-    // URL validation (SSRF prevention)
+    // URL validation (SSRF prevention + path validation)
     const urlCheck = validateUrl(clip.url, `clips[${i}].url`);
     if (!urlCheck.valid) errors.push(urlCheck.error!);
 
@@ -193,6 +220,14 @@ export function validateRenderRequest(req: FFmpegServiceRequest): string[] {
   if (req.voiceover_url) {
     const voCheck = validateUrl(req.voiceover_url, "voiceover_url");
     if (!voCheck.valid) errors.push(voCheck.error!);
+  }
+
+  // Transition type allowlist
+  if (!ALLOWED_TRANSITIONS.has(req.transition.type)) {
+    errors.push(
+      `transition.type "${req.transition.type}" not allowed. ` +
+        `Valid: ${[...ALLOWED_TRANSITIONS].join(", ")}`
+    );
   }
 
   // Transition safety: duration must be < min(trim_seconds) - buffer
@@ -225,6 +260,7 @@ export type JobStatus = "queued" | "rendering" | "succeeded" | "failed";
 
 export interface Job {
   job_id: string;
+  idempotency_key?: string;  // Store for O(1) cleanup
   status: JobStatus;
   progress?: number;
   eta_seconds?: number;
@@ -250,10 +286,12 @@ export function getJobByIdempotencyKey(key: string): Job | undefined {
 }
 
 export function upsertJob(job: Job, idempotencyKey?: string): void {
-  jobs.set(job.job_id, job);
+  // Store the key on the job for O(1) cleanup later
   if (idempotencyKey) {
+    job.idempotency_key = idempotencyKey;
     idempotencyIndex.set(idempotencyKey, job.job_id);
   }
+  jobs.set(job.job_id, job);
 }
 
 export function setJobStatus(job_id: string, patch: Partial<Job>): void {
@@ -262,24 +300,17 @@ export function setJobStatus(job_id: string, patch: Partial<Job>): void {
 }
 
 // TTL cleanup: remove jobs older than maxAgeMs
+// O(1) per job using stored idempotency_key (no scan required)
 export function cleanupOldJobs(maxAgeMs: number = 3600000): void {
   const now = Date.now();
-  const keysToDelete: string[] = [];
 
   for (const [id, job] of jobs) {
     const completed = job.completed_at ? new Date(job.completed_at).getTime() : 0;
     if (completed && now - completed > maxAgeMs) {
-      keysToDelete.push(id);
-    }
-  }
-
-  for (const id of keysToDelete) {
-    jobs.delete(id);
-    // Also clean up idempotency index
-    for (const [key, jobId] of idempotencyIndex) {
-      if (jobId === id) {
-        idempotencyIndex.delete(key);
-        break;
+      jobs.delete(id);
+      // O(1) cleanup: use stored key instead of scanning
+      if (job.idempotency_key) {
+        idempotencyIndex.delete(job.idempotency_key);
       }
     }
   }
@@ -423,9 +454,11 @@ export function buildFiltergraph(
           `[a${i}]`
       );
     } else {
-      // Clip has no audio - synthesize silence
+      // Clip has no audio - synthesize silence (full filter chain for consistency)
       filterParts.push(
-        `anullsrc=r=48000:cl=stereo,atrim=0:${trimDur},` +
+        `anullsrc=r=48000:cl=stereo,` +
+          `aformat=sample_rates=48000:channel_layouts=stereo,` +
+          `atrim=0:${trimDur},asetpts=PTS-STARTPTS,` +
           `adelay=${startMs}|${startMs}` +
           `[a${i}]`
       );
@@ -563,7 +596,11 @@ export async function runRenderJob(req: FFmpegServiceRequest): Promise<void> {
     const { filter, duration: expectedDuration } = buildFiltergraph(req, clipHasAudio);
 
     // Build ffmpeg args
-    const args: string[] = [];
+    // IMPORTANT: -loglevel and -stats BEFORE inputs for reliable progress output
+    const args: string[] = [
+      "-loglevel", "info",
+      "-stats",  // Ensure time= is emitted to stderr
+    ];
     
     // Add clip inputs
     for (const p of clipPaths) args.push("-i", p);
@@ -584,7 +621,6 @@ export async function runRenderJob(req: FFmpegServiceRequest): Promise<void> {
       "-b:a", req.output.audio_bitrate,
       "-ar", "48000",
       "-shortest",
-      "-loglevel", "info",  // Ensure progress is emitted
       outPath
     );
 
@@ -653,11 +689,14 @@ app.post("/render/reel", async (req, res) => {
   const body = req.body as FFmpegServiceRequest;
 
   try {
-    // Check idempotency first - return existing job if key matches
+    // Check idempotency first - return existing job's FULL status if key matches
+    // NOTE: This returns a superset of the initial 202 response (includes progress, output_url, etc.)
+    // so clients can get current progress/result on retry without starting a new render
     if (body.idempotency_key) {
       const existingJob = getJobByIdempotencyKey(body.idempotency_key);
       if (existingJob) {
         console.log(`Idempotent request: returning existing job ${existingJob.job_id}`);
+        // Return full job state (superset of JobStatus interface)
         return res.status(202).json({
           job_id: existingJob.job_id,
           status: existingJob.status,
@@ -666,6 +705,8 @@ app.post("/render/reel", async (req, res) => {
           output_url: existingJob.output_url,
           duration: existingJob.duration,
           error: existingJob.error,
+          started_at: existingJob.started_at,
+          completed_at: existingJob.completed_at,
         });
       }
     }
@@ -857,8 +898,9 @@ https://your-ffmpeg-service.fly.dev
 |-------|------|
 | `clips.length` | >= 2, <= 50 |
 | `clips[i].trim_seconds` | >= 0.3s, <= generated_seconds |
-| `clips[i].url` | HTTPS, Supabase storage domain only |
-| `voiceover_url` | HTTPS, Supabase storage domain only |
+| `clips[i].url` | HTTPS, Supabase storage hostname + path prefix |
+| `voiceover_url` | HTTPS, Supabase storage hostname + path prefix |
+| `transition.type` | Must be in allowlist: fade, wipe, dissolve, etc. |
 | `transition.duration` | < min(trim_seconds) - 0.1s |
 | Total duration | <= 180s |
 
