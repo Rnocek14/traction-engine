@@ -64,8 +64,8 @@ export function ActionDock({ script, clips = [], className }: ActionDockProps) {
   const generateAllMutation = useGenerateAllClipsVideo();
 
   const [activePreset, setActivePreset] = useState<RegenPreset | null>(null);
-  const [isRegenOpen, setIsRegenOpen] = useState(true);
-  const [isVideoOpen, setIsVideoOpen] = useState(true);
+  const [isRegenOpen, setIsRegenOpen] = useState(false); // Start collapsed
+  const [isVideoOpen, setIsVideoOpen] = useState(true); // Video section open by default
   const [size, setSize] = useState<VideoSize>("720x1280");
   const [duration, setDuration] = useState<VideoDuration>(4);
 
