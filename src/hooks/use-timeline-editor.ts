@@ -14,6 +14,7 @@ import {
   moveClip,
   duplicateClip,
   calculateTimelineDuration,
+  reflowClipsSequential,
 } from "@/types/timeline-types";
 
 type ScriptRun = Tables<"script_runs">;
@@ -96,9 +97,10 @@ export function useTimelineEditor({
 
   const clips = history.present;
 
-  // Selection state
-  const [selectedClipIds, setSelectedClipIds] = useState<Set<string>>(new Set());
+  // Selection state - use lazy initializer to avoid recreating Set on every render
+  const [selectedClipIds, setSelectedClipIds] = useState<Set<string>>(() => new Set());
   const [playheadPosition, setPlayheadPosition] = useState(0);
+  const [rippleMode, setRippleMode] = useState(false);
 
   // Computed values
   const duration = useMemo(() => calculateTimelineDuration(clips), [clips]);
@@ -179,9 +181,10 @@ export function useTimelineEditor({
     }
 
     const clipId = Array.from(selectedClipIds)[0];
-    const clip = clips.find((c) => c.id === clipId);
-    if (!clip) return;
+    const idx = clips.findIndex((c) => c.id === clipId);
+    if (idx === -1) return;
 
+    const clip = clips[idx];
     const result = splitClip(clip, playheadPosition);
     if (!result) {
       toast({ title: "Playhead must be within clip to split", variant: "destructive" });
@@ -189,9 +192,10 @@ export function useTimelineEditor({
     }
 
     const [first, second] = result;
-    const newClips = clips.map((c) => (c.id === clipId ? first : c));
-    const clipIndex = newClips.findIndex((c) => c.id === first.id);
-    newClips.splice(clipIndex + 1, 0, second);
+    
+    // Safer splice: find index before mutation, then replace in place
+    const newClips = [...clips];
+    newClips.splice(idx, 1, first, second);
 
     pushToHistory(newClips);
     setSelectedClipIds(new Set([second.id]));
@@ -362,27 +366,17 @@ export function useTimelineEditor({
         duration: calculateTimelineDuration(clips),
       };
 
-      if (timelineRecord?.id) {
-        // Update existing
-        const { error } = await supabase
-          .from("studio_timelines")
-          .update({
-            timeline_json: timelineData as unknown as Json,
-            version: (timelineRecord.version || 1) + 1,
-          })
-          .eq("id", timelineRecord.id);
+      // Always INSERT a new version to preserve history
+      const nextVersion = (timelineRecord?.version || 0) + 1;
 
-        if (error) throw error;
-      } else {
-        // Create new
-        const { error } = await supabase.from("studio_timelines").insert({
-          script_run_id: script.id,
-          timeline_json: timelineData as unknown as Json,
-          version: 1,
-        });
+      const { error } = await supabase.from("studio_timelines").insert({
+        script_run_id: script.id,
+        timeline_json: timelineData as unknown as Json,
+        version: nextVersion,
+        label: null,
+      });
 
-        if (error) throw error;
-      }
+      if (error) throw error;
 
       // Also update script_runs.script_content.scene_prompts for backward compat
       const content = script.script_content as Record<string, unknown>;
@@ -535,6 +529,10 @@ export function useTimelineEditor({
     canUndo,
     canRedo,
     historyLength: history.past.length,
+
+    // Ripple mode
+    rippleMode,
+    setRippleMode,
 
     // Persistence
     isDirty,

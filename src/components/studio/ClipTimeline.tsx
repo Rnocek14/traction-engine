@@ -307,11 +307,11 @@ export function ClipTimeline({
       {/* Timeline ruler */}
       <div className="px-4 pt-2">
         <div className="flex text-[9px] font-mono text-muted-foreground/60">
-          {Array.from({ length: Math.ceil(duration / 2) + 1 }).map((_, i) => (
+          {duration > 0 && Array.from({ length: Math.ceil(duration / 2) + 1 }).map((_, i) => (
             <div
               key={i}
               className="flex-shrink-0"
-              style={{ width: `${(2 / duration) * 100}%` }}
+              style={{ width: `${(2 / Math.max(duration, 0.0001)) * 100}%` }}
             >
               {formatTime(i * 2)}
             </div>
@@ -434,10 +434,14 @@ function SortableClip({ clip, isSelected, duration, onClick }: SortableClipProps
     isDragging,
   } = useSortable({ id: clip.id });
 
+  // Prevent division by zero
+  const safeDuration = Math.max(duration, 0.0001);
+  const clipDuration = clip.end - clip.start;
+  
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
-    width: `${((clip.end - clip.start) / duration) * 100}%`,
+    width: `${(clipDuration / safeDuration) * 100}%`,
     minWidth: "80px",
   };
 
