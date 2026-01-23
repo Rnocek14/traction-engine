@@ -6,6 +6,8 @@ import type { Tables } from "@/integrations/supabase/types";
 import { 
   getProviderDuration, 
   isClipDurationTooShort,
+  isClipDurationTooLong,
+  PROVIDER_CAPABILITIES,
   type VideoProvider 
 } from "@/types/video-provider-types";
 
@@ -127,6 +129,15 @@ export function useGenerateClipVideo() {
       const timelineDuration = clip.end - clip.start;
       const requestedSeconds = timelineDuration;
       
+      // Block generation if clip exceeds provider max duration
+      const maxDuration = PROVIDER_CAPABILITIES[provider].maxDuration;
+      if (isClipDurationTooLong(provider, timelineDuration)) {
+        throw new Error(
+          `Clip is ${timelineDuration.toFixed(1)}s but max for ${provider === "sora" ? "Sora" : "Runway"} is ${maxDuration}s. ` +
+          `Split the clip first.`
+        );
+      }
+      
       // Manual duration only overrides provider bucket, never requested_seconds
       const providerSeconds = manualProviderDuration 
         ?? getProviderDuration(provider, requestedSeconds).providerSeconds;
@@ -204,13 +215,27 @@ export function useGenerateAllClipsVideo() {
       duration: globalDuration,
       model: modelOverride,
       provider = "sora",
-    }: GenerateAllClipsParams): Promise<{ queued: number; failed: number; jobs: VideoJob[] }> => {
+    }: GenerateAllClipsParams): Promise<{ queued: number; failed: number; skippedLong: number; jobs: VideoJob[] }> => {
       const model = modelOverride || (size.startsWith("1024") || size.startsWith("1792") ? "sora-2-pro" : "sora-2");
       
+      // Filter clips and categorize by duration validity
+      const eligibleClips = clips.filter(c => c.type === "video" && c.prompt && !c.disabled);
+      const maxDuration = PROVIDER_CAPABILITIES[provider].maxDuration;
+      
+      const validClips: Clip[] = [];
+      const tooLongClips: Clip[] = [];
+      
+      for (const clip of eligibleClips) {
+        const timelineDuration = clip.end - clip.start;
+        if (isClipDurationTooLong(provider, timelineDuration)) {
+          tooLongClips.push(clip);
+        } else {
+          validClips.push(clip);
+        }
+      }
+      
       const results = await Promise.allSettled(
-        clips
-          .filter(c => c.type === "video" && c.prompt && !c.disabled)
-          .map(async (clip) => {
+        validClips.map(async (clip) => {
             // Timeline duration is ALWAYS requested_seconds
             const timelineDuration = clip.end - clip.start;
             const requestedSeconds = timelineDuration;
@@ -244,13 +269,21 @@ export function useGenerateAllClipsVideo() {
         .map((r) => r.value);
       
       const failed = results.filter((r) => r.status === "rejected").length;
+      const skippedLong = tooLongClips.length;
 
-      return { queued: jobs.length, failed, jobs };
+      return { queued: jobs.length, failed, skippedLong, jobs };
     },
     onSuccess: (result, variables) => {
+      const parts = [`${result.queued} clips queued`];
+      if (result.failed > 0) parts.push(`${result.failed} failed`);
+      if (result.skippedLong > 0) {
+        const maxDur = PROVIDER_CAPABILITIES[variables.provider || "sora"].maxDuration;
+        parts.push(`${result.skippedLong} skipped (>${maxDur}s, split first)`);
+      }
       toast({
-        title: "Batch video generation started",
-        description: `${result.queued} clips queued${result.failed > 0 ? `, ${result.failed} failed` : ""}`,
+        title: result.skippedLong > 0 ? "Batch generation started with skips" : "Batch video generation started",
+        description: parts.join(", "),
+        variant: result.skippedLong > 0 ? "default" : "default",
       });
       queryClient.invalidateQueries({ queryKey: ["video-jobs", variables.scriptId] });
     },
