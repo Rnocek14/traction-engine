@@ -27,8 +27,8 @@ interface FFmpegServiceRequest {
     audio_bitrate: string;  // "192k"
   };
   transition: {
-    type: string;       // "fade", "wipe", "cut"
-    duration: number;   // seconds, e.g. 0.2
+    type: string;       // "cut" (no transition), "fade", "wipe", "dissolve", etc.
+    duration: number;   // seconds, e.g. 0.2 (ignored for "cut")
   };
   mix: {
     duck_video_audio: boolean;      // sidechain compress video audio
@@ -120,8 +120,9 @@ const ALLOWED_PATH_PREFIXES = [
   "/storage/v1/object/",          // authenticated access
 ];
 
-// Allowed transition types for FFmpeg xfade
+// Allowed transition types for FFmpeg xfade (+ "cut" for no transition)
 export const ALLOWED_TRANSITIONS = new Set([
+  "cut",  // No xfade - hard cut between clips
   "fade", "wipe", "dissolve", "pixelize",
   "slideup", "slidedown", "slideleft", "slideright",
 ]);
@@ -390,12 +391,14 @@ export function buildFiltergraph(
   clipHasAudio: boolean[] // which clips have audio streams
 ) {
   const { width, height, fps } = req.output;
-  const t = req.transition.duration;
+  const isCut = req.transition.type === "cut";
+  const t = isCut ? 0 : req.transition.duration;  // "cut" = no overlap
 
   // Use trim_seconds as source of truth
   const trims = req.clips.map((c) => Math.max(0.05, Number(c.trim_seconds)));
 
   // Video xfade offsets: offset_i = sum(trims[0..i]) - (i+1)*t
+  // For "cut", t=0 so offsets are simply cumulative sums
   const offsets: number[] = [];
   let vSum = 0;
   for (let i = 0; i < trims.length - 1; i++) {
@@ -428,14 +431,21 @@ export function buildFiltergraph(
     );
   }
 
-  // --- Video: xfade chain ---
-  let last = `v0`;
-  for (let i = 1; i < req.clips.length; i++) {
-    const out = i === req.clips.length - 1 ? "v" : `v${i - 1}${i}`;
-    filterParts.push(
-      `[${last}][v${i}]xfade=transition=${req.transition.type}:duration=${t}:offset=${offsets[i - 1].toFixed(3)}[${out}]`
-    );
-    last = out;
+  // --- Video: chain clips together ---
+  if (isCut) {
+    // "cut" transition: use concat filter (no overlap)
+    const vLabels = req.clips.map((_, i) => `[v${i}]`).join("");
+    filterParts.push(`${vLabels}concat=n=${req.clips.length}:v=1:a=0[v]`);
+  } else {
+    // xfade transition chain
+    let last = `v0`;
+    for (let i = 1; i < req.clips.length; i++) {
+      const out = i === req.clips.length - 1 ? "v" : `v${i - 1}${i}`;
+      filterParts.push(
+        `[${last}][v${i}]xfade=transition=${req.transition.type}:duration=${t}:offset=${offsets[i - 1].toFixed(3)}[${out}]`
+      );
+      last = out;
+    }
   }
 
   // --- Audio: place each clip audio on timeline ---
@@ -900,8 +910,8 @@ https://your-ffmpeg-service.fly.dev
 | `clips[i].trim_seconds` | >= 0.3s, <= generated_seconds |
 | `clips[i].url` | HTTPS, Supabase storage hostname + path prefix |
 | `voiceover_url` | HTTPS, Supabase storage hostname + path prefix |
-| `transition.type` | Must be in allowlist: fade, wipe, dissolve, etc. |
-| `transition.duration` | < min(trim_seconds) - 0.1s |
+| `transition.type` | Must be in allowlist: cut, fade, wipe, dissolve, etc. |
+| `transition.duration` | < min(trim_seconds) - 0.1s (ignored for "cut") |
 | Total duration | <= 180s |
 
 ---
