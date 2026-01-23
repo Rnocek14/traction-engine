@@ -55,7 +55,40 @@ interface FFmpegServiceRequest {
 }
 ```
 
-**Idempotency:** If `idempotency_key` matches an existing job, returns current job status instead of starting a new render.
+**Idempotency:** If `idempotency_key` matches an existing job, returns current job status (including `progress`, `output_url` if succeeded) instead of starting a new render.
+
+**Example Request (crossfade):**
+```json
+{
+  "job_id": "abc123",
+  "idempotency_key": "run_xyz:hash",
+  "clips": [
+    { "url": "https://proj.supabase.co/storage/v1/object/public/videos/clip1.mp4", "requested_seconds": 2.5, "generated_seconds": 4.0, "trim_seconds": 2.5 },
+    { "url": "https://proj.supabase.co/storage/v1/object/public/videos/clip2.mp4", "requested_seconds": 3.0, "generated_seconds": 4.0, "trim_seconds": 3.0 }
+  ],
+  "voiceover_url": "https://proj.supabase.co/storage/v1/object/public/audio/vo.mp3",
+  "output": { "width": 1080, "height": 1920, "fps": 30, "video_bitrate": "8M", "audio_bitrate": "192k" },
+  "transition": { "type": "fade", "duration": 0.2 },
+  "mix": { "duck_video_audio": true, "video_audio_gain_db": -18, "voiceover_gain_db": 0 },
+  "upload": { "provider": "supabase", "bucket": "videos", "path": "assembled/abc123.mp4", "upsert": true, "supabase_url": "https://proj.supabase.co", "supabase_service_key": "..." }
+}
+```
+
+**Example Request (hard cut - no transition):**
+```json
+{
+  "job_id": "def456",
+  "idempotency_key": "run_abc:hash",
+  "clips": [
+    { "url": "https://proj.supabase.co/storage/v1/object/public/videos/clip1.mp4", "requested_seconds": 2.0, "generated_seconds": 4.0, "trim_seconds": 2.0 },
+    { "url": "https://proj.supabase.co/storage/v1/object/public/videos/clip2.mp4", "requested_seconds": 3.0, "generated_seconds": 4.0, "trim_seconds": 3.0 }
+  ],
+  "output": { "width": 1080, "height": 1920, "fps": 30, "video_bitrate": "8M", "audio_bitrate": "192k" },
+  "transition": { "type": "cut", "duration": 0 },
+  "mix": { "duck_video_audio": false, "video_audio_gain_db": 0, "voiceover_gain_db": 0 },
+  "upload": { "provider": "supabase", "bucket": "videos", "path": "assembled/def456.mp4", "upsert": true, "supabase_url": "https://proj.supabase.co", "supabase_service_key": "..." }
+}
+```
 
 ### `GET /jobs/:job_id`
 
@@ -915,7 +948,7 @@ https://your-ffmpeg-service.fly.dev
 | `clips[i].url` | HTTPS, Supabase storage hostname + path prefix |
 | `voiceover_url` | HTTPS, Supabase storage hostname + path prefix |
 | `transition.type` | Must be in allowlist: cut, fade, wipe, dissolve, etc. |
-| `transition.duration` | < min(trim_seconds) - 0.1s (ignored for "cut") |
+| `transition.duration` | < min(trim_seconds) - 0.1s (skipped when `type="cut"`; recommend sending `0`) |
 | Total duration | <= 180s |
 
 ---
