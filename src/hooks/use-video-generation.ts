@@ -67,6 +67,7 @@ export interface GenerateClipVideoParams {
   duration?: VideoDuration;
   promptOverride?: string;
   model?: string;
+  seed?: number; // For reproducibility
 }
 
 export interface GenerateAllClipsParams {
@@ -75,6 +76,7 @@ export interface GenerateAllClipsParams {
   size?: VideoSize;
   duration?: VideoDuration;
   model?: string;
+  seed?: number;
 }
 
 export interface GenerateChainedParams {
@@ -83,6 +85,8 @@ export interface GenerateChainedParams {
   size?: VideoSize;
   duration?: VideoDuration;
   model?: string;
+  seed?: number; // For reproducibility
+  resumeFromJobId?: string; // Resume from this job's last frame
 }
 
 const ACTIVE_STATUSES = ["queued", "running", "rendering"];
@@ -102,6 +106,7 @@ export function useGenerateClipVideo() {
       duration = 4,
       promptOverride,
       model: modelOverride,
+      seed,
     }: GenerateClipVideoParams): Promise<VideoJob> => {
       const model = modelOverride || (size.startsWith("1024") || size.startsWith("1792") ? "sora-2-pro" : "sora-2");
 
@@ -114,6 +119,7 @@ export function useGenerateClipVideo() {
             size,
             seconds: duration,
             model,
+            seed,
           },
         },
       });
@@ -221,7 +227,9 @@ export function useGenerateChainedSequence() {
       size = "720x1280",
       duration = 4,
       model: modelOverride,
-    }: GenerateChainedParams): Promise<{ succeeded: number; failed: number }> => {
+      seed,
+      resumeFromJobId,
+    }: GenerateChainedParams): Promise<{ succeeded: number; failed: number; skipped?: number; resumeJobId?: string | null }> => {
       const model = modelOverride || (size.startsWith("1024") || size.startsWith("1792") ? "sora-2-pro" : "sora-2");
 
       const { data, error } = await supabase.functions.invoke("generate-reel-sequence", {
@@ -232,19 +240,33 @@ export function useGenerateChainedSequence() {
             size,
             seconds: duration,
             model,
+            seed,
           },
+          resume_from_job_id: resumeFromJobId,
         },
       });
 
       if (error) throw error;
-      if (!data?.success) throw new Error(data?.error || "Failed to start sequence");
+      if (!data?.success && data?.summary?.succeeded === 0) throw new Error(data?.error || "Failed to start sequence");
 
-      return data.summary;
+      return {
+        succeeded: data.summary.succeeded,
+        failed: data.summary.failed,
+        skipped: data.summary.skipped,
+        resumeJobId: data.summary.resume_job_id,
+      };
     },
     onSuccess: (result, variables) => {
+      const parts = [`${result.succeeded} clips generated`];
+      if (result.failed && result.failed > 0) parts.push(`${result.failed} failed`);
+      if (result.skipped && result.skipped > 0) parts.push(`${result.skipped} skipped`);
+      
       toast({
-        title: "Chained sequence complete",
-        description: `${result.succeeded} clips generated${result.failed > 0 ? `, ${result.failed} failed` : ""}`,
+        title: result.failed === 0 && (result.skipped || 0) === 0 
+          ? "Chained sequence complete" 
+          : "Chained sequence partially complete",
+        description: parts.join(", "),
+        variant: result.failed && result.failed > 0 ? "destructive" : "default",
       });
       queryClient.invalidateQueries({ queryKey: ["video-jobs", variables.scriptId] });
     },
