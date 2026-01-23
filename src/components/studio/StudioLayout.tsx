@@ -12,7 +12,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Play, Layers } from "lucide-react";
 import { PreviewCanvas } from "./PreviewCanvas";
+import { ReelPlayer } from "./ReelPlayer";
 import { ClipTimeline } from "./ClipTimeline";
 import { InspectorPanel } from "./InspectorPanel";
 import { VersionRail } from "./VersionRail";
@@ -20,6 +23,8 @@ import { ActionDock } from "./ActionDock";
 import { ClipActions } from "./ClipActions";
 import { useStudioEditor } from "@/hooks/use-studio-editor";
 import { useTimelineEditor } from "@/hooks/use-timeline-editor";
+import { useVideoJobs } from "@/hooks/use-video-generation";
+import { cn } from "@/lib/utils";
 import type { Tables } from "@/integrations/supabase/types";
 
 type ScriptRun = Tables<"script_runs">;
@@ -51,6 +56,7 @@ export function StudioLayout({
   const [selectedVideoJobId, setSelectedVideoJobId] = useState<string | null>(null);
   const [previewVideoUrl, setPreviewVideoUrl] = useState<string | null>(null);
   const [hoveredClipId, setHoveredClipId] = useState<string | null>(null);
+  const [isPlayAllMode, setIsPlayAllMode] = useState(false);
 
   // Centralized editor state (for script fields)
   const editor = useStudioEditor({ script });
@@ -93,12 +99,20 @@ export function StudioLayout({
     },
   });
 
+  // Fetch all video jobs for reel player
+  const { data: allVideoJobs = [] } = useVideoJobs(script.id);
+  const completedVideos = allVideoJobs.filter(j => j.status === "done" || j.status === "succeeded").length;
+
   // Keyboard shortcut for version rail toggle
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       if (e.code === "KeyV" && !e.metaKey && !e.ctrlKey) {
         setIsVersionRailCollapsed((prev) => !prev);
+      }
+      // P key toggles Play All mode
+      if (e.code === "KeyP" && !e.metaKey && !e.ctrlKey) {
+        setIsPlayAllMode((prev) => !prev);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -133,18 +147,54 @@ export function StudioLayout({
               <div className="h-full p-3 pb-0">
                 <ResizablePanelGroup direction="horizontal" className="h-full">
                   <ResizablePanel defaultSize={65} minSize={40}>
-                    <PreviewCanvas
-                      videoJob={activeVideoJob}
-                      scenePrompts={timeline.clips.map((c) => c.prompt || "")}
-                      currentSceneIndex={Math.max(0, currentSceneIndex)}
-                      onSceneChange={(idx) => {
-                        const clip = timeline.clips[idx];
-                        if (clip) timeline.setPlayheadPosition(clip.start);
-                      }}
-                      onScrubPositionChange={(pos) => timeline.setPlayheadPosition(pos * timeline.duration)}
-                      hoveredClipId={hoveredClipId}
-                      className="h-full"
-                    />
+                    {/* Play All / Single Clip toggle */}
+                    <div className="absolute top-5 left-5 z-10 flex gap-2">
+                      <Button
+                        variant={isPlayAllMode ? "default" : "outline"}
+                        size="sm"
+                        className="gap-2 h-8"
+                        onClick={() => setIsPlayAllMode(true)}
+                        disabled={completedVideos === 0}
+                      >
+                        <Play className="h-3.5 w-3.5" />
+                        Play All ({completedVideos})
+                      </Button>
+                      <Button
+                        variant={!isPlayAllMode ? "default" : "outline"}
+                        size="sm"
+                        className="gap-2 h-8"
+                        onClick={() => setIsPlayAllMode(false)}
+                      >
+                        <Layers className="h-3.5 w-3.5" />
+                        Single
+                      </Button>
+                    </div>
+
+                    {isPlayAllMode ? (
+                      <ReelPlayer
+                        clips={timeline.clips}
+                        videoJobs={allVideoJobs}
+                        audioUrl={(script as unknown as { voiceover_audio_url?: string }).voiceover_audio_url}
+                        onClipChange={(idx) => {
+                          const clip = timeline.clips[idx];
+                          if (clip) timeline.setPlayheadPosition(clip.start);
+                        }}
+                        className="h-full"
+                      />
+                    ) : (
+                      <PreviewCanvas
+                        videoJob={activeVideoJob}
+                        scenePrompts={timeline.clips.map((c) => c.prompt || "")}
+                        currentSceneIndex={Math.max(0, currentSceneIndex)}
+                        onSceneChange={(idx) => {
+                          const clip = timeline.clips[idx];
+                          if (clip) timeline.setPlayheadPosition(clip.start);
+                        }}
+                        onScrubPositionChange={(pos) => timeline.setPlayheadPosition(pos * timeline.duration)}
+                        hoveredClipId={hoveredClipId}
+                        className="h-full"
+                      />
+                    )}
                   </ResizablePanel>
 
                   <ResizableHandle withHandle className="mx-2" />
