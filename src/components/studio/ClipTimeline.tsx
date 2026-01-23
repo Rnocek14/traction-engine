@@ -28,6 +28,7 @@ import {
   Film,
   Mic,
   Music,
+  AlertTriangle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -504,21 +505,23 @@ export function ClipTimeline({
                   strategy={horizontalListSortingStrategy}
                 >
                   <div className="flex h-full p-1 gap-0.5">
-                    {clips.map((clip, index) => (
-                      <SortableClip
-                        key={clip.id}
-                        clip={clip}
-                        index={index}
-                        isSelected={selectedClipIds.has(clip.id)}
-                        duration={safeDuration}
-                        onClick={(multi) => onClipSelect(clip.id, multi)}
-                        onHover={(hovering) => onClipHover?.(hovering ? clip.id : null)}
-                        onTrimPointerDown={onTrimPreview && onTrimCommit 
-                          ? (e, edge) => handleTrimPointerDown(clip, edge, e)
-                          : undefined
-                        }
-                      />
-                    ))}
+                    <TooltipProvider delayDuration={300}>
+                      {clips.map((clip, index) => (
+                        <SortableClip
+                          key={clip.id}
+                          clip={clip}
+                          index={index}
+                          isSelected={selectedClipIds.has(clip.id)}
+                          duration={safeDuration}
+                          onClick={(multi) => onClipSelect(clip.id, multi)}
+                          onHover={(hovering) => onClipHover?.(hovering ? clip.id : null)}
+                          onTrimPointerDown={onTrimPreview && onTrimCommit 
+                            ? (e, edge) => handleTrimPointerDown(clip, edge, e)
+                            : undefined
+                          }
+                        />
+                      ))}
+                    </TooltipProvider>
 
                     {clips.length === 0 && (
                       <div className="flex-1 flex items-center justify-center">
@@ -813,10 +816,40 @@ function SortableClip({
           {clip.prompt || "(empty)"}
         </p>
         
-        {/* Footer with duration badge and camera direction */}
+        {/* Footer with duration badge, warnings, and camera direction */}
         <div className="flex items-center justify-between mt-auto pt-1 gap-1">
           {clip.disabled && (
             <EyeOff className="h-2.5 w-2.5 text-muted-foreground/60" />
+          )}
+          
+          {/* Duration warnings */}
+          {clipDuration < 1.5 && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="flex items-center gap-0.5 px-1 py-0.5 rounded bg-warning/20 text-warning">
+                  <AlertTriangle className="h-2.5 w-2.5" />
+                  <span className="text-[8px] font-medium">Short</span>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="text-xs max-w-[200px]">
+                Very short clip ({clipDuration.toFixed(1)}s). Video quality may suffer below 1.5s.
+              </TooltipContent>
+            </Tooltip>
+          )}
+          
+          {/* Will trim indicator - shown when clip has a video job with longer generated duration */}
+          {clip.source?.video_job_id && clip.settings?.duration && clip.settings.duration > clipDuration && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="flex items-center gap-0.5 px-1 py-0.5 rounded bg-primary/20 text-primary">
+                  <Scissors className="h-2.5 w-2.5" />
+                  <span className="text-[8px] font-medium">Trim</span>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="text-xs max-w-[200px]">
+                Will trim from {clip.settings.duration}s to {clipDuration.toFixed(1)}s on export
+              </TooltipContent>
+            </Tooltip>
           )}
           
           {/* Camera direction badge */}
@@ -828,9 +861,11 @@ function SortableClip({
           
           <span className={cn(
             "text-[9px] font-mono px-1.5 py-0.5 rounded-full ml-auto",
-            isSelected 
-              ? "bg-primary/30 text-primary" 
-              : "bg-background/30 text-muted-foreground/70"
+            clipDuration < 1.5
+              ? "bg-warning/20 text-warning"
+              : isSelected 
+                ? "bg-primary/30 text-primary" 
+                : "bg-background/30 text-muted-foreground/70"
           )}>
             {clipDuration.toFixed(1)}s
           </span>

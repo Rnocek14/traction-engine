@@ -1,4 +1,11 @@
-# FFmpeg Microservice Specification
+# FFmpeg Assembly Microservice Specification
+
+> **Timeline-Driven Duration Architecture**
+> 
+> This service uses `trim_seconds` (effective duration) as the primary field for all FFmpeg operations.
+> - `requested_seconds`: Timeline duration (what user set in Studio)  
+> - `generated_seconds`: Provider bucket duration (what AI generated)
+> - `trim_seconds`: `min(requested, generated)` — FFmpeg trims to this (prevents trimming past end)
 
 **Target Host**: Fly.io  
 **Purpose**: Server-side video assembly with crossfade transitions and baked voiceover audio  
@@ -30,17 +37,20 @@ This microservice receives clip URLs, voiceover audio, and transition settings, 
     { 
       "url": "https://.../videos/clip1.mp4", 
       "requested_seconds": 2.5,
-      "generated_seconds": 4.0
+      "generated_seconds": 4.0,
+      "trim_seconds": 2.5
     },
     { 
       "url": "https://.../videos/clip2.mp4", 
       "requested_seconds": 3.0,
-      "generated_seconds": 4.0
+      "generated_seconds": 4.0,
+      "trim_seconds": 3.0
     },
     { 
       "url": "https://.../videos/clip3.mp4", 
-      "requested_seconds": 4.0,
-      "generated_seconds": 8.0
+      "requested_seconds": 10.0,
+      "generated_seconds": 8.0,
+      "trim_seconds": 8.0
     }
   ],
   "voiceover_url": "https://.../audio/voiceover.mp3",
@@ -71,9 +81,10 @@ This microservice receives clip URLs, voiceover audio, and transition settings, 
 }
 ```
 
-**Duration Fields:**
-- `requested_seconds`: Timeline duration (source of truth) - FFmpeg MUST trim to this
-- `generated_seconds`: What the AI provider generated (for reference/logging only)
+**Duration Fields (Critical):**
+- `requested_seconds`: Timeline duration (what user set in Studio)
+- `generated_seconds`: What the AI provider generated (for logging/debugging)
+- `trim_seconds`: **USE THIS** - Already clamped to `min(requested, generated)`. FFmpeg MUST trim to this value.
 
 **Response (Sync - if fast enough):**
 
@@ -149,40 +160,41 @@ format=yuv420p
 
 ### 2. Per-Clip Trim + Crossfade Chain
 
-**CRITICAL**: Each clip must be trimmed to `requested_seconds` BEFORE xfade.
-This ensures timeline duration is respected, not the AI-generated duration.
+**CRITICAL**: Each clip must be trimmed to `trim_seconds` BEFORE xfade.
+This ensures timeline duration is respected, and prevents trimming past the generated video's end.
 
-For N clips with transition duration `t`, where `d[i] = requested_seconds[i]`:
+For N clips with transition duration `t`, where `d[i] = trim_seconds[i]`:
 
 **Per-clip filter (normalize + trim):**
 ```
 [i:v]scale=...,pad=...,fps=30,setsar=1,format=yuv420p,trim=duration=d[i],setpts=PTS-STARTPTS[v{i}];
 ```
 
-**Offset calculation (using trimmed durations):**
+**Offset calculation (using trim_seconds):**
 - offset_1 = d[0] - t
 - offset_2 = (d[0] + d[1]) - 2t
 - offset_k = sum(d[0]..d[k-1]) - k*t
 
-**Example (3 clips with timeline durations 2.5s, 3.0s, 4.0s; 0.2s transition):**
+**Example (3 clips with trim_seconds 2.5s, 3.0s, 8.0s; 0.2s transition):**
+Note: clip3 requested 10.0s but only 8.0s was generated, so trim_seconds = 8.0s
 
 ```bash
 ffmpeg -i clip1.mp4 -i clip2.mp4 -i clip3.mp4 -i voiceover.mp3 \
   -filter_complex "
-    # Normalize + TRIM to timeline duration
+    # Normalize + TRIM to trim_seconds (effective duration)
     [0:v]scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,fps=30,setsar=1,format=yuv420p,trim=duration=2.5,setpts=PTS-STARTPTS[v0];
     [1:v]scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,fps=30,setsar=1,format=yuv420p,trim=duration=3.0,setpts=PTS-STARTPTS[v1];
-    [2:v]scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,fps=30,setsar=1,format=yuv420p,trim=duration=4.0,setpts=PTS-STARTPTS[v2];
+    [2:v]scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,fps=30,setsar=1,format=yuv420p,trim=duration=8.0,setpts=PTS-STARTPTS[v2];
     
-    # Crossfade with offsets based on TRIMMED durations
+    # Crossfade with offsets based on trim_seconds
     # offset_1 = 2.5 - 0.2 = 2.3
     # offset_2 = (2.5 + 3.0) - 2*0.2 = 5.1
     [v0][v1]xfade=transition=fade:duration=0.2:offset=2.3[v01];
     [v01][v2]xfade=transition=fade:duration=0.2:offset=5.1[v];
     
     # Audio: trim voiceover to final duration
-    # final_duration = sum(d[i]) - (N-1)*t = (2.5+3.0+4.0) - 2*0.2 = 9.1
-    [3:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,atrim=0:9.1,asetpts=N/SR/TB[vo]
+    # final_duration = sum(trim_seconds) - (N-1)*t = (2.5+3.0+8.0) - 2*0.2 = 13.1
+    [3:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,atrim=0:13.1,asetpts=N/SR/TB[vo]
   " \
   -map "[v]" -map "[vo]" \
   -c:v libx264 -profile:v high -pix_fmt yuv420p -r 30 -b:v 8M \
