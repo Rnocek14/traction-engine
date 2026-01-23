@@ -14,11 +14,13 @@ import {
   CheckCircle2,
   Link2,
   Zap,
+  Dices,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -72,6 +74,7 @@ export function ActionDock({ script, clips = [], className }: ActionDockProps) {
   const [isVideoOpen, setIsVideoOpen] = useState(true);
   const [qualityTier, setQualityTier] = useState<QualityTier>("standard");
   const [isChainedMode, setIsChainedMode] = useState(true); // Default to chained for best quality
+  const [seed, setSeed] = useState<number | undefined>(); // Optional seed for reproducibility
 
   const isHardBlock = hasHardBlocks(script);
   const isFailed = script.status === "qa_failed";
@@ -104,6 +107,7 @@ export function ActionDock({ script, clips = [], className }: ActionDockProps) {
         size,
         duration,
         model,
+        seed, // Pass seed for reproducibility
       });
     } else {
       // Use parallel generation (faster but less consistent)
@@ -113,6 +117,7 @@ export function ActionDock({ script, clips = [], className }: ActionDockProps) {
         size,
         duration,
         model,
+        seed, // Pass seed for reproducibility
       });
     }
   };
@@ -291,6 +296,34 @@ export function ActionDock({ script, clips = [], className }: ActionDockProps) {
               {isChainedMode && (
                 <p className="text-[9px] text-primary/80 text-center">
                   ✓ Each clip uses the last frame of the previous clip for seamless continuity
+                </p>
+              )}
+
+              {/* Seed input for reproducibility */}
+              <div className="flex items-center gap-2 px-1">
+                <Label className="text-[10px] text-muted-foreground whitespace-nowrap">
+                  Seed
+                </Label>
+                <Input
+                  type="number"
+                  value={seed || ""}
+                  onChange={(e) => setSeed(e.target.value ? Number(e.target.value) : undefined)}
+                  placeholder="Random"
+                  className="h-7 text-xs flex-1"
+                />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 p-0"
+                  onClick={() => setSeed(Math.floor(Math.random() * 999999))}
+                  title="Generate random seed"
+                >
+                  <Dices className="h-3.5 w-3.5 text-muted-foreground" />
+                </Button>
+              </div>
+              {seed && (
+                <p className="text-[9px] text-muted-foreground/70 text-center">
+                  Seed: {seed} (for reproducible results)
                 </p>
               )}
 

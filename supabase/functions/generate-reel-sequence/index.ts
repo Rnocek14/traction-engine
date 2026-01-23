@@ -120,6 +120,10 @@ Deno.serve(async (req) => {
       form.set("size", size);
       form.set("seconds", String(settings.seconds));
       
+      // Critical API parameters for maximum quality
+      form.set("fps", "24"); // Cinematic standard
+      form.set("aspect_ratio_lock", "true"); // Prevent internal cropping
+      
       // Add seed for reproducibility
       if (settings.seed) {
         form.set("seed", String(settings.seed));

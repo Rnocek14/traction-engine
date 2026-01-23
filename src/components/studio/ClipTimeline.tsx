@@ -705,11 +705,19 @@ function SortableClip({
           {clip.prompt || "(empty)"}
         </p>
         
-        {/* Footer with duration badge */}
-        <div className="flex items-center justify-between mt-auto pt-1">
+        {/* Footer with duration badge and camera direction */}
+        <div className="flex items-center justify-between mt-auto pt-1 gap-1">
           {clip.disabled && (
             <EyeOff className="h-2.5 w-2.5 text-muted-foreground/60" />
           )}
+          
+          {/* Camera direction badge */}
+          {clip.camera_direction && (
+            <span className="text-[8px] font-medium px-1 py-0.5 rounded bg-accent/30 text-accent-foreground/70 truncate max-w-[50px]">
+              {clip.camera_direction.replace("-", " ").replace(/\b\w/g, l => l.toUpperCase()).slice(0, 8)}
+            </span>
+          )}
+          
           <span className={cn(
             "text-[9px] font-mono px-1.5 py-0.5 rounded-full ml-auto",
             isSelected 

@@ -38,6 +38,27 @@ export interface ClipSettings {
 }
 
 /**
+ * Shot types for per-clip camera direction
+ * Must match SHOT_TYPES in cinematic-prompts.ts
+ */
+export const SHOT_TYPE_OPTIONS = [
+  { value: "extreme-wide", label: "Extreme Wide (EWS)", description: "Vast environment, subject small" },
+  { value: "wide", label: "Wide Shot (WS)", description: "Full body, environmental context" },
+  { value: "medium-wide", label: "Medium Wide (MWS)", description: "Knees up, action space" },
+  { value: "medium", label: "Medium Shot (MS)", description: "Waist up, conversational" },
+  { value: "medium-close", label: "Medium Close-up (MCU)", description: "Chest up, emotional" },
+  { value: "close-up", label: "Close-up (CU)", description: "Face fills frame, intensity" },
+  { value: "extreme-close", label: "Extreme Close-up (ECU)", description: "Detail shot, eyes/hands" },
+  { value: "over-shoulder", label: "Over-the-Shoulder (OTS)", description: "Conversational perspective" },
+  { value: "pov", label: "Point of View (POV)", description: "First-person, immersive" },
+  { value: "dutch", label: "Dutch Angle", description: "Tilted, tension/unease" },
+  { value: "low-angle", label: "Low Angle", description: "Looking up, power/heroic" },
+  { value: "high-angle", label: "High Angle", description: "Looking down, vulnerability" },
+  { value: "tracking", label: "Tracking Shot", description: "Following movement" },
+  { value: "crane", label: "Crane/Jib Shot", description: "Vertical reveal, epic scope" },
+] as const;
+
+/**
  * A single clip on the timeline
  */
 export interface Clip {
@@ -65,6 +86,10 @@ export interface Clip {
   created_at?: string;
   /** Per-clip camera direction/shot type (overrides style guide) */
   camera_direction?: string;
+  /** Seed for reproducible generation */
+  seed?: number;
+  /** Generate as seamless loop for ambient clips */
+  loop?: boolean;
 }
 
 /**
