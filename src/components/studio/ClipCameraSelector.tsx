@@ -46,7 +46,11 @@ export function ClipCameraSelector({
       <TooltipProvider delayDuration={200}>
         <Tooltip>
           <TooltipTrigger asChild>
-            <Select value={value || ""} onValueChange={onChange} disabled={disabled}>
+            <Select 
+              value={value || "__none__"} 
+              onValueChange={(v) => onChange(v === "__none__" ? "" : v)} 
+              disabled={disabled}
+            >
               <SelectTrigger 
                 className={cn(
                   "h-6 w-6 p-0 border-0 bg-transparent hover:bg-secondary/50 justify-center",
@@ -57,7 +61,7 @@ export function ClipCameraSelector({
                 <Camera className="h-3 w-3" />
               </SelectTrigger>
               <SelectContent align="end" className="w-64">
-                <SelectItem value="">
+                <SelectItem value="__none__">
                   <span className="text-muted-foreground">No camera direction (use style guide)</span>
                 </SelectItem>
                 {SHOT_TYPE_OPTIONS.map((shot) => (
@@ -87,7 +91,11 @@ export function ClipCameraSelector({
   }
   
   return (
-    <Select value={value || ""} onValueChange={onChange} disabled={disabled}>
+    <Select 
+      value={value || "__none__"} 
+      onValueChange={(v) => onChange(v === "__none__" ? "" : v)} 
+      disabled={disabled}
+    >
       <SelectTrigger className={cn("h-8 text-xs", className)}>
         <div className="flex items-center gap-2">
           <Camera className="h-3 w-3" />
@@ -95,7 +103,7 @@ export function ClipCameraSelector({
         </div>
       </SelectTrigger>
       <SelectContent className="w-72">
-        <SelectItem value="">
+        <SelectItem value="__none__">
           <span className="text-muted-foreground">No override (use style guide)</span>
         </SelectItem>
         {SHOT_TYPE_OPTIONS.map((shot) => (
