@@ -220,23 +220,3 @@ export function StudioLayout({
     </>
   );
 }
-
-      {/* Video Preview Modal */}
-      <Dialog open={!!previewVideoUrl} onOpenChange={() => setPreviewVideoUrl(null)}>
-        <DialogContent className="max-w-4xl">
-          <DialogHeader>
-            <DialogTitle>Video Preview</DialogTitle>
-          </DialogHeader>
-          {previewVideoUrl && (
-            <video
-              src={previewVideoUrl}
-              controls
-              autoPlay
-              className="w-full rounded-lg"
-            />
-          )}
-        </DialogContent>
-      </Dialog>
-    </>
-  );
-}
