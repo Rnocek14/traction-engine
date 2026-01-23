@@ -269,6 +269,26 @@ export function useTimelineEditor({
     [clips, pushToHistory]
   );
 
+  /** Replace a clip with multiple segments (for auto-split) */
+  const replaceClipWithSegments = useCallback(
+    (clipId: string, segments: Clip[]) => {
+      const idx = clips.findIndex((c) => c.id === clipId);
+      if (idx === -1 || segments.length === 0) {
+        toast({ title: "Failed to replace clip", variant: "destructive" });
+        return;
+      }
+
+      const newClips = [...clips];
+      newClips.splice(idx, 1, ...segments);
+
+      pushToHistory(newClips);
+      // Select the first segment
+      setSelectedClipIds(new Set([segments[0].id]));
+      toast({ title: `Split into ${segments.length} segments` });
+    },
+    [clips, pushToHistory, toast]
+  );
+
   /** Toggle clip disabled state */
   const toggleDisabled = useCallback(() => {
     if (selectedClipIds.size === 0) return;
@@ -657,6 +677,7 @@ export function useTimelineEditor({
     deleteSelected,
     duplicateSelected,
     reorderClips,
+    replaceClipWithSegments,
     toggleDisabled,
     updateClipPrompt,
     addClip,
