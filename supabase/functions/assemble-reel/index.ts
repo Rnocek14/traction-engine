@@ -406,21 +406,32 @@ Deno.serve(async (req) => {
     const inputHash = await computeIdempotencyHash(clips, voiceoverUrl, transitionSettings, outputSettings);
     const idempotencyKey = `${script_run_id}:${inputHash}`;
 
-    console.log(`Assembling reel: ${clips.length} clips, voiceover: ${!!voiceoverUrl}`);
-    console.log(`Transition: ${transitionSettings.type} @ ${transition_duration}s`);
-    console.log(`Output: ${output_width}x${output_height} @ ${output_fps}fps`);
-    console.log(`Idempotency: ${idempotencyKey}`);
-    
-    // Log any clamped clips for debugging
-    const clampedClips = clips.filter(c => c.trim_clamped);
-    if (clampedClips.length > 0) {
-      console.log(`Warning: ${clampedClips.length} clips were clamped (requested > generated)`);
-    }
-
     // Calculate expected duration using trim_seconds (effective duration after clamping)
     const totalClipDuration = clips.reduce((sum, c) => sum + c.trim_seconds, 0);
     const transitionOverlap = (clips.length - 1) * transition_duration;
     const expectedDuration = totalClipDuration - transitionOverlap;
+
+    // Structured diagnostic log - single JSON blob for production debugging
+    console.log(
+      JSON.stringify({
+        at: "assemble-reel:prepared",
+        script_run_id,
+        clip_count: clips.length,
+        clips: clips.map(c => ({
+          i: c.index,
+          id: c.id.slice(0, 8),
+          requested: Number(c.requested_seconds.toFixed(2)),
+          generated: Number(c.generated_seconds.toFixed(2)),
+          trim: Number(c.trim_seconds.toFixed(2)),
+          clamped: c.trim_clamped,
+        })),
+        transition: transitionSettings,
+        output: outputSettings,
+        voiceover: !!voiceoverUrl,
+        expectedDuration: Number(expectedDuration.toFixed(2)),
+        idempotencyKey,
+      })
+    );
 
     // Build sanitized metadata (NO secrets!)
     const sanitizedMeta: AssembledMeta = {
@@ -528,12 +539,32 @@ Deno.serve(async (req) => {
 
     if (!ffmpegResponse.ok) {
       const errorText = await ffmpegResponse.text();
+      // Structured error log for debugging
+      console.log(
+        JSON.stringify({
+          at: "assemble-reel:ffmpeg_error",
+          script_run_id,
+          job_id: jobId,
+          status_code: ffmpegResponse.status,
+          error_body: errorText.slice(0, 500),
+        })
+      );
       throw new Error(`FFmpeg service error: ${ffmpegResponse.status} - ${errorText}`);
     }
 
     const ffmpegResult = await ffmpegResponse.json();
 
-    console.log("FFmpeg service response:", ffmpegResult);
+    // Structured success log
+    console.log(
+      JSON.stringify({
+        at: "assemble-reel:ffmpeg_response",
+        script_run_id,
+        job_id: jobId,
+        status: ffmpegResult.status,
+        duration: ffmpegResult.duration,
+        eta_seconds: ffmpegResult.eta_seconds,
+      })
+    );
 
     // Handle sync completion
     if (ffmpegResult.status === "succeeded" && ffmpegResult.output_url) {
@@ -591,7 +622,14 @@ Deno.serve(async (req) => {
     );
 
   } catch (error) {
-    console.error("assemble-reel error:", error);
+    // Structured error log for debugging
+    console.log(
+      JSON.stringify({
+        at: "assemble-reel:error",
+        error: error instanceof Error ? error.message : "Unknown error",
+        stack: error instanceof Error ? error.stack?.slice(0, 300) : undefined,
+      })
+    );
 
     // Try to update status on error
     try {
