@@ -61,7 +61,7 @@ export function StudioLauncher({ onScriptCreated }: StudioLauncherProps) {
         .from("script_runs")
         .select("*")
         .order("created_at", { ascending: false })
-        .limit(10);
+        .limit(20);
       if (error) throw error;
       return data || [];
     },
@@ -255,7 +255,9 @@ export function StudioLauncher({ onScriptCreated }: StudioLauncherProps) {
             <div className="space-y-2">
               {recentScripts.map((script) => {
                 const content = script.script_content as Record<string, unknown> | null;
+                const reelName = content?.reel_name as string | undefined;
                 const hook = (content?.hook as string) || "No hook";
+                const displayTitle = reelName || hook;
 
                 return (
                   <button
@@ -266,7 +268,10 @@ export function StudioLauncher({ onScriptCreated }: StudioLauncherProps) {
                     <div className="flex items-start gap-3">
                       {getStatusIcon(script.status)}
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{hook}</p>
+                        <p className="text-sm font-medium truncate">{displayTitle}</p>
+                        {reelName && (
+                          <p className="text-xs text-muted-foreground truncate mt-0.5">{hook}</p>
+                        )}
                         <div className="flex items-center gap-2 mt-1">
                           <Badge variant="outline" className="text-[10px]">
                             {script.account_id}
