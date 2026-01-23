@@ -45,6 +45,7 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
   const userWantsPlayingRef = useRef(false);
   const isTransitioningRef = useRef(false);
   const isNextReadyRef = useRef(false);
+  const loadedVideoUrlRef = useRef<string | null>(null);
 
   // Map clips to their video jobs
   const clipVideos = clips
@@ -93,19 +94,22 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
   }, [currentClipIndex, clipVideos, getActiveRef]);
 
   // Load initial video when component mounts or clip changes
+  // Use loadedVideoUrlRef to prevent spurious reloads that stop playback
   useEffect(() => {
     if (!currentVideo?.job?.output_url) return;
     
-    const activeRef = getActiveRef();
-    const activeEl = activeRef.current;
+    const url = currentVideo.job.output_url;
+    
+    // Skip if we've already loaded this exact URL
+    if (loadedVideoUrlRef.current === url) return;
+    
+    const activeEl = activePlayer === "A" ? videoARef.current : videoBRef.current;
     if (!activeEl) return;
     
-    // Only set src if it's different (prevents reloading same video)
-    if (activeEl.src !== currentVideo.job.output_url) {
-      activeEl.src = currentVideo.job.output_url;
-      activeEl.load();
-    }
-  }, [currentVideo, getActiveRef]);
+    loadedVideoUrlRef.current = url;
+    activeEl.src = url;
+    activeEl.load();
+  }, [currentVideo, activePlayer]);
 
   // Preload next video with canplaythrough guard
   useEffect(() => {
@@ -205,10 +209,29 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
 
   // Time update handler
   const handleTimeUpdate = useCallback(() => {
-    const activeRef = getActiveRef();
-    if (!activeRef.current) return;
+    const activeEl = activePlayer === "A" ? videoARef.current : videoBRef.current;
+    if (!activeEl) return;
     setCurrentTime(calculateGlobalTime());
-  }, [calculateGlobalTime, getActiveRef]);
+  }, [calculateGlobalTime, activePlayer]);
+
+  // Handle unexpected video pause - sync audio
+  const handleVideoPause = useCallback(() => {
+    // If user wanted playback but video paused unexpectedly (not during transition)
+    if (userWantsPlayingRef.current && !isTransitioningRef.current) {
+      // Pause audio to stay in sync
+      audioRef.current?.pause();
+      setIsPlaying(false);
+      userWantsPlayingRef.current = false;
+    }
+  }, []);
+
+  // Handle video ready to play - resume if user wants playback
+  const handleVideoCanPlay = useCallback(() => {
+    const activeEl = activePlayer === "A" ? videoARef.current : videoBRef.current;
+    if (activeEl && userWantsPlayingRef.current && !isTransitioningRef.current) {
+      activeEl.play().catch(() => {});
+    }
+  }, [activePlayer]);
 
   // Notify parent of clip changes
   useEffect(() => {
@@ -363,6 +386,8 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
           preload="auto"
           onTimeUpdate={activePlayer === "A" ? handleTimeUpdate : undefined}
           onEnded={activePlayer === "A" ? handleVideoEnded : undefined}
+          onPause={activePlayer === "A" ? handleVideoPause : undefined}
+          onCanPlay={activePlayer === "A" ? handleVideoCanPlay : undefined}
         />
         
         {/* Video B (preload/swap) */}
@@ -377,6 +402,8 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
           preload="auto"
           onTimeUpdate={activePlayer === "B" ? handleTimeUpdate : undefined}
           onEnded={activePlayer === "B" ? handleVideoEnded : undefined}
+          onPause={activePlayer === "B" ? handleVideoPause : undefined}
+          onCanPlay={activePlayer === "B" ? handleVideoCanPlay : undefined}
         />
 
         {/* Hidden audio for voiceover */}
