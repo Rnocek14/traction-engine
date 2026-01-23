@@ -2,7 +2,8 @@ import { useState, useRef, useEffect, useCallback, forwardRef } from "react";
 import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Film, Mic, Video } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Tables } from "@/integrations/supabase/types";
-import type { Clip } from "@/types/timeline-types";
+import type { Clip, ClipTransition } from "@/types/timeline-types";
+import { DEFAULT_TRANSITION } from "@/types/timeline-types";
 
 type VideoJob = Tables<"video_jobs">;
 
@@ -12,16 +13,21 @@ interface ReelPlayerProps {
   audioUrl?: string;
   className?: string;
   onClipChange?: (clipIndex: number) => void;
+  /** Enable crossfade transitions between clips (default: true) */
+  enableTransitions?: boolean;
+  /** Default transition when clip doesn't specify one */
+  defaultTransition?: ClipTransition;
 }
 
 /**
- * Sequential reel player that plays all clip videos seamlessly.
- * Uses dual video elements for gapless playback.
+ * Sequential reel player that plays all clip videos seamlessly with crossfade transitions.
+ * Uses dual video elements for gapless playback with opacity-based crossfades.
  * 
  * Key architecture:
  * - userWantsPlayingRef tracks user intent (not video element state)
  * - isNextReadyRef guards transitions until preload is buffered
  * - Audio syncs only on user actions (play/skip), not during auto-transitions
+ * - Crossfade transitions via CSS opacity with configurable duration
  */
 export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function ReelPlayer({
   clips,
@@ -29,6 +35,8 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
   audioUrl,
   className,
   onClipChange,
+  enableTransitions = true,
+  defaultTransition = DEFAULT_TRANSITION,
 }, ref) {
   const videoARef = useRef<HTMLVideoElement>(null);
   const videoBRef = useRef<HTMLVideoElement>(null);
@@ -40,6 +48,8 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
   const [isMuted, setIsMuted] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [showControls, setShowControls] = useState(true);
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  const [transitionDuration, setTransitionDuration] = useState(0);
   
   // Audio source: "voiceover" plays the voiceover track and mutes video,
   // "video" plays the video's embedded audio and mutes voiceover
@@ -158,7 +168,7 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
   }, [currentClipIndex, nextVideo, activePlayer]);
 
 
-  // Handle seamless transition to next clip
+  // Handle seamless transition to next clip with crossfade
   const transitionToNextClip = useCallback(() => {
     console.log('[ReelPlayer] transitionToNextClip called', {
       currentClipIndex,
@@ -173,6 +183,7 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
       console.log('[ReelPlayer] End of reel, resetting');
       userWantsPlayingRef.current = false;
       setIsPlaying(false);
+      setIsTransitioning(false);
       setCurrentClipIndex(0);
       setActivePlayer("A");
       loadedUrlARef.current = null;
@@ -205,7 +216,22 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
     if (!preloadEl) {
       console.log('[ReelPlayer] No preload element, aborting transition');
       isTransitioningRef.current = false;
+      setIsTransitioning(false);
       return;
+    }
+
+    // Get transition settings for next clip
+    const nextClipData = clipVideos[currentClipIndex + 1];
+    const transition = enableTransitions 
+      ? (nextClipData?.clip?.transition_in ?? defaultTransition)
+      : { type: "cut" as const, duration: 0 };
+    
+    const transitionMs = transition.type === "cut" ? 0 : transition.duration * 1000;
+    setTransitionDuration(transition.duration);
+    
+    // Start crossfade transition
+    if (transitionMs > 0) {
+      setIsTransitioning(true);
     }
 
     // Start playback on preloaded video FIRST
@@ -227,23 +253,23 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
           loadedUrlBRef.current = null;
         }
         
-        // Pause old video BEFORE state updates
-        if (activeEl) {
-          activeEl.pause();
-        }
-        
-        // Now swap the active player
+        // Now swap the active player (triggers CSS transition)
         setActivePlayer(newActivePlayer);
         setCurrentClipIndex(prev => prev + 1);
         
-        // Clear transition flag AFTER a microtask to let React state updates settle
-        // This prevents the preload effect from running during the transition
-        queueMicrotask(() => {
+        // Wait for crossfade to complete, then pause old video and cleanup
+        setTimeout(() => {
+          if (activeEl) {
+            activeEl.pause();
+          }
+          setIsTransitioning(false);
           isTransitioningRef.current = false;
-        });
+        }, transitionMs);
+        
       }).catch((err) => {
         console.log('[ReelPlayer] Play promise rejected:', err);
         isTransitioningRef.current = false;
+        setIsTransitioning(false);
       });
     } else {
       // Fallback for browsers without promise
@@ -257,10 +283,13 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
       }
       setActivePlayer(newActivePlayer);
       setCurrentClipIndex(prev => prev + 1);
-      if (activeEl) activeEl.pause();
-      isTransitioningRef.current = false;
+      setTimeout(() => {
+        if (activeEl) activeEl.pause();
+        setIsTransitioning(false);
+        isTransitioningRef.current = false;
+      }, transitionMs);
     }
-  }, [currentClipIndex, totalClips, getPreloadRef, getActiveRef, activePlayer, nextVideo]);
+  }, [currentClipIndex, totalClips, getPreloadRef, getActiveRef, activePlayer, nextVideo, clipVideos, enableTransitions, defaultTransition]);
 
   // Video ended handler - only triggers transition
   // CRITICAL: Set isTransitioningRef IMMEDIATELY to guard against onPause race condition
@@ -495,9 +524,18 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
         <video
           ref={videoARef}
           className={cn(
-            "max-w-full max-h-full object-contain transition-opacity duration-75",
-            activePlayer === "A" ? "opacity-100" : "opacity-0 absolute"
+            "max-w-full max-h-full object-contain",
+            activePlayer === "A" 
+              ? "opacity-100" 
+              : isTransitioning 
+                ? "opacity-0" // Fade out during transition
+                : "opacity-0 absolute pointer-events-none"
           )}
+          style={{
+            transition: isTransitioning || activePlayer === "A"
+              ? `opacity ${transitionDuration}s ease-in-out`
+              : "none",
+          }}
           muted={audioSource === "voiceover" || isMuted}
           playsInline
           preload="auto"
@@ -511,9 +549,18 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
         <video
           ref={videoBRef}
           className={cn(
-            "max-w-full max-h-full object-contain transition-opacity duration-75",
-            activePlayer === "B" ? "opacity-100" : "opacity-0 absolute"
+            "max-w-full max-h-full object-contain absolute inset-0 m-auto",
+            activePlayer === "B" 
+              ? "opacity-100" 
+              : isTransitioning 
+                ? "opacity-100" // Fade in during transition
+                : "opacity-0 pointer-events-none"
           )}
+          style={{
+            transition: isTransitioning || activePlayer === "B"
+              ? `opacity ${transitionDuration}s ease-in-out`
+              : "none",
+          }}
           muted={audioSource === "voiceover" || isMuted}
           playsInline
           preload="auto"

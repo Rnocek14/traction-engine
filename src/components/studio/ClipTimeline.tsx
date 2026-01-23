@@ -27,6 +27,7 @@ import {
   ZoomOut,
   Film,
   Mic,
+  Music,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -38,6 +39,7 @@ import {
 } from "@/components/ui/tooltip";
 import { useAudioWaveform } from "@/hooks/use-audio-waveform";
 import type { Clip } from "@/types/timeline-types";
+import type { Beat } from "@/types/beat-map-types";
 
 interface ClipTimelineProps {
   clips: Clip[];
@@ -62,6 +64,12 @@ interface ClipTimelineProps {
   onToggleRipple?: () => void;
   /** Callback to report discovered audio duration to parent */
   onAudioDurationChange?: (duration: number) => void;
+  /** Detected beats for visual markers */
+  beats?: Beat[];
+  /** Callback for "Align to Beats" action */
+  onAlignToBeats?: () => void;
+  /** Whether beat alignment is available */
+  hasBeatMap?: boolean;
   className?: string;
 }
 
@@ -89,6 +97,9 @@ export function ClipTimeline({
   rippleMode = false,
   onToggleRipple,
   onAudioDurationChange,
+  beats = [],
+  onAlignToBeats,
+  hasBeatMap = false,
   className,
 }: ClipTimelineProps) {
   // Track discovered audio duration for unified scaling
