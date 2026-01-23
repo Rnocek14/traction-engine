@@ -134,12 +134,12 @@ export function analyzeQuality(
     status: poorPrompts === 0 && abstractPrompts === 0 
       ? "pass" 
       : poorPrompts > 0 
-        ? "warn" 
+        ? "fail"  // Fail on poor prompts - blocks generation
         : "warn",
     message: poorPrompts === 0 && abstractPrompts === 0
       ? "All prompts are well-structured"
       : poorPrompts > 0
-        ? `${poorPrompts} clip(s) have weak prompts`
+        ? `${poorPrompts} clip(s) have weak prompts - fix before generating`
         : `${abstractPrompts} clip(s) may be too abstract for video AI`,
     fixable: true,
   });
@@ -148,8 +148,10 @@ export function analyzeQuality(
   const passCount = checks.filter(c => c.status === "pass").length;
   const overallScore = Math.round((passCount / checks.length) * 100);
   
-  // Can generate if no hard failures (we allow warnings)
-  const canGenerate = !checks.some(c => c.status === "fail") || hasAnyStyleGuide;
+  // Can generate if no hard failures
+  // Style guide missing is a "fail" but we allow override if user has at least something
+  const hasFailures = checks.some(c => c.status === "fail");
+  const canGenerate = !hasFailures || hasAnyStyleGuide;
   
   return {
     canGenerate,

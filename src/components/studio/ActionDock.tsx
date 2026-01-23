@@ -51,6 +51,7 @@ import { useReelAssembly } from "@/hooks/use-reel-assembly";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { QualityGate, analyzeQuality } from "./QualityGate";
+import { autoAssignCameraDirections } from "@/lib/prompt-quality";
 import type { Tables } from "@/integrations/supabase/types";
 import type { Clip, StyleGuide } from "@/types/timeline-types";
 
@@ -64,6 +65,7 @@ interface ActionDockProps {
   styleGuide?: StyleGuide | null;
   onNavigateToStyleGuide?: () => void;
   onSelectClip?: (clipId: string) => void;
+  onAutoAssignCameras?: (assignments: Array<{ clipId: string; direction: string }>) => void;
   className?: string;
 }
 
@@ -71,7 +73,7 @@ interface ActionDockProps {
  * Floating action dock for regeneration and video generation.
  * Compact design with expandable sections.
  */
-export function ActionDock({ script, clips = [], styleGuide, onNavigateToStyleGuide, onSelectClip, className }: ActionDockProps) {
+export function ActionDock({ script, clips = [], styleGuide, onNavigateToStyleGuide, onSelectClip, onAutoAssignCameras, className }: ActionDockProps) {
   const navigate = useNavigate();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -299,13 +301,38 @@ export function ActionDock({ script, clips = [], styleGuide, onNavigateToStyleGu
           )}
         </CollapsibleTrigger>
 
-        <CollapsibleContent className="px-3 pb-3">
+        <CollapsibleContent className="px-3 pb-3 space-y-2">
           <QualityGate
             clips={clips}
             styleGuide={styleGuide}
             onNavigateToStyleGuide={onNavigateToStyleGuide}
             onSelectClip={onSelectClip}
           />
+          
+          {/* Auto-assign cameras button */}
+          {clips.filter(c => !c.camera_direction).length > 0 && onAutoAssignCameras && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full h-8 gap-2 text-xs mt-2"
+              onClick={() => {
+                const assignments = autoAssignCameraDirections(clips);
+                if (assignments.length > 0) {
+                  onAutoAssignCameras(assignments.map(a => ({
+                    clipId: a.clipId,
+                    direction: a.suggestedDirection
+                  })));
+                  toast({
+                    title: "Camera directions assigned",
+                    description: `Set ${assignments.length} camera direction${assignments.length > 1 ? "s" : ""} based on prompt analysis`
+                  });
+                }
+              }}
+            >
+              <Video className="h-3.5 w-3.5" />
+              Auto-assign Cameras ({clips.filter(c => !c.camera_direction).length} missing)
+            </Button>
+          )}
         </CollapsibleContent>
       </Collapsible>
 
@@ -422,28 +449,44 @@ export function ActionDock({ script, clips = [], styleGuide, onNavigateToStyleGu
                 </p>
               )}
 
-              {/* Generate All Button */}
-              <Button
-                className="w-full h-9 gap-2"
-                disabled={isGenerating || videoClips.length === 0}
-                onClick={handleGenerateAll}
-              >
-                {isGenerating ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    {isChainedGenerating 
-                      ? "Generating sequence..." 
-                      : hasActiveJob 
-                        ? `Rendering ${activeJobsCount}...` 
-                        : "Queueing..."}
-                  </>
-                ) : (
-                  <>
-                    <Video className="h-4 w-4" />
-                    {isChainedMode ? "Generate Chained" : "Generate All"} ({videoClips.length})
-                  </>
-                )}
-              </Button>
+              {/* Generate All Button - Enforced by Quality Gate */}
+              {!qualityResult.canGenerate ? (
+                <div className="space-y-2">
+                  <Button
+                    className="w-full h-9 gap-2"
+                    disabled
+                    variant="outline"
+                  >
+                    <AlertTriangle className="h-4 w-4 text-warning" />
+                    Fix Issues to Generate
+                  </Button>
+                  <p className="text-[10px] text-warning text-center">
+                    Quality gate is blocking generation. Fix the issues above first.
+                  </p>
+                </div>
+              ) : (
+                <Button
+                  className="w-full h-9 gap-2"
+                  disabled={isGenerating || videoClips.length === 0}
+                  onClick={handleGenerateAll}
+                >
+                  {isGenerating ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      {isChainedGenerating 
+                        ? "Generating sequence..." 
+                        : hasActiveJob 
+                          ? `Rendering ${activeJobsCount}...` 
+                          : "Queueing..."}
+                    </>
+                  ) : (
+                    <>
+                      <Video className="h-4 w-4" />
+                      {isChainedMode ? "Generate Chained" : "Generate All"} ({videoClips.length})
+                    </>
+                  )}
+                </Button>
+              )}
 
               {/* Info text */}
               <p className="text-[10px] text-muted-foreground text-center">

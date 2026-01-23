@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { FileText, Video, ShieldCheck, ChevronRight, Save, RotateCcw, Undo2, Redo2 } from "lucide-react";
+import { FileText, Video, ShieldCheck, ChevronRight, Save, RotateCcw, Undo2, Redo2, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { getStatusInfo, hasHardBlocks } from "@/hooks/use-studio";
 import { VideoGallery } from "./VideoGallery";
 import { VoiceoverGenerator } from "./VoiceoverGenerator";
+import { STYLE_PRESETS, applyPreset } from "@/data/style-presets";
 import type { Tables } from "@/integrations/supabase/types";
 import type { ScriptEdits } from "@/hooks/use-studio-editor";
 import type { StyleGuide } from "@/types/timeline-types";
@@ -280,9 +281,42 @@ export function InspectorPanel({
             {/* Style Guide Section */}
             <InspectorSection title="Style Guide" defaultOpen>
               <div className="space-y-3">
-                <p className="text-[10px] text-muted-foreground mb-2">
-                  Define visual consistency for all generated clips
-                </p>
+                {/* Preset Selector */}
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                    <Sparkles className="h-3 w-3" />
+                    Quick Presets
+                  </label>
+                  <Select
+                    value=""
+                    onValueChange={(presetId) => {
+                      const preset = STYLE_PRESETS.find(p => p.id === presetId);
+                      if (preset && onUpdateStyleGuide) {
+                        onUpdateStyleGuide(applyPreset(styleGuide, preset));
+                      }
+                    }}
+                  >
+                    <SelectTrigger className="text-xs bg-secondary/30 border-border/30 h-8">
+                      <SelectValue placeholder="Apply a style preset..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {STYLE_PRESETS.map((preset) => (
+                        <SelectItem key={preset.id} value={preset.id}>
+                          <span className="flex items-center gap-2">
+                            <span>{preset.icon}</span>
+                            <span>{preset.name}</span>
+                            <span className="text-muted-foreground text-[10px]">— {preset.description}</span>
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[9px] text-muted-foreground">
+                    Presets apply cinematography settings while keeping your character/location
+                  </p>
+                </div>
+
+                <Separator className="bg-border/20" />
 
                 {/* Reference Image (for first-clip anchoring) */}
                 <div className="space-y-1">

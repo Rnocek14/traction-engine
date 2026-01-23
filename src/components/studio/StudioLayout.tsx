@@ -351,6 +351,11 @@ export function StudioLayout({
                     styleGuide={timeline.styleGuide}
                     onNavigateToStyleGuide={navigateToStyleGuide}
                     onSelectClip={(clipId) => timeline.selectClip(clipId)}
+                    onAutoAssignCameras={(assignments) => {
+                      assignments.forEach(({ clipId, direction }) => {
+                        timeline.updateClipCameraDirection(clipId, direction);
+                      });
+                    }}
                   />
                 </div>
               </div>
