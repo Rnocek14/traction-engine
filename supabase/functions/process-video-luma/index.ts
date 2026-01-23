@@ -1,0 +1,260 @@
+/**
+ * Luma Video Processor
+ * 
+ * Polls Luma AI generations and updates video_jobs when complete.
+ * Downloads completed videos and uploads to Supabase storage.
+ */
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
+interface ProcessRequest {
+  job_id?: string;
+}
+
+/**
+ * Map Luma status to our internal status
+ */
+function mapLumaStatus(lumaState: string): string {
+  switch (lumaState) {
+    case "completed":
+      return "done";
+    case "failed":
+      return "failed";
+    case "queued":
+      return "queued";
+    case "dreaming":
+    case "processing":
+      return "running";
+    default:
+      return "running";
+  }
+}
+
+/**
+ * Download video and upload to Supabase storage
+ */
+async function downloadAndUpload(
+  supabase: ReturnType<typeof createClient>,
+  videoUrl: string,
+  storagePath: string
+): Promise<string | null> {
+  try {
+    const response = await fetch(videoUrl);
+    if (!response.ok) {
+      console.error("Failed to download video:", response.status);
+      return null;
+    }
+
+    const videoBuffer = await response.arrayBuffer();
+    
+    const { error: uploadError } = await supabase.storage
+      .from("videos")
+      .upload(storagePath, videoBuffer, {
+        contentType: "video/mp4",
+        upsert: true,
+      });
+
+    if (uploadError) {
+      console.error("Upload error:", uploadError);
+      return null;
+    }
+
+    const { data: { publicUrl } } = supabase.storage
+      .from("videos")
+      .getPublicUrl(storagePath);
+
+    return publicUrl;
+  } catch (err) {
+    console.error("Download/upload error:", err);
+    return null;
+  }
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  try {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const lumaApiKey = Deno.env.get("LUMA_API_KEY");
+
+    if (!lumaApiKey) {
+      throw new Error("LUMA_API_KEY not configured");
+    }
+
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    
+    let body: ProcessRequest = {};
+    try {
+      body = await req.json();
+    } catch {
+      // Empty body is fine
+    }
+
+    // Build query for jobs to process
+    let query = supabase
+      .from("video_jobs")
+      .select("*")
+      .eq("provider", "luma")
+      .in("status", ["queued", "running"])
+      .not("openai_video_id", "is", null)
+      .order("created_at", { ascending: true })
+      .limit(10);
+
+    // Filter by specific job if provided
+    if (body.job_id) {
+      query = supabase
+        .from("video_jobs")
+        .select("*")
+        .eq("id", body.job_id)
+        .eq("provider", "luma");
+    }
+
+    const { data: jobs, error: jobsError } = await query;
+
+    if (jobsError) {
+      throw new Error(`Failed to fetch jobs: ${jobsError.message}`);
+    }
+
+    if (!jobs || jobs.length === 0) {
+      return new Response(
+        JSON.stringify({ success: true, processed: 0, message: "No Luma jobs to process" }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const results: Array<{
+      job_id: string;
+      status: string;
+      luma_state?: string;
+      output_url?: string;
+      error?: string;
+    }> = [];
+
+    for (const job of jobs) {
+      const lumaTaskId = job.openai_video_id;
+
+      try {
+        // Poll Luma API for status
+        const statusResponse = await fetch(
+          `https://api.lumalabs.ai/dream-machine/v1/generations/${lumaTaskId}`,
+          {
+            headers: {
+              "Authorization": `Bearer ${lumaApiKey}`,
+            },
+          }
+        );
+
+        if (!statusResponse.ok) {
+          const errorText = await statusResponse.text();
+          console.error(`Luma status check failed for ${lumaTaskId}:`, errorText);
+          
+          results.push({
+            job_id: job.id,
+            status: "error",
+            error: `Luma API error: ${statusResponse.status}`,
+          });
+          continue;
+        }
+
+        const lumaData = await statusResponse.json();
+        const lumaState = lumaData.state;
+        const newStatus = mapLumaStatus(lumaState);
+
+        console.log(`Luma job ${lumaTaskId} state: ${lumaState} -> ${newStatus}`);
+
+        const updates: Record<string, unknown> = {
+          status: newStatus,
+          openai_status: lumaState,
+        };
+
+        // Handle completion
+        if (lumaState === "completed" && lumaData.assets?.video) {
+          const videoUrl = lumaData.assets.video;
+          
+          // Download and upload to storage
+          const storagePath = `luma/${job.script_run_id}/${job.id}.mp4`;
+          const publicUrl = await downloadAndUpload(supabase, videoUrl, storagePath);
+
+          if (publicUrl) {
+            updates.output_url = publicUrl;
+            updates.progress = 100;
+            
+            // Get thumbnail if available
+            if (lumaData.assets?.thumbnail) {
+              updates.thumbnail_url = lumaData.assets.thumbnail;
+            }
+          } else {
+            // Fallback to direct Luma URL (temporary)
+            updates.output_url = videoUrl;
+            updates.progress = 100;
+          }
+
+          results.push({
+            job_id: job.id,
+            status: "done",
+            luma_state: lumaState,
+            output_url: updates.output_url as string,
+          });
+        } else if (lumaState === "failed") {
+          updates.error = lumaData.failure_reason || "Generation failed";
+          
+          results.push({
+            job_id: job.id,
+            status: "failed",
+            luma_state: lumaState,
+            error: updates.error as string,
+          });
+        } else {
+          // Still processing
+          if (lumaData.progress !== undefined) {
+            updates.progress = Math.round(lumaData.progress * 100);
+          }
+
+          results.push({
+            job_id: job.id,
+            status: newStatus,
+            luma_state: lumaState,
+          });
+        }
+
+        // Update job in database
+        await supabase
+          .from("video_jobs")
+          .update(updates)
+          .eq("id", job.id);
+
+      } catch (err) {
+        console.error(`Error processing Luma job ${job.id}:`, err);
+        results.push({
+          job_id: job.id,
+          status: "error",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        processed: results.length,
+        results,
+      }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+
+  } catch (err) {
+    const error = err instanceof Error ? err : new Error(String(err));
+    console.error("process-video-luma error:", error);
+    return new Response(
+      JSON.stringify({ success: false, error: error.message }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+});
