@@ -34,12 +34,33 @@ async function downloadAndUpload(
     const buffer = await response.arrayBuffer();
     const bytes = new Uint8Array(buffer);
 
-    // Determine content type
-    const contentType = variant === "mp4" 
-      ? "video/mp4" 
-      : variant === "spritesheet" 
-        ? "image/png" 
-        : "image/jpeg";
+    // Log the first few bytes to debug format issues
+    const magicBytes = Array.from(bytes.slice(0, 8)).map(b => b.toString(16).padStart(2, '0')).join(' ');
+    console.log(`Downloaded ${variant}: ${bytes.length} bytes, magic: ${magicBytes}`);
+
+    // Detect actual content type from magic bytes
+    // JPEG: FF D8 FF | PNG: 89 50 4E 47 | WebP: 52 49 46 46 ... 57 45 42 50
+    const isJpeg = bytes[0] === 0xFF && bytes[1] === 0xD8;
+    const isPng = bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47;
+    const isWebP = bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46;
+    
+    // Determine content type based on actual bytes, not assumption
+    let contentType: string;
+    if (variant === "mp4") {
+      contentType = "video/mp4";
+    } else if (isPng) {
+      contentType = "image/png";
+    } else if (isJpeg) {
+      contentType = "image/jpeg";
+    } else if (isWebP) {
+      contentType = "image/webp";
+    } else {
+      // Default to PNG for images - most compatible
+      console.warn(`Unknown image format for ${variant}, defaulting to PNG`);
+      contentType = "image/png";
+    }
+    
+    console.log(`Detected format: ${contentType} for ${variant}`);
 
     const { error: uploadError } = await supabase.storage
       .from("videos")
