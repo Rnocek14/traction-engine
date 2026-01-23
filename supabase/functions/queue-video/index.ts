@@ -174,11 +174,6 @@ Style: Professional, engaging, suitable for TikTok/Reels. Smooth transitions bet
     form.set("size", size);
     form.set("seconds", String(seconds));
 
-    // Add seed for reproducibility
-    if (settings.seed) {
-      form.set("seed", String(settings.seed));
-    }
-
     // Add starting frame if provided (must be fetched and uploaded as file)
     if (starting_frame_url) {
       try {
