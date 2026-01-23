@@ -248,6 +248,50 @@ export function runwayToSoraDuration(runwayDuration: RunwayDuration): SoraDurati
 }
 
 /**
+ * Get the optimal provider duration for a requested timeline duration.
+ * Uses the provider's capabilities to select the smallest valid duration >= requested.
+ * 
+ * @param provider - The video provider ("sora" | "runway")
+ * @param requestedSeconds - The exact timeline clip duration (source of truth)
+ * @param model - Optional model override (unused for now, but allows future model-specific durations)
+ * @returns { providerSeconds, requestedSeconds } - Provider bucket and original request
+ */
+export function getProviderDuration(
+  provider: VideoProvider,
+  requestedSeconds: number,
+  _model?: string
+): { providerSeconds: number; requestedSeconds: number } {
+  const capabilities = PROVIDER_CAPABILITIES[provider];
+  const validDurations = capabilities.durations;
+  
+  // Find smallest valid duration >= requested, or max if requested exceeds all
+  let providerSeconds = validDurations[validDurations.length - 1]; // Default to max
+  for (const d of validDurations) {
+    if (d >= requestedSeconds) {
+      providerSeconds = d;
+      break;
+    }
+  }
+  
+  return { providerSeconds, requestedSeconds };
+}
+
+/**
+ * Check if a timeline duration is too short for quality video generation
+ */
+export function isClipDurationTooShort(requestedSeconds: number): boolean {
+  return requestedSeconds < 1.5;
+}
+
+/**
+ * Check if a timeline duration exceeds provider max and needs splitting
+ */
+export function isClipDurationTooLong(provider: VideoProvider, requestedSeconds: number): boolean {
+  const capabilities = PROVIDER_CAPABILITIES[provider];
+  return requestedSeconds > capabilities.maxDuration;
+}
+
+/**
  * Get provider display info
  */
 export function getProviderDisplayInfo(provider: VideoProvider): { icon: string; label: string; color: string } {

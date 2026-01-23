@@ -8,13 +8,19 @@ const corsHeaders = {
 
 interface VideoRequest {
   script_run_id: string;
-  clip_id?: string; // Optional: generate video for specific clip
-  prompt?: string; // Optional: override prompt
+  clip_id?: string;
+  prompt?: string;
+  provider?: "sora" | "runway";
   settings: {
-    size: string; // e.g., "720x1280"
-    seconds: number; // 4, 8, or 12
-    model?: string; // "sora-2" or "sora-2-pro"
-    seed?: number; // For reproducibility
+    size: string;
+    /** Provider-bucketed duration (what we request from API) */
+    provider_seconds?: number;
+    /** Exact timeline duration (source of truth for trim) */
+    requested_seconds?: number;
+    /** Legacy field - use provider_seconds instead */
+    seconds?: number;
+    model?: string;
+    seed?: number;
   };
   starting_frame_url?: string;
 }
@@ -42,25 +48,38 @@ Deno.serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     const body: VideoRequest = await req.json();
-    const { script_run_id, clip_id, prompt: overridePrompt, settings, starting_frame_url } = body;
+    const { script_run_id, clip_id, prompt: overridePrompt, settings, starting_frame_url, provider: reqProvider } = body;
 
     if (!script_run_id) {
       throw new Error("script_run_id is required");
     }
 
+    const provider = reqProvider || "sora";
+
     // Validate settings
     const allowedSizes = ["720x1280", "1280x720", "1024x1792", "1792x1024"];
-    const allowedSeconds = [4, 8, 12];
+    // Provider durations: Sora = 4, 8, 12; Runway = 5, 10
+    const allowedSecondsSora = [4, 8, 12];
+    const allowedSecondsRunway = [5, 10];
+    const allowedSeconds = provider === "runway" ? allowedSecondsRunway : allowedSecondsSora;
     
     const size = settings?.size || "720x1280";
-    const seconds = settings?.seconds || 8;
+    
+    // Resolve duration: prefer provider_seconds, fall back to seconds, require explicit value
+    const providerSeconds = settings?.provider_seconds ?? settings?.seconds;
+    const requestedSeconds = settings?.requested_seconds ?? providerSeconds;
+    
+    if (!providerSeconds) {
+      throw new Error("provider_seconds or seconds is required - duration must be explicitly provided");
+    }
+    
     const model = settings?.model || "sora-2";
 
     if (!allowedSizes.includes(size)) {
       throw new Error(`Invalid size. Allowed: ${allowedSizes.join(", ")}`);
     }
-    if (!allowedSeconds.includes(seconds)) {
-      throw new Error(`Invalid seconds. Allowed: ${allowedSeconds.join(", ")}`);
+    if (!allowedSeconds.includes(providerSeconds)) {
+      console.warn(`Duration ${providerSeconds}s not in allowed list for ${provider}. Proceeding anyway.`);
     }
 
     // Fetch the script to get the prompt
@@ -147,10 +166,13 @@ Style: Professional, engaging, suitable for TikTok/Reels. Smooth transitions bet
       .insert({
         script_run_id,
         status: "queued",
-        provider: "sora",
+        provider,
         settings: { 
           size, 
-          seconds, 
+          provider_seconds: providerSeconds,
+          requested_seconds: requestedSeconds,
+          // Legacy field for backwards compat
+          seconds: providerSeconds,
           model,
           clip_id: clip_id || null,
           prompt: videoPrompt.slice(0, 500), // Store truncated prompt for reference
@@ -172,7 +194,7 @@ Style: Professional, engaging, suitable for TikTok/Reels. Smooth transitions bet
     form.set("prompt", videoPrompt);
     form.set("model", model);
     form.set("size", size);
-    form.set("seconds", String(seconds));
+    form.set("seconds", String(providerSeconds));
 
     // Add starting frame if provided (must be fetched and uploaded as file)
     if (starting_frame_url) {
