@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useToast } from "@/hooks/use-toast";
 import {
   Wand2,
   FastForward,
@@ -96,6 +97,7 @@ export function ClipActions({
   onAutoSplit,
   className 
 }: ClipActionsProps) {
+  const { toast } = useToast();
   const [isVideoOpen, setIsVideoOpen] = useState(false);
   const [size, setSize] = useState<VideoSize>("720x1280");
   const [useTimelineDuration, setUseTimelineDuration] = useState(true);
@@ -128,6 +130,16 @@ export function ClipActions({
 
   const handleGenerateVideo = async () => {
     if (!clip) return;
+
+    // Block generation for clips that are too short
+    if (timelineDuration < 3) {
+      toast({
+        title: "Clip too short",
+        description: "Minimum 3 seconds required for video generation. Extend or merge this clip.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     await generateVideo.mutateAsync({
       scriptId,
