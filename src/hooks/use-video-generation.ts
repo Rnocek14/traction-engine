@@ -9,12 +9,13 @@ type VideoJob = Tables<"video_jobs">;
 // Sora 2 constraints
 export type VideoSize = "720x1280" | "1280x720" | "1024x1792" | "1792x1024";
 export type VideoDuration = 4 | 8 | 12;
+export type QualityTier = "draft" | "standard" | "pro";
 
 export const SIZE_OPTIONS: { value: VideoSize; label: string; aspectRatio: string }[] = [
   { value: "720x1280", label: "9:16 Vertical (720p)", aspectRatio: "9:16" },
   { value: "1280x720", label: "16:9 Landscape (720p)", aspectRatio: "16:9" },
-  { value: "1024x1792", label: "9:16 Pro", aspectRatio: "9:16" },
-  { value: "1792x1024", label: "16:9 Pro", aspectRatio: "16:9" },
+  { value: "1024x1792", label: "9:16 Pro", aspectRatio: "9:16 Pro" },
+  { value: "1792x1024", label: "16:9 Pro", aspectRatio: "16:9 Pro" },
 ];
 
 export const DURATION_OPTIONS: { value: VideoDuration; label: string }[] = [
@@ -23,12 +24,49 @@ export const DURATION_OPTIONS: { value: VideoDuration; label: string }[] = [
   { value: 12, label: "12 seconds" },
 ];
 
+export interface QualityTierConfig {
+  tier: QualityTier;
+  label: string;
+  model: string;
+  seconds: VideoDuration;
+  size: VideoSize;
+  description: string;
+}
+
+export const QUALITY_TIERS: QualityTierConfig[] = [
+  {
+    tier: "draft",
+    label: "Draft",
+    model: "sora-2",
+    seconds: 4,
+    size: "720x1280",
+    description: "Fast preview",
+  },
+  {
+    tier: "standard",
+    label: "Standard",
+    model: "sora-2",
+    seconds: 8,
+    size: "720x1280",
+    description: "Balanced",
+  },
+  {
+    tier: "pro",
+    label: "Pro",
+    model: "sora-2-pro",
+    seconds: 4,
+    size: "1024x1792",
+    description: "Best quality",
+  },
+];
+
 export interface GenerateClipVideoParams {
   scriptId: string;
   clip: Clip;
   size?: VideoSize;
   duration?: VideoDuration;
   promptOverride?: string;
+  model?: string;
 }
 
 export interface GenerateAllClipsParams {
@@ -36,6 +74,7 @@ export interface GenerateAllClipsParams {
   clips: Clip[];
   size?: VideoSize;
   duration?: VideoDuration;
+  model?: string;
 }
 
 export interface GenerateChainedParams {
@@ -43,6 +82,7 @@ export interface GenerateChainedParams {
   clipIds: string[];
   size?: VideoSize;
   duration?: VideoDuration;
+  model?: string;
 }
 
 const ACTIVE_STATUSES = ["queued", "running", "rendering"];
@@ -61,8 +101,9 @@ export function useGenerateClipVideo() {
       size = "720x1280",
       duration = 4,
       promptOverride,
+      model: modelOverride,
     }: GenerateClipVideoParams): Promise<VideoJob> => {
-      const model = size.startsWith("1024") || size.startsWith("1792") ? "sora-2-pro" : "sora-2";
+      const model = modelOverride || (size.startsWith("1024") || size.startsWith("1792") ? "sora-2-pro" : "sora-2");
 
       const { data, error } = await supabase.functions.invoke("queue-video", {
         body: {
@@ -113,8 +154,9 @@ export function useGenerateAllClipsVideo() {
       clips,
       size = "720x1280",
       duration = 4,
+      model: modelOverride,
     }: GenerateAllClipsParams): Promise<{ queued: number; failed: number; jobs: VideoJob[] }> => {
-      const model = size.startsWith("1024") || size.startsWith("1792") ? "sora-2-pro" : "sora-2";
+      const model = modelOverride || (size.startsWith("1024") || size.startsWith("1792") ? "sora-2-pro" : "sora-2");
       
       const results = await Promise.allSettled(
         clips
@@ -178,8 +220,9 @@ export function useGenerateChainedSequence() {
       clipIds,
       size = "720x1280",
       duration = 4,
+      model: modelOverride,
     }: GenerateChainedParams): Promise<{ succeeded: number; failed: number }> => {
-      const model = size.startsWith("1024") || size.startsWith("1792") ? "sora-2-pro" : "sora-2";
+      const model = modelOverride || (size.startsWith("1024") || size.startsWith("1792") ? "sora-2-pro" : "sora-2");
 
       const { data, error } = await supabase.functions.invoke("generate-reel-sequence", {
         body: {

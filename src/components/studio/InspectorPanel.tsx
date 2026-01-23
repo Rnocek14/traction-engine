@@ -297,6 +297,19 @@ export function InspectorPanel({
                   />
                 </div>
 
+                {/* Wardrobe (new) */}
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                    Wardrobe
+                  </label>
+                  <Input
+                    value={styleGuide?.wardrobe || ""}
+                    onChange={(e) => onUpdateStyleGuide?.({ ...styleGuide, wardrobe: e.target.value })}
+                    placeholder="e.g., blue denim jacket, white t-shirt, silver watch"
+                    className="text-xs bg-secondary/30 border-border/30"
+                  />
+                </div>
+
                 {/* Location */}
                 <div className="space-y-1">
                   <label className="text-[10px] uppercase tracking-wider text-muted-foreground">
@@ -310,25 +323,41 @@ export function InspectorPanel({
                   />
                 </div>
 
+                {/* Props (new) */}
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                    Key Props
+                  </label>
+                  <Input
+                    value={styleGuide?.props || ""}
+                    onChange={(e) => onUpdateStyleGuide?.({ ...styleGuide, props: e.target.value })}
+                    placeholder="e.g., vintage coffee mug, worn leather notebook"
+                    className="text-xs bg-secondary/30 border-border/30"
+                  />
+                </div>
+
+                <Separator className="bg-border/20" />
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Cinematography</p>
+
                 <div className="grid grid-cols-2 gap-2">
-                  {/* Lighting */}
+                  {/* Lens (new) */}
                   <div className="space-y-1">
                     <label className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                      Lighting
+                      Lens
                     </label>
                     <Select
-                      value={styleGuide?.lighting || ""}
-                      onValueChange={(v) => onUpdateStyleGuide?.({ ...styleGuide, lighting: v })}
+                      value={styleGuide?.lens || ""}
+                      onValueChange={(v) => onUpdateStyleGuide?.({ ...styleGuide, lens: v })}
                     >
                       <SelectTrigger className="text-xs bg-secondary/30 border-border/30 h-8">
                         <SelectValue placeholder="Select..." />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="natural">Natural daylight</SelectItem>
-                        <SelectItem value="golden_hour">Golden hour</SelectItem>
-                        <SelectItem value="studio">Studio</SelectItem>
-                        <SelectItem value="dramatic">Dramatic</SelectItem>
-                        <SelectItem value="soft">Soft diffused</SelectItem>
+                        <SelectItem value="24mm">24mm Wide</SelectItem>
+                        <SelectItem value="35mm">35mm Standard</SelectItem>
+                        <SelectItem value="50mm">50mm Natural</SelectItem>
+                        <SelectItem value="85mm">85mm Portrait</SelectItem>
+                        <SelectItem value="135mm">135mm Telephoto</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -355,6 +384,97 @@ export function InspectorPanel({
                     </Select>
                   </div>
 
+                  {/* Depth of Field (new) */}
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                      Depth of Field
+                    </label>
+                    <Select
+                      value={styleGuide?.depth_of_field || ""}
+                      onValueChange={(v) => onUpdateStyleGuide?.({ ...styleGuide, depth_of_field: v })}
+                    >
+                      <SelectTrigger className="text-xs bg-secondary/30 border-border/30 h-8">
+                        <SelectValue placeholder="Select..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="shallow">Shallow (f/1.8-2.8)</SelectItem>
+                        <SelectItem value="medium">Medium (f/4-5.6)</SelectItem>
+                        <SelectItem value="deep">Deep (f/8-11)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Motion Style (new) */}
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                      Motion Style
+                    </label>
+                    <Select
+                      value={styleGuide?.motion_style || ""}
+                      onValueChange={(v) => onUpdateStyleGuide?.({ ...styleGuide, motion_style: v })}
+                    >
+                      <SelectTrigger className="text-xs bg-secondary/30 border-border/30 h-8">
+                        <SelectValue placeholder="Select..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="smooth">Smooth/Stabilized</SelectItem>
+                        <SelectItem value="handheld">Handheld</SelectItem>
+                        <SelectItem value="static">Static/Locked</SelectItem>
+                        <SelectItem value="tracking">Tracking</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <Separator className="bg-border/20" />
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Lighting & Color</p>
+
+                <div className="grid grid-cols-2 gap-2">
+                  {/* Time of Day (new) */}
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                      Time of Day
+                    </label>
+                    <Select
+                      value={styleGuide?.time_of_day || ""}
+                      onValueChange={(v) => onUpdateStyleGuide?.({ ...styleGuide, time_of_day: v })}
+                    >
+                      <SelectTrigger className="text-xs bg-secondary/30 border-border/30 h-8">
+                        <SelectValue placeholder="Select..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="dawn">Dawn</SelectItem>
+                        <SelectItem value="morning">Morning</SelectItem>
+                        <SelectItem value="midday">Midday</SelectItem>
+                        <SelectItem value="golden_hour">Golden Hour</SelectItem>
+                        <SelectItem value="dusk">Dusk</SelectItem>
+                        <SelectItem value="night">Night</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Lighting */}
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                      Lighting
+                    </label>
+                    <Select
+                      value={styleGuide?.lighting || ""}
+                      onValueChange={(v) => onUpdateStyleGuide?.({ ...styleGuide, lighting: v })}
+                    >
+                      <SelectTrigger className="text-xs bg-secondary/30 border-border/30 h-8">
+                        <SelectValue placeholder="Select..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="natural">Natural daylight</SelectItem>
+                        <SelectItem value="golden_hour">Golden hour</SelectItem>
+                        <SelectItem value="studio">Studio</SelectItem>
+                        <SelectItem value="dramatic">Dramatic</SelectItem>
+                        <SelectItem value="soft">Soft diffused</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
                   {/* Color Grade */}
                   <div className="space-y-1">
                     <label className="text-[10px] uppercase tracking-wider text-muted-foreground">
@@ -377,8 +497,29 @@ export function InspectorPanel({
                     </Select>
                   </div>
 
-                  {/* Mood */}
+                  {/* Film Stock (new) */}
                   <div className="space-y-1">
+                    <label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                      Film Stock
+                    </label>
+                    <Select
+                      value={styleGuide?.film_stock || ""}
+                      onValueChange={(v) => onUpdateStyleGuide?.({ ...styleGuide, film_stock: v })}
+                    >
+                      <SelectTrigger className="text-xs bg-secondary/30 border-border/30 h-8">
+                        <SelectValue placeholder="Select..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="digital">Clean Digital</SelectItem>
+                        <SelectItem value="portra">Kodak Portra</SelectItem>
+                        <SelectItem value="ektar">Kodak Ektar</SelectItem>
+                        <SelectItem value="cinestill">CineStill 800T</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Mood */}
+                  <div className="space-y-1 col-span-2">
                     <label className="text-[10px] uppercase tracking-wider text-muted-foreground">
                       Mood
                     </label>

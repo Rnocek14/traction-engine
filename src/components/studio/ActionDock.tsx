@@ -13,6 +13,7 @@ import {
   Video,
   CheckCircle2,
   Link2,
+  Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -37,10 +38,8 @@ import {
   useVideoJobs,
   useGenerateAllClipsVideo,
   useGenerateChainedSequence,
-  SIZE_OPTIONS,
-  DURATION_OPTIONS,
-  type VideoSize,
-  type VideoDuration,
+  QUALITY_TIERS,
+  type QualityTier,
 } from "@/hooks/use-video-generation";
 import { cn } from "@/lib/utils";
 import type { Tables } from "@/integrations/supabase/types";
@@ -69,15 +68,17 @@ export function ActionDock({ script, clips = [], className }: ActionDockProps) {
   const generateChainedMutation = useGenerateChainedSequence();
 
   const [activePreset, setActivePreset] = useState<RegenPreset | null>(null);
-  const [isRegenOpen, setIsRegenOpen] = useState(false); // Start collapsed
-  const [isVideoOpen, setIsVideoOpen] = useState(true); // Video section open by default
-  const [size, setSize] = useState<VideoSize>("720x1280");
-  const [duration, setDuration] = useState<VideoDuration>(4);
-  const [isChainedMode, setIsChainedMode] = useState(false);
+  const [isRegenOpen, setIsRegenOpen] = useState(false);
+  const [isVideoOpen, setIsVideoOpen] = useState(true);
+  const [qualityTier, setQualityTier] = useState<QualityTier>("standard");
+  const [isChainedMode, setIsChainedMode] = useState(true); // Default to chained for best quality
 
   const isHardBlock = hasHardBlocks(script);
   const isFailed = script.status === "qa_failed";
   const isPassed = script.status === "qa_passed";
+
+  // Get current tier config
+  const tierConfig = QUALITY_TIERS.find((t) => t.tier === qualityTier) || QUALITY_TIERS[1];
 
   // Video jobs for this script
   const { data: jobs = [] } = useVideoJobs(script.id);
@@ -93,13 +94,16 @@ export function ActionDock({ script, clips = [], className }: ActionDockProps) {
       return;
     }
 
+    const { size, seconds: duration, model } = tierConfig;
+
     if (isChainedMode) {
-      // Use chained sequential generation
+      // Use chained sequential generation with proper frame extraction
       await generateChainedMutation.mutateAsync({
         scriptId: script.id,
         clipIds: videoClips.map(c => c.id),
         size,
         duration,
+        model,
       });
     } else {
       // Use parallel generation (faster but less consistent)
@@ -108,6 +112,7 @@ export function ActionDock({ script, clips = [], className }: ActionDockProps) {
         clips: videoClips,
         size,
         duration,
+        model,
       });
     }
   };
@@ -239,41 +244,40 @@ export function ActionDock({ script, clips = [], className }: ActionDockProps) {
             </div>
           ) : (
             <>
-              {/* Settings row */}
-              <div className="flex gap-2">
-                <Select value={size} onValueChange={(v) => setSize(v as VideoSize)}>
-                  <SelectTrigger className="h-8 text-xs flex-1">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {SIZE_OPTIONS.map((opt) => (
-                      <SelectItem key={opt.value} value={opt.value}>
-                        {opt.aspectRatio}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                <Select value={String(duration)} onValueChange={(v) => setDuration(Number(v) as VideoDuration)}>
-                  <SelectTrigger className="h-8 text-xs w-16">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {DURATION_OPTIONS.map((opt) => (
-                      <SelectItem key={opt.value} value={String(opt.value)}>
-                        {opt.value}s
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              {/* Quality Tier Selector */}
+              <div className="space-y-1.5">
+                <Label className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                  Quality Tier
+                </Label>
+                <div className="grid grid-cols-3 gap-1">
+                  {QUALITY_TIERS.map((tier) => (
+                    <button
+                      key={tier.tier}
+                      onClick={() => setQualityTier(tier.tier)}
+                      className={cn(
+                        "flex flex-col items-center p-2 rounded border transition-all",
+                        qualityTier === tier.tier
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-border/30 hover:border-border/50 text-muted-foreground"
+                      )}
+                    >
+                      {tier.tier === "pro" && <Zap className="h-3 w-3 mb-0.5" />}
+                      <span className="text-[10px] font-medium">{tier.label}</span>
+                      <span className="text-[8px] opacity-70">{tier.description}</span>
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[9px] text-muted-foreground text-center">
+                  {tierConfig.size} • {tierConfig.seconds}s • {tierConfig.model}
+                </p>
               </div>
 
               {/* Chained mode toggle */}
-              <div className="flex items-center justify-between py-1">
+              <div className="flex items-center justify-between py-1 px-1 rounded bg-secondary/20">
                 <div className="flex items-center gap-1.5">
-                  <Link2 className="h-3 w-3 text-muted-foreground" />
+                  <Link2 className={cn("h-3 w-3", isChainedMode ? "text-primary" : "text-muted-foreground")} />
                   <Label htmlFor="chained-mode" className="text-[10px] text-muted-foreground cursor-pointer">
-                    Frame chaining
+                    Frame chaining (recommended)
                   </Label>
                 </div>
                 <Switch
@@ -283,6 +287,12 @@ export function ActionDock({ script, clips = [], className }: ActionDockProps) {
                   className="scale-75"
                 />
               </div>
+              
+              {isChainedMode && (
+                <p className="text-[9px] text-primary/80 text-center">
+                  ✓ Each clip uses the last frame of the previous clip for seamless continuity
+                </p>
+              )}
 
               {/* Generate All Button */}
               <Button
@@ -312,8 +322,8 @@ export function ActionDock({ script, clips = [], className }: ActionDockProps) {
                 {videoClips.length === 0 
                   ? "No video clips with prompts" 
                   : isChainedMode
-                    ? `Sequential • ~${Math.ceil(videoClips.length * 2)} min`
-                    : `Parallel • ~${(duration * videoClips.length * 0.025).toFixed(2)} credits`
+                    ? `Sequential • ~${Math.ceil(videoClips.length * 2)} min total`
+                    : `Parallel • faster but less consistent`
                 }
               </p>
 

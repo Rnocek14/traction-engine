@@ -83,6 +83,24 @@ export interface StyleGuide {
   mood?: string;
   /** Custom style notes */
   custom_notes?: string;
+  
+  // Advanced cinematography controls
+  /** Lens focal length: "24mm", "35mm", "50mm", "85mm", "135mm" */
+  lens?: string;
+  /** Depth of field: "shallow", "medium", "deep" */
+  depth_of_field?: string;
+  /** Motion style: "smooth", "handheld", "static", "tracking" */
+  motion_style?: string;
+  /** Film stock emulation: "digital", "portra", "ektar", "cinestill" */
+  film_stock?: string;
+  
+  // Continuity anchors
+  /** Wardrobe description for consistency */
+  wardrobe?: string;
+  /** Key props to maintain */
+  props?: string;
+  /** Time of day: "dawn", "morning", "midday", "golden_hour", "dusk", "night" */
+  time_of_day?: string;
 }
 
 /**
