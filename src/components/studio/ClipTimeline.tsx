@@ -55,6 +55,11 @@ interface ClipTimelineProps {
   onToggleDisabled: () => void;
   onAddClip: () => void;
   onClipHover?: (clipId: string | null) => void;
+  // Trim operations
+  onTrimPreview?: (clipId: string, newStart?: number, newEnd?: number) => void;
+  onTrimCommit?: (clipId: string, newStart?: number, newEnd?: number) => void;
+  rippleMode?: boolean;
+  onToggleRipple?: () => void;
   className?: string;
 }
 
@@ -77,13 +82,90 @@ export function ClipTimeline({
   onToggleDisabled,
   onAddClip,
   onClipHover,
+  onTrimPreview,
+  onTrimCommit,
+  rippleMode = false,
+  onToggleRipple,
   className,
 }: ClipTimelineProps) {
   const timelineRef = useRef<HTMLDivElement>(null);
   const [isDraggingScrub, setIsDraggingScrub] = useState(false);
   const [isDndActive, setIsDndActive] = useState(false);
+  const [isTrimming, setIsTrimming] = useState(false);
   const [hoverPosition, setHoverPosition] = useState<number | null>(null);
   const [zoom, setZoom] = useState(1);
+
+  // Convert pixel delta to time delta
+  const pxToTime = useCallback(
+    (deltaPx: number) => {
+      if (!timelineRef.current) return 0;
+      const rect = timelineRef.current.getBoundingClientRect();
+      const visibleWidth = rect.width;
+      if (visibleWidth <= 0) return 0;
+      return (deltaPx / visibleWidth) * duration;
+    },
+    [duration]
+  );
+
+  // Trim pointer handler - called from SortableClip
+  const handleTrimPointerDown = useCallback(
+    (clip: Clip, edge: "left" | "right", e: React.PointerEvent) => {
+      if (!onTrimPreview || !onTrimCommit) return;
+      
+      e.stopPropagation();
+      e.preventDefault();
+      setIsTrimming(true);
+
+      const startX = e.clientX;
+      const originalStart = clip.start;
+      const originalEnd = clip.end;
+
+      const onMove = (ev: PointerEvent) => {
+        const dx = ev.clientX - startX;
+        const dt = pxToTime(dx);
+
+        // Shift key for snapping to 0.5s
+        const snap = ev.shiftKey ? 0.5 : 0;
+        const applySnap = (v: number) => (snap ? Math.round(v / snap) * snap : v);
+
+        if (edge === "left") {
+          const ns = applySnap(originalStart + dt);
+          const clamped = Math.min(Math.max(0, ns), originalEnd - 0.1);
+          onTrimPreview(clip.id, clamped, undefined);
+        } else {
+          const ne = applySnap(originalEnd + dt);
+          const clamped = Math.max(ne, originalStart + 0.1);
+          onTrimPreview(clip.id, undefined, clamped);
+        }
+      };
+
+      const onUp = (ev: PointerEvent) => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        setIsTrimming(false);
+
+        const dx = ev.clientX - startX;
+        const dt = pxToTime(dx);
+
+        const snap = ev.shiftKey ? 0.5 : 0;
+        const applySnap = (v: number) => (snap ? Math.round(v / snap) * snap : v);
+
+        if (edge === "left") {
+          const ns = applySnap(originalStart + dt);
+          const clamped = Math.min(Math.max(0, ns), originalEnd - 0.1);
+          onTrimCommit(clip.id, clamped, undefined);
+        } else {
+          const ne = applySnap(originalEnd + dt);
+          const clamped = Math.max(ne, originalStart + 0.1);
+          onTrimCommit(clip.id, undefined, clamped);
+        }
+      };
+
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+    },
+    [onTrimPreview, onTrimCommit, pxToTime]
+  );
 
   // DnD sensors
   const sensors = useSensors(
@@ -257,6 +339,32 @@ export function ClipTimeline({
 
             <div className="w-px h-4 bg-border/30 mx-1" />
 
+            {/* Ripple mode toggle */}
+            {onToggleRipple && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={cn(
+                      "h-6 px-2 text-[10px] font-medium",
+                      rippleMode 
+                        ? "bg-success/20 text-success hover:bg-success/30" 
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                    onClick={onToggleRipple}
+                  >
+                    Ripple {rippleMode ? "ON" : "OFF"}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="text-xs">
+                  {rippleMode ? "Trimming shifts following clips" : "Enable ripple to auto-shift clips"}
+                </TooltipContent>
+              </Tooltip>
+            )}
+
+            <div className="w-px h-4 bg-border/30 mx-1" />
+
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -347,6 +455,10 @@ export function ClipTimeline({
                         duration={safeDuration}
                         onClick={(multi) => onClipSelect(clip.id, multi)}
                         onHover={(hovering) => onClipHover?.(hovering ? clip.id : null)}
+                        onTrimPointerDown={onTrimPreview && onTrimCommit 
+                          ? (e, edge) => handleTrimPointerDown(clip, edge, e)
+                          : undefined
+                        }
                       />
                     ))}
 
@@ -465,9 +577,18 @@ interface SortableClipProps {
   duration: number;
   onClick: (multi: boolean) => void;
   onHover?: (hovering: boolean) => void;
+  onTrimPointerDown?: (e: React.PointerEvent, edge: "left" | "right") => void;
 }
 
-function SortableClip({ clip, index, isSelected, duration, onClick, onHover }: SortableClipProps) {
+function SortableClip({ 
+  clip, 
+  index, 
+  isSelected, 
+  duration, 
+  onClick, 
+  onHover,
+  onTrimPointerDown,
+}: SortableClipProps) {
   const {
     attributes,
     listeners,
@@ -498,7 +619,7 @@ function SortableClip({ clip, index, isSelected, duration, onClick, onHover }: S
       ref={setNodeRef}
       style={style}
       className={cn(
-        "h-full rounded-md flex-shrink-0 overflow-hidden",
+        "h-full rounded-md flex-shrink-0 overflow-hidden relative",
         "border-2 transition-all duration-150 cursor-pointer group",
         "flex flex-col",
         // Base gradient based on type
@@ -516,6 +637,32 @@ function SortableClip({ clip, index, isSelected, duration, onClick, onHover }: S
       onMouseEnter={() => onHover?.(true)}
       onMouseLeave={() => onHover?.(false)}
     >
+      {/* Left trim handle */}
+      {onTrimPointerDown && (
+        <div
+          className={cn(
+            "absolute left-0 top-0 bottom-0 w-2 z-10",
+            "cursor-ew-resize opacity-0 group-hover:opacity-100 transition-opacity",
+            "bg-gradient-to-r from-primary/40 to-transparent",
+            "hover:from-primary/70"
+          )}
+          onPointerDown={(e) => onTrimPointerDown(e, "left")}
+        />
+      )}
+
+      {/* Right trim handle */}
+      {onTrimPointerDown && (
+        <div
+          className={cn(
+            "absolute right-0 top-0 bottom-0 w-2 z-10",
+            "cursor-ew-resize opacity-0 group-hover:opacity-100 transition-opacity",
+            "bg-gradient-to-l from-primary/40 to-transparent",
+            "hover:from-primary/70"
+          )}
+          onPointerDown={(e) => onTrimPointerDown(e, "right")}
+        />
+      )}
+
       {/* Thumbnail strip - visual indicator at top */}
       <div className={cn(
         "h-4 flex-shrink-0 flex items-center px-1.5 gap-1",

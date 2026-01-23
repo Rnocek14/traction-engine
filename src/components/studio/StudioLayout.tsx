@@ -129,7 +129,7 @@ export function StudioLayout({
         <div className="flex-1 flex flex-col min-w-0">
           <ResizablePanelGroup direction="vertical" className="flex-1">
             {/* Top: Preview + Inspector */}
-            <ResizablePanel defaultSize={65} minSize={30}>
+            <ResizablePanel defaultSize={72} minSize={40}>
               <div className="h-full p-3 pb-0">
                 <ResizablePanelGroup direction="horizontal" className="h-full">
                   <ResizablePanel defaultSize={65} minSize={40}>
@@ -177,7 +177,7 @@ export function StudioLayout({
             <ResizableHandle withHandle className="my-1" />
 
             {/* Bottom: Timeline + Actions */}
-            <ResizablePanel defaultSize={35} minSize={20}>
+            <ResizablePanel defaultSize={28} minSize={18}>
               <div className="h-full p-3 pt-0 flex gap-3">
                 <div className="flex-1 min-w-0">
                   <ClipTimeline
@@ -196,6 +196,10 @@ export function StudioLayout({
                     onToggleDisabled={timeline.toggleDisabled}
                     onAddClip={() => timeline.addClip("New scene prompt")}
                     onClipHover={setHoveredClipId}
+                    onTrimPreview={timeline.previewTrim}
+                    onTrimCommit={timeline.commitTrim}
+                    rippleMode={timeline.rippleMode}
+                    onToggleRipple={() => timeline.setRippleMode(!timeline.rippleMode)}
                   />
                 </div>
 
