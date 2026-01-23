@@ -305,6 +305,7 @@ export function StudioLayout({
                     duration={timeline.duration}
                     voiceover={editor.edits.voiceover}
                     audioUrl={voiceoverAudioUrl}
+                    videoJobs={allVideoJobs}
                     onClipSelect={timeline.selectClip}
                     onReorder={timeline.reorderClips}
                     onPlayheadChange={timeline.setPlayheadPosition}

@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback, useEffect } from "react";
+import { useRef, useState, useCallback, useEffect, useMemo } from "react";
 import {
   DndContext,
   closestCenter,
@@ -42,6 +42,13 @@ import { useAudioWaveform } from "@/hooks/use-audio-waveform";
 import type { Clip } from "@/types/timeline-types";
 import type { Beat } from "@/types/beat-map-types";
 
+/** Video job data for trim badge calculation - accepts Json type from Supabase */
+interface VideoJobInfo {
+  id: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  settings?: any;
+}
+
 interface ClipTimelineProps {
   clips: Clip[];
   selectedClipIds: Set<string>;
@@ -49,6 +56,8 @@ interface ClipTimelineProps {
   duration: number;
   voiceover?: string;
   audioUrl?: string | null;
+  /** Video jobs for calculating trim badges */
+  videoJobs?: VideoJobInfo[];
   onClipSelect: (clipId: string, multi?: boolean) => void;
   onReorder: (fromIndex: number, toIndex: number) => void;
   onPlayheadChange: (position: number) => void;
@@ -84,6 +93,7 @@ export function ClipTimeline({
   duration,
   voiceover = "",
   audioUrl,
+  videoJobs = [],
   onClipSelect,
   onReorder,
   onPlayheadChange,
@@ -103,6 +113,15 @@ export function ClipTimeline({
   hasBeatMap = false,
   className,
 }: ClipTimelineProps) {
+  // Build lookup map for video job settings (for trim badge calculation)
+  const jobsByVideoJobId = useMemo(() => {
+    const map = new Map<string, VideoJobInfo>();
+    for (const job of videoJobs) {
+      map.set(job.id, job);
+    }
+    return map;
+  }, [videoJobs]);
+  
   // Track discovered audio duration for unified scaling
   const [audioDuration, setAudioDuration] = useState(0);
   
@@ -506,21 +525,29 @@ export function ClipTimeline({
                 >
                   <div className="flex h-full p-1 gap-0.5">
                     <TooltipProvider delayDuration={300}>
-                      {clips.map((clip, index) => (
-                        <SortableClip
-                          key={clip.id}
-                          clip={clip}
-                          index={index}
-                          isSelected={selectedClipIds.has(clip.id)}
-                          duration={safeDuration}
-                          onClick={(multi) => onClipSelect(clip.id, multi)}
-                          onHover={(hovering) => onClipHover?.(hovering ? clip.id : null)}
-                          onTrimPointerDown={onTrimPreview && onTrimCommit 
-                            ? (e, edge) => handleTrimPointerDown(clip, edge, e)
-                            : undefined
-                          }
-                        />
-                      ))}
+                      {clips.map((clip, index) => {
+                        // Look up video job for this clip to get generated duration
+                        const videoJobId = clip.source?.video_job_id;
+                        const job = videoJobId ? jobsByVideoJobId.get(videoJobId) : undefined;
+                        const generatedDuration = job?.settings?.provider_seconds ?? job?.settings?.seconds;
+                        
+                        return (
+                          <SortableClip
+                            key={clip.id}
+                            clip={clip}
+                            index={index}
+                            isSelected={selectedClipIds.has(clip.id)}
+                            duration={safeDuration}
+                            generatedDuration={generatedDuration}
+                            onClick={(multi) => onClipSelect(clip.id, multi)}
+                            onHover={(hovering) => onClipHover?.(hovering ? clip.id : null)}
+                            onTrimPointerDown={onTrimPreview && onTrimCommit 
+                              ? (e, edge) => handleTrimPointerDown(clip, edge, e)
+                              : undefined
+                            }
+                          />
+                        );
+                      })}
                     </TooltipProvider>
 
                     {clips.length === 0 && (
@@ -686,6 +713,8 @@ interface SortableClipProps {
   index: number;
   isSelected: boolean;
   duration: number;
+  /** Generated duration from video job (provider_seconds or seconds) */
+  generatedDuration?: number;
   onClick: (multi: boolean) => void;
   onHover?: (hovering: boolean) => void;
   onTrimPointerDown?: (e: React.PointerEvent, edge: "left" | "right") => void;
@@ -695,7 +724,8 @@ function SortableClip({
   clip, 
   index, 
   isSelected, 
-  duration, 
+  duration,
+  generatedDuration,
   onClick, 
   onHover,
   onTrimPointerDown,
@@ -837,8 +867,8 @@ function SortableClip({
             </Tooltip>
           )}
           
-          {/* Will trim indicator - shown when clip has a video job with longer generated duration */}
-          {clip.source?.video_job_id && clip.settings?.duration && clip.settings.duration > clipDuration && (
+          {/* Will trim indicator - shown when generated duration > timeline duration */}
+          {generatedDuration && generatedDuration > clipDuration && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <span className="flex items-center gap-0.5 px-1 py-0.5 rounded bg-primary/20 text-primary">
@@ -847,7 +877,7 @@ function SortableClip({
                 </span>
               </TooltipTrigger>
               <TooltipContent side="top" className="text-xs max-w-[200px]">
-                Will trim from {clip.settings.duration}s to {clipDuration.toFixed(1)}s on export
+                Will trim from {generatedDuration}s → {clipDuration.toFixed(1)}s on export
               </TooltipContent>
             </Tooltip>
           )}
