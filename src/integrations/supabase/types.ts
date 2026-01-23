@@ -556,6 +556,10 @@ export type Database = {
       script_runs: {
         Row: {
           account_id: string
+          assembled_at: string | null
+          assembled_meta: Json | null
+          assembled_status: string | null
+          assembled_video_url: string | null
           created_at: string
           draft_edits: Json | null
           fact_claims: string[]
@@ -585,6 +589,10 @@ export type Database = {
         }
         Insert: {
           account_id: string
+          assembled_at?: string | null
+          assembled_meta?: Json | null
+          assembled_status?: string | null
+          assembled_video_url?: string | null
           created_at?: string
           draft_edits?: Json | null
           fact_claims?: string[]
@@ -614,6 +622,10 @@ export type Database = {
         }
         Update: {
           account_id?: string
+          assembled_at?: string | null
+          assembled_meta?: Json | null
+          assembled_status?: string | null
+          assembled_video_url?: string | null
           created_at?: string
           draft_edits?: Json | null
           fact_claims?: string[]
