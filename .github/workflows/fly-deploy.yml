@@ -1,0 +1,38 @@
+name: Deploy FFmpeg Service to Fly
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "ffmpeg-service/**"
+      - ".github/workflows/fly-deploy.yml"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    concurrency: ffmpeg-service-deploy
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Create Fly app if missing
+        working-directory: ffmpeg-service
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          flyctl apps list | grep -q "life-path-ffmpeg-service" || flyctl apps create life-path-ffmpeg-service
+
+      - name: Set Fly secrets
+        working-directory: ffmpeg-service
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          flyctl secrets set ALLOWED_HOSTNAMES="jrujlpljluvxewjytuab.supabase.co"
+
+      - name: Deploy
+        working-directory: ffmpeg-service
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          flyctl deploy --remote-only
