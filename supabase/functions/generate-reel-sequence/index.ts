@@ -125,21 +125,24 @@ Deno.serve(async (req) => {
         form.set("seed", String(settings.seed));
       }
 
-      // Add input reference for frame chaining
+      // Add image reference for frame chaining (Sora uses "image" parameter)
       if (prevJobId) {
         // Chain from previous job's last frame
         const frameBlob = await extractLastFrame(prevJobId, supabase, targetW, targetH);
         if (frameBlob) {
-          form.set("input_reference", new File([frameBlob], "ref.jpg", { type: "image/jpeg" }));
-          console.log(`Chaining clip ${i + 1} from job ${prevJobId}`);
+          // Try "image" parameter - the standard Sora image-to-video parameter
+          form.set("image", new File([frameBlob], "frame.png", { type: "image/png" }));
+          console.log(`Chaining clip ${i + 1} from job ${prevJobId}, frame size: ${frameBlob.size} bytes`);
+        } else {
+          console.warn(`Failed to extract frame from job ${prevJobId}, generating without reference`);
         }
       } else if (useReferenceImage && i === 0) {
         // Use reference image for first clip
         try {
           const refBlob = await fetchReferenceImage(styleGuide!.reference_image_url!, targetW, targetH);
           if (refBlob) {
-            form.set("input_reference", new File([refBlob], "ref.jpg", { type: "image/jpeg" }));
-            console.log(`Using reference image for first clip`);
+            form.set("image", new File([refBlob], "frame.png", { type: "image/png" }));
+            console.log(`Using reference image for first clip, size: ${refBlob.size} bytes`);
           }
         } catch (err) {
           console.warn("Failed to fetch reference image:", err);
@@ -260,14 +263,15 @@ async function extractLastFrame(jobId: string, supabase: any, w: number, h: numb
     
     // Resize to target if needed
     if (img.width !== w || img.height !== h) {
+      console.log(`Resizing frame from ${img.width}x${img.height} to ${w}x${h}`);
       img = img.resize(w, h);
     }
     
-    // Use JPEG 100 for maximum quality in frame chaining
-    const jpegBytes = await img.encodeJPEG(100);
+    // Encode as PNG for lossless quality in frame chaining
+    const pngBytes = await img.encode();
     
-    // Type assertion to work around Deno's strict ArrayBuffer typing
-    return new Blob([jpegBytes as unknown as ArrayBuffer], { type: "image/jpeg" });
+    console.log(`Extracted frame: ${pngBytes.byteLength} bytes`);
+    return new Blob([pngBytes.buffer as ArrayBuffer], { type: "image/png" });
     
   } catch (err) {
     console.error(`Failed to extract frame from job ${jobId}:`, err);
@@ -295,10 +299,10 @@ async function fetchReferenceImage(url: string, w: number, h: number): Promise<B
       img = img.resize(w, h);
     }
     
-    // Encode as high-quality JPEG
-    const jpegBytes = await img.encodeJPEG(100);
-    return new Blob([jpegBytes as unknown as ArrayBuffer], { type: "image/jpeg" });
-    
+    // Encode as PNG for lossless quality
+    const pngBytes = await img.encode();
+    console.log(`Reference image: ${pngBytes.byteLength} bytes`);
+    return new Blob([pngBytes.buffer as ArrayBuffer], { type: "image/png" });
   } catch (err) {
     console.error(`Failed to fetch reference image:`, err);
     return null;
