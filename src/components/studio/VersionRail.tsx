@@ -151,22 +151,24 @@ export function VersionRail({
 }
 
 function StatusIcon({ status, isHardBlock }: { status: string; isHardBlock: boolean }) {
+  const iconClass = "h-4 w-4 flex-shrink-0";
+  
   if (isHardBlock) {
-    return <AlertTriangle className="h-4 w-4 text-destructive flex-shrink-0" />;
+    return <AlertTriangle className={cn(iconClass, "text-destructive")} />;
   }
 
   switch (status) {
     case "qa_passed":
-      return <CheckCircle2 className="h-4 w-4 text-success flex-shrink-0" />;
+      return <CheckCircle2 className={cn(iconClass, "text-success")} />;
     case "qa_failed":
-      return <XCircle className="h-4 w-4 text-warning flex-shrink-0" />;
+      return <XCircle className={cn(iconClass, "text-warning")} />;
     case "generating":
-      return <Loader2 className="h-4 w-4 text-primary animate-spin flex-shrink-0" />;
+      return <Loader2 className={cn(iconClass, "text-primary animate-spin")} />;
     case "published":
-      return <Send className="h-4 w-4 text-success flex-shrink-0" />;
+      return <Send className={cn(iconClass, "text-success")} />;
     case "rejected":
-      return <Ban className="h-4 w-4 text-destructive flex-shrink-0" />;
+      return <Ban className={cn(iconClass, "text-destructive")} />;
     default:
-      return <Clock className="h-4 w-4 text-muted-foreground flex-shrink-0" />;
+      return <Clock className={cn(iconClass, "text-muted-foreground")} />;
   }
 }

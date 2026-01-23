@@ -146,55 +146,60 @@ export function StudioLayout({
             <ResizablePanel defaultSize={72} minSize={40}>
               <div className="h-full p-3 pb-0">
                 <ResizablePanelGroup direction="horizontal" className="h-full">
-                  <ResizablePanel defaultSize={65} minSize={40}>
-                    {/* Play All / Single Clip toggle */}
-                    <div className="absolute top-5 left-5 z-10 flex gap-2">
-                      <Button
-                        variant={isPlayAllMode ? "default" : "outline"}
-                        size="sm"
-                        className="gap-2 h-8"
-                        onClick={() => setIsPlayAllMode(true)}
-                        disabled={completedVideos === 0}
-                      >
-                        <Play className="h-3.5 w-3.5" />
-                        Play All ({completedVideos})
-                      </Button>
-                      <Button
-                        variant={!isPlayAllMode ? "default" : "outline"}
-                        size="sm"
-                        className="gap-2 h-8"
-                        onClick={() => setIsPlayAllMode(false)}
-                      >
-                        <Layers className="h-3.5 w-3.5" />
-                        Single
-                      </Button>
-                    </div>
+            <ResizablePanel defaultSize={65} minSize={40}>
+                    <div className="relative h-full">
+                      {/* Play All / Single Clip toggle */}
+                      <div className="absolute top-3 left-3 z-20 flex gap-2">
+                        <Button
+                          variant={isPlayAllMode ? "default" : "outline"}
+                          size="sm"
+                          className="gap-2 h-8"
+                          onClick={() => setIsPlayAllMode(true)}
+                          disabled={completedVideos === 0}
+                        >
+                          <Play className="h-3.5 w-3.5" />
+                          Play All ({completedVideos})
+                        </Button>
+                        <Button
+                          variant={!isPlayAllMode ? "default" : "outline"}
+                          size="sm"
+                          className="gap-2 h-8"
+                          onClick={() => setIsPlayAllMode(false)}
+                        >
+                          <Layers className="h-3.5 w-3.5" />
+                          Single
+                        </Button>
+                      </div>
 
-                    {isPlayAllMode ? (
-                      <ReelPlayer
-                        clips={timeline.clips}
-                        videoJobs={allVideoJobs}
-                        audioUrl={(script as unknown as { voiceover_audio_url?: string }).voiceover_audio_url}
-                        onClipChange={(idx) => {
-                          const clip = timeline.clips[idx];
-                          if (clip) timeline.setPlayheadPosition(clip.start);
-                        }}
-                        className="h-full"
-                      />
-                    ) : (
-                      <PreviewCanvas
-                        videoJob={activeVideoJob}
-                        scenePrompts={timeline.clips.map((c) => c.prompt || "")}
-                        currentSceneIndex={Math.max(0, currentSceneIndex)}
-                        onSceneChange={(idx) => {
-                          const clip = timeline.clips[idx];
-                          if (clip) timeline.setPlayheadPosition(clip.start);
-                        }}
-                        onScrubPositionChange={(pos) => timeline.setPlayheadPosition(pos * timeline.duration)}
-                        hoveredClipId={hoveredClipId}
-                        className="h-full"
-                      />
-                    )}
+                      {/* Player container */}
+                      <div className="h-full flex items-center justify-center bg-[hsl(222_47%_4%)]">
+                        {isPlayAllMode ? (
+                          <ReelPlayer
+                            clips={timeline.clips}
+                            videoJobs={allVideoJobs}
+                            audioUrl={(script as unknown as { voiceover_audio_url?: string }).voiceover_audio_url}
+                            onClipChange={(idx) => {
+                              const clip = timeline.clips[idx];
+                              if (clip) timeline.setPlayheadPosition(clip.start);
+                            }}
+                            className="h-full w-full"
+                          />
+                        ) : (
+                          <PreviewCanvas
+                            videoJob={activeVideoJob}
+                            scenePrompts={timeline.clips.map((c) => c.prompt || "")}
+                            currentSceneIndex={Math.max(0, currentSceneIndex)}
+                            onSceneChange={(idx) => {
+                              const clip = timeline.clips[idx];
+                              if (clip) timeline.setPlayheadPosition(clip.start);
+                            }}
+                            onScrubPositionChange={(pos) => timeline.setPlayheadPosition(pos * timeline.duration)}
+                            hoveredClipId={hoveredClipId}
+                            className="h-full"
+                          />
+                        )}
+                      </div>
+                    </div>
                   </ResizablePanel>
 
                   <ResizableHandle withHandle className="mx-2" />

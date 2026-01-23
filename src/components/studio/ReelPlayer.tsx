@@ -16,7 +16,12 @@ interface ReelPlayerProps {
 
 /**
  * Sequential reel player that plays all clip videos seamlessly.
- * Uses dual video elements for gapless playback with proper transition handling.
+ * Uses dual video elements for gapless playback.
+ * 
+ * Key architecture:
+ * - userWantsPlayingRef tracks user intent (not video element state)
+ * - isNextReadyRef guards transitions until preload is buffered
+ * - Audio syncs only on user actions (play/skip), not during auto-transitions
  */
 export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function ReelPlayer({
   clips,
@@ -36,10 +41,10 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
   const [currentTime, setCurrentTime] = useState(0);
   const [showControls, setShowControls] = useState(true);
   
-  // Track if we're in a transition to prevent pause state interference
-  const isTransitioningRef = useRef(false);
-  // Track the intended playing state (user intent)
+  // Imperative state refs - these are the source of truth
   const userWantsPlayingRef = useRef(false);
+  const isTransitioningRef = useRef(false);
+  const isNextReadyRef = useRef(false);
 
   // Map clips to their video jobs
   const clipVideos = clips
@@ -72,25 +77,7 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
     return activePlayer === "A" ? videoBRef : videoARef;
   }, [activePlayer]);
 
-  // Preload next video when clip index changes
-  useEffect(() => {
-    const preloadRef = getPreloadRef();
-    if (nextVideo?.job?.output_url && preloadRef.current) {
-      preloadRef.current.src = nextVideo.job.output_url;
-      preloadRef.current.load();
-      preloadRef.current.currentTime = 0;
-    }
-  }, [currentClipIndex, nextVideo, getPreloadRef]);
-
-  // Load initial video
-  useEffect(() => {
-    if (currentVideo?.job?.output_url && videoARef.current && currentClipIndex === 0) {
-      videoARef.current.src = currentVideo.job.output_url;
-      videoARef.current.load();
-    }
-  }, [currentVideo, currentClipIndex]);
-
-  // Calculate current position across all clips
+  // Calculate global time across all clips
   const calculateGlobalTime = useCallback(() => {
     let time = 0;
     for (let i = 0; i < currentClipIndex; i++) {
@@ -105,11 +92,35 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
     return time;
   }, [currentClipIndex, clipVideos, getActiveRef]);
 
-  const handleTimeUpdate = useCallback(() => {
-    const activeRef = getActiveRef();
-    if (!activeRef.current) return;
-    setCurrentTime(calculateGlobalTime());
-  }, [calculateGlobalTime, getActiveRef]);
+  // Preload next video with canplaythrough guard
+  useEffect(() => {
+    const preloadRef = getPreloadRef();
+    const preloadEl = preloadRef.current;
+    if (!nextVideo?.job?.output_url || !preloadEl) {
+      isNextReadyRef.current = false;
+      return;
+    }
+    
+    isNextReadyRef.current = false;
+    preloadEl.src = nextVideo.job.output_url;
+    preloadEl.load();
+    preloadEl.currentTime = 0;
+    
+    const handleCanPlay = () => {
+      isNextReadyRef.current = true;
+    };
+    
+    preloadEl.addEventListener("canplaythrough", handleCanPlay);
+    return () => preloadEl.removeEventListener("canplaythrough", handleCanPlay);
+  }, [currentClipIndex, nextVideo, getPreloadRef]);
+
+  // Load initial video
+  useEffect(() => {
+    if (currentVideo?.job?.output_url && videoARef.current && currentClipIndex === 0) {
+      videoARef.current.src = currentVideo.job.output_url;
+      videoARef.current.load();
+    }
+  }, [currentVideo, currentClipIndex]);
 
   // Handle seamless transition to next clip
   const transitionToNextClip = useCallback(() => {
@@ -126,79 +137,105 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
       return;
     }
 
+    // Guard: wait for preload to be ready
+    if (!isNextReadyRef.current) {
+      // Retry after a short delay
+      setTimeout(() => {
+        if (userWantsPlayingRef.current) {
+          transitionToNextClip();
+        }
+      }, 50);
+      return;
+    }
+
     isTransitioningRef.current = true;
     
     const preloadRef = getPreloadRef();
     const activeRef = getActiveRef();
+    const preloadEl = preloadRef.current;
+    const activeEl = activeRef.current;
     
-    // Ensure preloaded video starts playing BEFORE we swap
-    if (preloadRef.current) {
-      preloadRef.current.currentTime = 0;
-      const playPromise = preloadRef.current.play();
-      
-      if (playPromise !== undefined) {
-        playPromise.then(() => {
-          // Now swap the active player
-          setActivePlayer(prev => prev === "A" ? "B" : "A");
-          setCurrentClipIndex(prev => prev + 1);
-          
-          // Pause the old video after transition
-          if (activeRef.current) {
-            activeRef.current.pause();
-          }
-          
-          isTransitioningRef.current = false;
-        }).catch(() => {
-          isTransitioningRef.current = false;
-        });
-      }
+    if (!preloadEl) {
+      isTransitioningRef.current = false;
+      return;
+    }
+
+    // Start playback on preloaded video FIRST
+    preloadEl.currentTime = 0;
+    const playPromise = preloadEl.play();
+    
+    if (playPromise !== undefined) {
+      playPromise.then(() => {
+        // Now swap the active player
+        setActivePlayer(prev => prev === "A" ? "B" : "A");
+        setCurrentClipIndex(prev => prev + 1);
+        
+        // Pause old video after swap
+        if (activeEl) {
+          activeEl.pause();
+        }
+        
+        isTransitioningRef.current = false;
+      }).catch(() => {
+        isTransitioningRef.current = false;
+      });
+    } else {
+      // Fallback for browsers without promise
+      setActivePlayer(prev => prev === "A" ? "B" : "A");
+      setCurrentClipIndex(prev => prev + 1);
+      if (activeEl) activeEl.pause();
+      isTransitioningRef.current = false;
     }
   }, [currentClipIndex, totalClips, getPreloadRef, getActiveRef]);
 
+  // Video ended handler - only triggers transition
   const handleVideoEnded = useCallback(() => {
-    if (userWantsPlayingRef.current) {
+    if (userWantsPlayingRef.current && !isTransitioningRef.current) {
       transitionToNextClip();
     }
   }, [transitionToNextClip]);
+
+  // Time update handler
+  const handleTimeUpdate = useCallback(() => {
+    const activeRef = getActiveRef();
+    if (!activeRef.current) return;
+    setCurrentTime(calculateGlobalTime());
+  }, [calculateGlobalTime, getActiveRef]);
 
   // Notify parent of clip changes
   useEffect(() => {
     onClipChange?.(currentClipIndex);
   }, [currentClipIndex, onClipChange]);
 
-  // Sync audio with video playback
-  useEffect(() => {
+  // Sync audio imperatively (called only on user actions)
+  const syncAudio = useCallback((globalTime: number) => {
     if (!audioRef.current || !audioUrl) return;
-    
-    if (isPlaying) {
-      const globalTime = calculateGlobalTime();
-      audioRef.current.currentTime = globalTime;
+    audioRef.current.currentTime = globalTime;
+    if (userWantsPlayingRef.current) {
       audioRef.current.play().catch(() => {});
-    } else {
-      audioRef.current.pause();
     }
-  }, [isPlaying, audioUrl, calculateGlobalTime]);
+  }, [audioUrl]);
 
   const togglePlay = useCallback(() => {
     const activeRef = getActiveRef();
-    if (!activeRef.current) return;
+    const activeEl = activeRef.current;
+    if (!activeEl) return;
     
     if (isPlaying) {
+      // User wants to pause
       userWantsPlayingRef.current = false;
-      activeRef.current.pause();
+      activeEl.pause();
       audioRef.current?.pause();
       setIsPlaying(false);
     } else {
+      // User wants to play
       userWantsPlayingRef.current = true;
-      activeRef.current.play().catch(() => {});
-      if (audioRef.current && audioUrl) {
-        const globalTime = calculateGlobalTime();
-        audioRef.current.currentTime = globalTime;
-        audioRef.current.play().catch(() => {});
-      }
+      activeEl.play().catch(() => {});
+      // Sync audio on explicit play action
+      syncAudio(calculateGlobalTime());
       setIsPlaying(true);
     }
-  }, [isPlaying, audioUrl, calculateGlobalTime, getActiveRef]);
+  }, [isPlaying, calculateGlobalTime, getActiveRef, syncAudio]);
 
   const toggleMute = useCallback(() => {
     const newMuted = !isMuted;
@@ -216,6 +253,12 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
     
     isTransitioningRef.current = true;
     
+    // Calculate audio time for target clip
+    let audioTime = 0;
+    for (let i = 0; i < index; i++) {
+      audioTime += clipVideos[i].clip.end - clipVideos[i].clip.start;
+    }
+    
     // Reset to player A for clean state
     setActivePlayer("A");
     setCurrentClipIndex(index);
@@ -224,43 +267,22 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
     if (videoARef.current) {
       videoARef.current.src = targetVideo.job.output_url;
       videoARef.current.currentTime = 0;
-      if (userWantsPlayingRef.current || isPlaying) {
+      if (userWantsPlayingRef.current) {
         videoARef.current.play().catch(() => {});
       }
     }
     
-    // Sync audio
-    if (audioRef.current && audioUrl) {
-      let time = 0;
-      for (let i = 0; i < index; i++) {
-        time += clipVideos[i].clip.end - clipVideos[i].clip.start;
-      }
-      audioRef.current.currentTime = time;
-    }
+    // Sync audio on explicit skip
+    syncAudio(audioTime);
     
     isTransitioningRef.current = false;
-  }, [totalClips, clipVideos, isPlaying, audioUrl]);
+  }, [totalClips, clipVideos, syncAudio]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
-
-  // Handle play/pause events from video elements
-  const handleVideoPlay = useCallback((player: "A" | "B") => {
-    if (player === activePlayer && !isTransitioningRef.current) {
-      setIsPlaying(true);
-    }
-  }, [activePlayer]);
-
-  const handleVideoPause = useCallback((player: "A" | "B") => {
-    // Only update isPlaying if this is the active player AND we're not transitioning
-    // AND the user actually wanted to pause (not just a video ending)
-    if (player === activePlayer && !isTransitioningRef.current && !userWantsPlayingRef.current) {
-      setIsPlaying(false);
-    }
-  }, [activePlayer]);
 
   // Keyboard controls
   useEffect(() => {
@@ -294,7 +316,7 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
         ref={ref}
         className={cn(
           "relative bg-[hsl(222_47%_4%)] rounded-lg overflow-hidden border border-border/30",
-          "flex items-center justify-center aspect-[9/16] max-h-[70vh]",
+          "flex items-center justify-center h-full",
           className
         )}
       >
@@ -313,44 +335,40 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
     <div
       ref={ref}
       className={cn(
-        "relative bg-[hsl(222_47%_4%)] rounded-lg overflow-hidden border border-border/30",
+        "relative bg-[hsl(222_47%_4%)] rounded-lg overflow-hidden border border-border/30 h-full",
         className
       )}
       onMouseEnter={() => setShowControls(true)}
       onMouseLeave={() => setShowControls(false)}
     >
-      {/* Dual video players for seamless transitions */}
-      <div className="relative aspect-[9/16] max-h-[70vh] flex items-center justify-center">
+      {/* Video container - fills parent, videos use object-contain */}
+      <div className="relative w-full h-full flex items-center justify-center">
         {/* Video A */}
         <video
           ref={videoARef}
           className={cn(
-            "absolute inset-0 w-full h-full object-contain transition-opacity duration-75",
-            activePlayer === "A" ? "opacity-100 z-10" : "opacity-0 z-0"
+            "max-w-full max-h-full object-contain transition-opacity duration-75",
+            activePlayer === "A" ? "opacity-100" : "opacity-0 absolute"
           )}
           muted={isMuted}
           playsInline
           preload="auto"
           onTimeUpdate={activePlayer === "A" ? handleTimeUpdate : undefined}
           onEnded={activePlayer === "A" ? handleVideoEnded : undefined}
-          onPlay={() => handleVideoPlay("A")}
-          onPause={() => handleVideoPause("A")}
         />
         
         {/* Video B (preload/swap) */}
         <video
           ref={videoBRef}
           className={cn(
-            "absolute inset-0 w-full h-full object-contain transition-opacity duration-75",
-            activePlayer === "B" ? "opacity-100 z-10" : "opacity-0 z-0"
+            "max-w-full max-h-full object-contain transition-opacity duration-75",
+            activePlayer === "B" ? "opacity-100" : "opacity-0 absolute"
           )}
           muted={isMuted}
           playsInline
           preload="auto"
           onTimeUpdate={activePlayer === "B" ? handleTimeUpdate : undefined}
           onEnded={activePlayer === "B" ? handleVideoEnded : undefined}
-          onPlay={() => handleVideoPlay("B")}
-          onPause={() => handleVideoPause("B")}
         />
 
         {/* Hidden audio for voiceover */}
