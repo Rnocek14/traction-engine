@@ -60,6 +60,8 @@ interface ClipTimelineProps {
   onTrimCommit?: (clipId: string, newStart?: number, newEnd?: number) => void;
   rippleMode?: boolean;
   onToggleRipple?: () => void;
+  /** Callback to report discovered audio duration to parent */
+  onAudioDurationChange?: (duration: number) => void;
   className?: string;
 }
 
@@ -86,8 +88,20 @@ export function ClipTimeline({
   onTrimCommit,
   rippleMode = false,
   onToggleRipple,
+  onAudioDurationChange,
   className,
 }: ClipTimelineProps) {
+  // Track discovered audio duration for unified scaling
+  const [audioDuration, setAudioDuration] = useState(0);
+  
+  // Handle audio duration discovery
+  const handleAudioDurationChange = useCallback((newDuration: number) => {
+    setAudioDuration(newDuration);
+    onAudioDurationChange?.(newDuration);
+  }, [onAudioDurationChange]);
+  
+  // Master timeline duration is the max of video clips or audio
+  const masterDuration = Math.max(duration, audioDuration);
   const timelineRef = useRef<HTMLDivElement>(null);
   const [isDraggingScrub, setIsDraggingScrub] = useState(false);
   const [isDndActive, setIsDndActive] = useState(false);
@@ -190,19 +204,19 @@ export function ClipTimeline({
     }
   };
 
-  // Scrubbing - prevent while trimming
+  // Scrubbing - prevent while trimming - use masterDuration for unified timeline
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
       if (isDndActive || isTrimming || !timelineRef.current) return;
 
       const rect = timelineRef.current.getBoundingClientRect();
       const position = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-      const timePosition = position * duration;
+      const timePosition = position * masterDuration;
 
       setIsDraggingScrub(true);
       onPlayheadChange(timePosition);
     },
-    [isDndActive, isTrimming, duration, onPlayheadChange]
+    [isDndActive, isTrimming, masterDuration, onPlayheadChange]
   );
 
   const handleMouseMove = useCallback(
@@ -213,10 +227,10 @@ export function ClipTimeline({
       const position = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
 
       if (isDraggingScrub) {
-        onPlayheadChange(position * duration);
+        onPlayheadChange(position * masterDuration);
       }
     },
-    [isDraggingScrub, duration, onPlayheadChange]
+    [isDraggingScrub, masterDuration, onPlayheadChange]
   );
 
   const handleMouseUp = useCallback(() => {
@@ -240,8 +254,8 @@ export function ClipTimeline({
     setHoverPosition((e.clientX - rect.left) / rect.width);
   };
 
-  // Calculate playhead percentage
-  const playheadPercent = duration > 0 ? (playheadPosition / duration) * 100 : 0;
+  // Calculate playhead percentage based on master duration for unified positioning
+  const playheadPercent = masterDuration > 0 ? (playheadPosition / masterDuration) * 100 : 0;
 
   // Format time display
   const formatTime = (seconds: number) => {
@@ -259,6 +273,10 @@ export function ClipTimeline({
 
   const hasSelection = selectedClipIds.size > 0;
   const safeDuration = Math.max(duration, 0.0001);
+  const safeMasterDuration = Math.max(masterDuration, 0.0001);
+  
+  // Calculate video track width as percentage of master duration
+  const videoTrackWidthPercent = masterDuration > 0 ? (duration / masterDuration) * 100 : 100;
 
   return (
     <div className={cn("bg-[hsl(222_47%_5%)] rounded-lg border border-border/30 overflow-hidden", className)}>
@@ -407,18 +425,19 @@ export function ClipTimeline({
 
       {/* Tracks Container */}
       <div className="relative">
-        {/* Timeline ruler */}
-        <TimelineRuler duration={safeDuration} zoom={zoom} formatTime={formatTimeShort} />
+        {/* Timeline ruler - use master duration for unified scale */}
+        <TimelineRuler duration={safeMasterDuration} zoom={zoom} formatTime={formatTimeShort} />
 
         {/* Audio Track (A1) */}
         <div className="flex border-b border-border/20">
           <TrackLabel label="A1" icon={<Mic className="h-2.5 w-2.5" />} />
-          <div className="flex-1 min-w-0">
+          <div className="flex-1 min-w-0" style={{ minWidth: `${zoom * 100}%` }}>
             <AudioWaveformDisplay
               voiceover={voiceover}
               audioUrl={audioUrl}
               playheadPercent={playheadPercent}
-              zoom={zoom}
+              masterDuration={safeMasterDuration}
+              onDurationChange={handleAudioDurationChange}
             />
           </div>
         </div>
@@ -426,14 +445,14 @@ export function ClipTimeline({
         {/* Video Track (V1) */}
         <div className="flex">
           <TrackLabel label="V1" icon={<Film className="h-2.5 w-2.5" />} />
-          <div className="flex-1 min-w-0 relative">
+          <div className="flex-1 min-w-0 relative" style={{ minWidth: `${zoom * 100}%` }}>
             <div
               ref={timelineRef}
               className="relative h-[72px] cursor-crosshair"
               onMouseDown={handleMouseDown}
               onMouseMove={handleTimelineHover}
               onMouseLeave={() => setHoverPosition(null)}
-              style={{ minWidth: `${zoom * 100}%` }}
+              style={{ width: `${videoTrackWidthPercent}%` }}
             >
               <DndContext
                 sensors={sensors}
@@ -736,16 +755,27 @@ interface AudioWaveformDisplayProps {
   voiceover: string;
   audioUrl?: string | null;
   playheadPercent: number;
-  zoom: number;
+  /** Master timeline duration for proportional scaling */
+  masterDuration: number;
+  /** Callback to report discovered audio duration */
+  onDurationChange?: (duration: number) => void;
 }
 
 function AudioWaveformDisplay({
   voiceover,
   audioUrl,
   playheadPercent,
-  zoom,
+  masterDuration,
+  onDurationChange,
 }: AudioWaveformDisplayProps) {
   const { peaks, duration, isLoading } = useAudioWaveform(audioUrl, voiceover, 100);
+
+  // Report audio duration when it changes
+  useEffect(() => {
+    if (duration > 0) {
+      onDurationChange?.(duration);
+    }
+  }, [duration, onDurationChange]);
 
   if (peaks.length === 0 && !isLoading) {
     return (
@@ -757,11 +787,16 @@ function AudioWaveformDisplay({
 
   const playheadIndex = Math.floor((playheadPercent / 100) * peaks.length);
   const isRealAudio = !!audioUrl && duration > 0;
+  
+  // Scale audio waveform width proportionally to master duration
+  const audioWidthPercent = masterDuration > 0 && duration > 0
+    ? (duration / masterDuration) * 100
+    : 100;
 
   return (
     <div 
       className="h-10 flex items-center gap-px px-2 relative"
-      style={{ minWidth: `${zoom * 100}%` }}
+      style={{ width: `${audioWidthPercent}%` }}
     >
       {isRealAudio && (
         <div className="absolute left-1 top-1/2 -translate-y-1/2 z-10">
