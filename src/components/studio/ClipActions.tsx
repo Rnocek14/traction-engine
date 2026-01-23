@@ -58,14 +58,22 @@ import {
 } from "@/hooks/use-video-generation";
 import { 
   getProviderDuration, 
-  isClipDurationTooShort 
+  isClipDurationTooShort,
+  isClipDurationTooLong,
+  PROVIDER_CAPABILITIES,
+  type VideoProvider,
 } from "@/types/video-provider-types";
+import { autoSplitClip, getSplitInfo } from "@/lib/clip-utils";
 import type { Clip } from "@/types/timeline-types";
 
 interface ClipActionsProps {
   clip: Clip | null;
   scriptId: string;
+  /** Currently selected provider for generation */
+  provider?: VideoProvider;
   onClipUpdated?: () => void;
+  /** Callback to replace clip with auto-split segments */
+  onAutoSplit?: (clipId: string, segments: Clip[]) => void;
   className?: string;
 }
 
@@ -80,7 +88,14 @@ const STYLE_PRESETS = [
 /**
  * Actions panel for selected clip - generate video, regenerate, extend
  */
-export function ClipActions({ clip, scriptId, onClipUpdated, className }: ClipActionsProps) {
+export function ClipActions({ 
+  clip, 
+  scriptId, 
+  provider = "sora",
+  onClipUpdated, 
+  onAutoSplit,
+  className 
+}: ClipActionsProps) {
   const [isVideoOpen, setIsVideoOpen] = useState(false);
   const [size, setSize] = useState<VideoSize>("720x1280");
   const [useTimelineDuration, setUseTimelineDuration] = useState(true);
@@ -93,10 +108,23 @@ export function ClipActions({ clip, scriptId, onClipUpdated, className }: ClipAc
   // Calculate timeline and provider durations
   const timelineDuration = clip ? clip.end - clip.start : 0;
   const { providerSeconds } = clip 
-    ? getProviderDuration("sora", useTimelineDuration ? timelineDuration : manualDuration)
+    ? getProviderDuration(provider, useTimelineDuration ? timelineDuration : manualDuration)
     : { providerSeconds: 4 };
   const willTrim = providerSeconds > timelineDuration && useTimelineDuration;
   const isTooShort = clip ? isClipDurationTooShort(timelineDuration) : false;
+  
+  // Check if clip is too long for the provider
+  const isTooLong = clip ? isClipDurationTooLong(provider, timelineDuration) : false;
+  const maxDuration = PROVIDER_CAPABILITIES[provider].maxDuration;
+  const splitInfo = clip ? getSplitInfo(clip, provider) : null;
+  
+  const handleAutoSplit = () => {
+    if (!clip || !onAutoSplit) return;
+    const segments = autoSplitClip(clip, provider);
+    if (segments.length > 1) {
+      onAutoSplit(clip.id, segments);
+    }
+  };
 
   const handleGenerateVideo = async () => {
     if (!clip) return;
@@ -107,6 +135,7 @@ export function ClipActions({ clip, scriptId, onClipUpdated, className }: ClipAc
       size,
       duration: useTimelineDuration ? undefined : manualDuration,
       promptOverride: promptOverride || undefined,
+      provider,
     });
 
     setIsVideoOpen(false);
@@ -181,18 +210,46 @@ export function ClipActions({ clip, scriptId, onClipUpdated, className }: ClipAc
           {getJobStatusBadge()}
         </div>
 
+        {/* Too long warning + Auto-split button */}
+        {isTooLong && (
+          <div className="p-2 bg-destructive/10 border border-destructive/30 rounded space-y-2">
+            <div className="flex items-center gap-2 text-xs text-destructive">
+              <AlertTriangle className="h-3.5 w-3.5" />
+              <span>
+                {timelineDuration.toFixed(1)}s exceeds max {maxDuration}s for {provider === "sora" ? "Sora" : "Runway"}
+              </span>
+            </div>
+            {onAutoSplit && splitInfo && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full gap-2 text-xs"
+                onClick={handleAutoSplit}
+              >
+                <Scissors className="h-3.5 w-3.5" />
+                Auto-split into {splitInfo.segmentCount} clips
+              </Button>
+            )}
+          </div>
+        )}
+
         <Dialog open={isVideoOpen} onOpenChange={setIsVideoOpen}>
           <DialogTrigger asChild>
             <Button 
               className="w-full gap-2" 
               size="sm"
-              disabled={isGenerating}
+              disabled={isGenerating || isTooLong}
               variant={hasVideo ? "outline" : "default"}
             >
               {isGenerating ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
                   {clipJob?.status === "queued" ? "Queued..." : "Rendering..."}
+                </>
+              ) : isTooLong ? (
+                <>
+                  <AlertTriangle className="h-4 w-4" />
+                  Split First
                 </>
               ) : hasVideo ? (
                 <>

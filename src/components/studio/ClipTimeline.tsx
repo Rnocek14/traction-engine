@@ -715,6 +715,8 @@ interface SortableClipProps {
   duration: number;
   /** Generated duration from video job (provider_seconds or seconds) */
   generatedDuration?: number;
+  /** Max duration for current provider (for "too long" badge) */
+  maxDuration?: number;
   onClick: (multi: boolean) => void;
   onHover?: (hovering: boolean) => void;
   onTrimPointerDown?: (e: React.PointerEvent, edge: "left" | "right") => void;
@@ -726,6 +728,7 @@ function SortableClip({
   isSelected, 
   duration,
   generatedDuration,
+  maxDuration = 12,
   onClick, 
   onHover,
   onTrimPointerDown,
@@ -756,6 +759,7 @@ function SortableClip({
   };
 
   const isVideo = clip.type === "video";
+  const isTooLong = isVideo && clipDuration > maxDuration;
 
   return (
     <div
@@ -867,8 +871,23 @@ function SortableClip({
             </Tooltip>
           )}
           
+          {/* Too long warning - needs split before generation */}
+          {isTooLong && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="flex items-center gap-0.5 px-1 py-0.5 rounded bg-destructive/20 text-destructive">
+                  <AlertTriangle className="h-2.5 w-2.5" />
+                  <span className="text-[8px] font-medium">Too long</span>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="text-xs max-w-[200px]">
+                {clipDuration.toFixed(1)}s exceeds max {maxDuration}s. Auto-split before generating.
+              </TooltipContent>
+            </Tooltip>
+          )}
+          
           {/* Will trim indicator - shown when generated duration > timeline duration */}
-          {generatedDuration && generatedDuration > clipDuration && (
+          {generatedDuration && generatedDuration > clipDuration && !isTooLong && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <span className="flex items-center gap-0.5 px-1 py-0.5 rounded bg-primary/20 text-primary">
