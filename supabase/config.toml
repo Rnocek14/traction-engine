@@ -20,3 +20,15 @@ verify_jwt = false
 
 [functions.generate-reel-sequence]
 verify_jwt = false
+
+[functions.queue-video-runway]
+verify_jwt = false
+
+[functions.process-video-runway]
+verify_jwt = false
+
+[functions.generate-reel-sequence-runway]
+verify_jwt = false
+
+[functions.queue-video-smart]
+verify_jwt = false
