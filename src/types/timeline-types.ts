@@ -113,6 +113,20 @@ export function calculateTimelineDuration(clips: Clip[]): number {
 }
 
 /**
+ * Reflow clips sequentially to eliminate gaps and ensure contiguous timing.
+ * Use after any structural change (delete, duplicate, reorder).
+ */
+export function reflowClipsSequential(clips: Clip[]): Clip[] {
+  let t = 0;
+  return clips.map((c) => {
+    const d = Math.max(0.01, c.end - c.start); // Ensure minimum duration
+    const next = { ...c, start: t, end: t + d };
+    t += d;
+    return next;
+  });
+}
+
+/**
  * Convert legacy scene_prompts array to clips
  */
 export function scenePromptsToClips(
@@ -221,27 +235,11 @@ export function trimClip(
 }
 
 /**
- * Ripple delete - remove clip and shift all following clips
+ * Ripple delete - remove clip and reflow remaining clips
  */
 export function rippleDeleteClip(clips: Clip[], clipId: string): Clip[] {
-  const clipIndex = clips.findIndex((c) => c.id === clipId);
-  if (clipIndex === -1) return clips;
-  
-  const clipToRemove = clips[clipIndex];
-  const duration = clipToRemove.end - clipToRemove.start;
-  
-  return clips
-    .filter((c) => c.id !== clipId)
-    .map((c) => {
-      if (c.start >= clipToRemove.end) {
-        return {
-          ...c,
-          start: c.start - duration,
-          end: c.end - duration,
-        };
-      }
-      return c;
-    });
+  const filtered = clips.filter((c) => c.id !== clipId);
+  return reflowClipsSequential(filtered);
 }
 
 /**
@@ -278,7 +276,7 @@ export function moveClip(
 }
 
 /**
- * Duplicate a clip
+ * Duplicate a clip and reflow timeline
  */
 export function duplicateClip(clips: Clip[], clipId: string): Clip[] {
   const clipIndex = clips.findIndex((c) => c.id === clipId);
@@ -290,25 +288,16 @@ export function duplicateClip(clips: Clip[], clipId: string): Clip[] {
   const duplicatedClip: Clip = {
     ...originalClip,
     id: generateClipId(),
-    start: originalClip.end,
-    end: originalClip.end + duration,
+    start: 0, // Will be recalculated by reflow
+    end: duration,
     notes: originalClip.notes ? `${originalClip.notes} (copy)` : "(copy)",
     created_at: new Date().toISOString(),
   };
   
-  // Insert after original and shift remaining clips
+  // Insert after original
   const result = [...clips];
   result.splice(clipIndex + 1, 0, duplicatedClip);
   
-  // Shift all clips after the duplicate
-  return result.map((clip, i) => {
-    if (i > clipIndex + 1) {
-      return {
-        ...clip,
-        start: clip.start + duration,
-        end: clip.end + duration,
-      };
-    }
-    return clip;
-  });
+  // Reflow to ensure contiguous timing
+  return reflowClipsSequential(result);
 }
