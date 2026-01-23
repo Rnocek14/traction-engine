@@ -729,6 +729,47 @@ export type Database = {
         }
         Relationships: []
       }
+      studio_timelines: {
+        Row: {
+          created_at: string
+          id: string
+          label: string | null
+          published_at: string | null
+          script_run_id: string
+          timeline_json: Json
+          updated_at: string
+          version: number
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          label?: string | null
+          published_at?: string | null
+          script_run_id: string
+          timeline_json?: Json
+          updated_at?: string
+          version?: number
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          label?: string | null
+          published_at?: string | null
+          script_run_id?: string
+          timeline_json?: Json
+          updated_at?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "studio_timelines_script_run_id_fkey"
+            columns: ["script_run_id"]
+            isOneToOne: false
+            referencedRelation: "script_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       topic_bank: {
         Row: {
           claim_sensitivity: number

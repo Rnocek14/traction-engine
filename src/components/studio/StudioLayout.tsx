@@ -13,11 +13,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { PreviewCanvas } from "./PreviewCanvas";
-import { SceneTimeline } from "./SceneTimeline";
+import { ClipTimeline } from "./ClipTimeline";
 import { InspectorPanel } from "./InspectorPanel";
 import { VersionRail } from "./VersionRail";
 import { ActionDock } from "./ActionDock";
+import { ClipActions } from "./ClipActions";
 import { useStudioEditor } from "@/hooks/use-studio-editor";
+import { useTimelineEditor } from "@/hooks/use-timeline-editor";
 import type { Tables } from "@/integrations/supabase/types";
 
 type ScriptRun = Tables<"script_runs">;
@@ -45,17 +47,21 @@ export function StudioLayout({
   currentScriptId,
 }: StudioLayoutProps) {
   const queryClient = useQueryClient();
-  const [currentSceneIndex, setCurrentSceneIndex] = useState(0);
-  const [scrubPosition, setScrubPosition] = useState(0);
   const [isVersionRailCollapsed, setIsVersionRailCollapsed] = useState(false);
   const [selectedVideoJobId, setSelectedVideoJobId] = useState<string | null>(null);
   const [previewVideoUrl, setPreviewVideoUrl] = useState<string | null>(null);
 
-  // Centralized editor state
+  // Centralized editor state (for script fields)
   const editor = useStudioEditor({ script });
+  
+  // Timeline editor (for clips)
+  const timeline = useTimelineEditor({ script });
 
   // Version chain IDs for gallery
   const versionChainIds = versionChain.map((s) => s.id).filter((id) => id !== script.id);
+  
+  // Get selected clip
+  const selectedClip = timeline.selectedClips[0] || null;
 
   // Fetch the selected video job or latest successful one
   const { data: activeVideoJob } = useQuery({
@@ -86,37 +92,6 @@ export function StudioLayout({
     },
   });
 
-  // Sync scene index with scrub position
-  useEffect(() => {
-    if (editor.edits.scene_prompts.length > 0) {
-      const sceneWidth = 1 / editor.edits.scene_prompts.length;
-      const newIndex = Math.min(
-        Math.floor(scrubPosition / sceneWidth),
-        editor.edits.scene_prompts.length - 1
-      );
-      if (newIndex !== currentSceneIndex) {
-        setCurrentSceneIndex(newIndex);
-      }
-    }
-  }, [scrubPosition, editor.edits.scene_prompts.length, currentSceneIndex]);
-
-  const handleSceneSelect = useCallback((index: number) => {
-    setCurrentSceneIndex(index);
-    // Update scrub position to center of that scene
-    if (editor.edits.scene_prompts.length > 0) {
-      const sceneWidth = 1 / editor.edits.scene_prompts.length;
-      setScrubPosition((index + 0.5) * sceneWidth);
-    }
-  }, [editor.edits.scene_prompts.length]);
-
-  const handleScrubPositionChange = useCallback((position: number) => {
-    setScrubPosition(position);
-  }, []);
-
-  const handleSceneReorder = useCallback((fromIndex: number, toIndex: number) => {
-    editor.reorderScenes(fromIndex, toIndex);
-  }, [editor]);
-
   // Keyboard shortcut for version rail toggle
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -128,6 +103,13 @@ export function StudioLayout({
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
+
+  // Calculate current scene index from playhead
+  const currentSceneIndex = timeline.clips.length > 0
+    ? timeline.clips.findIndex((c) => 
+        timeline.playheadPosition >= c.start && timeline.playheadPosition < c.end
+      )
+    : 0;
 
   return (
     <>
@@ -149,10 +131,13 @@ export function StudioLayout({
             <ResizablePanel defaultSize={65} minSize={40}>
               <PreviewCanvas
                 videoJob={activeVideoJob}
-                scenePrompts={editor.edits.scene_prompts}
-                currentSceneIndex={currentSceneIndex}
-                onSceneChange={handleSceneSelect}
-                onScrubPositionChange={handleScrubPositionChange}
+                scenePrompts={timeline.clips.map((c) => c.prompt || "")}
+                currentSceneIndex={Math.max(0, currentSceneIndex)}
+                onSceneChange={(idx) => {
+                  const clip = timeline.clips[idx];
+                  if (clip) timeline.setPlayheadPosition(clip.start);
+                }}
+                onScrubPositionChange={(pos) => timeline.setPlayheadPosition(pos * timeline.duration)}
                 className="h-full"
               />
             </ResizablePanel>
@@ -164,15 +149,15 @@ export function StudioLayout({
                 script={script}
                 edits={editor.edits}
                 dirtyFields={editor.dirtyFields}
-                isDirty={editor.isDirty}
-                isSaving={editor.isSaving}
+                isDirty={editor.isDirty || timeline.isDirty}
+                isSaving={editor.isSaving || timeline.isSaving}
                 onUpdateField={editor.updateField}
-                onSave={editor.save}
+                onSave={() => { editor.save(); timeline.save(); }}
                 onReset={editor.resetEdits}
                 onUndo={editor.undo}
                 onRedo={editor.redo}
-                canUndo={editor.canUndo}
-                canRedo={editor.canRedo}
+                canUndo={editor.canUndo || timeline.canUndo}
+                canRedo={editor.canRedo || timeline.canRedo}
                 selectedVideoJobId={selectedVideoJobId}
                 onSelectVideoJob={setSelectedVideoJobId}
                 onPreviewVideo={setPreviewVideoUrl}
@@ -185,23 +170,56 @@ export function StudioLayout({
           {/* Bottom section: Timeline + Actions */}
           <div className="flex gap-3">
             <div className="flex-1">
-              <SceneTimeline
-                scenePrompts={editor.edits.scene_prompts}
-                currentSceneIndex={currentSceneIndex}
-                onSceneSelect={handleSceneSelect}
-                onSceneReorder={handleSceneReorder}
-                scrubPosition={scrubPosition}
-                onScrubPositionChange={handleScrubPositionChange}
+              <ClipTimeline
+                clips={timeline.clips}
+                selectedClipIds={timeline.selectedClipIds}
+                playheadPosition={timeline.playheadPosition}
+                duration={timeline.duration}
                 voiceover={editor.edits.voiceover}
                 audioUrl={(script as unknown as { voiceover_audio_url?: string }).voiceover_audio_url}
+                onClipSelect={timeline.selectClip}
+                onReorder={timeline.reorderClips}
+                onPlayheadChange={timeline.setPlayheadPosition}
+                onSplit={timeline.splitAtPlayhead}
+                onDelete={timeline.deleteSelected}
+                onDuplicate={timeline.duplicateSelected}
+                onToggleDisabled={timeline.toggleDisabled}
+                onAddClip={() => timeline.addClip("New scene prompt")}
               />
             </div>
 
-            {/* Floating Action Dock */}
-            <ActionDock script={script} className="w-80" />
+            {/* Clip Actions + Action Dock */}
+            <div className="w-80 space-y-3">
+              <ClipActions
+                clip={selectedClip}
+                scriptId={script.id}
+                onClipUpdated={() => {}}
+              />
+              <ActionDock script={script} />
+            </div>
           </div>
         </div>
       </div>
+
+      {/* Video Preview Modal */}
+      <Dialog open={!!previewVideoUrl} onOpenChange={() => setPreviewVideoUrl(null)}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Video Preview</DialogTitle>
+          </DialogHeader>
+          {previewVideoUrl && (
+            <video
+              src={previewVideoUrl}
+              controls
+              autoPlay
+              className="w-full rounded-lg"
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
 
       {/* Video Preview Modal */}
       <Dialog open={!!previewVideoUrl} onOpenChange={() => setPreviewVideoUrl(null)}>
