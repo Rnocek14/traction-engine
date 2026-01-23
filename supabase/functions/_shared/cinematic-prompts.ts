@@ -314,3 +314,151 @@ export function getOptimalApiParams(loop: boolean = false): SoraApiParams {
 
 // Re-export specs for external use if needed
 export { LENS_SPECS, CAMERA_SPECS, LIGHTING_SPECS, COLOR_SPECS, DOF_SPECS, MOTION_SPECS, FILM_SPECS, TIME_SPECS };
+
+/**
+ * =============================================================================
+ * RUNWAY GEN-3 ALPHA PROMPT SYSTEM
+ * =============================================================================
+ * Runway prefers concise, motion-focused prompts with camera keywords.
+ * Less verbose than Sora - focus on action and visual style.
+ */
+
+/**
+ * Runway-specific camera motion keywords
+ */
+const RUNWAY_CAMERA_MOTIONS: Record<string, string> = {
+  "static": "static shot",
+  "tracking": "tracking shot following subject",
+  "dolly": "dolly push forward",
+  "crane": "crane shot rising",
+  "handheld": "handheld camera with subtle movement",
+  "pan": "smooth pan",
+  "tilt": "tilt up reveal",
+  "zoom": "slow zoom in",
+};
+
+/**
+ * Map our shot types to Runway-friendly descriptions
+ */
+const RUNWAY_SHOT_MAPPING: Record<string, string> = {
+  "extreme-wide": "extreme wide shot, vast environment",
+  "wide": "wide shot showing full scene",
+  "medium-wide": "medium wide shot, action visible",
+  "medium": "medium shot, waist up",
+  "medium-close": "medium close-up, chest up",
+  "close-up": "close-up on face",
+  "extreme-close": "extreme close-up, detail shot",
+  "over-shoulder": "over the shoulder perspective",
+  "pov": "first person POV",
+  "dutch": "dutch angle, tilted frame",
+  "low-angle": "low angle looking up",
+  "high-angle": "high angle looking down",
+  "tracking": "tracking shot following subject",
+  "crane": "crane shot with vertical movement",
+};
+
+/**
+ * Build a Runway-optimized prompt.
+ * Runway prefers:
+ * - Concise descriptions (under 500 chars ideal)
+ * - Camera motion keywords at the start
+ * - Clear subject description
+ * - Action/motion focus
+ * - Minimal technical jargon
+ */
+export function buildRunwayPrompt(
+  styleGuide: StyleGuideData | null,
+  scenePrompt: string,
+  clipCameraDirection?: string
+): string {
+  const parts: string[] = [];
+  
+  // Camera/shot direction first (Runway responds well to this)
+  if (clipCameraDirection && RUNWAY_SHOT_MAPPING[clipCameraDirection]) {
+    parts.push(RUNWAY_SHOT_MAPPING[clipCameraDirection]);
+  } else if (styleGuide?.camera_style && RUNWAY_CAMERA_MOTIONS[styleGuide.camera_style]) {
+    parts.push(RUNWAY_CAMERA_MOTIONS[styleGuide.camera_style]);
+  }
+  
+  // Subject/character with key visual details
+  if (styleGuide?.character) {
+    let subjectDesc = styleGuide.character;
+    if (styleGuide.wardrobe) {
+      subjectDesc += `, wearing ${styleGuide.wardrobe}`;
+    }
+    parts.push(subjectDesc);
+  }
+  
+  // Environment/location
+  if (styleGuide?.location) {
+    parts.push(`in ${styleGuide.location}`);
+  }
+  
+  // Time of day for lighting context
+  if (styleGuide?.time_of_day && TIME_SPECS[styleGuide.time_of_day]) {
+    parts.push(styleGuide.time_of_day.replace(/_/g, " ") + " lighting");
+  }
+  
+  // The actual scene action (most important)
+  parts.push(scenePrompt);
+  
+  // Mood/style at the end
+  if (styleGuide?.mood) {
+    parts.push(`${styleGuide.mood} mood`);
+  }
+  
+  // Lighting style
+  if (styleGuide?.lighting) {
+    const lightingDesc = styleGuide.lighting.replace(/_/g, " ");
+    parts.push(`${lightingDesc} lighting`);
+  }
+  
+  // Color grade
+  if (styleGuide?.color_grade) {
+    const colorDesc = styleGuide.color_grade.replace(/_/g, " ");
+    parts.push(`${colorDesc} color grade`);
+  }
+  
+  // Film look
+  if (styleGuide?.film_stock && styleGuide.film_stock !== "digital") {
+    parts.push(`${styleGuide.film_stock} film look`);
+  }
+  
+  // Quality directive (concise)
+  parts.push("cinematic quality, smooth motion, professional production");
+  
+  // Join with commas for Runway's preferred format
+  return parts.filter(Boolean).join(", ");
+}
+
+/**
+ * Build a provider-aware prompt.
+ * Single entry point for both Sora and Runway prompt generation.
+ */
+export function buildProviderPrompt(
+  provider: "sora" | "runway",
+  styleGuide: StyleGuideData | null,
+  scenePrompt: string,
+  isFirstClip: boolean,
+  clipCameraDirection?: string
+): string {
+  if (provider === "runway") {
+    return buildRunwayPrompt(styleGuide, scenePrompt, clipCameraDirection);
+  }
+  return buildCinematicPrompt(styleGuide, scenePrompt, isFirstClip, clipCameraDirection);
+}
+
+/**
+ * Continuity prompt addition for chained clips (Runway version)
+ * When using image-to-video, add motion guidance
+ */
+export function buildRunwayContinuityPrompt(
+  styleGuide: StyleGuideData | null,
+  scenePrompt: string,
+  clipCameraDirection?: string
+): string {
+  const basePrompt = buildRunwayPrompt(styleGuide, scenePrompt, clipCameraDirection);
+  
+  // Add continuity directive for image-to-video
+  return `${basePrompt}, seamlessly continue from the reference image, maintain character consistency, smooth natural motion`;
+}
