@@ -814,7 +814,7 @@ function AudioWaveformDisplay({
           </div>
         </div>
       ) : (
-        <div className="flex-1 flex items-center justify-center gap-[1px] h-full ml-4">
+        <div className="flex-1 flex items-end h-full ml-4">
           {peaks.map((amplitude, i) => {
             const isPast = i <= playheadIndex;
             const height = Math.max(4, amplitude * 28);
@@ -823,7 +823,7 @@ function AudioWaveformDisplay({
               <div
                 key={i}
                 className={cn(
-                  "w-[2px] rounded-full transition-all duration-100",
+                  "flex-1 min-w-0 rounded-sm transition-all duration-100",
                   isPast
                     ? isRealAudio
                       ? "bg-gradient-to-t from-success/60 to-success"
