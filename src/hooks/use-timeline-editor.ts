@@ -348,7 +348,8 @@ export function useTimelineEditor({
       // Clamp start to 0
       if (targetStart < 0) targetStart = 0;
 
-      const trimmed = { ...current, start: targetStart, end: targetEnd };
+      // Use trimClip utility to properly update source in/out
+      const trimmed = trimClip(current, targetStart, targetEnd);
       
       let next = [...clips];
       next[idx] = trimmed;
@@ -356,7 +357,8 @@ export function useTimelineEditor({
       // If ripple mode and trimming right edge, shift following clips
       if (rippleMode && newEnd !== undefined) {
         const before = next.slice(0, idx + 1);
-        const after = next.slice(idx + 1);
+        // Normalize after clips first, then reflow
+        const after = reflowClipsSequential(next.slice(idx + 1));
         
         let t = before[before.length - 1].end;
         const afterOffset = after.map((c) => {
@@ -396,14 +398,16 @@ export function useTimelineEditor({
       
       if (targetStart < 0) targetStart = 0;
 
-      const trimmed = { ...current, start: targetStart, end: targetEnd };
+      // Use trimClip utility to properly update source in/out
+      const trimmed = trimClip(current, targetStart, targetEnd);
       
       let next = [...clips];
       next[idx] = trimmed;
 
       if (rippleMode && newEnd !== undefined) {
         const before = next.slice(0, idx + 1);
-        const after = next.slice(idx + 1);
+        // Normalize after clips first, then reflow
+        const after = reflowClipsSequential(next.slice(idx + 1));
         
         let t = before[before.length - 1].end;
         const afterOffset = after.map((c) => {
