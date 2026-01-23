@@ -1,17 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { Image } from "https://deno.land/x/imagescript@1.2.15/mod.ts";
 import { decode as decodeJpeg } from "https://esm.sh/jpeg-js@0.4.4";
-import decodeWebp, { init as initWebpDecode } from "https://esm.sh/@jsquash/webp@1.5.0/decode";
 import { buildCinematicPrompt, type StyleGuideData } from "../_shared/cinematic-prompts.ts";
-
-// WebP decoder initialization
-let webpInitialized = false;
-async function ensureWebpInit() {
-  if (!webpInitialized) {
-    await initWebpDecode();
-    webpInitialized = true;
-  }
-}
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -272,7 +262,31 @@ async function extractLastFrame(jobId: string, supabase: any, w: number, h: numb
         }
         
         const imgData = new Uint8Array(await imgResp.arrayBuffer());
-        const sprite = await Image.decode(imgData);
+        
+        // Detect format - spritesheets from OpenAI are often JPEG
+        const isJpeg = imgData[0] === 0xFF && imgData[1] === 0xD8;
+        
+        let sprite: Image;
+        if (isJpeg) {
+          // Use jpeg-js for JPEG spritesheets
+          console.log(`Decoding JPEG spritesheet...`);
+          const jpegData = decodeJpeg(imgData, { useTArray: true, formatAsRGBA: true });
+          sprite = new Image(jpegData.width, jpegData.height);
+          for (let y = 0; y < jpegData.height; y++) {
+            for (let x = 0; x < jpegData.width; x++) {
+              const idx = (y * jpegData.width + x) * 4;
+              sprite.setPixelAt(x + 1, y + 1, Image.rgbaToColor(
+                jpegData.data[idx], jpegData.data[idx + 1], 
+                jpegData.data[idx + 2], jpegData.data[idx + 3]
+              ));
+            }
+          }
+          console.log(`JPEG spritesheet decoded: ${sprite.width}x${sprite.height}`);
+        } else {
+          // PNG or other format
+          sprite = await Image.decode(imgData);
+          console.log(`PNG spritesheet decoded: ${sprite.width}x${sprite.height}`);
+        }
         
         // Spritesheet is 5x5 grid, last frame is bottom-right
         const frameW = Math.floor(sprite.width / 5);
@@ -325,21 +339,8 @@ async function decodeImage(url: string, w: number, h: number): Promise<Blob | nu
   let img: Image;
   
   if (isWebP) {
-    // Use @jsquash/webp for WebP decoding
-    console.log(`Decoding WebP image...`);
-    await ensureWebpInit();
-    const decoded = await decodeWebp(imgData.buffer);
-    img = new Image(decoded.width, decoded.height);
-    for (let y = 0; y < decoded.height; y++) {
-      for (let x = 0; x < decoded.width; x++) {
-        const idx = (y * decoded.width + x) * 4;
-        img.setPixelAt(x + 1, y + 1, Image.rgbaToColor(
-          decoded.data[idx], decoded.data[idx + 1], 
-          decoded.data[idx + 2], decoded.data[idx + 3]
-        ));
-      }
-    }
-    console.log(`WebP decoded: ${img.width}x${img.height}`);
+    // WebP not supported by imagescript - throw to trigger spritesheet fallback
+    throw new Error("WebP format not supported, use spritesheet fallback");
   } else if (isJpeg) {
     // Use jpeg-js for JPEG decoding
     const jpegData = decodeJpeg(imgData, { useTArray: true, formatAsRGBA: true });
