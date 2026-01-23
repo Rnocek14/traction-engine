@@ -431,13 +431,21 @@ export function ClipTimeline({
         {/* Audio Track (A1) */}
         <div className="flex border-b border-border/20">
           <TrackLabel label="A1" icon={<Mic className="h-2.5 w-2.5" />} />
-          <div className="flex-1 min-w-0" style={{ minWidth: `${zoom * 100}%` }}>
+          <div className="flex-1 min-w-0 relative" style={{ minWidth: `${zoom * 100}%` }}>
             <AudioWaveformDisplay
               voiceover={voiceover}
               audioUrl={audioUrl}
-              playheadPercent={playheadPercent}
+              playheadPosition={playheadPosition}
               masterDuration={safeMasterDuration}
               onDurationChange={handleAudioDurationChange}
+            />
+            {/* Unified playhead for audio track */}
+            <div
+              className="absolute top-0 bottom-0 w-0.5 z-20 pointer-events-none bg-primary/50"
+              style={{ 
+                left: `${playheadPercent}%`,
+                transition: isDraggingScrub ? 'none' : 'left 50ms ease-out'
+              }}
             />
           </div>
         </div>
@@ -446,9 +454,10 @@ export function ClipTimeline({
         <div className="flex">
           <TrackLabel label="V1" icon={<Film className="h-2.5 w-2.5" />} />
           <div className="flex-1 min-w-0 relative" style={{ minWidth: `${zoom * 100}%` }}>
+            {/* Video clips container - scaled to video duration within master timeline */}
             <div
               ref={timelineRef}
-              className="relative h-[72px] cursor-crosshair"
+              className="h-[72px] cursor-crosshair"
               onMouseDown={handleMouseDown}
               onMouseMove={handleTimelineHover}
               onMouseLeave={() => setHoverPosition(null)}
@@ -493,35 +502,35 @@ export function ClipTimeline({
                   </div>
                 </SortableContext>
               </DndContext>
-
-              {/* Playhead */}
-              <div
-                className={cn(
-                  "absolute top-0 bottom-0 w-0.5 z-20 pointer-events-none",
-                  "bg-gradient-to-b from-primary via-primary to-primary/50",
-                  isDraggingScrub && "shadow-[0_0_20px_hsl(var(--primary)/0.9)]"
-                )}
-                style={{ 
-                  left: `${playheadPercent}%`,
-                  transition: isDraggingScrub ? 'none' : 'left 50ms ease-out'
-                }}
-              >
-                {/* Playhead top handle */}
-                <div className="absolute -top-0.5 left-1/2 -translate-x-1/2 w-3 h-3">
-                  <div className="w-full h-full bg-primary rounded-sm rotate-45 shadow-[0_0_12px_hsl(var(--primary)/0.7)]" />
-                </div>
-                {/* Playhead glow */}
-                <div className="absolute inset-0 w-2 -left-[3px] bg-primary/30 blur-sm" />
-              </div>
-
-              {/* Hover indicator */}
-              {hoverPosition !== null && !isDraggingScrub && !isDndActive && (
-                <div
-                  className="absolute top-0 bottom-0 w-px bg-muted-foreground/20 pointer-events-none z-10"
-                  style={{ left: `${hoverPosition * 100}%` }}
-                />
-              )}
             </div>
+
+            {/* Unified playhead - positioned relative to master duration container */}
+            <div
+              className={cn(
+                "absolute top-0 bottom-0 w-0.5 z-20 pointer-events-none",
+                "bg-gradient-to-b from-primary via-primary to-primary/50",
+                isDraggingScrub && "shadow-[0_0_20px_hsl(var(--primary)/0.9)]"
+              )}
+              style={{ 
+                left: `${playheadPercent}%`,
+                transition: isDraggingScrub ? 'none' : 'left 50ms ease-out'
+              }}
+            >
+              {/* Playhead top handle */}
+              <div className="absolute -top-0.5 left-1/2 -translate-x-1/2 w-3 h-3">
+                <div className="w-full h-full bg-primary rounded-sm rotate-45 shadow-[0_0_12px_hsl(var(--primary)/0.7)]" />
+              </div>
+              {/* Playhead glow */}
+              <div className="absolute inset-0 w-2 -left-[3px] bg-primary/30 blur-sm" />
+            </div>
+
+            {/* Hover indicator */}
+            {hoverPosition !== null && !isDraggingScrub && !isDndActive && (
+              <div
+                className="absolute top-0 bottom-0 w-px bg-muted-foreground/20 pointer-events-none z-10"
+                style={{ left: `${hoverPosition * 100}%` }}
+              />
+            )}
           </div>
         </div>
 
@@ -530,7 +539,7 @@ export function ClipTimeline({
           <span className="text-[10px] font-mono text-muted-foreground/70">
             <span className="text-primary font-semibold">{formatTime(playheadPosition)}</span>
             <span className="mx-2 text-muted-foreground/40">/</span>
-            {formatTime(duration)}
+            {formatTime(safeMasterDuration)}
           </span>
           {hasSelection && (
             <span className="text-[10px] text-muted-foreground/60">
@@ -754,7 +763,8 @@ function SortableClip({
 interface AudioWaveformDisplayProps {
   voiceover: string;
   audioUrl?: string | null;
-  playheadPercent: number;
+  /** Playhead position in seconds for audio-relative highlighting */
+  playheadPosition: number;
   /** Master timeline duration for proportional scaling */
   masterDuration: number;
   /** Callback to report discovered audio duration */
@@ -764,7 +774,7 @@ interface AudioWaveformDisplayProps {
 function AudioWaveformDisplay({
   voiceover,
   audioUrl,
-  playheadPercent,
+  playheadPosition,
   masterDuration,
   onDurationChange,
 }: AudioWaveformDisplayProps) {
@@ -785,7 +795,9 @@ function AudioWaveformDisplay({
     );
   }
 
-  const playheadIndex = Math.floor((playheadPercent / 100) * peaks.length);
+  // Calculate peak highlighting based on audio-relative position (not master timeline)
+  const audioProgress = duration > 0 ? Math.min(1, playheadPosition / duration) : 0;
+  const playheadIndex = Math.floor(audioProgress * peaks.length);
   const isRealAudio = !!audioUrl && duration > 0;
   
   // Scale audio waveform width proportionally to master duration
