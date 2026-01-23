@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { FileText, Video, ShieldCheck, ChevronRight, Save, RotateCcw } from "lucide-react";
+import { FileText, Video, ShieldCheck, ChevronRight, Save, RotateCcw, Undo2, Redo2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -8,8 +8,10 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Separator } from "@/components/ui/separator";
 import { getStatusInfo, hasHardBlocks } from "@/hooks/use-studio";
 import { VideoGallery } from "./VideoGallery";
+import { VoiceoverGenerator } from "./VoiceoverGenerator";
 import type { Tables } from "@/integrations/supabase/types";
 import type { ScriptEdits } from "@/hooks/use-studio-editor";
 
@@ -24,6 +26,10 @@ interface InspectorPanelProps {
   onUpdateField: <K extends keyof ScriptEdits>(field: K, value: ScriptEdits[K]) => void;
   onSave: () => void;
   onReset: () => void;
+  onUndo?: () => void;
+  onRedo?: () => void;
+  canUndo?: boolean;
+  canRedo?: boolean;
   selectedVideoJobId: string | null;
   onSelectVideoJob: (jobId: string | null) => void;
   onPreviewVideo: (url: string) => void;
@@ -44,6 +50,10 @@ export function InspectorPanel({
   onUpdateField,
   onSave,
   onReset,
+  onUndo,
+  onRedo,
+  canUndo = false,
+  canRedo = false,
   selectedVideoJobId,
   onSelectVideoJob,
   onPreviewVideo,
@@ -113,13 +123,36 @@ export function InspectorPanel({
         <ScrollArea className="flex-1">
           {/* Script Tab - Editable */}
           <TabsContent value="script" className="m-0 p-4 space-y-2">
-            {/* Save/Reset bar when dirty */}
-            {isDirty && (
-              <div className="flex items-center justify-between p-2 rounded bg-warning/10 border border-warning/30 mb-3">
-                <span className="text-xs text-warning">
-                  {dirtyCount} unsaved change{dirtyCount > 1 ? "s" : ""}
-                </span>
-                <div className="flex gap-2">
+            {/* Undo/Redo + Save bar */}
+            <div className="flex items-center justify-between p-2 rounded bg-secondary/20 border border-border/30 mb-3">
+              <div className="flex gap-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0"
+                  onClick={onUndo}
+                  disabled={!canUndo}
+                  title="Undo (⌘Z)"
+                >
+                  <Undo2 className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0"
+                  onClick={onRedo}
+                  disabled={!canRedo}
+                  title="Redo (⌘⇧Z)"
+                >
+                  <Redo2 className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+              
+              {isDirty ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-warning">
+                    {dirtyCount} unsaved
+                  </span>
                   <Button
                     variant="ghost"
                     size="sm"
@@ -138,13 +171,12 @@ export function InspectorPanel({
                   >
                     <Save className="h-3 w-3 mr-1" />
                     Save
-                    <kbd className="ml-2 px-1 py-0.5 bg-primary-foreground/20 rounded text-[9px]">
-                      ⌘S
-                    </kbd>
                   </Button>
                 </div>
-              </div>
-            )}
+              ) : (
+                <span className="text-[10px] text-muted-foreground">No changes</span>
+              )}
+            </div>
 
             <EditableSection
               title="Hook"
@@ -171,6 +203,18 @@ export function InspectorPanel({
                 className="text-sm bg-secondary/30 border-border/30 min-h-[120px] resize-y"
               />
             </EditableSection>
+
+            <Separator className="my-3 bg-border/30" />
+
+            {/* TTS Generation */}
+            <VoiceoverGenerator
+              scriptId={script.id}
+              voiceoverText={edits.voiceover}
+              existingAudioUrl={(script as unknown as { voiceover_audio_url?: string }).voiceover_audio_url}
+              existingVoice={(script as unknown as { voiceover_voice?: string }).voiceover_voice}
+            />
+
+            <Separator className="my-3 bg-border/30" />
 
             <EditableSection
               title="Call to Action"

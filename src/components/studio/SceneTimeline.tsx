@@ -16,9 +16,10 @@ import {
   horizontalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical } from "lucide-react";
+import { GripVertical, Volume2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
+import { useAudioWaveform } from "@/hooks/use-audio-waveform";
 
 interface SceneTimelineProps {
   scenePrompts: string[];
@@ -28,6 +29,7 @@ interface SceneTimelineProps {
   scrubPosition: number;
   onScrubPositionChange?: (position: number) => void;
   voiceover?: string;
+  audioUrl?: string | null;
   className?: string;
 }
 
@@ -43,6 +45,7 @@ export function SceneTimeline({
   scrubPosition,
   onScrubPositionChange,
   voiceover = "",
+  audioUrl,
   className,
 }: SceneTimelineProps) {
   const timelineRef = useRef<HTMLDivElement>(null);
@@ -50,11 +53,15 @@ export function SceneTimeline({
   const [hoverPosition, setHoverPosition] = useState<number | null>(null);
   const [isDndActive, setIsDndActive] = useState(false);
 
-  // Generate scene IDs for dnd-kit
-  const sceneIds = useMemo(
-    () => scenePrompts.map((_, i) => `scene-${i}`),
-    [scenePrompts]
-  );
+  // Generate stable scene IDs for dnd-kit based on content + original index
+  // This prevents drift during reordering by using content hash
+  const sceneIds = useMemo(() => {
+    return scenePrompts.map((prompt, i) => {
+      // Create a stable ID from content hash + position context
+      const contentHash = prompt.slice(0, 20).replace(/\s+/g, "_");
+      return `scene-${contentHash}-${i}`;
+    });
+  }, [scenePrompts]);
 
   // DnD sensors
   const sensors = useSensors(
@@ -150,8 +157,12 @@ export function SceneTimeline({
         </div>
       </div>
 
-      {/* Synthetic waveform */}
-      <SyntheticWaveform voiceover={voiceover} scrubPosition={scrubPosition} />
+      {/* Waveform - uses real audio if available, falls back to synthetic */}
+      <AudioWaveformDisplay
+        voiceover={voiceover}
+        audioUrl={audioUrl}
+        scrubPosition={scrubPosition}
+      />
 
       {/* Timeline track area */}
       <div className="relative p-4 pt-2">
@@ -300,76 +311,59 @@ function SortableSceneClip({ id, index, prompt, isSelected, onClick }: SortableS
   );
 }
 
-interface SyntheticWaveformProps {
+interface AudioWaveformDisplayProps {
   voiceover: string;
+  audioUrl?: string | null;
   scrubPosition: number;
 }
 
 /**
- * Generates a synthetic waveform visualization from voiceover text.
- * Uses punctuation and word length to simulate audio cadence.
+ * Displays audio waveform - uses real audio data if available, 
+ * falls back to synthetic waveform generated from text.
  */
-function SyntheticWaveform({ voiceover, scrubPosition }: SyntheticWaveformProps) {
-  const waveformData = useMemo(() => {
-    if (!voiceover) return [];
+function AudioWaveformDisplay({
+  voiceover,
+  audioUrl,
+  scrubPosition,
+}: AudioWaveformDisplayProps) {
+  const { peaks, duration, isLoading } = useAudioWaveform(audioUrl, voiceover, 60);
 
-    // Split into words and generate amplitude based on word characteristics
-    const words = voiceover.split(/\s+/).filter(Boolean);
-    const bars: number[] = [];
-
-    // Generate ~60 bars
-    const targetBars = 60;
-    const wordsPerBar = Math.max(1, Math.ceil(words.length / targetBars));
-
-    for (let i = 0; i < targetBars; i++) {
-      const startWord = i * wordsPerBar;
-      const endWord = Math.min(startWord + wordsPerBar, words.length);
-      const chunk = words.slice(startWord, endWord).join(" ");
-
-      if (!chunk) {
-        bars.push(0.1);
-        continue;
-      }
-
-      // Base amplitude from average word length
-      const avgWordLen = chunk.length / Math.max(1, endWord - startWord);
-      let amplitude = Math.min(1, avgWordLen / 8);
-
-      // Boost for punctuation (emphasis, pauses)
-      if (/[!?]/.test(chunk)) amplitude = Math.min(1, amplitude + 0.3);
-      if (/[,;:]/.test(chunk)) amplitude = Math.max(0.2, amplitude * 0.8);
-      if (/\./.test(chunk)) amplitude = Math.max(0.15, amplitude * 0.6);
-
-      // Add some randomness for natural look
-      amplitude += (Math.random() - 0.5) * 0.2;
-      amplitude = Math.max(0.1, Math.min(1, amplitude));
-
-      bars.push(amplitude);
-    }
-
-    return bars;
-  }, [voiceover]);
-
-  if (waveformData.length === 0) {
+  if (peaks.length === 0 && !isLoading) {
     return null;
   }
 
-  const playheadIndex = Math.floor(scrubPosition * waveformData.length);
+  const playheadIndex = Math.floor(scrubPosition * peaks.length);
+  const isRealAudio = !!audioUrl && duration > 0;
 
   return (
-    <div className="h-8 px-4 py-1 flex items-center gap-px border-b border-border/20">
-      {waveformData.map((amplitude, i) => (
-        <div
-          key={i}
-          className={cn(
-            "flex-1 rounded-sm transition-colors duration-75",
-            i <= playheadIndex
-              ? "bg-primary/70"
-              : "bg-muted-foreground/20"
-          )}
-          style={{ height: `${amplitude * 100}%` }}
-        />
-      ))}
+    <div className="h-8 px-4 py-1 flex items-center gap-px border-b border-border/20 relative">
+      {/* Real audio indicator */}
+      {isRealAudio && (
+        <div className="absolute left-2 top-1/2 -translate-y-1/2">
+          <Volume2 className="h-3 w-3 text-success/70" />
+        </div>
+      )}
+      
+      {isLoading ? (
+        <div className="flex-1 flex items-center justify-center">
+          <div className="animate-pulse text-[10px] text-muted-foreground">
+            Loading waveform...
+          </div>
+        </div>
+      ) : (
+        peaks.map((amplitude, i) => (
+          <div
+            key={i}
+            className={cn(
+              "flex-1 rounded-sm transition-colors duration-75",
+              i <= playheadIndex
+                ? isRealAudio ? "bg-success/70" : "bg-primary/70"
+                : "bg-muted-foreground/20"
+            )}
+            style={{ height: `${amplitude * 100}%` }}
+          />
+        ))
+      )}
     </div>
   );
 }
