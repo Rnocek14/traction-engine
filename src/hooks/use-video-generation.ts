@@ -38,6 +38,13 @@ export interface GenerateAllClipsParams {
   duration?: VideoDuration;
 }
 
+export interface GenerateChainedParams {
+  scriptId: string;
+  clipIds: string[];
+  size?: VideoSize;
+  duration?: VideoDuration;
+}
+
 const ACTIVE_STATUSES = ["queued", "running", "rendering"];
 
 /**
@@ -150,6 +157,57 @@ export function useGenerateAllClipsVideo() {
     onError: (error) => {
       toast({
         title: "Batch generation failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+}
+
+/**
+ * Hook for generating videos sequentially with frame chaining for visual continuity.
+ * Each clip uses the last frame of the previous clip as its starting frame.
+ */
+export function useGenerateChainedSequence() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      scriptId,
+      clipIds,
+      size = "720x1280",
+      duration = 4,
+    }: GenerateChainedParams): Promise<{ succeeded: number; failed: number }> => {
+      const model = size.startsWith("1024") || size.startsWith("1792") ? "sora-2-pro" : "sora-2";
+
+      const { data, error } = await supabase.functions.invoke("generate-reel-sequence", {
+        body: {
+          script_run_id: scriptId,
+          clip_ids: clipIds,
+          settings: {
+            size,
+            seconds: duration,
+            model,
+          },
+        },
+      });
+
+      if (error) throw error;
+      if (!data?.success) throw new Error(data?.error || "Failed to start sequence");
+
+      return data.summary;
+    },
+    onSuccess: (result, variables) => {
+      toast({
+        title: "Chained sequence complete",
+        description: `${result.succeeded} clips generated${result.failed > 0 ? `, ${result.failed} failed` : ""}`,
+      });
+      queryClient.invalidateQueries({ queryKey: ["video-jobs", variables.scriptId] });
+    },
+    onError: (error) => {
+      toast({
+        title: "Sequence generation failed",
         description: error.message,
         variant: "destructive",
       });

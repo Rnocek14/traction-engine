@@ -12,9 +12,12 @@ import {
   ChevronDown,
   Video,
   CheckCircle2,
+  Link2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -33,6 +36,7 @@ import { hasHardBlocks } from "@/hooks/use-studio";
 import {
   useVideoJobs,
   useGenerateAllClipsVideo,
+  useGenerateChainedSequence,
   SIZE_OPTIONS,
   DURATION_OPTIONS,
   type VideoSize,
@@ -62,12 +66,14 @@ export function ActionDock({ script, clips = [], className }: ActionDockProps) {
   const queryClient = useQueryClient();
   const regenerateMutation = useRegenerateFromStudio();
   const generateAllMutation = useGenerateAllClipsVideo();
+  const generateChainedMutation = useGenerateChainedSequence();
 
   const [activePreset, setActivePreset] = useState<RegenPreset | null>(null);
   const [isRegenOpen, setIsRegenOpen] = useState(false); // Start collapsed
   const [isVideoOpen, setIsVideoOpen] = useState(true); // Video section open by default
   const [size, setSize] = useState<VideoSize>("720x1280");
   const [duration, setDuration] = useState<VideoDuration>(4);
+  const [isChainedMode, setIsChainedMode] = useState(false);
 
   const isHardBlock = hasHardBlocks(script);
   const isFailed = script.status === "qa_failed";
@@ -87,12 +93,23 @@ export function ActionDock({ script, clips = [], className }: ActionDockProps) {
       return;
     }
 
-    await generateAllMutation.mutateAsync({
-      scriptId: script.id,
-      clips: videoClips,
-      size,
-      duration,
-    });
+    if (isChainedMode) {
+      // Use chained sequential generation
+      await generateChainedMutation.mutateAsync({
+        scriptId: script.id,
+        clipIds: videoClips.map(c => c.id),
+        size,
+        duration,
+      });
+    } else {
+      // Use parallel generation (faster but less consistent)
+      await generateAllMutation.mutateAsync({
+        scriptId: script.id,
+        clips: videoClips,
+        size,
+        duration,
+      });
+    }
   };
 
   const handleRegenerate = async (preset: RegenPreset) => {
@@ -121,7 +138,8 @@ export function ActionDock({ script, clips = [], className }: ActionDockProps) {
   };
 
   const isAnyLoading = regenerateMutation.isPending;
-  const isGenerating = generateAllMutation.isPending || hasActiveJob;
+  const isGenerating = generateAllMutation.isPending || generateChainedMutation.isPending || hasActiveJob;
+  const isChainedGenerating = generateChainedMutation.isPending;
 
   return (
     <div
@@ -250,6 +268,22 @@ export function ActionDock({ script, clips = [], className }: ActionDockProps) {
                 </Select>
               </div>
 
+              {/* Chained mode toggle */}
+              <div className="flex items-center justify-between py-1">
+                <div className="flex items-center gap-1.5">
+                  <Link2 className="h-3 w-3 text-muted-foreground" />
+                  <Label htmlFor="chained-mode" className="text-[10px] text-muted-foreground cursor-pointer">
+                    Frame chaining
+                  </Label>
+                </div>
+                <Switch
+                  id="chained-mode"
+                  checked={isChainedMode}
+                  onCheckedChange={setIsChainedMode}
+                  className="scale-75"
+                />
+              </div>
+
               {/* Generate All Button */}
               <Button
                 className="w-full h-9 gap-2"
@@ -259,12 +293,16 @@ export function ActionDock({ script, clips = [], className }: ActionDockProps) {
                 {isGenerating ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    {hasActiveJob ? `Rendering ${activeJobsCount}...` : "Queueing..."}
+                    {isChainedGenerating 
+                      ? "Generating sequence..." 
+                      : hasActiveJob 
+                        ? `Rendering ${activeJobsCount}...` 
+                        : "Queueing..."}
                   </>
                 ) : (
                   <>
                     <Video className="h-4 w-4" />
-                    Generate All ({videoClips.length} clips)
+                    {isChainedMode ? "Generate Chained" : "Generate All"} ({videoClips.length})
                   </>
                 )}
               </Button>
@@ -273,7 +311,9 @@ export function ActionDock({ script, clips = [], className }: ActionDockProps) {
               <p className="text-[10px] text-muted-foreground text-center">
                 {videoClips.length === 0 
                   ? "No video clips with prompts" 
-                  : `~${(duration * videoClips.length * 0.025).toFixed(2)} credits`
+                  : isChainedMode
+                    ? `Sequential • ~${Math.ceil(videoClips.length * 2)} min`
+                    : `Parallel • ~${(duration * videoClips.length * 0.025).toFixed(2)} credits`
                 }
               </p>
 
