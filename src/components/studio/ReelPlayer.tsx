@@ -120,10 +120,21 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
 
   // Preload next video with canplaythrough guard
   useEffect(() => {
-    const preloadRef = getPreloadRef();
-    const preloadEl = preloadRef.current;
+    // DON'T PRELOAD DURING TRANSITIONS - the active player is changing
+    if (isTransitioningRef.current) return;
+    
+    // Determine which player should preload (opposite of active)
+    const preloadPlayer = activePlayer === "A" ? "B" : "A";
+    const preloadEl = preloadPlayer === "A" ? videoARef.current : videoBRef.current;
+    
     if (!nextVideo?.job?.output_url || !preloadEl) {
       isNextReadyRef.current = false;
+      return;
+    }
+    
+    // CRITICAL: Never call .load() on a video that's currently playing
+    if (!preloadEl.paused) {
+      console.log('[ReelPlayer] Skipping preload - element is playing');
       return;
     }
     
@@ -138,7 +149,7 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
     
     preloadEl.addEventListener("canplaythrough", handleCanPlay);
     return () => preloadEl.removeEventListener("canplaythrough", handleCanPlay);
-  }, [currentClipIndex, nextVideo, getPreloadRef]);
+  }, [currentClipIndex, nextVideo, activePlayer]);
 
 
   // Handle seamless transition to next clip
@@ -210,16 +221,20 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
           loadedUrlBRef.current = null;
         }
         
-        // Now swap the active player
-        setActivePlayer(newActivePlayer);
-        setCurrentClipIndex(prev => prev + 1);
-        
-        // Pause old video after swap
+        // Pause old video BEFORE state updates
         if (activeEl) {
           activeEl.pause();
         }
         
-        isTransitioningRef.current = false;
+        // Now swap the active player
+        setActivePlayer(newActivePlayer);
+        setCurrentClipIndex(prev => prev + 1);
+        
+        // Clear transition flag AFTER a microtask to let React state updates settle
+        // This prevents the preload effect from running during the transition
+        queueMicrotask(() => {
+          isTransitioningRef.current = false;
+        });
       }).catch((err) => {
         console.log('[ReelPlayer] Play promise rejected:', err);
         isTransitioningRef.current = false;
