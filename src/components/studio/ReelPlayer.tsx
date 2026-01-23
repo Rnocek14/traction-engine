@@ -92,6 +92,21 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
     return time;
   }, [currentClipIndex, clipVideos, getActiveRef]);
 
+  // Load initial video when component mounts or clip changes
+  useEffect(() => {
+    if (!currentVideo?.job?.output_url) return;
+    
+    const activeRef = getActiveRef();
+    const activeEl = activeRef.current;
+    if (!activeEl) return;
+    
+    // Only set src if it's different (prevents reloading same video)
+    if (activeEl.src !== currentVideo.job.output_url) {
+      activeEl.src = currentVideo.job.output_url;
+      activeEl.load();
+    }
+  }, [currentVideo, getActiveRef]);
+
   // Preload next video with canplaythrough guard
   useEffect(() => {
     const preloadRef = getPreloadRef();
@@ -114,13 +129,6 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
     return () => preloadEl.removeEventListener("canplaythrough", handleCanPlay);
   }, [currentClipIndex, nextVideo, getPreloadRef]);
 
-  // Load initial video
-  useEffect(() => {
-    if (currentVideo?.job?.output_url && videoARef.current && currentClipIndex === 0) {
-      videoARef.current.src = currentVideo.job.output_url;
-      videoARef.current.load();
-    }
-  }, [currentVideo, currentClipIndex]);
 
   // Handle seamless transition to next clip
   const transitionToNextClip = useCallback(() => {
