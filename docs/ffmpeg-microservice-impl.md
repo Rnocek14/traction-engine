@@ -232,12 +232,15 @@ export function validateRenderRequest(req: FFmpegServiceRequest): string[] {
   }
 
   // Transition safety: duration must be < min(trim_seconds) - buffer
-  const maxSafeTransition = Math.max(0.05, minTrim - 0.1);
-  if (req.transition.duration > maxSafeTransition) {
-    errors.push(
-      `transition.duration (${req.transition.duration}s) too long for shortest clip ` +
-        `(${minTrim}s, max safe: ${maxSafeTransition.toFixed(2)}s)`
-    );
+  // Skip for "cut" since duration is irrelevant (no overlap)
+  if (req.transition.type !== "cut") {
+    const maxSafeTransition = Math.max(0.05, minTrim - 0.1);
+    if (req.transition.duration > maxSafeTransition) {
+      errors.push(
+        `transition.duration (${req.transition.duration}s) too long for shortest clip ` +
+          `(${minTrim}s, max safe: ${maxSafeTransition.toFixed(2)}s)`
+      );
+    }
   }
 
   // Hard limits
@@ -407,6 +410,7 @@ export function buildFiltergraph(
   }
 
   // Audio start times: start_i = sum(trims[0..i-1]) - i*t
+  // For "cut", t=0 so starts are just cumulative sums (no overlap)
   const starts: number[] = [];
   let aSum = 0;
   for (let i = 0; i < trims.length; i++) {
