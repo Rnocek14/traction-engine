@@ -12,6 +12,8 @@ import {
   XCircle,
   Clock,
   Play,
+  Scissors,
+  AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,6 +41,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import {
   useGenerateClipVideo,
@@ -48,6 +56,10 @@ import {
   type VideoSize,
   type VideoDuration,
 } from "@/hooks/use-video-generation";
+import { 
+  getProviderDuration, 
+  isClipDurationTooShort 
+} from "@/types/video-provider-types";
 import type { Clip } from "@/types/timeline-types";
 
 interface ClipActionsProps {
@@ -71,11 +83,20 @@ const STYLE_PRESETS = [
 export function ClipActions({ clip, scriptId, onClipUpdated, className }: ClipActionsProps) {
   const [isVideoOpen, setIsVideoOpen] = useState(false);
   const [size, setSize] = useState<VideoSize>("720x1280");
-  const [duration, setDuration] = useState<VideoDuration>(4);
+  const [useTimelineDuration, setUseTimelineDuration] = useState(true);
+  const [manualDuration, setManualDuration] = useState<VideoDuration>(4);
   const [promptOverride, setPromptOverride] = useState("");
 
   const generateVideo = useGenerateClipVideo();
   const { data: clipJob, isLoading: jobLoading } = useClipVideoJob(scriptId, clip?.id);
+
+  // Calculate timeline and provider durations
+  const timelineDuration = clip ? clip.end - clip.start : 0;
+  const { providerSeconds } = clip 
+    ? getProviderDuration("sora", useTimelineDuration ? timelineDuration : manualDuration)
+    : { providerSeconds: 4 };
+  const willTrim = providerSeconds > timelineDuration && useTimelineDuration;
+  const isTooShort = clip ? isClipDurationTooShort(timelineDuration) : false;
 
   const handleGenerateVideo = async () => {
     if (!clip) return;
@@ -84,7 +105,7 @@ export function ClipActions({ clip, scriptId, onClipUpdated, className }: ClipAc
       scriptId,
       clip,
       size,
-      duration,
+      duration: useTimelineDuration ? undefined : manualDuration,
       promptOverride: promptOverride || undefined,
     });
 
@@ -235,13 +256,23 @@ export function ClipActions({ clip, scriptId, onClipUpdated, className }: ClipAc
                 <div className="space-y-2">
                   <Label>Duration</Label>
                   <Select
-                    value={String(duration)}
-                    onValueChange={(v) => setDuration(Number(v) as VideoDuration)}
+                    value={useTimelineDuration ? "timeline" : String(manualDuration)}
+                    onValueChange={(v) => {
+                      if (v === "timeline") {
+                        setUseTimelineDuration(true);
+                      } else {
+                        setUseTimelineDuration(false);
+                        setManualDuration(Number(v) as VideoDuration);
+                      }
+                    }}
                   >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="timeline">
+                        Timeline ({timelineDuration.toFixed(1)}s)
+                      </SelectItem>
                       {DURATION_OPTIONS.map((opt) => (
                         <SelectItem key={opt.value} value={String(opt.value)}>
                           {opt.label}
@@ -252,9 +283,33 @@ export function ClipActions({ clip, scriptId, onClipUpdated, className }: ClipAc
                 </div>
               </div>
 
+              {/* Duration info */}
+              <div className="p-2 bg-secondary/30 rounded text-xs space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Timeline duration</span>
+                  <span className="font-mono">{timelineDuration.toFixed(1)}s</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Will generate</span>
+                  <span className="font-mono">{providerSeconds}s</span>
+                </div>
+                {willTrim && (
+                  <div className="flex items-center gap-1 text-primary">
+                    <Scissors className="h-3 w-3" />
+                    <span>Will trim to {timelineDuration.toFixed(1)}s on export</span>
+                  </div>
+                )}
+                {isTooShort && (
+                  <div className="flex items-center gap-1 text-warning">
+                    <AlertTriangle className="h-3 w-3" />
+                    <span>Very short - may reduce quality</span>
+                  </div>
+                )}
+              </div>
+
               {/* Cost estimate */}
               <div className="text-xs text-muted-foreground text-center">
-                Estimated: ~{duration === 4 ? "0.10" : duration === 8 ? "0.20" : "0.30"} credits
+                Estimated: ~{providerSeconds === 4 ? "0.10" : providerSeconds === 8 ? "0.20" : "0.30"} credits
                 {size.startsWith("1024") || size.startsWith("1792") ? " (Pro model)" : ""}
               </div>
             </div>

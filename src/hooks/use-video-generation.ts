@@ -3,10 +3,15 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import type { Clip } from "@/types/timeline-types";
 import type { Tables } from "@/integrations/supabase/types";
+import { 
+  getProviderDuration, 
+  isClipDurationTooShort,
+  type VideoProvider 
+} from "@/types/video-provider-types";
 
 type VideoJob = Tables<"video_jobs">;
 
-// Sora 2 constraints
+// Sora 2 constraints (for UI display - actual logic uses provider capabilities)
 export type VideoSize = "720x1280" | "1280x720" | "1024x1792" | "1792x1024";
 export type VideoDuration = 4 | 8 | 12;
 export type QualityTier = "draft" | "standard" | "pro";
@@ -64,19 +69,26 @@ export interface GenerateClipVideoParams {
   scriptId: string;
   clip: Clip;
   size?: VideoSize;
+  /** 
+   * Manual duration override. If not provided, uses clip.end - clip.start 
+   * and maps to the optimal provider duration.
+   */
   duration?: VideoDuration;
   promptOverride?: string;
   model?: string;
-  seed?: number; // For reproducibility
+  seed?: number;
+  provider?: VideoProvider;
 }
 
 export interface GenerateAllClipsParams {
   scriptId: string;
   clips: Clip[];
   size?: VideoSize;
+  /** If not provided, each clip uses its own timeline duration */
   duration?: VideoDuration;
   model?: string;
   seed?: number;
+  provider?: VideoProvider;
 }
 
 export interface GenerateChainedParams {
@@ -85,14 +97,16 @@ export interface GenerateChainedParams {
   size?: VideoSize;
   duration?: VideoDuration;
   model?: string;
-  seed?: number; // For reproducibility
-  resumeFromJobId?: string; // Resume from this job's last frame
+  seed?: number;
+  resumeFromJobId?: string;
+  provider?: VideoProvider;
 }
 
 const ACTIVE_STATUSES = ["queued", "running", "rendering"];
 
 /**
- * Hook for generating video for a single clip
+ * Hook for generating video for a single clip.
+ * Timeline duration (clip.end - clip.start) is the source of truth.
  */
 export function useGenerateClipVideo() {
   const { toast } = useToast();
@@ -103,11 +117,26 @@ export function useGenerateClipVideo() {
       scriptId,
       clip,
       size = "720x1280",
-      duration = 4,
+      duration: manualDuration,
       promptOverride,
       model: modelOverride,
       seed,
+      provider = "sora",
     }: GenerateClipVideoParams): Promise<VideoJob> => {
+      // Timeline duration is the source of truth
+      const timelineDuration = clip.end - clip.start;
+      
+      // If manual duration provided, use it; otherwise compute from timeline
+      const requestedSeconds = manualDuration ?? timelineDuration;
+      
+      // Get the optimal provider duration bucket
+      const { providerSeconds } = getProviderDuration(provider, requestedSeconds);
+      
+      // Warn if clip is too short
+      if (isClipDurationTooShort(timelineDuration)) {
+        console.warn(`Clip ${clip.id} is very short (${timelineDuration.toFixed(1)}s) - may produce poor results`);
+      }
+
       const model = modelOverride || (size.startsWith("1024") || size.startsWith("1792") ? "sora-2-pro" : "sora-2");
 
       const { data, error } = await supabase.functions.invoke("queue-video", {
@@ -115,9 +144,14 @@ export function useGenerateClipVideo() {
           script_run_id: scriptId,
           clip_id: clip.id,
           prompt: promptOverride || clip.prompt,
+          provider,
           settings: {
             size,
-            seconds: duration,
+            // Pass both durations - provider_seconds for API, requested_seconds for trim
+            provider_seconds: providerSeconds,
+            requested_seconds: requestedSeconds,
+            // Legacy field for backwards compat (will be removed)
+            seconds: providerSeconds,
             model,
             seed,
           },
@@ -130,9 +164,17 @@ export function useGenerateClipVideo() {
       return data.job;
     },
     onSuccess: (job, variables) => {
+      const settings = job.settings as Record<string, unknown> | null;
+      const requested = settings?.requested_seconds as number | undefined;
+      const provider = settings?.provider_seconds as number | undefined;
+      
+      const desc = requested && provider && requested !== provider
+        ? `Generating ${provider}s, will trim to ${requested.toFixed(1)}s`
+        : `Clip queued for rendering`;
+      
       toast({
         title: "Video generation started",
-        description: `Clip queued for rendering`,
+        description: desc,
       });
       queryClient.invalidateQueries({ queryKey: ["video-jobs", variables.scriptId] });
       queryClient.invalidateQueries({ queryKey: ["clip-video-jobs", variables.clip.id] });
@@ -148,7 +190,8 @@ export function useGenerateClipVideo() {
 }
 
 /**
- * Hook for generating videos for all clips in batch
+ * Hook for generating videos for all clips in batch.
+ * Each clip uses its own timeline duration unless overridden.
  */
 export function useGenerateAllClipsVideo() {
   const { toast } = useToast();
@@ -159,8 +202,9 @@ export function useGenerateAllClipsVideo() {
       scriptId,
       clips,
       size = "720x1280",
-      duration = 4,
+      duration: globalDuration,
       model: modelOverride,
+      provider = "sora",
     }: GenerateAllClipsParams): Promise<{ queued: number; failed: number; jobs: VideoJob[] }> => {
       const model = modelOverride || (size.startsWith("1024") || size.startsWith("1792") ? "sora-2-pro" : "sora-2");
       
@@ -168,14 +212,22 @@ export function useGenerateAllClipsVideo() {
         clips
           .filter(c => c.type === "video" && c.prompt && !c.disabled)
           .map(async (clip) => {
+            // Each clip uses its own timeline duration, or global override
+            const timelineDuration = clip.end - clip.start;
+            const requestedSeconds = globalDuration ?? timelineDuration;
+            const { providerSeconds } = getProviderDuration(provider, requestedSeconds);
+
             const { data, error } = await supabase.functions.invoke("queue-video", {
               body: {
                 script_run_id: scriptId,
                 clip_id: clip.id,
                 prompt: clip.prompt,
+                provider,
                 settings: {
                   size,
-                  seconds: duration,
+                  provider_seconds: providerSeconds,
+                  requested_seconds: requestedSeconds,
+                  seconds: providerSeconds, // Legacy
                   model,
                 },
               },
