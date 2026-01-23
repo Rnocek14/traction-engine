@@ -25,6 +25,7 @@ This microservice receives clip URLs, voiceover audio, and transition settings, 
 ```json
 {
   "job_id": "uuid",
+  "idempotency_key": "script_run_id:hash",
   "clips": [
     { "url": "https://.../videos/clip1.mp4", "duration": 4.0 },
     { "url": "https://.../videos/clip2.mp4", "duration": 4.0 },
@@ -50,20 +51,18 @@ This microservice receives clip URLs, voiceover audio, and transition settings, 
   "upload": {
     "provider": "supabase",
     "bucket": "videos",
-    "path": "assembled/{job_id}.mp4",
+    "path": "assembled/{script_run_id}.mp4",
     "upsert": true,
     "supabase_url": "https://xxx.supabase.co",
     "supabase_service_key": "service_role_key"
-  },
-  "idempotency_key": "script_run_id:v3"
+  }
 }
 ```
 
-**Response (Sync):**
+**Response (Sync - if fast enough):**
 
 ```json
 {
-  "job_id": "uuid",
   "status": "succeeded",
   "output_url": "https://.../storage/v1/object/public/videos/assembled/uuid.mp4",
   "duration": 11.4,
@@ -80,22 +79,39 @@ This microservice receives clip URLs, voiceover audio, and transition settings, 
 
 ```json
 {
-  "job_id": "uuid",
   "status": "queued",
+  "job_id": "uuid",
   "eta_seconds": 45
 }
 ```
 
-### `GET /render/reel/{job_id}`
+### `GET /jobs/{job_id}`
 
 Poll for job status:
 
+**Rendering:**
 ```json
 {
-  "job_id": "uuid",
+  "status": "rendering",
+  "progress": 0.42,
+  "eta_seconds": 18
+}
+```
+
+**Succeeded:**
+```json
+{
   "status": "succeeded",
   "output_url": "https://.../videos/assembled/uuid.mp4",
   "duration": 11.4
+}
+```
+
+**Failed:**
+```json
+{
+  "status": "failed",
+  "error": "ffmpeg exited 1: ..."
 }
 ```
 
@@ -201,6 +217,10 @@ CMD ["node", "server.js"]
 
 5. **Error handling**: On FFmpeg failure, return detailed error with clip that failed.
 
+6. **Minimum clip duration**: Edge function enforces `clip.duration >= transition_duration + 0.3`. Service should also validate.
+
+7. **Videos bucket is public**: Clips can be fetched directly. If bucket becomes private, generate signed URLs.
+
 ---
 
 ## Security
@@ -209,6 +229,22 @@ CMD ["node", "server.js"]
 - **Input validation**: Validate all URLs are from expected domains
 - **Rate limiting**: Limit concurrent renders per project
 - **Cleanup**: Delete temp files immediately after upload
+- **Secrets**: Never log or return supabase_service_key in responses
+
+---
+
+## Idempotency Strategy
+
+The edge function computes a SHA-256 hash of:
+- Ordered clip IDs + durations
+- Voiceover URL (or null)
+- Transition settings
+- Output settings
+
+This ensures:
+- Same inputs = same idempotency key
+- Timeline edits that don't change clip order/durations = cache hit
+- Any clip/duration/setting change = new render
 
 ---
 

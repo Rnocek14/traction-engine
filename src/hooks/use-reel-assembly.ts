@@ -26,6 +26,7 @@ export interface AssemblyResult {
   job_id?: string;
   eta_seconds?: number;
   error?: string;
+  progress?: number;
 }
 
 export interface AssemblyMeta {
@@ -34,6 +35,7 @@ export interface AssemblyMeta {
   failed_at?: string;
   error?: string;
   clips_count?: number;
+  clip_ids?: string[];
   expected_duration?: number;
   voiceover_available?: boolean;
   transition?: {
@@ -49,6 +51,8 @@ export interface AssemblyMeta {
   ffmpeg_status?: string;
   eta_seconds?: number;
   duration?: number;
+  progress?: number;
+  idempotency_key?: string;
 }
 
 // ============================================
@@ -124,9 +128,11 @@ export function useAssembleReel() {
 // ============================================
 
 /**
- * Hook for polling assembly status
+ * Hook for polling assembly status with active polling via edge function
  */
 export function useAssemblyStatus(scriptRunId: string | undefined) {
+  const queryClient = useQueryClient();
+
   return useQuery({
     queryKey: ["assembly-status", scriptRunId],
     queryFn: async () => {
@@ -143,11 +149,49 @@ export function useAssemblyStatus(scriptRunId: string | undefined) {
         return null;
       }
 
+      const status = (data.assembled_status || "none") as AssemblyStatus;
+      const meta = data.assembled_meta as AssemblyMeta | null;
+
+      // If status is queued/rendering, poll the FFmpeg service for updates
+      if (status === "queued" || status === "rendering") {
+        try {
+          const pipelineKey = import.meta.env.VITE_PIPELINE_KEY;
+          const { data: pollData } = await supabase.functions.invoke<AssemblyResult>(
+            "poll-assembly-status",
+            {
+              headers: pipelineKey ? { "x-pipeline-key": pipelineKey } : undefined,
+              body: { script_run_id: scriptRunId },
+            }
+          );
+
+          if (pollData) {
+            // If status changed, invalidate to get fresh data
+            if (pollData.status !== status) {
+              queryClient.invalidateQueries({ queryKey: ["script-run", scriptRunId] });
+            }
+
+            return {
+              status: pollData.status || status,
+              videoUrl: pollData.output_url || null,
+              assembledAt: data.assembled_at as string | null,
+              meta: {
+                ...meta,
+                progress: pollData.progress,
+                eta_seconds: pollData.eta_seconds,
+                error: pollData.error,
+              },
+            };
+          }
+        } catch (pollError) {
+          console.error("Error polling assembly status:", pollError);
+        }
+      }
+
       return {
-        status: (data.assembled_status || "none") as AssemblyStatus,
+        status,
         videoUrl: data.assembled_video_url as string | null,
         assembledAt: data.assembled_at as string | null,
-        meta: data.assembled_meta as AssemblyMeta | null,
+        meta,
       };
     },
     enabled: !!scriptRunId,

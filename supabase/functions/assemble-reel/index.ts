@@ -10,6 +10,7 @@ const corsHeaders = {
 // ============================================
 
 interface ClipInput {
+  id: string;
   url: string;
   duration: number;
   index: number;
@@ -24,8 +25,10 @@ interface AssembleRequest {
   output_fps?: number;
 }
 
+// Request sent to FFmpeg service (excludes sensitive data from what we store)
 interface FFmpegServiceRequest {
   job_id: string;
+  idempotency_key: string;
   clips: { url: string; duration: number }[];
   voiceover_url?: string;
   output: {
@@ -52,7 +55,25 @@ interface FFmpegServiceRequest {
     supabase_url: string;
     supabase_service_key: string;
   };
-  idempotency_key: string;
+}
+
+// Sanitized metadata stored in DB (no secrets!)
+interface AssembledMeta {
+  started_at?: string;
+  completed_at?: string;
+  failed_at?: string;
+  error?: string;
+  clips_count: number;
+  clip_ids?: string[];
+  expected_duration: number;
+  voiceover_available: boolean;
+  transition: { type: string; duration: number };
+  output: { width: number; height: number; fps: number };
+  ffmpeg_job_id?: string;
+  ffmpeg_status?: string;
+  eta_seconds?: number;
+  duration?: number;
+  idempotency_key?: string;
 }
 
 interface TimelineData {
@@ -71,6 +92,50 @@ interface TimelineData {
 }
 
 // ============================================
+// Utilities
+// ============================================
+
+/**
+ * Compute a stable hash from inputs for idempotency.
+ * Uses clip IDs, durations, transition settings, output settings, and voiceover.
+ */
+async function computeIdempotencyHash(
+  clips: ClipInput[],
+  voiceoverUrl: string | null,
+  transition: { type: string; duration: number },
+  output: { width: number; height: number; fps: number }
+): Promise<string> {
+  const payload = JSON.stringify({
+    clips: clips.map(c => ({ id: c.id, duration: c.duration })),
+    voiceover: voiceoverUrl || null,
+    transition,
+    output,
+  });
+  
+  const encoder = new TextEncoder();
+  const data = encoder.encode(payload);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.slice(0, 8).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Enforce minimum clip duration for xfade safety.
+ * Returns adjusted transition duration if clips are too short.
+ */
+function safeTransitionDuration(clips: ClipInput[], requestedDuration: number): number {
+  const minClipDuration = Math.min(...clips.map(c => c.duration));
+  // xfade needs clip duration > transition + buffer
+  const maxSafeTransition = Math.max(0.1, minClipDuration - 0.3);
+  
+  if (requestedDuration > maxSafeTransition) {
+    console.log(`Clamping transition from ${requestedDuration}s to ${maxSafeTransition}s (min clip: ${minClipDuration}s)`);
+    return maxSafeTransition;
+  }
+  return requestedDuration;
+}
+
+// ============================================
 // Main Handler
 // ============================================
 
@@ -82,7 +147,7 @@ interface TimelineData {
  * - Audio/video sync is locked (not client-dependent)
  * - Transitions are baked into the final MP4
  * - Export quality matches preview quality
- * - Mixed resolutions are normalized
+ * - Mixed resolutions are normalized to output size
  */
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -99,7 +164,7 @@ Deno.serve(async (req) => {
     const {
       script_run_id,
       transition_type = "crossfade",
-      transition_duration = 0.2,
+      transition_duration: requestedTransitionDuration = 0.2,
       output_width = 1080,
       output_height = 1920,
       output_fps = 30,
@@ -112,7 +177,7 @@ Deno.serve(async (req) => {
     // Check if already rendering
     const { data: existingRun } = await supabase
       .from("script_runs")
-      .select("assembled_status")
+      .select("assembled_status, assembled_meta")
       .eq("id", script_run_id)
       .single();
 
@@ -122,6 +187,7 @@ Deno.serve(async (req) => {
           success: false,
           error: "Assembly already in progress",
           status: "rendering",
+          job_id: (existingRun.assembled_meta as AssembledMeta)?.ffmpeg_job_id,
         }),
         { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
@@ -191,6 +257,7 @@ Deno.serve(async (req) => {
         const job = jobMap.get(jobId);
         if (job?.output_url) {
           clips.push({
+            id: jobId,
             url: job.output_url,
             duration: clipDurations.get(jobId) || (job.settings as Record<string, unknown>)?.seconds as number || 4,
             index: i,
@@ -206,6 +273,7 @@ Deno.serve(async (req) => {
       for (let i = 0; i < sortedJobs.length; i++) {
         const job = sortedJobs[i];
         clips.push({
+          id: job.id,
           url: job.output_url!,
           duration: (job.settings as Record<string, unknown>)?.seconds as number || 4,
           index: i,
@@ -217,16 +285,46 @@ Deno.serve(async (req) => {
       throw new Error("No valid clips with output URLs found");
     }
 
-    const voiceoverUrl = scriptRun.voiceover_audio_url;
+    if (clips.length < 2) {
+      throw new Error("Need at least 2 clips to assemble a reel");
+    }
+
+    const voiceoverUrl = scriptRun.voiceover_audio_url as string | null;
+
+    // Enforce minimum clip duration for safe xfade
+    const transition_duration = safeTransitionDuration(clips, requestedTransitionDuration);
+
+    const outputSettings = { width: output_width, height: output_height, fps: output_fps };
+    const transitionSettings = { 
+      type: transition_type === "crossfade" ? "fade" : transition_type, 
+      duration: transition_duration 
+    };
+
+    // Compute idempotency hash from actual inputs (not just version)
+    const inputHash = await computeIdempotencyHash(clips, voiceoverUrl, transitionSettings, outputSettings);
+    const idempotencyKey = `${script_run_id}:${inputHash}`;
 
     console.log(`Assembling reel: ${clips.length} clips, voiceover: ${!!voiceoverUrl}`);
-    console.log(`Transition: ${transition_type} @ ${transition_duration}s`);
+    console.log(`Transition: ${transitionSettings.type} @ ${transition_duration}s`);
     console.log(`Output: ${output_width}x${output_height} @ ${output_fps}fps`);
+    console.log(`Idempotency: ${idempotencyKey}`);
 
     // Calculate expected duration
     const totalClipDuration = clips.reduce((sum, c) => sum + c.duration, 0);
     const transitionOverlap = (clips.length - 1) * transition_duration;
     const expectedDuration = totalClipDuration - transitionOverlap;
+
+    // Build sanitized metadata (NO secrets!)
+    const sanitizedMeta: AssembledMeta = {
+      started_at: new Date().toISOString(),
+      clips_count: clips.length,
+      clip_ids: clips.map(c => c.id),
+      expected_duration: expectedDuration,
+      voiceover_available: !!voiceoverUrl,
+      transition: transitionSettings,
+      output: outputSettings,
+      idempotency_key: idempotencyKey,
+    };
 
     // Check if FFmpeg service is configured
     if (!ffmpegServiceUrl) {
@@ -236,11 +334,9 @@ Deno.serve(async (req) => {
         .update({
           assembled_status: "failed",
           assembled_meta: {
+            ...sanitizedMeta,
             error: "FFmpeg service not configured",
-            clips_count: clips.length,
-            expected_duration: expectedDuration,
-            voiceover_available: !!voiceoverUrl,
-            transition: { type: transition_type, duration: transition_duration },
+            failed_at: new Date().toISOString(),
           },
         })
         .eq("id", script_run_id);
@@ -257,42 +353,33 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Mark as rendering
+    // Generate job ID
+    const jobId = crypto.randomUUID();
+
+    // Mark as rendering with sanitized metadata
     await supabase
       .from("script_runs")
       .update({
         assembled_status: "rendering",
         assembled_meta: {
-          started_at: new Date().toISOString(),
-          clips_count: clips.length,
-          expected_duration: expectedDuration,
-          voiceover_available: !!voiceoverUrl,
-          transition: { type: transition_type, duration: transition_duration },
-          output: { width: output_width, height: output_height, fps: output_fps },
+          ...sanitizedMeta,
+          ffmpeg_job_id: jobId,
         },
       })
       .eq("id", script_run_id);
 
-    // Build FFmpeg service request
-    const jobId = crypto.randomUUID();
-    const timelineVersion = timeline?.version || 1;
-    const idempotencyKey = `${script_run_id}:v${timelineVersion}`;
-
+    // Build FFmpeg service request (includes secrets for upload, but NOT stored)
     const ffmpegRequest: FFmpegServiceRequest = {
       job_id: jobId,
+      idempotency_key: idempotencyKey,
       clips: clips.map(c => ({ url: c.url, duration: c.duration })),
       voiceover_url: voiceoverUrl || undefined,
       output: {
-        width: output_width,
-        height: output_height,
-        fps: output_fps,
+        ...outputSettings,
         video_bitrate: "8M",
         audio_bitrate: "192k",
       },
-      transition: {
-        type: transition_type === "crossfade" ? "fade" : transition_type,
-        duration: transition_duration,
-      },
+      transition: transitionSettings,
       mix: {
         duck_video_audio: true,
         video_audio_gain_db: -18,
@@ -304,9 +391,8 @@ Deno.serve(async (req) => {
         path: `assembled/${script_run_id}.mp4`,
         upsert: true,
         supabase_url: supabaseUrl,
-        supabase_service_key: supabaseKey,
+        supabase_service_key: supabaseKey, // Only sent to FFmpeg service, NOT stored!
       },
-      idempotency_key: idempotencyKey,
     };
 
     console.log(`Calling FFmpeg service at ${ffmpegServiceUrl}`);
@@ -329,9 +415,8 @@ Deno.serve(async (req) => {
 
     console.log("FFmpeg service response:", ffmpegResult);
 
-    // Handle async job (polling required) or sync completion
+    // Handle sync completion
     if (ffmpegResult.status === "succeeded" && ffmpegResult.output_url) {
-      // Sync completion - update immediately
       const publicUrl = `${supabaseUrl}/storage/v1/object/public/videos/assembled/${script_run_id}.mp4`;
       
       await supabase
@@ -341,7 +426,7 @@ Deno.serve(async (req) => {
           assembled_status: "succeeded",
           assembled_at: new Date().toISOString(),
           assembled_meta: {
-            ...ffmpegRequest,
+            ...sanitizedMeta,
             completed_at: new Date().toISOString(),
             duration: ffmpegResult.duration || expectedDuration,
             ffmpeg_job_id: jobId,
@@ -361,12 +446,12 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Async job - return queued status
+    // Async job - update with job info for polling
     await supabase
       .from("script_runs")
       .update({
         assembled_meta: {
-          ...ffmpegRequest,
+          ...sanitizedMeta,
           ffmpeg_job_id: jobId,
           ffmpeg_status: ffmpegResult.status || "queued",
           eta_seconds: ffmpegResult.eta_seconds,
