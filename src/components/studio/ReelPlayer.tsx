@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, forwardRef } from "react";
-import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Film } from "lucide-react";
+import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Film, Mic, Video } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Tables } from "@/integrations/supabase/types";
 import type { Clip } from "@/types/timeline-types";
@@ -40,6 +40,12 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
   const [isMuted, setIsMuted] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [showControls, setShowControls] = useState(true);
+  
+  // Audio source: "voiceover" plays the voiceover track and mutes video,
+  // "video" plays the video's embedded audio and mutes voiceover
+  const [audioSource, setAudioSource] = useState<"voiceover" | "video">(
+    audioUrl ? "voiceover" : "video"
+  );
   
   // Imperative state refs - these are the source of truth
   const userWantsPlayingRef = useRef(false);
@@ -349,11 +355,43 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
 
   const toggleMute = useCallback(() => {
     const newMuted = !isMuted;
-    if (videoARef.current) videoARef.current.muted = newMuted;
-    if (videoBRef.current) videoBRef.current.muted = newMuted;
-    if (audioRef.current) audioRef.current.muted = newMuted;
+    // Mute/unmute active audio source only
+    if (audioSource === "voiceover") {
+      if (audioRef.current) audioRef.current.muted = newMuted;
+    } else {
+      if (videoARef.current) videoARef.current.muted = newMuted;
+      if (videoBRef.current) videoBRef.current.muted = newMuted;
+    }
     setIsMuted(newMuted);
-  }, [isMuted]);
+  }, [isMuted, audioSource]);
+  
+  // Toggle between voiceover and video audio
+  const toggleAudioSource = useCallback(() => {
+    const newSource = audioSource === "voiceover" ? "video" : "voiceover";
+    setAudioSource(newSource);
+    
+    if (newSource === "voiceover") {
+      // Mute video, unmute voiceover
+      if (videoARef.current) videoARef.current.muted = true;
+      if (videoBRef.current) videoBRef.current.muted = true;
+      if (audioRef.current) {
+        audioRef.current.muted = isMuted;
+        // Sync voiceover to current position
+        audioRef.current.currentTime = calculateGlobalTime();
+        if (userWantsPlayingRef.current) {
+          audioRef.current.play().catch(() => {});
+        }
+      }
+    } else {
+      // Mute voiceover, unmute video
+      if (audioRef.current) {
+        audioRef.current.muted = true;
+        audioRef.current.pause();
+      }
+      if (videoARef.current) videoARef.current.muted = isMuted;
+      if (videoBRef.current) videoBRef.current.muted = isMuted;
+    }
+  }, [audioSource, isMuted, calculateGlobalTime]);
 
   const skipToClip = useCallback((index: number) => {
     if (index < 0 || index >= totalClips) return;
@@ -453,14 +491,14 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
     >
       {/* Video container - fills parent, videos use object-contain */}
       <div className="relative w-full h-full flex items-center justify-center">
-        {/* Video A */}
+        {/* Video A - muted when voiceover is active */}
         <video
           ref={videoARef}
           className={cn(
             "max-w-full max-h-full object-contain transition-opacity duration-75",
             activePlayer === "A" ? "opacity-100" : "opacity-0 absolute"
           )}
-          muted={isMuted}
+          muted={audioSource === "voiceover" || isMuted}
           playsInline
           preload="auto"
           onTimeUpdate={activePlayer === "A" ? handleTimeUpdate : undefined}
@@ -469,14 +507,14 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
           onCanPlay={activePlayer === "A" ? handleVideoCanPlay : undefined}
         />
         
-        {/* Video B (preload/swap) */}
+        {/* Video B (preload/swap) - muted when voiceover is active */}
         <video
           ref={videoBRef}
           className={cn(
             "max-w-full max-h-full object-contain transition-opacity duration-75",
             activePlayer === "B" ? "opacity-100" : "opacity-0 absolute"
           )}
-          muted={isMuted}
+          muted={audioSource === "voiceover" || isMuted}
           playsInline
           preload="auto"
           onTimeUpdate={activePlayer === "B" ? handleTimeUpdate : undefined}
@@ -614,6 +652,21 @@ export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function R
           >
             <SkipForward className="h-4 w-4 text-muted-foreground" />
           </button>
+
+          {/* Audio source toggle - only show if voiceover exists */}
+          {audioUrl && (
+            <button
+              onClick={toggleAudioSource}
+              className="p-1 hover:bg-secondary/50 rounded transition-colors flex items-center gap-1"
+              title={audioSource === "voiceover" ? "Playing: Voiceover" : "Playing: Video Audio"}
+            >
+              {audioSource === "voiceover" ? (
+                <Mic className="h-4 w-4 text-primary" />
+              ) : (
+                <Video className="h-4 w-4 text-primary" />
+              )}
+            </button>
+          )}
 
           {/* Volume toggle */}
           <button
