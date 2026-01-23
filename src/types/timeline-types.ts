@@ -213,6 +213,8 @@ export function reflowClipsSequential(clips: Clip[]): Clip[] {
   });
 }
 
+import { MIN_SCENE_DURATION } from "./video-provider-types";
+
 /**
  * Convert legacy scene_prompts array to clips
  */
@@ -220,6 +222,8 @@ export function scenePromptsToClips(
   scenePrompts: string[],
   defaultDurationPerScene: number = 4
 ): Clip[] {
+  // Enforce minimum duration to prevent short clips
+  const safeDuration = Math.max(MIN_SCENE_DURATION, defaultDurationPerScene);
   let currentTime = 0;
   
   return scenePrompts.map((prompt) => {
@@ -227,11 +231,11 @@ export function scenePromptsToClips(
       id: generateClipId(),
       type: "video",
       start: currentTime,
-      end: currentTime + defaultDurationPerScene,
+      end: currentTime + safeDuration,
       prompt,
       created_at: new Date().toISOString(),
     };
-    currentTime += defaultDurationPerScene;
+    currentTime += safeDuration;
     return clip;
   });
 }

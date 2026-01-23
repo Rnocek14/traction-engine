@@ -276,11 +276,14 @@ export function getProviderDuration(
   return { providerSeconds, requestedSeconds };
 }
 
+/** Minimum scene duration for quality video generation */
+export const MIN_SCENE_DURATION = 3;
+
 /**
  * Check if a timeline duration is too short for quality video generation
  */
 export function isClipDurationTooShort(requestedSeconds: number): boolean {
-  return requestedSeconds < 1.5;
+  return requestedSeconds < MIN_SCENE_DURATION;
 }
 
 /**

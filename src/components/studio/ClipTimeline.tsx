@@ -857,7 +857,7 @@ function SortableClip({
           )}
           
           {/* Duration warnings */}
-          {clipDuration < 1.5 && (
+          {clipDuration < 3 && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <span className="flex items-center gap-0.5 px-1 py-0.5 rounded bg-warning/20 text-warning">
@@ -866,7 +866,7 @@ function SortableClip({
                 </span>
               </TooltipTrigger>
               <TooltipContent side="top" className="text-xs max-w-[200px]">
-                Very short clip ({clipDuration.toFixed(1)}s). Video quality may suffer below 1.5s.
+                Too short ({clipDuration.toFixed(1)}s). Minimum 3s required for quality generation.
               </TooltipContent>
             </Tooltip>
           )}

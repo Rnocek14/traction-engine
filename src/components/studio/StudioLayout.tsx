@@ -21,6 +21,7 @@ import { InspectorPanel } from "./InspectorPanel";
 import { VersionRail } from "./VersionRail";
 import { ActionDock } from "./ActionDock";
 import { ClipActions } from "./ClipActions";
+import { SystemHealthPanel } from "./SystemHealthPanel";
 import { useStudioEditor } from "@/hooks/use-studio-editor";
 import { useTimelineEditor } from "@/hooks/use-timeline-editor";
 import { useVideoJobs } from "@/hooks/use-video-generation";
@@ -325,13 +326,17 @@ export function StudioLayout({
                   />
                 </div>
 
-                {/* Clip Actions + Action Dock */}
+                {/* Clip Actions + System Health + Action Dock */}
                 <div className="w-72 flex-shrink-0 space-y-3 overflow-y-auto">
                   <ClipActions
                     clip={selectedClip}
                     scriptId={script.id}
                     onClipUpdated={() => {}}
                     onAutoSplit={(clipId, segments) => timeline.replaceClipWithSegments(clipId, segments)}
+                  />
+                  <SystemHealthPanel
+                    clips={timeline.clips}
+                    videoJobs={allVideoJobs}
                   />
                   <ActionDock script={script} clips={timeline.clips} />
                 </div>
