@@ -1,6 +1,9 @@
 /**
  * Cinematic prompt builder for Sora 2 video generation.
  * Implements film-industry standard terminology for maximum quality.
+ * 
+ * This is the SINGLE SOURCE OF TRUTH for prompt building.
+ * Both queue-video and generate-reel-sequence must use these functions.
  */
 
 export interface StyleGuideData {
@@ -20,6 +23,8 @@ export interface StyleGuideData {
   wardrobe?: string;
   props?: string;
   time_of_day?: string;
+  // First-clip reference image
+  reference_image_url?: string;
 }
 
 /**
@@ -108,12 +113,34 @@ const TIME_SPECS: Record<string, string> = {
 };
 
 /**
+ * Camera shot/framing types for per-clip direction
+ */
+export const SHOT_TYPES: Record<string, string> = {
+  "extreme-wide": "Extreme wide shot (EWS), vast environment, subject small in frame, establishing scale",
+  "wide": "Wide shot (WS), full body visible, environmental context, scene-setting",
+  "medium-wide": "Medium wide shot (MWS), knees up, action space, movement room",
+  "medium": "Medium shot (MS), waist up, conversational distance, balanced framing",
+  "medium-close": "Medium close-up (MCU), chest up, emotional connection, intimate but contextual",
+  "close-up": "Close-up (CU), face fills frame, emotional intensity, subtle expressions",
+  "extreme-close": "Extreme close-up (ECU), detail shot, eyes/hands/texture, maximum intimacy",
+  "over-shoulder": "Over-the-shoulder (OTS), perspective shot, conversational, subjective POV",
+  "pov": "Point-of-view (POV), first-person perspective, subjective experience, immersive",
+  "dutch": "Dutch angle, tilted frame, tension/unease, stylized composition",
+  "low-angle": "Low angle shot, looking up at subject, power/heroic, imposing presence",
+  "high-angle": "High angle shot, looking down at subject, vulnerability, overview perspective",
+  "tracking": "Tracking shot, following subject movement, dynamic energy, continuous action",
+  "crane": "Crane/jib shot, vertical movement, reveal, epic scope",
+};
+
+/**
  * Build a cinematic "shot brief" prompt for Sora 2
+ * This is the main function - use for ALL video generation.
  */
 export function buildCinematicPrompt(
   styleGuide: StyleGuideData | null,
   scenePrompt: string,
-  isFirstClip: boolean
+  isFirstClip: boolean,
+  clipCameraDirection?: string
 ): string {
   const sections: string[] = [];
   
@@ -139,8 +166,18 @@ export function buildCinematicPrompt(
     sections.push(`TIME: ${TIME_SPECS[styleGuide.time_of_day]}`);
   }
   
+  // Props
+  if (styleGuide?.props) {
+    sections.push(`PROPS: ${styleGuide.props}`);
+  }
+  
   // Cinematography section
   sections.push("\n--- CINEMATOGRAPHY ---");
+  
+  // Per-clip camera direction (shot type) - takes precedence
+  if (clipCameraDirection && SHOT_TYPES[clipCameraDirection]) {
+    sections.push(`FRAMING: ${SHOT_TYPES[clipCameraDirection]}`);
+  }
   
   // Lens
   const lens = styleGuide?.lens || "50mm";
@@ -177,27 +214,36 @@ export function buildCinematicPrompt(
     sections.push(`\nMOOD: ${styleGuide.mood} emotional tone throughout.`);
   }
   
-  // Props
-  if (styleGuide?.props) {
-    sections.push(`PROPS: ${styleGuide.props}`);
-  }
-  
   // Custom notes
   if (styleGuide?.custom_notes) {
     sections.push(`\nNOTES: ${styleGuide.custom_notes}`);
   }
   
-  // Quality directives
-  sections.push("\n--- QUALITY ---");
+  // Quality directives - CRITICAL for professional output
+  sections.push("\n--- QUALITY REQUIREMENTS ---");
   sections.push("Natural motion blur on movement. Lifelike physics and weight. Smooth 24fps cinematic cadence.");
-  sections.push("No artificial smoothness. No morphing artifacts. Photorealistic rendering.");
+  sections.push("Photorealistic rendering. Accurate anatomy. Consistent proportions frame-to-frame.");
+  sections.push("Professional production value. Broadcast quality. No amateur artifacts.");
+  
+  // AVOID section - Anti-artifact directives (CRITICAL for Sora)
+  sections.push("\n--- AVOID (CRITICAL) ---");
+  sections.push("NO morphing between poses or body parts. NO limbs changing length.");
+  sections.push("NO sudden scene cuts or jump cuts. NO flickering or strobing.");
+  sections.push("NO unnatural limb movements or impossible contortions.");
+  sections.push("NO uncanny valley facial expressions. NO dead eyes or frozen faces.");
+  sections.push("NO temporal artifacts or frame-to-frame inconsistency.");
+  sections.push("NO text, logos, watermarks, or UI elements in frame.");
+  sections.push("NO extra fingers, merged limbs, or anatomical errors.");
+  sections.push("NO sudden lighting changes. NO color banding.");
   
   // Continuity directive (critical for chained generation)
   if (!isFirstClip) {
     sections.push("\n--- CONTINUITY DIRECTIVE ---");
-    sections.push("CRITICAL: Continue seamlessly from the reference frame provided.");
-    sections.push("Same person, same wardrobe, same environment, same lighting.");
-    sections.push("This is the NEXT shot in a continuous sequence.");
+    sections.push("CRITICAL: Continue SEAMLESSLY from the reference frame provided.");
+    sections.push("SAME person - exact face, body, proportions.");
+    sections.push("SAME wardrobe - exact clothing, accessories, colors.");
+    sections.push("SAME environment - consistent background, lighting, time of day.");
+    sections.push("This is the NEXT shot in a continuous sequence - maintain 100% visual consistency.");
   }
   
   // The actual scene action
@@ -210,6 +256,8 @@ export function buildCinematicPrompt(
 /**
  * Build a simplified style prefix for single clip generation
  * (backwards compatible with existing queue-video function)
+ * 
+ * @deprecated Use buildCinematicPrompt instead for full quality
  */
 export function buildStylePrefix(styleGuide: StyleGuideData | null): string {
   if (!styleGuide) return "";
@@ -245,3 +293,6 @@ export function buildStylePrefix(styleGuide: StyleGuideData | null): string {
   
   return parts.join("\n") + "\n\nSCENE: ";
 }
+
+// Re-export specs for external use if needed
+export { LENS_SPECS, CAMERA_SPECS, LIGHTING_SPECS, COLOR_SPECS, DOF_SPECS, MOTION_SPECS, FILM_SPECS, TIME_SPECS };

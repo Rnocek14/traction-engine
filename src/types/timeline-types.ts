@@ -63,6 +63,8 @@ export interface Clip {
   locked?: boolean;
   /** Creation timestamp */
   created_at?: string;
+  /** Per-clip camera direction/shot type (overrides style guide) */
+  camera_direction?: string;
 }
 
 /**
@@ -101,6 +103,10 @@ export interface StyleGuide {
   props?: string;
   /** Time of day: "dawn", "morning", "midday", "golden_hour", "dusk", "night" */
   time_of_day?: string;
+  
+  // First-clip reference image for visual anchoring
+  /** URL of reference image to anchor the first clip's visual style */
+  reference_image_url?: string;
 }
 
 /**

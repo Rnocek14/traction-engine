@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { buildCinematicPrompt, type StyleGuideData } from "../_shared/cinematic-prompts.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -13,8 +14,15 @@ interface VideoRequest {
     size: string; // e.g., "720x1280"
     seconds: number; // 4, 8, or 12
     model?: string; // "sora-2" or "sora-2-pro"
+    seed?: number; // For reproducibility
   };
   starting_frame_url?: string;
+}
+
+interface ClipData {
+  id: string;
+  prompt?: string;
+  camera_direction?: string;
 }
 
 Deno.serve(async (req) => {
@@ -71,22 +79,6 @@ Deno.serve(async (req) => {
       throw new Error("Script must pass QA before video generation");
     }
 
-    // Style guide type definition
-    interface StyleGuideData {
-      character?: string;
-      location?: string;
-      lighting?: string;
-      camera_style?: string;
-      color_grade?: string;
-      mood?: string;
-      custom_notes?: string;
-    }
-
-    // Build the video prompt
-    const content = script.script_content as Record<string, unknown>;
-    let videoPrompt: string;
-    let styleGuide: StyleGuideData | null = null;
-
     // Fetch timeline to get style guide and clip data
     const { data: timeline } = await supabase
       .from("studio_timelines")
@@ -96,94 +88,39 @@ Deno.serve(async (req) => {
       .limit(1)
       .single();
 
+    let styleGuide: StyleGuideData | null = null;
+    let clipData: ClipData | null = null;
+
     if (timeline?.timeline_json) {
       const timelineData = timeline.timeline_json as {
-        clips?: Array<{ id: string; prompt?: string }>;
+        clips?: ClipData[];
         style_guide?: StyleGuideData;
       };
       styleGuide = timelineData.style_guide || null;
+      
+      // Find clip if clip_id provided
+      if (clip_id) {
+        clipData = timelineData.clips?.find(c => c.id === clip_id) || null;
+      }
     }
 
-    // Build style consistency prefix from style guide
-    const buildStylePrefix = (): string => {
-      if (!styleGuide) return "";
-      
-      const parts: string[] = ["VISUAL CONSISTENCY REQUIREMENTS:"];
-      
-      if (styleGuide.character) {
-        parts.push(`- Subject: ${styleGuide.character}`);
-      }
-      if (styleGuide.location) {
-        parts.push(`- Location: ${styleGuide.location}`);
-      }
-      if (styleGuide.lighting) {
-        const lightingMap: Record<string, string> = {
-          natural: "soft natural daylight",
-          golden_hour: "warm golden hour lighting with long shadows",
-          studio: "controlled studio lighting, even exposure",
-          dramatic: "high contrast dramatic lighting with deep shadows",
-          soft: "soft diffused lighting, minimal shadows",
-        };
-        parts.push(`- Lighting: ${lightingMap[styleGuide.lighting] || styleGuide.lighting}`);
-      }
-      if (styleGuide.camera_style) {
-        const cameraMap: Record<string, string> = {
-          documentary: "intimate documentary style, handheld feel, close-ups",
-          cinematic: "cinematic wide shots, smooth dolly movements, shallow depth of field",
-          vlog: "first-person vlog style, direct address, casual framing",
-          static: "locked-off static shots, minimal camera movement",
-          dynamic: "dynamic camera movement, tracking shots, reveals",
-        };
-        parts.push(`- Camera: ${cameraMap[styleGuide.camera_style] || styleGuide.camera_style}`);
-      }
-      if (styleGuide.color_grade) {
-        const colorMap: Record<string, string> = {
-          warm: "warm amber/orange color grade, cozy feel",
-          cool: "cool blue/teal color grade, clean modern feel",
-          neutral: "natural balanced colors, true-to-life",
-          vintage: "vintage film look, slight grain, muted colors",
-          high_contrast: "high contrast, punchy colors, bold look",
-        };
-        parts.push(`- Color: ${colorMap[styleGuide.color_grade] || styleGuide.color_grade}`);
-      }
-      if (styleGuide.mood) {
-        parts.push(`- Mood: ${styleGuide.mood}`);
-      }
-      if (styleGuide.custom_notes) {
-        parts.push(`- Notes: ${styleGuide.custom_notes}`);
-      }
-      
-      if (parts.length <= 1) return ""; // Only header, no actual content
-      
-      return parts.join("\n") + "\n\nSCENE: ";
-    };
-
-    const stylePrefix = buildStylePrefix();
+    // Build the video prompt using shared cinematic prompt builder
+    let videoPrompt: string;
+    let scenePrompt: string;
 
     if (overridePrompt) {
-      // Use the override prompt with style prefix
-      videoPrompt = stylePrefix + overridePrompt;
-    } else if (clip_id) {
-      // Find clip in timeline and use its prompt
-      if (timeline?.timeline_json) {
-        const timelineData = timeline.timeline_json as { clips?: Array<{ id: string; prompt?: string }> };
-        const clip = timelineData.clips?.find(c => c.id === clip_id);
-        if (clip?.prompt) {
-          videoPrompt = stylePrefix + clip.prompt;
-        } else {
-          throw new Error("Clip not found or has no prompt");
-        }
-      } else {
-        throw new Error("Timeline not found");
-      }
+      scenePrompt = overridePrompt;
+    } else if (clipData?.prompt) {
+      scenePrompt = clipData.prompt;
     } else {
       // Build combined prompt from script content (legacy full-script mode)
+      const content = script.script_content as Record<string, unknown>;
       const hook = (content?.hook as string) || "";
       const voiceover = (content?.voiceover as string) || "";
       const scenePrompts = (content?.scene_prompts as string[]) || [];
 
-      videoPrompt = `
-${stylePrefix}Create a cinematic short-form video for social media.
+      scenePrompt = `
+Create a cinematic short-form video for social media.
 
 HOOK TEXT (opening): "${hook}"
 
@@ -195,6 +132,14 @@ ${scenePrompts.map((p, i) => `Scene ${i + 1}: ${p}`).join("\n")}
 Style: Professional, engaging, suitable for TikTok/Reels. Smooth transitions between scenes.
       `.trim();
     }
+
+    // Use full cinematic prompt builder for professional quality
+    videoPrompt = buildCinematicPrompt(
+      styleGuide,
+      scenePrompt,
+      !starting_frame_url, // isFirstClip - true if no starting frame
+      clipData?.camera_direction // Per-clip shot direction
+    );
 
     // Create the video job in database first
     const { data: job, error: jobError } = await supabase
@@ -209,6 +154,8 @@ Style: Professional, engaging, suitable for TikTok/Reels. Smooth transitions bet
           model,
           clip_id: clip_id || null,
           prompt: videoPrompt.slice(0, 500), // Store truncated prompt for reference
+          seed: settings.seed,
+          camera_direction: clipData?.camera_direction,
         },
         progress: 0,
         openai_status: "pending",
@@ -226,6 +173,11 @@ Style: Professional, engaging, suitable for TikTok/Reels. Smooth transitions bet
     form.set("model", model);
     form.set("size", size);
     form.set("seconds", String(seconds));
+
+    // Add seed for reproducibility
+    if (settings.seed) {
+      form.set("seed", String(settings.seed));
+    }
 
     // Add starting frame if provided (must be fetched and uploaded as file)
     if (starting_frame_url) {

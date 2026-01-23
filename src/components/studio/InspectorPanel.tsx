@@ -283,6 +283,24 @@ export function InspectorPanel({
                 <p className="text-[10px] text-muted-foreground mb-2">
                   Define visual consistency for all generated clips
                 </p>
+
+                {/* Reference Image (for first-clip anchoring) */}
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                    Reference Image (anchors first clip)
+                  </label>
+                  <Input
+                    value={styleGuide?.reference_image_url || ""}
+                    onChange={(e) => onUpdateStyleGuide?.({ ...styleGuide, reference_image_url: e.target.value })}
+                    placeholder="https://... or paste image URL"
+                    className="text-xs bg-secondary/30 border-border/30"
+                  />
+                  <p className="text-[9px] text-muted-foreground">
+                    Upload your character/location image to anchor the visual style
+                  </p>
+                </div>
+
+                <Separator className="bg-border/20" />
                 
                 {/* Character/Subject */}
                 <div className="space-y-1">
