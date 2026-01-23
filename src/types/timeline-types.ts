@@ -2,10 +2,19 @@
 // Timeline & Clip Types for DaVinci-style Editor
 // ============================================
 
-// Re-export transition types from beat-map
+// Re-export transition types from beat-map (types only)
 export type { TransitionType, ClipTransition, AlignmentConstraints } from "./beat-map-types";
+export { DEFAULT_ALIGNMENT_CONSTRAINTS } from "./beat-map-types";
 import type { ClipTransition } from "./beat-map-types";
-export { DEFAULT_TRANSITION, DEFAULT_ALIGNMENT_CONSTRAINTS } from "./beat-map-types";
+
+/**
+ * Default transition for clips (0.2s crossfade)
+ * This is the SINGLE source of truth for transitions - lives in clip domain
+ */
+export const DEFAULT_TRANSITION: ClipTransition = {
+  type: "crossfade",
+  duration: 0.2,
+};
 
 /**
  * Clip types supported in the timeline

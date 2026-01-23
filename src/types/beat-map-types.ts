@@ -99,6 +99,8 @@ export interface BeatMap {
 
 /**
  * Transition types for clip boundaries
+ * NOTE: These are defined here for type-only usage. 
+ * DEFAULT_TRANSITION lives in timeline-types.ts (clip domain)
  */
 export type TransitionType = 
   | "cut"           // Hard cut (default)
@@ -117,15 +119,6 @@ export interface ClipTransition {
   duration: number;
 }
 
-/**
- * Default transition for clips (0.2s crossfade)
- * NOTE: This is the SINGLE source of truth - import from timeline-types.ts
- */
-export const DEFAULT_TRANSITION: ClipTransition = {
-  type: "crossfade",
-  duration: 0.2,
-};
-
 // ============================================
 // Beat Map Utility Functions
 // ============================================
@@ -140,6 +133,8 @@ export function generateBeatId(): string {
 /**
  * Detect beats from waveform peaks + voiceover text punctuation (MVP algorithm)
  * No Whisper required - uses amplitude analysis + text heuristics
+ * 
+ * GUARDRAIL: Punctuation beats only become cut-eligible if validated by nearby waveform evidence
  */
 export function detectBeatsFromWaveform(
   peaks: number[],
@@ -148,6 +143,10 @@ export function detectBeatsFromWaveform(
 ): Beat[] {
   const beats: Beat[] = [];
   const samplesPerSecond = peaks.length / duration;
+  
+  // ============================================
+  // STEP 1: Detect waveform-based beats FIRST
+  // ============================================
   
   // Detect peaks (relative amplitude spikes)
   const avgPeak = peaks.reduce((a, b) => a + b, 0) / peaks.length;
@@ -175,6 +174,8 @@ export function detectBeatsFromWaveform(
   }
   
   // Detect pauses (low amplitude regions)
+  // IMPORTANT: Build pauseBeats array FIRST, then use for punctuation coupling
+  const pauseBeats: Beat[] = [];
   const silenceThreshold = avgPeak * 0.15;
   let pauseStart: number | null = null;
   
@@ -188,7 +189,7 @@ export function detectBeatsFromWaveform(
     } else if (pauseStart !== null) {
       const pauseDuration = time - pauseStart;
       if (pauseDuration > 0.3) { // 300ms+ pause
-        beats.push({
+        const pauseBeat: Beat = {
           id: generateBeatId(),
           type: "pause",
           time: pauseStart,
@@ -197,14 +198,18 @@ export function detectBeatsFromWaveform(
           is_cut_point: pauseDuration > 0.5,
           cut_priority: Math.min(10, Math.floor(pauseDuration * 10)),
           source: "waveform",
-        });
+        };
+        pauseBeats.push(pauseBeat);
+        beats.push(pauseBeat);
       }
       pauseStart = null;
     }
   }
   
-  // Detect phrase boundaries from punctuation in voiceover text
-  // GUARDRAIL: Only mark as cut-eligible if there's nearby waveform evidence (pause)
+  // ============================================
+  // STEP 2: Detect punctuation beats using STABLE pauseBeats array
+  // GUARDRAIL: Only mark as cut-eligible if there's nearby waveform evidence
+  // ============================================
   const words = voiceoverText.split(/\s+/).filter(Boolean);
   const wordsPerSecond = words.length / duration;
   
@@ -212,9 +217,18 @@ export function detectBeatsFromWaveform(
     const estimatedTime = (index + 1) / wordsPerSecond;
     
     // Check if there's a pause beat within ±0.35s that would validate this punctuation
-    const hasNearbyPause = beats.some(b => 
-      b.type === "pause" && Math.abs(b.time - estimatedTime) <= 0.35
+    // Use the STABLE pauseBeats array, not the evolving beats list
+    const hasNearbyPause = pauseBeats.some(p => 
+      Math.abs(p.time - estimatedTime) <= 0.35
     );
+    
+    // Also check for low amplitude region in raw waveform as additional validation
+    const sampleIndex = Math.floor(estimatedTime * samplesPerSecond);
+    const localAmplitude = peaks[sampleIndex] ?? avgPeak;
+    const hasLowAmplitude = localAmplitude < avgPeak * 0.4;
+    
+    // Combine both signals for validation
+    const hasWaveformEvidence = hasNearbyPause || hasLowAmplitude;
     
     // Sentence-final punctuation (.!?)
     if (/[.!?]$/.test(word)) {
@@ -225,10 +239,10 @@ export function detectBeatsFromWaveform(
         duration: 0,
         word,
         word_index: index,
-        confidence: hasNearbyPause ? 0.9 : 0.6, // Higher if validated by waveform
-        // GUARDRAIL: Only cut-eligible if nearby pause validates the timing
-        is_cut_point: hasNearbyPause,
-        cut_priority: hasNearbyPause ? 9 : 5, // Demote if no waveform evidence
+        confidence: hasWaveformEvidence ? 0.9 : 0.5, // Higher if validated by waveform
+        // GUARDRAIL: Only cut-eligible if waveform evidence validates the timing
+        is_cut_point: hasWaveformEvidence,
+        cut_priority: hasWaveformEvidence ? 9 : 4, // Demote significantly if no evidence
         source: "waveform", // Derived from text, not Whisper
       });
     }
@@ -241,9 +255,9 @@ export function detectBeatsFromWaveform(
         duration: 0,
         word,
         word_index: index,
-        confidence: 0.5,
+        confidence: 0.4,
         is_cut_point: false, // Clause breaks are suggestions only
-        cut_priority: 4,
+        cut_priority: 3,
         source: "waveform",
       });
     }

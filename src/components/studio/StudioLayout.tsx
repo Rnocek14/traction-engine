@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import {
@@ -24,8 +24,11 @@ import { ClipActions } from "./ClipActions";
 import { useStudioEditor } from "@/hooks/use-studio-editor";
 import { useTimelineEditor } from "@/hooks/use-timeline-editor";
 import { useVideoJobs } from "@/hooks/use-video-generation";
+import { useBeatMap } from "@/hooks/use-beat-map";
 import { cn } from "@/lib/utils";
 import type { Tables } from "@/integrations/supabase/types";
+import type { Clip } from "@/types/timeline-types";
+import { suggestCutsFromBeats, DEFAULT_ALIGNMENT_CONSTRAINTS } from "@/types/beat-map-types";
 
 type ScriptRun = Tables<"script_runs">;
 type VideoJob = Tables<"video_jobs">;
@@ -63,6 +66,64 @@ export function StudioLayout({
   
   // Timeline editor (for clips)
   const timeline = useTimelineEditor({ script });
+
+  // Get voiceover URL and text for beat map
+  const voiceoverAudioUrl = (script as unknown as { voiceover_audio_url?: string }).voiceover_audio_url;
+  
+  // Beat Map for editorial intelligence
+  const { beatMap, isLoading: beatMapLoading } = useBeatMap({
+    scriptRunId: script.id,
+    voiceoverText: editor.edits.voiceover || "",
+    audioUrl: voiceoverAudioUrl,
+    clips: timeline.clips,
+  });
+  
+  // Get cut-eligible beats for timeline display
+  const cutEligibleBeats = useMemo(() => {
+    if (!beatMap?.beats) return [];
+    return beatMap.beats.filter(b => b.is_cut_point || b.cut_priority >= 5);
+  }, [beatMap]);
+  
+  // Align clips to beats handler
+  const handleAlignToBeats = useCallback(() => {
+    if (!beatMap?.beats || timeline.clips.length === 0) return;
+    
+    // Get target durations from current clips (enabled video clips only)
+    const enabledClips = timeline.clips.filter(c => c.type === "video" && !c.disabled);
+    const targetDurations = enabledClips.map(c => c.end - c.start);
+    
+    // Suggest new cut points
+    const suggestedCuts = suggestCutsFromBeats(
+      beatMap.beats,
+      targetDurations,
+      0.3,
+      { 
+        ...DEFAULT_ALIGNMENT_CONSTRAINTS,
+        totalDuration: beatMap.duration 
+      }
+    );
+    
+    // Apply suggested cuts to create new clip boundaries
+    let accumulatedTime = 0;
+    const alignedClips: Clip[] = enabledClips.map((clip, index) => {
+      const nextCut = suggestedCuts[index];
+      const newEnd = nextCut?.time ?? (accumulatedTime + (clip.end - clip.start));
+      
+      const newClip: Clip = {
+        ...clip,
+        start: accumulatedTime,
+        end: newEnd,
+      };
+      accumulatedTime = newEnd;
+      return newClip;
+    });
+    
+    // Include disabled clips (keep their original relative position)
+    const disabledClips = timeline.clips.filter(c => c.disabled || c.type !== "video");
+    const allAlignedClips = [...alignedClips, ...disabledClips];
+    
+    timeline.alignClipsToBeats(allAlignedClips);
+  }, [beatMap, timeline]);
 
   // Version chain IDs for gallery
   const versionChainIds = versionChain.map((s) => s.id).filter((id) => id !== script.id);
@@ -177,7 +238,7 @@ export function StudioLayout({
                           <ReelPlayer
                             clips={timeline.clips}
                             videoJobs={allVideoJobs}
-                            audioUrl={(script as unknown as { voiceover_audio_url?: string }).voiceover_audio_url}
+                            audioUrl={voiceoverAudioUrl}
                             onClipChange={(idx) => {
                               const clip = timeline.clips[idx];
                               if (clip) timeline.setPlayheadPosition(clip.start);
@@ -243,7 +304,7 @@ export function StudioLayout({
                     playheadPosition={timeline.playheadPosition}
                     duration={timeline.duration}
                     voiceover={editor.edits.voiceover}
-                    audioUrl={(script as unknown as { voiceover_audio_url?: string }).voiceover_audio_url}
+                    audioUrl={voiceoverAudioUrl}
                     onClipSelect={timeline.selectClip}
                     onReorder={timeline.reorderClips}
                     onPlayheadChange={timeline.setPlayheadPosition}
@@ -257,6 +318,9 @@ export function StudioLayout({
                     onTrimCommit={timeline.commitTrim}
                     rippleMode={timeline.rippleMode}
                     onToggleRipple={() => timeline.setRippleMode(!timeline.rippleMode)}
+                    beats={cutEligibleBeats}
+                    onAlignToBeats={handleAlignToBeats}
+                    hasBeatMap={!!beatMap && !beatMapLoading}
                   />
                 </div>
 

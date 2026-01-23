@@ -389,6 +389,29 @@ export function ClipTimeline({
               </Tooltip>
             )}
 
+            {/* Align to Beats button */}
+            {hasBeatMap && onAlignToBeats && (
+              <>
+                <div className="w-px h-4 bg-border/30 mx-1" />
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 gap-1.5 text-[10px] font-medium text-warning hover:bg-warning/20 hover:text-warning"
+                      onClick={onAlignToBeats}
+                    >
+                      <Music className="h-3 w-3" />
+                      Align to Beats
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="text-xs max-w-48">
+                    Snap clip boundaries to voice rhythm (pauses &amp; phrase ends). Use Undo (⌘Z) to revert.
+                  </TooltipContent>
+                </Tooltip>
+              </>
+            )}
+
             <div className="w-px h-4 bg-border/30 mx-1" />
 
             <Tooltip>
@@ -509,6 +532,56 @@ export function ClipTimeline({
                   </div>
                 </SortableContext>
               </DndContext>
+              
+              {/* Beat markers overlay - render cut-eligible beats */}
+              {beats.length > 0 && (
+                <div className="absolute inset-0 pointer-events-none">
+                  {beats.map((beat) => {
+                    const leftPercent = (beat.time / safeMasterDuration) * 100;
+                    // Color coding: pause (green), phrase_end (blue), peak/other (amber)
+                    const colorClass = beat.type === "pause" 
+                      ? "bg-success" 
+                      : beat.type === "phrase_end"
+                        ? "bg-primary"
+                        : "bg-warning";
+                    // Opacity based on confidence/priority
+                    const opacity = beat.is_cut_point ? 0.8 : 0.4;
+                    
+                    return (
+                      <TooltipProvider key={beat.id} delayDuration={100}>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              className={cn(
+                                "absolute top-0 bottom-0 w-0.5 cursor-pointer pointer-events-auto",
+                                "hover:w-1 transition-all",
+                                colorClass
+                              )}
+                              style={{ 
+                                left: `${leftPercent}%`,
+                                opacity,
+                              }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onPlayheadChange(beat.time);
+                              }}
+                            />
+                          </TooltipTrigger>
+                          <TooltipContent side="top" className="text-xs">
+                            <div className="font-medium capitalize">{beat.type.replace("_", " ")}</div>
+                            <div className="text-muted-foreground">
+                              {beat.time.toFixed(2)}s • {Math.round(beat.confidence * 100)}% confidence
+                            </div>
+                            {beat.word && (
+                              <div className="text-muted-foreground italic">"{beat.word}"</div>
+                            )}
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* Unified playhead - positioned relative to master duration container */}
