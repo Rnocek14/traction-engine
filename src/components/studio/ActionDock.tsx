@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQueryClient, useMutation, useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   RefreshCw,
   Sparkles,
@@ -11,6 +10,8 @@ import {
   Film,
   ChevronUp,
   ChevronDown,
+  Video,
+  CheckCircle2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -29,97 +30,70 @@ import {
   type RegenPreset,
 } from "@/hooks/use-regenerate-studio";
 import { hasHardBlocks } from "@/hooks/use-studio";
+import {
+  useVideoJobs,
+  useGenerateAllClipsVideo,
+  SIZE_OPTIONS,
+  DURATION_OPTIONS,
+  type VideoSize,
+  type VideoDuration,
+} from "@/hooks/use-video-generation";
 import { cn } from "@/lib/utils";
 import type { Tables } from "@/integrations/supabase/types";
+import type { Clip } from "@/types/timeline-types";
 
 type ScriptRun = Tables<"script_runs">;
-type VideoJob = Tables<"video_jobs">;
 
-// Sora 2 constraints
-type VideoSize = "720x1280" | "1280x720" | "1024x1792" | "1792x1024";
-type VideoDuration = 4 | 8 | 12;
-
-const SIZE_OPTIONS: { value: VideoSize; label: string }[] = [
-  { value: "720x1280", label: "9:16 (720p)" },
-  { value: "1280x720", label: "16:9 (720p)" },
-  { value: "1024x1792", label: "9:16 Pro" },
-  { value: "1792x1024", label: "16:9 Pro" },
-];
-
-const DURATION_OPTIONS: { value: VideoDuration; label: string }[] = [
-  { value: 4, label: "4s" },
-  { value: 8, label: "8s" },
-  { value: 12, label: "12s" },
-];
+const ACTIVE_STATUSES = ["queued", "running", "rendering"];
 
 interface ActionDockProps {
   script: ScriptRun;
+  clips?: Clip[];
   className?: string;
 }
-
-const ACTIVE_STATUSES = ["queued", "running", "rendering"];
 
 /**
  * Floating action dock for regeneration and video generation.
  * Compact design with expandable sections.
  */
-export function ActionDock({ script, className }: ActionDockProps) {
+export function ActionDock({ script, clips = [], className }: ActionDockProps) {
   const navigate = useNavigate();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const regenerateMutation = useRegenerateFromStudio();
+  const generateAllMutation = useGenerateAllClipsVideo();
 
   const [activePreset, setActivePreset] = useState<RegenPreset | null>(null);
   const [isRegenOpen, setIsRegenOpen] = useState(true);
   const [isVideoOpen, setIsVideoOpen] = useState(true);
   const [size, setSize] = useState<VideoSize>("720x1280");
-  const [duration, setDuration] = useState<VideoDuration>(8);
+  const [duration, setDuration] = useState<VideoDuration>(4);
 
   const isHardBlock = hasHardBlocks(script);
   const isFailed = script.status === "qa_failed";
   const isPassed = script.status === "qa_passed";
 
-  // Check for active video jobs
-  const { data: jobs = [] } = useQuery({
-    queryKey: ["video-jobs", script.id],
-    queryFn: async (): Promise<VideoJob[]> => {
-      const { data, error } = await supabase
-        .from("video_jobs")
-        .select("*")
-        .eq("script_run_id", script.id)
-        .order("created_at", { ascending: false });
-      if (error) throw error;
-      return data ?? [];
-    },
-  });
+  // Video jobs for this script
+  const { data: jobs = [] } = useVideoJobs(script.id);
 
   const hasActiveJob = jobs.some((j) => ACTIVE_STATUSES.includes(j.status));
+  const completedJobs = jobs.filter((j) => j.status === "succeeded" || j.status === "done").length;
+  const videoClips = clips.filter((c) => c.type === "video" && c.prompt && !c.disabled);
+  const activeJobsCount = jobs.filter((j) => ACTIVE_STATUSES.includes(j.status)).length;
 
-  // Queue video mutation
-  const queueMutation = useMutation({
-    mutationFn: async () => {
-      const { data, error } = await supabase.functions.invoke("queue-video", {
-        body: {
-          script_run_id: script.id,
-          settings: {
-            size,
-            seconds: duration,
-            model: size.startsWith("1024") || size.startsWith("1792") ? "sora-2-pro" : "sora-2",
-          },
-        },
-      });
-      if (error) throw error;
-      if (!data?.success) throw new Error(data?.error || "Failed to queue video");
-      return data;
-    },
-    onSuccess: () => {
-      toast({ title: "Video queued!" });
-      queryClient.invalidateQueries({ queryKey: ["video-jobs", script.id] });
-    },
-    onError: (error) => {
-      toast({ title: "Failed to queue video", description: error.message, variant: "destructive" });
-    },
-  });
+  const handleGenerateAll = async () => {
+    if (videoClips.length === 0) {
+      toast({ title: "No clips to generate", description: "Add video clips with prompts first" });
+      return;
+    }
+
+    await generateAllMutation.mutateAsync({
+      scriptId: script.id,
+      clips: videoClips,
+      size,
+      duration,
+    });
+  };
 
   const handleRegenerate = async (preset: RegenPreset) => {
     setActivePreset(preset);
@@ -147,6 +121,7 @@ export function ActionDock({ script, className }: ActionDockProps) {
   };
 
   const isAnyLoading = regenerateMutation.isPending;
+  const isGenerating = generateAllMutation.isPending || hasActiveJob;
 
   return (
     <div
@@ -216,9 +191,18 @@ export function ActionDock({ script, className }: ActionDockProps) {
         <CollapsibleTrigger className="flex items-center justify-between w-full p-3 hover:bg-secondary/30 transition-colors border-t border-border/30">
           <div className="flex items-center gap-2">
             <Film className="h-4 w-4 text-primary" />
-            <span className="text-xs font-medium">Generate Video</span>
+            <span className="text-xs font-medium">Generate Videos</span>
             {hasActiveJob && (
-              <Loader2 className="h-3 w-3 animate-spin text-primary" />
+              <Badge variant="outline" className="text-[10px] h-5 gap-1">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                {activeJobsCount}
+              </Badge>
+            )}
+            {completedJobs > 0 && !hasActiveJob && (
+              <Badge variant="outline" className="text-[10px] h-5 gap-1 text-success border-success/30">
+                <CheckCircle2 className="h-3 w-3" />
+                {completedJobs}
+              </Badge>
             )}
           </div>
           {isVideoOpen ? (
@@ -237,6 +221,7 @@ export function ActionDock({ script, className }: ActionDockProps) {
             </div>
           ) : (
             <>
+              {/* Settings row */}
               <div className="flex gap-2">
                 <Select value={size} onValueChange={(v) => setSize(v as VideoSize)}>
                   <SelectTrigger className="h-8 text-xs flex-1">
@@ -245,49 +230,60 @@ export function ActionDock({ script, className }: ActionDockProps) {
                   <SelectContent>
                     {SIZE_OPTIONS.map((opt) => (
                       <SelectItem key={opt.value} value={opt.value}>
-                        {opt.label}
+                        {opt.aspectRatio}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
 
                 <Select value={String(duration)} onValueChange={(v) => setDuration(Number(v) as VideoDuration)}>
-                  <SelectTrigger className="h-8 text-xs w-20">
+                  <SelectTrigger className="h-8 text-xs w-16">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     {DURATION_OPTIONS.map((opt) => (
                       <SelectItem key={opt.value} value={String(opt.value)}>
-                        {opt.label}
+                        {opt.value}s
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
 
+              {/* Generate All Button */}
               <Button
                 className="w-full h-9 gap-2"
-                disabled={queueMutation.isPending || hasActiveJob}
-                onClick={() => queueMutation.mutate()}
+                disabled={isGenerating || videoClips.length === 0}
+                onClick={handleGenerateAll}
               >
-                {queueMutation.isPending || hasActiveJob ? (
+                {isGenerating ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    {hasActiveJob ? "Rendering..." : "Queueing..."}
+                    {hasActiveJob ? `Rendering ${activeJobsCount}...` : "Queueing..."}
                   </>
                 ) : (
                   <>
-                    <Film className="h-4 w-4" />
-                    Generate (Sora 2)
+                    <Video className="h-4 w-4" />
+                    Generate All ({videoClips.length} clips)
                   </>
                 )}
               </Button>
 
-              {/* Job count */}
+              {/* Info text */}
+              <p className="text-[10px] text-muted-foreground text-center">
+                {videoClips.length === 0 
+                  ? "No video clips with prompts" 
+                  : `~${(duration * videoClips.length * 0.025).toFixed(2)} credits`
+                }
+              </p>
+
+              {/* Job summary */}
               {jobs.length > 0 && (
-                <p className="text-[10px] text-muted-foreground text-center">
-                  {jobs.filter((j) => j.status === "succeeded" || j.status === "done").length} completed • {jobs.length} total
-                </p>
+                <div className="flex justify-center gap-3 text-[10px] text-muted-foreground">
+                  <span>{completedJobs} done</span>
+                  <span>•</span>
+                  <span>{jobs.length} total</span>
+                </div>
               )}
             </>
           )}
