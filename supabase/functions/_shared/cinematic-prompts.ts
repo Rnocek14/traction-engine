@@ -226,26 +226,15 @@ export function buildCinematicPrompt(
   sections.push("Allow for natural pauses and subtle secondary movements.");
   sections.push("Actions have weight, momentum, and follow-through.");
   
-  // Quality directives - CRITICAL for professional output
-  sections.push("\n--- QUALITY REQUIREMENTS ---");
-  sections.push("MOTION: Natural motion blur. Lifelike physics with weight and momentum. Smooth 24fps cinematic cadence.");
-  sections.push("RENDERING: Photorealistic. Accurate human anatomy. Consistent proportions frame-to-frame.");
-  sections.push("TEMPORAL: Smooth interpolation between keyframes. No frame skipping. Consistent velocity.");
-  sections.push("SPATIAL: Coherent 3D space. Correct perspective. Objects maintain relative positions.");
-  sections.push("FACES: Expressive but natural. Eye contact when appropriate. Subtle micro-expressions.");
-  sections.push("HANDS: Correct finger count (5 per hand). Natural gestures. Smooth hand-object interactions.");
-  sections.push("PRODUCTION: Professional broadcast quality. Cinema-grade color. No compression artifacts.");
-  
-  // AVOID section - Anti-artifact directives (CRITICAL for Sora)
-  sections.push("\n--- AVOID (CRITICAL) ---");
-  sections.push("NO morphing between poses or body parts. NO limbs changing length.");
-  sections.push("NO sudden scene cuts or jump cuts. NO flickering or strobing.");
-  sections.push("NO unnatural limb movements or impossible contortions.");
-  sections.push("NO uncanny valley facial expressions. NO dead eyes or frozen faces.");
-  sections.push("NO temporal artifacts or frame-to-frame inconsistency.");
-  sections.push("NO text, logos, watermarks, or UI elements in frame.");
-  sections.push("NO extra fingers, merged limbs, or anatomical errors.");
-  sections.push("NO sudden lighting changes. NO color banding.");
+  // Quality directives - POSITIVE FRAMING (moderation-safe)
+  sections.push("\n--- QUALITY STANDARDS ---");
+  sections.push("MOTION: Natural motion blur with lifelike physics. Smooth 24fps cinematic cadence with realistic momentum.");
+  sections.push("ANATOMY: Consistent human proportions throughout. Five fingers per hand. Natural body mechanics.");
+  sections.push("FACES: Expressive and engaged. Natural eye movements. Subtle authentic micro-expressions.");
+  sections.push("TEMPORAL: Smooth frame interpolation. Consistent velocity and acceleration. Seamless movement flow.");
+  sections.push("SPATIAL: Coherent 3D space. Correct perspective. Objects maintain relative positions throughout.");
+  sections.push("LIGHTING: Consistent lighting direction. Stable exposure. Smooth color transitions.");
+  sections.push("PRODUCTION: Broadcast-quality output. Clean edges. Sharp details. Rich color depth.");
   
   // Continuity directive (critical for chained generation)
   if (!isFirstClip) {
