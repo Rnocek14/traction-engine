@@ -150,13 +150,13 @@ Deno.serve(async (req) => {
       // No body or invalid JSON - process all pending
     }
 
-    // Fetch pending Runway jobs
+    // Fetch pending Runway jobs - check both provider_job_id and legacy openai_video_id
     let query = supabase
       .from("video_jobs")
       .select("*")
       .eq("provider", "runway")
       .in("status", ["running", "queued"])
-      .not("openai_video_id", "is", null); // Runway task ID stored here
+      .not("openai_video_id", "is", null); // Provider task ID (stored in openai_video_id or settings.provider_job_id)
 
     if (jobFilter) {
       query = query.eq("id", jobFilter);
@@ -180,7 +180,9 @@ Deno.serve(async (req) => {
     const results: { jobId: string; status: string; error?: string }[] = [];
 
     for (const job of jobs) {
-      const runwayTaskId = job.openai_video_id;
+      // Get task ID from settings.provider_job_id (preferred) or legacy openai_video_id
+      const settings = job.settings as Record<string, unknown> | null;
+      const runwayTaskId = (settings?.provider_job_id as string) || job.openai_video_id;
       
       try {
         // Poll Runway task status

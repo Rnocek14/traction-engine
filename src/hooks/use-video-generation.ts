@@ -104,10 +104,10 @@ export interface GenerateChainedParams {
   provider?: VideoProvider;
 }
 
-// Canonical status set - all processors use: queued, running, succeeded, failed
-// "done" is legacy - check for both "succeeded" and "done" for backwards compat
+// Canonical DB status set: queued, running, done, failed
+// All processors use "done" for completed (DB CHECK constraint)
 const ACTIVE_STATUSES = ["queued", "running", "rendering"];
-const COMPLETED_STATUSES = ["succeeded", "done"]; // Canonical + legacy
+const COMPLETED_STATUSES = ["done"]; // DB canonical status
 
 /**
  * Hook for generating video for a single clip.
@@ -303,6 +303,7 @@ export function useGenerateAllClipsVideo() {
 /**
  * Hook for generating videos sequentially with frame chaining for visual continuity.
  * Each clip uses the last frame of the previous clip as its starting frame.
+ * Passes routing_hint.is_chained=true for smart provider routing.
  */
 export function useGenerateChainedSequence() {
   const { toast } = useToast();
@@ -331,6 +332,10 @@ export function useGenerateChainedSequence() {
             seed,
           },
           resume_from_job_id: resumeFromJobId,
+          // Pass is_chained hint for smart provider routing
+          routing_hint: {
+            is_chained: true,
+          },
         },
       });
 
@@ -435,10 +440,9 @@ export function useClipVideoJob(scriptId: string, clipId: string | undefined) {
  */
 /**
  * Get the video generation status for a specific clip.
- * Maps provider statuses to UI-friendly status.
+ * Maps DB statuses to UI-friendly status.
  * 
- * Canonical status set: queued, running, succeeded, failed
- * Returns "done" for UI backwards compat (maps from "succeeded" or legacy "done")
+ * Canonical DB status set: queued, running, done, failed
  */
 export function getClipVideoStatus(
   jobs: VideoJob[],
@@ -454,7 +458,7 @@ export function getClipVideoStatus(
   // Get the most recent job
   const latestJob = clipJobs[0];
   
-  // Check for completed status (canonical "succeeded" or legacy "done")
+  // Check for completed status (canonical "done")
   if (COMPLETED_STATUSES.includes(latestJob.status)) {
     return { status: "done", job: latestJob };
   }

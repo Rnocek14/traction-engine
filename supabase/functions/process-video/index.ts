@@ -1,3 +1,9 @@
+/**
+ * Process Video for OpenAI Sora
+ * 
+ * Polls OpenAI video generation status and downloads completed videos.
+ * Canonical DB status set: queued, running, done, failed
+ */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
@@ -132,9 +138,19 @@ Deno.serve(async (req) => {
 
     for (const job of jobs) {
       try {
+        // Get task ID from settings.provider_job_id (preferred) or legacy openai_video_id
+        const settings = job.settings as Record<string, unknown> | null;
+        const videoId = (settings?.provider_job_id as string) || job.openai_video_id;
+
+        if (!videoId) {
+          console.error(`Job ${job.id} has no provider_job_id or openai_video_id`);
+          results.push({ id: job.id, status: "failed", error: "No video ID found" });
+          continue;
+        }
+
         // Check status with OpenAI
         const statusResponse = await fetch(
-          `https://api.openai.com/v1/videos/${job.openai_video_id}`,
+          `https://api.openai.com/v1/videos/${videoId}`,
           {
             headers: { "Authorization": `Bearer ${openaiApiKey}` },
           }

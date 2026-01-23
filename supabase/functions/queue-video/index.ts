@@ -187,6 +187,8 @@ Style: Professional, engaging, suitable for TikTok/Reels. Smooth transitions bet
           prompt: videoPrompt.slice(0, 500), // Store truncated prompt for reference
           seed: settings.seed,
           camera_direction: clipData?.camera_direction,
+          // Provider-neutral task ID (set after API call)
+          provider_job_id: null,
         },
         progress: 0,
         openai_status: "pending",
@@ -257,13 +259,17 @@ Style: Professional, engaging, suitable for TikTok/Reels. Smooth transitions bet
     const openaiVideoId = openaiData.id;
     const openaiStatus = openaiData.status || "queued";
 
-    // Update job with OpenAI video ID
+    // Update job with OpenAI video ID - store in both openai_video_id and settings.provider_job_id
     await supabase
       .from("video_jobs")
       .update({ 
         status: "running",
         openai_video_id: openaiVideoId,
         openai_status: openaiStatus,
+        settings: {
+          ...job.settings,
+          provider_job_id: openaiVideoId,
+        },
       })
       .eq("id", job.id);
 
