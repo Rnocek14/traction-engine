@@ -125,82 +125,92 @@ export function StudioLayout({
           onToggleCollapse={() => setIsVersionRailCollapsed((prev) => !prev)}
         />
 
-        {/* Main content area */}
-        <div className="flex-1 flex flex-col min-w-0 p-3 gap-3">
-          {/* Top section: Preview + Inspector */}
-          <ResizablePanelGroup direction="horizontal" className="flex-1 min-h-0">
-            <ResizablePanel defaultSize={65} minSize={40}>
-              <PreviewCanvas
-                videoJob={activeVideoJob}
-                scenePrompts={timeline.clips.map((c) => c.prompt || "")}
-                currentSceneIndex={Math.max(0, currentSceneIndex)}
-                onSceneChange={(idx) => {
-                  const clip = timeline.clips[idx];
-                  if (clip) timeline.setPlayheadPosition(clip.start);
-                }}
-                onScrubPositionChange={(pos) => timeline.setPlayheadPosition(pos * timeline.duration)}
-                hoveredClipId={hoveredClipId}
-                className="h-full"
-              />
+        {/* Main content area with vertical resizable split */}
+        <div className="flex-1 flex flex-col min-w-0">
+          <ResizablePanelGroup direction="vertical" className="flex-1">
+            {/* Top: Preview + Inspector */}
+            <ResizablePanel defaultSize={65} minSize={30}>
+              <div className="h-full p-3 pb-0">
+                <ResizablePanelGroup direction="horizontal" className="h-full">
+                  <ResizablePanel defaultSize={65} minSize={40}>
+                    <PreviewCanvas
+                      videoJob={activeVideoJob}
+                      scenePrompts={timeline.clips.map((c) => c.prompt || "")}
+                      currentSceneIndex={Math.max(0, currentSceneIndex)}
+                      onSceneChange={(idx) => {
+                        const clip = timeline.clips[idx];
+                        if (clip) timeline.setPlayheadPosition(clip.start);
+                      }}
+                      onScrubPositionChange={(pos) => timeline.setPlayheadPosition(pos * timeline.duration)}
+                      hoveredClipId={hoveredClipId}
+                      className="h-full"
+                    />
+                  </ResizablePanel>
+
+                  <ResizableHandle withHandle className="mx-2" />
+
+                  <ResizablePanel defaultSize={35} minSize={20}>
+                    <InspectorPanel
+                      script={script}
+                      edits={editor.edits}
+                      dirtyFields={editor.dirtyFields}
+                      isDirty={editor.isDirty || timeline.isDirty}
+                      isSaving={editor.isSaving || timeline.isSaving}
+                      onUpdateField={editor.updateField}
+                      onSave={() => { editor.save(); timeline.save(); }}
+                      onReset={editor.resetEdits}
+                      onUndo={editor.undo}
+                      onRedo={editor.redo}
+                      canUndo={editor.canUndo || timeline.canUndo}
+                      canRedo={editor.canRedo || timeline.canRedo}
+                      selectedVideoJobId={selectedVideoJobId}
+                      onSelectVideoJob={setSelectedVideoJobId}
+                      onPreviewVideo={setPreviewVideoUrl}
+                      versionChainIds={versionChainIds}
+                      className="h-full"
+                    />
+                  </ResizablePanel>
+                </ResizablePanelGroup>
+              </div>
             </ResizablePanel>
 
-            <ResizableHandle withHandle className="mx-2" />
+            <ResizableHandle withHandle className="my-1" />
 
-            <ResizablePanel defaultSize={35} minSize={25}>
-              <InspectorPanel
-                script={script}
-                edits={editor.edits}
-                dirtyFields={editor.dirtyFields}
-                isDirty={editor.isDirty || timeline.isDirty}
-                isSaving={editor.isSaving || timeline.isSaving}
-                onUpdateField={editor.updateField}
-                onSave={() => { editor.save(); timeline.save(); }}
-                onReset={editor.resetEdits}
-                onUndo={editor.undo}
-                onRedo={editor.redo}
-                canUndo={editor.canUndo || timeline.canUndo}
-                canRedo={editor.canRedo || timeline.canRedo}
-                selectedVideoJobId={selectedVideoJobId}
-                onSelectVideoJob={setSelectedVideoJobId}
-                onPreviewVideo={setPreviewVideoUrl}
-                versionChainIds={versionChainIds}
-                className="h-full"
-              />
+            {/* Bottom: Timeline + Actions */}
+            <ResizablePanel defaultSize={35} minSize={20}>
+              <div className="h-full p-3 pt-0 flex gap-3">
+                <div className="flex-1 min-w-0">
+                  <ClipTimeline
+                    clips={timeline.clips}
+                    selectedClipIds={timeline.selectedClipIds}
+                    playheadPosition={timeline.playheadPosition}
+                    duration={timeline.duration}
+                    voiceover={editor.edits.voiceover}
+                    audioUrl={(script as unknown as { voiceover_audio_url?: string }).voiceover_audio_url}
+                    onClipSelect={timeline.selectClip}
+                    onReorder={timeline.reorderClips}
+                    onPlayheadChange={timeline.setPlayheadPosition}
+                    onSplit={timeline.splitAtPlayhead}
+                    onDelete={timeline.deleteSelected}
+                    onDuplicate={timeline.duplicateSelected}
+                    onToggleDisabled={timeline.toggleDisabled}
+                    onAddClip={() => timeline.addClip("New scene prompt")}
+                    onClipHover={setHoveredClipId}
+                  />
+                </div>
+
+                {/* Clip Actions + Action Dock */}
+                <div className="w-72 flex-shrink-0 space-y-3 overflow-y-auto">
+                  <ClipActions
+                    clip={selectedClip}
+                    scriptId={script.id}
+                    onClipUpdated={() => {}}
+                  />
+                  <ActionDock script={script} />
+                </div>
+              </div>
             </ResizablePanel>
           </ResizablePanelGroup>
-
-          {/* Bottom section: Timeline + Actions */}
-          <div className="flex gap-3">
-            <div className="flex-1">
-              <ClipTimeline
-                clips={timeline.clips}
-                selectedClipIds={timeline.selectedClipIds}
-                playheadPosition={timeline.playheadPosition}
-                duration={timeline.duration}
-                voiceover={editor.edits.voiceover}
-                audioUrl={(script as unknown as { voiceover_audio_url?: string }).voiceover_audio_url}
-                onClipSelect={timeline.selectClip}
-                onReorder={timeline.reorderClips}
-                onPlayheadChange={timeline.setPlayheadPosition}
-                onSplit={timeline.splitAtPlayhead}
-                onDelete={timeline.deleteSelected}
-                onDuplicate={timeline.duplicateSelected}
-                onToggleDisabled={timeline.toggleDisabled}
-                onAddClip={() => timeline.addClip("New scene prompt")}
-                onClipHover={setHoveredClipId}
-              />
-            </div>
-
-            {/* Clip Actions + Action Dock */}
-            <div className="w-80 space-y-3">
-              <ClipActions
-                clip={selectedClip}
-                scriptId={script.id}
-                onClipUpdated={() => {}}
-              />
-              <ActionDock script={script} />
-            </div>
-          </div>
         </div>
       </div>
 
