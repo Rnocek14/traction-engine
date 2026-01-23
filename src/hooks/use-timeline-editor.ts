@@ -6,6 +6,7 @@ import type { Tables, Json } from "@/integrations/supabase/types";
 import {
   Clip,
   TimelineData,
+  StyleGuide,
   generateClipId,
   scenePromptsToClips,
   splitClip,
@@ -78,6 +79,23 @@ export function useTimelineEditor({
     const scenePrompts = (content?.scene_prompts as string[]) || [];
     return scenePromptsToClips(scenePrompts, defaultSceneDuration);
   }, [timelineRecord, script.script_content, defaultSceneDuration]);
+
+  // Initialize style guide from timeline
+  const initialStyleGuide = useMemo((): StyleGuide => {
+    if (timelineRecord?.timeline_json) {
+      const data = timelineRecord.timeline_json as unknown as TimelineData;
+      return data.style_guide || {};
+    }
+    return {};
+  }, [timelineRecord]);
+
+  // Style guide state
+  const [styleGuide, setStyleGuide] = useState<StyleGuide>(initialStyleGuide);
+
+  // Reset style guide when timeline changes
+  useEffect(() => {
+    setStyleGuide(initialStyleGuide);
+  }, [initialStyleGuide]);
 
   // History state
   const [history, setHistory] = useState<HistoryState>({
@@ -469,6 +487,7 @@ export function useTimelineEditor({
       const timelineData: TimelineData = {
         clips,
         duration: calculateTimelineDuration(clips),
+        style_guide: Object.keys(styleGuide).length > 0 ? styleGuide : undefined,
       };
 
       // Always INSERT a new version to preserve history
@@ -642,6 +661,10 @@ export function useTimelineEditor({
     // Trim operations
     previewTrim,
     commitTrim,
+
+    // Style guide
+    styleGuide,
+    updateStyleGuide: setStyleGuide,
 
     // Persistence
     isDirty,
