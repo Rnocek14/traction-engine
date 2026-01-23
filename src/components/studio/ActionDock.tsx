@@ -15,6 +15,8 @@ import {
   Link2,
   Zap,
   Dices,
+  Download,
+  ExternalLink,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -43,6 +45,7 @@ import {
   QUALITY_TIERS,
   type QualityTier,
 } from "@/hooks/use-video-generation";
+import { useReelAssembly } from "@/hooks/use-reel-assembly";
 import { cn } from "@/lib/utils";
 import type { Tables } from "@/integrations/supabase/types";
 import type { Clip } from "@/types/timeline-types";
@@ -68,10 +71,14 @@ export function ActionDock({ script, clips = [], className }: ActionDockProps) {
   const regenerateMutation = useRegenerateFromStudio();
   const generateAllMutation = useGenerateAllClipsVideo();
   const generateChainedMutation = useGenerateChainedSequence();
+  
+  // Reel assembly hook
+  const assembly = useReelAssembly(script.id);
 
   const [activePreset, setActivePreset] = useState<RegenPreset | null>(null);
   const [isRegenOpen, setIsRegenOpen] = useState(false);
   const [isVideoOpen, setIsVideoOpen] = useState(true);
+  const [isExportOpen, setIsExportOpen] = useState(false);
   const [qualityTier, setQualityTier] = useState<QualityTier>("standard");
   const [isChainedMode, setIsChainedMode] = useState(true); // Default to chained for best quality
   const [seed, setSeed] = useState<number | undefined>(); // Optional seed for reproducibility
@@ -90,6 +97,9 @@ export function ActionDock({ script, clips = [], className }: ActionDockProps) {
   const completedJobs = jobs.filter((j) => j.status === "succeeded" || j.status === "done").length;
   const videoClips = clips.filter((c) => c.type === "video" && c.prompt && !c.disabled);
   const activeJobsCount = jobs.filter((j) => ACTIVE_STATUSES.includes(j.status)).length;
+  
+  // Check if we can export (need at least some completed video jobs)
+  const canExport = completedJobs >= 2 && !assembly.isAssembling;
 
   const handleGenerateAll = async () => {
     if (videoClips.length === 0) {
@@ -366,6 +376,112 @@ export function ActionDock({ script, clips = [], className }: ActionDockProps) {
                   <span>{completedJobs} done</span>
                   <span>•</span>
                   <span>{jobs.length} total</span>
+                </div>
+              )}
+            </>
+          )}
+        </CollapsibleContent>
+      </Collapsible>
+
+      {/* Export Section */}
+      <Collapsible open={isExportOpen} onOpenChange={setIsExportOpen}>
+        <CollapsibleTrigger className="flex items-center justify-between w-full p-3 hover:bg-secondary/30 transition-colors border-t border-border/30">
+          <div className="flex items-center gap-2">
+            <Download className="h-4 w-4 text-primary" />
+            <span className="text-xs font-medium">Export Reel</span>
+            {assembly.isAssembling && (
+              <Badge variant="outline" className="text-[10px] h-5 gap-1">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Rendering
+              </Badge>
+            )}
+            {assembly.hasAssembledVideo && (
+              <Badge variant="outline" className="text-[10px] h-5 gap-1 text-success border-success/30">
+                <CheckCircle2 className="h-3 w-3" />
+                Ready
+              </Badge>
+            )}
+          </div>
+          {isExportOpen ? (
+            <ChevronUp className="h-4 w-4 text-muted-foreground" />
+          ) : (
+            <ChevronDown className="h-4 w-4 text-muted-foreground" />
+          )}
+        </CollapsibleTrigger>
+
+        <CollapsibleContent className="px-3 pb-3 space-y-2">
+          {completedJobs < 2 ? (
+            <div className="text-center py-2">
+              <p className="text-[11px] text-muted-foreground">
+                Need at least 2 completed clips to export
+              </p>
+              <p className="text-[10px] text-muted-foreground/70">
+                {completedJobs}/2 clips ready
+              </p>
+            </div>
+          ) : (
+            <>
+              {/* Export info */}
+              <div className="text-center space-y-1 py-1">
+                <p className="text-[10px] text-muted-foreground">
+                  Assembles {completedJobs} clips with crossfade transitions
+                </p>
+                {script.voiceover_audio_url && (
+                  <p className="text-[9px] text-primary/80">
+                    ✓ Voiceover will be baked into final MP4
+                  </p>
+                )}
+              </div>
+
+              {/* Assemble Button */}
+              <Button
+                className="w-full h-9 gap-2"
+                disabled={!canExport}
+                onClick={() => assembly.assemble()}
+              >
+                {assembly.isAssembling ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    {assembly.status === "queued" ? "Queued..." : "Rendering..."}
+                  </>
+                ) : (
+                  <>
+                    <Download className="h-4 w-4" />
+                    Export Final MP4
+                  </>
+                )}
+              </Button>
+
+              {/* Status info */}
+              {assembly.status === "rendering" && assembly.meta?.eta_seconds && (
+                <p className="text-[10px] text-muted-foreground text-center">
+                  ETA: ~{assembly.meta.eta_seconds}s
+                </p>
+              )}
+
+              {/* Download link if ready */}
+              {assembly.hasAssembledVideo && assembly.videoUrl && (
+                <div className="flex flex-col gap-1.5">
+                  <a
+                    href={assembly.videoUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-center gap-2 text-xs text-primary hover:underline"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                    Open Final MP4
+                  </a>
+                  <p className="text-[9px] text-muted-foreground/70 text-center">
+                    {assembly.meta?.duration ? `${assembly.meta.duration.toFixed(1)}s` : ""} 
+                    {assembly.meta?.output ? ` • ${assembly.meta.output.width}x${assembly.meta.output.height}` : ""}
+                  </p>
+                </div>
+              )}
+
+              {/* Error display */}
+              {assembly.status === "failed" && assembly.meta?.error && (
+                <div className="text-center py-1">
+                  <p className="text-[10px] text-destructive">{assembly.meta.error}</p>
                 </div>
               )}
             </>
