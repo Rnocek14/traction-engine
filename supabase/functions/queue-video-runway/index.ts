@@ -18,7 +18,12 @@ interface VideoRequest {
   prompt?: string;
   settings: {
     size: string; // Sora format: "720x1280" - will be converted
-    seconds: number; // 4, 8, 12 - will be mapped to 5 or 10
+    /** Timeline duration in seconds - source of truth */
+    requested_seconds?: number;
+    /** Provider bucket duration for Runway (5 or 10) */
+    provider_seconds?: number;
+    /** Legacy field - deprecated, use requested_seconds + provider_seconds */
+    seconds?: number;
     model?: string; // "gen3a_turbo", "gen3a", "gen4_turbo"
     seed?: number;
   };
@@ -81,9 +86,26 @@ Deno.serve(async (req) => {
       throw new Error("script_run_id is required");
     }
 
+    // Extract durations - timeline-driven architecture
+    // provider_seconds takes priority, then map from requested_seconds, then legacy seconds
+    const requestedSeconds = settings?.requested_seconds;
+    const legacySeconds = settings?.seconds;
+    
+    // Determine provider duration (Runway uses 5 or 10)
+    let runwayDuration: 5 | 10;
+    if (settings?.provider_seconds !== undefined) {
+      runwayDuration = settings.provider_seconds <= 7 ? 5 : 10;
+    } else if (requestedSeconds !== undefined) {
+      runwayDuration = mapDurationToRunway(requestedSeconds);
+    } else if (legacySeconds !== undefined) {
+      runwayDuration = mapDurationToRunway(legacySeconds);
+      console.log(`Warning: Using legacy seconds=${legacySeconds} for Runway, mapped to ${runwayDuration}s`);
+    } else {
+      throw new Error("Duration is required: provide requested_seconds, provider_seconds, or seconds");
+    }
+
     // Map settings to Runway format
     const runwaySize = mapSizeToRunway(settings?.size || "720x1280");
-    const runwayDuration = mapDurationToRunway(settings?.seconds || 5);
     const runwayModel = getRunwayModel(settings?.model);
 
     // Fetch the script to get the prompt
@@ -155,7 +177,7 @@ Style: Professional short-form video, engaging, smooth transitions.
       clipData?.camera_direction
     );
 
-    // Create job record first
+    // Create job record first - store both timeline and provider durations
     const { data: job, error: jobError } = await supabase
       .from("video_jobs")
       .insert({
@@ -164,6 +186,10 @@ Style: Professional short-form video, engaging, smooth transitions.
         provider: "runway",
         settings: {
           size: runwaySize,
+          // Store both durations for timeline-driven trimming
+          requested_seconds: requestedSeconds ?? legacySeconds ?? runwayDuration,
+          provider_seconds: runwayDuration,
+          // Legacy field for backwards compat
           seconds: runwayDuration,
           model: runwayModel,
           clip_id: clip_id || null,
@@ -171,7 +197,6 @@ Style: Professional short-form video, engaging, smooth transitions.
           seed: settings?.seed,
           camera_direction: clipData?.camera_direction,
           original_sora_size: settings?.size,
-          original_sora_seconds: settings?.seconds,
         },
         progress: 0,
         openai_status: "pending", // Reusing field for runway status
