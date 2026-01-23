@@ -17,6 +17,7 @@ import {
   Dices,
   Download,
   ExternalLink,
+  AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -46,6 +47,7 @@ import {
   type QualityTier,
 } from "@/hooks/use-video-generation";
 import { useReelAssembly } from "@/hooks/use-reel-assembly";
+import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import type { Tables } from "@/integrations/supabase/types";
 import type { Clip } from "@/types/timeline-types";
@@ -106,6 +108,43 @@ export function ActionDock({ script, clips = [], className }: ActionDockProps) {
       toast({ title: "No clips to generate", description: "Add video clips with prompts first" });
       return;
     }
+
+    // ========== PRE-FLIGHT: Validate timeline exists in DB ==========
+    // This prevents the "total: 0" silent failure
+    const { data: timeline, error: timelineError } = await supabase
+      .from("studio_timelines")
+      .select("id, timeline_json")
+      .eq("script_run_id", script.id)
+      .order("version", { ascending: false })
+      .limit(1)
+      .single();
+    
+    if (timelineError || !timeline) {
+      console.error("[ActionDock] Timeline not found in DB:", timelineError);
+      toast({ 
+        title: "Timeline not saved", 
+        description: "Please wait for auto-save or press Cmd+S to save before generating videos.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    // Verify clip IDs exist in the saved timeline
+    const savedClips = (timeline.timeline_json as { clips?: Array<{ id: string }> })?.clips || [];
+    const savedClipIds = new Set(savedClips.map(c => c.id));
+    const missingClips = videoClips.filter(c => !savedClipIds.has(c.id));
+    
+    if (missingClips.length > 0) {
+      console.warn(`[ActionDock] ${missingClips.length} clips not yet saved to DB`);
+      toast({ 
+        title: "Timeline out of sync", 
+        description: "Some clips haven't been saved. Please save (Cmd+S) and try again.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    console.log(`[ActionDock] Pre-flight passed: ${videoClips.length} clips ready for generation`);
 
     const { size, seconds: duration, model } = tierConfig;
 

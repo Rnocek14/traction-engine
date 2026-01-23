@@ -92,10 +92,61 @@ export function useTimelineEditor({
   // Style guide state
   const [styleGuide, setStyleGuide] = useState<StyleGuide>(initialStyleGuide);
 
+  // Track if initial auto-save has been attempted
+  const autoSaveAttemptedRef = useRef(false);
+
   // Reset style guide when timeline changes
   useEffect(() => {
     setStyleGuide(initialStyleGuide);
   }, [initialStyleGuide]);
+
+  // ========== AUTO-CREATE TIMELINE ON FIRST LOAD ==========
+  // This is the critical fix: ensure timeline exists in DB before generation
+  useEffect(() => {
+    // Only run once, only when:
+    // - We're done loading the timeline query
+    // - No timeline record exists in DB
+    // - We have clips to save (from scene_prompts conversion)
+    // - Haven't attempted auto-save yet
+    if (
+      !isLoadingTimeline &&
+      !timelineRecord &&
+      initialClips.length > 0 &&
+      !autoSaveAttemptedRef.current
+    ) {
+      autoSaveAttemptedRef.current = true;
+      
+      const createInitialTimeline = async () => {
+        const timelineData: TimelineData = {
+          clips: initialClips,
+          duration: calculateTimelineDuration(initialClips),
+        };
+        
+        console.log(`[Timeline] Auto-creating initial timeline for script ${script.id} with ${initialClips.length} clips`);
+        
+        const { error } = await supabase.from("studio_timelines").insert({
+          script_run_id: script.id,
+          timeline_json: timelineData as unknown as Json,
+          version: 1,
+          label: "Initial (auto-created)",
+        });
+        
+        if (error) {
+          console.error("[Timeline] Failed to auto-create timeline:", error);
+          toast({
+            title: "Timeline sync warning",
+            description: "Could not save timeline to database. Please save manually before generating videos.",
+            variant: "destructive",
+          });
+        } else {
+          console.log(`[Timeline] Auto-created timeline for script ${script.id}`);
+          queryClient.invalidateQueries({ queryKey: ["studio-timeline", script.id] });
+        }
+      };
+      
+      createInitialTimeline();
+    }
+  }, [isLoadingTimeline, timelineRecord, initialClips, script.id, queryClient, toast]);
 
   // History state
   const [history, setHistory] = useState<HistoryState>({
