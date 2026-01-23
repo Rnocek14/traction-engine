@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, forwardRef } from "react";
 import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Film } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Tables } from "@/integrations/supabase/types";
@@ -16,15 +16,15 @@ interface ReelPlayerProps {
 
 /**
  * Sequential reel player that plays all clip videos seamlessly.
- * Uses dual video elements for gapless playback.
+ * Uses dual video elements for gapless playback with proper transition handling.
  */
-export function ReelPlayer({
+export const ReelPlayer = forwardRef<HTMLDivElement, ReelPlayerProps>(function ReelPlayer({
   clips,
   videoJobs,
   audioUrl,
   className,
   onClipChange,
-}: ReelPlayerProps) {
+}, ref) {
   const videoARef = useRef<HTMLVideoElement>(null);
   const videoBRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -35,6 +35,11 @@ export function ReelPlayer({
   const [isMuted, setIsMuted] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [showControls, setShowControls] = useState(true);
+  
+  // Track if we're in a transition to prevent pause state interference
+  const isTransitioningRef = useRef(false);
+  // Track the intended playing state (user intent)
+  const userWantsPlayingRef = useRef(false);
 
   // Map clips to their video jobs
   const clipVideos = clips
@@ -59,59 +64,58 @@ export function ReelPlayer({
   }, 0);
 
   // Get refs based on active player
-  const activeVideoRef = activePlayer === "A" ? videoARef : videoBRef;
-  const preloadVideoRef = activePlayer === "A" ? videoBRef : videoARef;
+  const getActiveRef = useCallback(() => {
+    return activePlayer === "A" ? videoARef : videoBRef;
+  }, [activePlayer]);
 
-  // Preload next video
+  const getPreloadRef = useCallback(() => {
+    return activePlayer === "A" ? videoBRef : videoARef;
+  }, [activePlayer]);
+
+  // Preload next video when clip index changes
   useEffect(() => {
-    if (nextVideo?.job?.output_url && preloadVideoRef.current) {
-      preloadVideoRef.current.src = nextVideo.job.output_url;
-      preloadVideoRef.current.load();
+    const preloadRef = getPreloadRef();
+    if (nextVideo?.job?.output_url && preloadRef.current) {
+      preloadRef.current.src = nextVideo.job.output_url;
+      preloadRef.current.load();
+      preloadRef.current.currentTime = 0;
     }
-  }, [nextVideo, preloadVideoRef]);
+  }, [currentClipIndex, nextVideo, getPreloadRef]);
+
+  // Load initial video
+  useEffect(() => {
+    if (currentVideo?.job?.output_url && videoARef.current && currentClipIndex === 0) {
+      videoARef.current.src = currentVideo.job.output_url;
+      videoARef.current.load();
+    }
+  }, [currentVideo, currentClipIndex]);
 
   // Calculate current position across all clips
   const calculateGlobalTime = useCallback(() => {
     let time = 0;
     for (let i = 0; i < currentClipIndex; i++) {
-      time += clipVideos[i].clip.end - clipVideos[i].clip.start;
+      if (clipVideos[i]) {
+        time += clipVideos[i].clip.end - clipVideos[i].clip.start;
+      }
     }
-    if (activeVideoRef.current) {
-      time += activeVideoRef.current.currentTime;
+    const activeRef = getActiveRef();
+    if (activeRef.current && !isNaN(activeRef.current.currentTime)) {
+      time += activeRef.current.currentTime;
     }
     return time;
-  }, [currentClipIndex, clipVideos, activeVideoRef]);
+  }, [currentClipIndex, clipVideos, getActiveRef]);
 
   const handleTimeUpdate = useCallback(() => {
-    if (!activeVideoRef.current) return;
+    const activeRef = getActiveRef();
+    if (!activeRef.current) return;
     setCurrentTime(calculateGlobalTime());
-    
-    // Check if near end of current video (within 0.1s) to prepare seamless transition
-    const timeRemaining = activeVideoRef.current.duration - activeVideoRef.current.currentTime;
-    if (timeRemaining < 0.15 && timeRemaining > 0 && nextVideo && preloadVideoRef.current) {
-      // Ensure next video is ready
-      if (preloadVideoRef.current.readyState >= 3) {
-        preloadVideoRef.current.currentTime = 0;
-      }
-    }
-  }, [calculateGlobalTime, nextVideo, preloadVideoRef, activeVideoRef]);
+  }, [calculateGlobalTime, getActiveRef]);
 
-  const handleVideoEnded = useCallback(() => {
-    if (currentClipIndex < totalClips - 1) {
-      // Seamlessly switch to preloaded video
-      const nextIndex = currentClipIndex + 1;
-      
-      // Start the preloaded video immediately
-      if (preloadVideoRef.current && isPlaying) {
-        preloadVideoRef.current.currentTime = 0;
-        preloadVideoRef.current.play().catch(() => {});
-      }
-      
-      // Swap active player
-      setActivePlayer(prev => prev === "A" ? "B" : "A");
-      setCurrentClipIndex(nextIndex);
-    } else {
-      // End of reel - loop back to start
+  // Handle seamless transition to next clip
+  const transitionToNextClip = useCallback(() => {
+    if (currentClipIndex >= totalClips - 1) {
+      // End of reel - stop and reset
+      userWantsPlayingRef.current = false;
       setIsPlaying(false);
       setCurrentClipIndex(0);
       setActivePlayer("A");
@@ -119,8 +123,43 @@ export function ReelPlayer({
         audioRef.current.pause();
         audioRef.current.currentTime = 0;
       }
+      return;
     }
-  }, [currentClipIndex, totalClips, isPlaying, preloadVideoRef]);
+
+    isTransitioningRef.current = true;
+    
+    const preloadRef = getPreloadRef();
+    const activeRef = getActiveRef();
+    
+    // Ensure preloaded video starts playing BEFORE we swap
+    if (preloadRef.current) {
+      preloadRef.current.currentTime = 0;
+      const playPromise = preloadRef.current.play();
+      
+      if (playPromise !== undefined) {
+        playPromise.then(() => {
+          // Now swap the active player
+          setActivePlayer(prev => prev === "A" ? "B" : "A");
+          setCurrentClipIndex(prev => prev + 1);
+          
+          // Pause the old video after transition
+          if (activeRef.current) {
+            activeRef.current.pause();
+          }
+          
+          isTransitioningRef.current = false;
+        }).catch(() => {
+          isTransitioningRef.current = false;
+        });
+      }
+    }
+  }, [currentClipIndex, totalClips, getPreloadRef, getActiveRef]);
+
+  const handleVideoEnded = useCallback(() => {
+    if (userWantsPlayingRef.current) {
+      transitionToNextClip();
+    }
+  }, [transitionToNextClip]);
 
   // Notify parent of clip changes
   useEffect(() => {
@@ -141,27 +180,32 @@ export function ReelPlayer({
   }, [isPlaying, audioUrl, calculateGlobalTime]);
 
   const togglePlay = useCallback(() => {
-    if (!activeVideoRef.current) return;
+    const activeRef = getActiveRef();
+    if (!activeRef.current) return;
     
     if (isPlaying) {
-      activeVideoRef.current.pause();
+      userWantsPlayingRef.current = false;
+      activeRef.current.pause();
       audioRef.current?.pause();
+      setIsPlaying(false);
     } else {
-      activeVideoRef.current.play().catch(() => {});
+      userWantsPlayingRef.current = true;
+      activeRef.current.play().catch(() => {});
       if (audioRef.current && audioUrl) {
         const globalTime = calculateGlobalTime();
         audioRef.current.currentTime = globalTime;
         audioRef.current.play().catch(() => {});
       }
+      setIsPlaying(true);
     }
-    setIsPlaying(!isPlaying);
-  }, [isPlaying, audioUrl, calculateGlobalTime, activeVideoRef]);
+  }, [isPlaying, audioUrl, calculateGlobalTime, getActiveRef]);
 
   const toggleMute = useCallback(() => {
-    if (videoARef.current) videoARef.current.muted = !isMuted;
-    if (videoBRef.current) videoBRef.current.muted = !isMuted;
-    if (audioRef.current) audioRef.current.muted = !isMuted;
-    setIsMuted(!isMuted);
+    const newMuted = !isMuted;
+    if (videoARef.current) videoARef.current.muted = newMuted;
+    if (videoBRef.current) videoBRef.current.muted = newMuted;
+    if (audioRef.current) audioRef.current.muted = newMuted;
+    setIsMuted(newMuted);
   }, [isMuted]);
 
   const skipToClip = useCallback((index: number) => {
@@ -170,16 +214,20 @@ export function ReelPlayer({
     const targetVideo = clipVideos[index];
     if (!targetVideo?.job?.output_url) return;
     
+    isTransitioningRef.current = true;
+    
+    // Reset to player A for clean state
+    setActivePlayer("A");
+    setCurrentClipIndex(index);
+    
     // Load and play the target video
-    if (activeVideoRef.current) {
-      activeVideoRef.current.src = targetVideo.job.output_url;
-      activeVideoRef.current.currentTime = 0;
-      if (isPlaying) {
-        activeVideoRef.current.play().catch(() => {});
+    if (videoARef.current) {
+      videoARef.current.src = targetVideo.job.output_url;
+      videoARef.current.currentTime = 0;
+      if (userWantsPlayingRef.current || isPlaying) {
+        videoARef.current.play().catch(() => {});
       }
     }
-    
-    setCurrentClipIndex(index);
     
     // Sync audio
     if (audioRef.current && audioUrl) {
@@ -189,13 +237,30 @@ export function ReelPlayer({
       }
       audioRef.current.currentTime = time;
     }
-  }, [totalClips, clipVideos, isPlaying, audioUrl, activeVideoRef]);
+    
+    isTransitioningRef.current = false;
+  }, [totalClips, clipVideos, isPlaying, audioUrl]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
+
+  // Handle play/pause events from video elements
+  const handleVideoPlay = useCallback((player: "A" | "B") => {
+    if (player === activePlayer && !isTransitioningRef.current) {
+      setIsPlaying(true);
+    }
+  }, [activePlayer]);
+
+  const handleVideoPause = useCallback((player: "A" | "B") => {
+    // Only update isPlaying if this is the active player AND we're not transitioning
+    // AND the user actually wanted to pause (not just a video ending)
+    if (player === activePlayer && !isTransitioningRef.current && !userWantsPlayingRef.current) {
+      setIsPlaying(false);
+    }
+  }, [activePlayer]);
 
   // Keyboard controls
   useEffect(() => {
@@ -225,11 +290,14 @@ export function ReelPlayer({
 
   if (!hasVideos) {
     return (
-      <div className={cn(
-        "relative bg-[hsl(222_47%_4%)] rounded-lg overflow-hidden border border-border/30",
-        "flex items-center justify-center aspect-[9/16] max-h-[70vh]",
-        className
-      )}>
+      <div 
+        ref={ref}
+        className={cn(
+          "relative bg-[hsl(222_47%_4%)] rounded-lg overflow-hidden border border-border/30",
+          "flex items-center justify-center aspect-[9/16] max-h-[70vh]",
+          className
+        )}
+      >
         <div className="text-center p-8">
           <Film className="h-12 w-12 mx-auto text-muted-foreground/30 mb-4" />
           <p className="text-sm text-muted-foreground">No videos ready yet</p>
@@ -243,6 +311,7 @@ export function ReelPlayer({
 
   return (
     <div
+      ref={ref}
       className={cn(
         "relative bg-[hsl(222_47%_4%)] rounded-lg overflow-hidden border border-border/30",
         className
@@ -255,32 +324,33 @@ export function ReelPlayer({
         {/* Video A */}
         <video
           ref={videoARef}
-          src={currentVideo?.job?.output_url || ""}
           className={cn(
-            "absolute inset-0 w-full h-full object-contain transition-opacity duration-100",
+            "absolute inset-0 w-full h-full object-contain transition-opacity duration-75",
             activePlayer === "A" ? "opacity-100 z-10" : "opacity-0 z-0"
           )}
           muted={isMuted}
           playsInline
+          preload="auto"
           onTimeUpdate={activePlayer === "A" ? handleTimeUpdate : undefined}
           onEnded={activePlayer === "A" ? handleVideoEnded : undefined}
-          onPlay={() => activePlayer === "A" && setIsPlaying(true)}
-          onPause={() => activePlayer === "A" && setIsPlaying(false)}
+          onPlay={() => handleVideoPlay("A")}
+          onPause={() => handleVideoPause("A")}
         />
         
         {/* Video B (preload/swap) */}
         <video
           ref={videoBRef}
           className={cn(
-            "absolute inset-0 w-full h-full object-contain transition-opacity duration-100",
+            "absolute inset-0 w-full h-full object-contain transition-opacity duration-75",
             activePlayer === "B" ? "opacity-100 z-10" : "opacity-0 z-0"
           )}
           muted={isMuted}
           playsInline
+          preload="auto"
           onTimeUpdate={activePlayer === "B" ? handleTimeUpdate : undefined}
           onEnded={activePlayer === "B" ? handleVideoEnded : undefined}
-          onPlay={() => activePlayer === "B" && setIsPlaying(true)}
-          onPause={() => activePlayer === "B" && setIsPlaying(false)}
+          onPlay={() => handleVideoPlay("B")}
+          onPause={() => handleVideoPause("B")}
         />
 
         {/* Hidden audio for voiceover */}
@@ -428,4 +498,4 @@ export function ReelPlayer({
       </div>
     </div>
   );
-}
+});
