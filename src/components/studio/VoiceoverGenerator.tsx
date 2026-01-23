@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Mic, Loader2, Play, Pause, Volume2 } from "lucide-react";
+import { Mic, Loader2, Play, Pause, Volume2, Sparkles, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
 import {
   Select,
   SelectContent,
@@ -20,36 +21,67 @@ interface VoiceoverGeneratorProps {
   voiceoverText: string;
   existingAudioUrl?: string | null;
   existingVoice?: string | null;
+  existingProvider?: string | null;
   className?: string;
 }
 
-const VOICES = [
-  { id: "coral", name: "Coral", description: "Warm, conversational" },
-  { id: "sage", name: "Sage", description: "Calm, measured" },
-  { id: "ash", name: "Ash", description: "Clear, direct" },
-  { id: "ballad", name: "Ballad", description: "Expressive, storytelling" },
-  { id: "verse", name: "Verse", description: "Dynamic, engaging" },
-  { id: "alloy", name: "Alloy", description: "Neutral, professional" },
-  { id: "echo", name: "Echo", description: "Smooth, mellow" },
-  { id: "shimmer", name: "Shimmer", description: "Bright, energetic" },
-] as const;
+type VoiceProvider = "elevenlabs" | "openai";
+
+interface VoiceOption {
+  id: string;
+  name: string;
+  description: string;
+  provider: VoiceProvider;
+}
+
+// ElevenLabs voices - high quality narration
+const ELEVENLABS_VOICES: VoiceOption[] = [
+  { id: "roger", name: "Roger", description: "Deep, authoritative", provider: "elevenlabs" },
+  { id: "sarah", name: "Sarah", description: "Warm, friendly", provider: "elevenlabs" },
+  { id: "charlie", name: "Charlie", description: "Young, energetic", provider: "elevenlabs" },
+  { id: "george", name: "George", description: "British, refined", provider: "elevenlabs" },
+  { id: "liam", name: "Liam", description: "Neutral, clear", provider: "elevenlabs" },
+  { id: "jessica", name: "Jessica", description: "Warm, conversational", provider: "elevenlabs" },
+  { id: "eric", name: "Eric", description: "Professional, smooth", provider: "elevenlabs" },
+  { id: "brian", name: "Brian", description: "Deep, dramatic", provider: "elevenlabs" },
+  { id: "lily", name: "Lily", description: "Soft, intimate", provider: "elevenlabs" },
+  { id: "chris", name: "Chris", description: "Casual, relatable", provider: "elevenlabs" },
+];
+
+// OpenAI voices - fallback/alternative
+const OPENAI_VOICES: VoiceOption[] = [
+  { id: "coral", name: "Coral", description: "Warm, conversational", provider: "openai" },
+  { id: "sage", name: "Sage", description: "Calm, measured", provider: "openai" },
+  { id: "ash", name: "Ash", description: "Clear, direct", provider: "openai" },
+  { id: "ballad", name: "Ballad", description: "Expressive, storytelling", provider: "openai" },
+  { id: "verse", name: "Verse", description: "Dynamic, engaging", provider: "openai" },
+  { id: "shimmer", name: "Shimmer", description: "Bright, energetic", provider: "openai" },
+];
+
+const ALL_VOICES = [...ELEVENLABS_VOICES, ...OPENAI_VOICES];
 
 /**
  * UI for generating and previewing TTS voiceover audio.
+ * Supports ElevenLabs (primary) and OpenAI (fallback).
  */
 export function VoiceoverGenerator({
   scriptId,
   voiceoverText,
   existingAudioUrl,
   existingVoice,
+  existingProvider,
   className,
 }: VoiceoverGeneratorProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [voice, setVoice] = useState(existingVoice || "coral");
+  const [voice, setVoice] = useState(existingVoice || "roger");
   const [instructions, setInstructions] = useState("");
   const [isPlaying, setIsPlaying] = useState(false);
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null);
+
+  // Get the provider for the selected voice
+  const selectedVoiceData = ALL_VOICES.find(v => v.id === voice);
+  const provider: VoiceProvider = selectedVoiceData?.provider || "elevenlabs";
 
   const generateMutation = useMutation({
     mutationFn: async () => {
@@ -57,6 +89,7 @@ export function VoiceoverGenerator({
         body: {
           script_run_id: scriptId,
           voice,
+          provider,
           instructions: instructions.trim() || undefined,
         },
       });
@@ -66,7 +99,11 @@ export function VoiceoverGenerator({
       return data;
     },
     onSuccess: (data) => {
-      toast({ title: "Voiceover generated", description: `Using ${voice} voice` });
+      const providerLabel = data.provider === "elevenlabs" ? "ElevenLabs" : "OpenAI";
+      toast({ 
+        title: "Voiceover generated", 
+        description: `Using ${data.voice} (${providerLabel})` 
+      });
       queryClient.invalidateQueries({ queryKey: ["script-run", scriptId] });
       
       // Play the new audio
@@ -148,9 +185,20 @@ export function VoiceoverGenerator({
           <Volume2 className="h-4 w-4 text-success" />
           <div className="flex-1 min-w-0">
             <p className="text-xs text-success font-medium">Audio generated</p>
-            <p className="text-[10px] text-muted-foreground">
-              Voice: {existingVoice || "coral"}
-            </p>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] text-muted-foreground">
+                Voice: {existingVoice || "roger"}
+              </span>
+              {existingProvider && (
+                <Badge variant="outline" className="h-4 text-[9px] px-1">
+                  {existingProvider === "elevenlabs" ? (
+                    <><Sparkles className="h-2.5 w-2.5 mr-0.5" />11Labs</>
+                  ) : (
+                    <><Zap className="h-2.5 w-2.5 mr-0.5" />OpenAI</>
+                  )}
+                </Badge>
+              )}
+            </div>
           </div>
         </div>
       ) : (
@@ -161,15 +209,38 @@ export function VoiceoverGenerator({
         </div>
       )}
 
-      {/* Voice selection */}
+      {/* Voice selection with provider grouping */}
       <div className="space-y-2">
-        <Label className="text-xs text-muted-foreground">Voice</Label>
+        <div className="flex items-center justify-between">
+          <Label className="text-xs text-muted-foreground">Voice</Label>
+          <Badge variant="outline" className="h-5 text-[10px]">
+            {provider === "elevenlabs" ? (
+              <><Sparkles className="h-3 w-3 mr-1 text-violet-500" />ElevenLabs</>
+            ) : (
+              <><Zap className="h-3 w-3 mr-1 text-emerald-500" />OpenAI</>
+            )}
+          </Badge>
+        </div>
         <Select value={voice} onValueChange={setVoice}>
           <SelectTrigger className="h-8 text-xs bg-secondary/30">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {VOICES.map((v) => (
+            <div className="px-2 py-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+              ElevenLabs (Recommended)
+            </div>
+            {ELEVENLABS_VOICES.map((v) => (
+              <SelectItem key={v.id} value={v.id} className="text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium">{v.name}</span>
+                  <span className="text-muted-foreground">— {v.description}</span>
+                </div>
+              </SelectItem>
+            ))}
+            <div className="px-2 py-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider border-t mt-1 pt-2">
+              OpenAI (Alternative)
+            </div>
+            {OPENAI_VOICES.map((v) => (
               <SelectItem key={v.id} value={v.id} className="text-xs">
                 <div className="flex items-center gap-2">
                   <span className="font-medium">{v.name}</span>
@@ -181,18 +252,20 @@ export function VoiceoverGenerator({
         </Select>
       </div>
 
-      {/* Custom instructions */}
-      <div className="space-y-2">
-        <Label className="text-xs text-muted-foreground">
-          Custom instructions (optional)
-        </Label>
-        <Textarea
-          value={instructions}
-          onChange={(e) => setInstructions(e.target.value)}
-          placeholder="e.g., Speak with excitement, pause after questions..."
-          className="text-xs bg-secondary/30 border-border/30 min-h-[60px] resize-none"
-        />
-      </div>
+      {/* Custom instructions - only show for OpenAI */}
+      {provider === "openai" && (
+        <div className="space-y-2">
+          <Label className="text-xs text-muted-foreground">
+            Custom instructions (OpenAI only)
+          </Label>
+          <Textarea
+            value={instructions}
+            onChange={(e) => setInstructions(e.target.value)}
+            placeholder="e.g., Speak with excitement, pause after questions..."
+            className="text-xs bg-secondary/30 border-border/30 min-h-[60px] resize-none"
+          />
+        </div>
+      )}
 
       {/* Generate button */}
       <Button
@@ -212,7 +285,11 @@ export function VoiceoverGenerator({
           </>
         ) : (
           <>
-            <Mic className="h-4 w-4 mr-2" />
+            {provider === "elevenlabs" ? (
+              <Sparkles className="h-4 w-4 mr-2" />
+            ) : (
+              <Mic className="h-4 w-4 mr-2" />
+            )}
             Generate Voiceover
           </>
         )}
