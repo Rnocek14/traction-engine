@@ -219,11 +219,22 @@ export function buildCinematicPrompt(
     sections.push(`\nNOTES: ${styleGuide.custom_notes}`);
   }
   
+  // Action structure guidance - CRITICAL for controlled motion
+  sections.push("\n--- ACTION STRUCTURE ---");
+  sections.push("Describe motion in BEATS: setup → action → completion.");
+  sections.push("Each beat flows naturally with realistic timing and physics.");
+  sections.push("Allow for natural pauses and subtle secondary movements.");
+  sections.push("Actions have weight, momentum, and follow-through.");
+  
   // Quality directives - CRITICAL for professional output
   sections.push("\n--- QUALITY REQUIREMENTS ---");
-  sections.push("Natural motion blur on movement. Lifelike physics and weight. Smooth 24fps cinematic cadence.");
-  sections.push("Photorealistic rendering. Accurate anatomy. Consistent proportions frame-to-frame.");
-  sections.push("Professional production value. Broadcast quality. No amateur artifacts.");
+  sections.push("MOTION: Natural motion blur. Lifelike physics with weight and momentum. Smooth 24fps cinematic cadence.");
+  sections.push("RENDERING: Photorealistic. Accurate human anatomy. Consistent proportions frame-to-frame.");
+  sections.push("TEMPORAL: Smooth interpolation between keyframes. No frame skipping. Consistent velocity.");
+  sections.push("SPATIAL: Coherent 3D space. Correct perspective. Objects maintain relative positions.");
+  sections.push("FACES: Expressive but natural. Eye contact when appropriate. Subtle micro-expressions.");
+  sections.push("HANDS: Correct finger count (5 per hand). Natural gestures. Smooth hand-object interactions.");
+  sections.push("PRODUCTION: Professional broadcast quality. Cinema-grade color. No compression artifacts.");
   
   // AVOID section - Anti-artifact directives (CRITICAL for Sora)
   sections.push("\n--- AVOID (CRITICAL) ---");
@@ -292,6 +303,24 @@ export function buildStylePrefix(styleGuide: StyleGuideData | null): string {
   if (parts.length <= 1) return "";
   
   return parts.join("\n") + "\n\nSCENE: ";
+}
+
+/**
+ * Optimal Sora API parameters for maximum quality
+ * These should be passed alongside the prompt in FormData
+ */
+export interface SoraApiParams {
+  fps: 24 | 30 | 60;
+  aspect_ratio_lock: boolean;
+  loop: boolean;
+}
+
+export function getOptimalApiParams(loop: boolean = false): SoraApiParams {
+  return {
+    fps: 24, // Cinematic standard
+    aspect_ratio_lock: true, // Prevent internal cropping
+    loop, // Seamless looping for ambient clips
+  };
 }
 
 // Re-export specs for external use if needed

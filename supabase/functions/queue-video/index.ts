@@ -173,6 +173,10 @@ Style: Professional, engaging, suitable for TikTok/Reels. Smooth transitions bet
     form.set("model", model);
     form.set("size", size);
     form.set("seconds", String(seconds));
+    
+    // Critical API parameters for maximum quality
+    form.set("fps", "24"); // Cinematic standard
+    form.set("aspect_ratio_lock", "true"); // Prevent internal cropping
 
     // Add seed for reproducibility
     if (settings.seed) {
