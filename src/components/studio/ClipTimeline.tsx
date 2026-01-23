@@ -190,10 +190,10 @@ export function ClipTimeline({
     }
   };
 
-  // Scrubbing
+  // Scrubbing - prevent while trimming
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
-      if (isDndActive || !timelineRef.current) return;
+      if (isDndActive || isTrimming || !timelineRef.current) return;
 
       const rect = timelineRef.current.getBoundingClientRect();
       const position = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
@@ -202,7 +202,7 @@ export function ClipTimeline({
       setIsDraggingScrub(true);
       onPlayheadChange(timePosition);
     },
-    [isDndActive, duration, onPlayheadChange]
+    [isDndActive, isTrimming, duration, onPlayheadChange]
   );
 
   const handleMouseMove = useCallback(
@@ -598,12 +598,14 @@ function SortableClip({
     isDragging,
   } = useSortable({ id: clip.id });
 
-  const clipDuration = clip.end - clip.start;
+  // Safe calculations to prevent division by zero
+  const safeDuration = Math.max(duration, 0.0001);
+  const clipDuration = Math.max(0.01, clip.end - clip.start);
   
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
-    width: `${(clipDuration / duration) * 100}%`,
+    width: `${(clipDuration / safeDuration) * 100}%`,
     minWidth: "100px",
   };
 
@@ -646,7 +648,10 @@ function SortableClip({
             "bg-gradient-to-r from-primary/40 to-transparent",
             "hover:from-primary/70"
           )}
-          onPointerDown={(e) => onTrimPointerDown(e, "left")}
+          onPointerDown={(e) => {
+            (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+            onTrimPointerDown(e, "left");
+          }}
         />
       )}
 
@@ -659,7 +664,10 @@ function SortableClip({
             "bg-gradient-to-l from-primary/40 to-transparent",
             "hover:from-primary/70"
           )}
-          onPointerDown={(e) => onTrimPointerDown(e, "right")}
+          onPointerDown={(e) => {
+            (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+            onTrimPointerDown(e, "right");
+          }}
         />
       )}
 
