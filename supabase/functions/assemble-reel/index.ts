@@ -170,12 +170,19 @@ function safeTransitionDuration(clips: ClipInput[], requestedDuration: number): 
 /**
  * Validate clips meet minimum duration requirements.
  * Returns validation errors for any clips that are too short.
+ * Error messages include full context for debugging.
  */
 function validateClipDurations(clips: ClipInput[], minDuration: number = 0.3): string[] {
   const errors: string[] = [];
   for (const clip of clips) {
     if (clip.trim_seconds < minDuration) {
-      errors.push(`Clip ${clip.index + 1} (${clip.id.slice(0, 8)}...) has effective duration ${clip.trim_seconds.toFixed(2)}s, minimum is ${minDuration}s`);
+      errors.push(
+        `Clip ${clip.index + 1} (${clip.id.slice(0, 8)}...) too short after clamping: ` +
+        `requested=${clip.requested_seconds.toFixed(2)}s ` +
+        `generated=${clip.generated_seconds.toFixed(2)}s ` +
+        `trim=${clip.trim_seconds.toFixed(2)}s ` +
+        `(min=${minDuration}s)`
+      );
     }
   }
   return errors;
