@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Beaker, Brain } from "lucide-react";
@@ -15,6 +15,34 @@ import { LearningInspector } from "@/components/lab/LearningInspector";
 import { getVideoJobStatus } from "@/lib/lab-engines";
 import { supabase } from "@/integrations/supabase/client";
 
+const STORAGE_KEY = "lab-results";
+
+/** Load results from sessionStorage */
+function loadStoredResults(): LabResult[] {
+  try {
+    const stored = sessionStorage.getItem(STORAGE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored) as LabResult[];
+      // Restore startTime as Date-compatible number
+      return parsed.map(r => ({ ...r, startTime: r.startTime || Date.now() }));
+    }
+  } catch {
+    // Ignore parse errors
+  }
+  return [];
+}
+
+/** Save results to sessionStorage */
+function saveResults(results: LabResult[]) {
+  try {
+    // Only keep last 50 results to avoid storage limits
+    const toStore = results.slice(0, 50);
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(toStore));
+  } catch {
+    // Ignore storage errors
+  }
+}
+
 /**
  * Video Lab - 2-Column R&D Sandbox
  * 
@@ -22,9 +50,16 @@ import { supabase } from "@/integrations/supabase/client";
  * Right: Preview (always-visible result + strip)
  */
 export default function Lab() {
-  const [results, setResults] = useState<LabResult[]>([]);
-  const [activeResultId, setActiveResultId] = useState<string | null>(null);
+  // Initialize from sessionStorage to persist across tab switches
+  const [results, setResults] = useState<LabResult[]>(() => loadStoredResults());
+  const [activeResultId, setActiveResultId] = useState<string | null>(() => {
+    const stored = loadStoredResults();
+    return stored.length > 0 ? stored[0].id : null;
+  });
   const [extendHandler, setExtendHandler] = useState<((sourceUrl: string, engine: import("@/lib/lab-engines").VideoEngine) => void) | null>(null);
+  
+  // Track if we've done initial hydration
+  const isHydrated = useRef(false);
 
   // Memoize job IDs for polling - include jobs missing providerGenerationId
   const activeJobIds = useMemo(
@@ -75,6 +110,7 @@ export default function Lab() {
     };
 
     triggerProcessing();
+    isHydrated.current = true;
 
     // Poll every 5 seconds
     const interval = setInterval(triggerProcessing, 5000);
@@ -144,8 +180,19 @@ export default function Lab() {
     fetchMissingGenIds();
   }, [jobsMissingGenId.join(",")]);
 
+  // Persist results to sessionStorage whenever they change
+  useEffect(() => {
+    if (results.length > 0 || isHydrated.current) {
+      saveResults(results);
+    }
+  }, [results]);
+
   const handleResultCreated = useCallback((result: LabResult) => {
-    setResults(prev => [result, ...prev]);
+    setResults(prev => {
+      const updated = [result, ...prev];
+      saveResults(updated); // Immediate save for new results
+      return updated;
+    });
     setActiveResultId(result.id);
   }, []);
 
