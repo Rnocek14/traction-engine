@@ -24,12 +24,20 @@ export default function Lab() {
   const [activeResultId, setActiveResultId] = useState<string | null>(null);
   const [extendHandler, setExtendHandler] = useState<((sourceUrl: string, engine: import("@/lib/lab-engines").VideoEngine) => void) | null>(null);
 
-  // Memoize job IDs for polling
+  // Memoize job IDs for polling - include jobs missing providerGenerationId
   const activeJobIds = useMemo(
     () => results
       .filter(r => r.type === "video" && (r.status === "queued" || r.status === "running"))
       .map(r => r.jobId)
       .filter(Boolean) as string[],
+    [results]
+  );
+
+  // Jobs that are done but missing providerGenerationId (need one-time fetch)
+  const jobsMissingGenId = useMemo(
+    () => results
+      .filter(r => r.type === "video" && r.status === "done" && r.engine === "luma" && !r.providerGenerationId && r.jobId)
+      .map(r => r.jobId) as string[],
     [results]
   );
 
@@ -110,6 +118,29 @@ export default function Lab() {
     enabled: activeJobIds.length > 0,
     refetchInterval: 3000,
   });
+
+  // One-time fetch for completed Luma jobs missing providerGenerationId
+  useEffect(() => {
+    if (jobsMissingGenId.length === 0) return;
+
+    const fetchMissingGenIds = async () => {
+      const updates = await Promise.all(
+        jobsMissingGenId.map(async jobId => {
+          const status = await getVideoJobStatus(jobId);
+          return { jobId, providerGenerationId: status.providerGenerationId };
+        })
+      );
+
+      setResults(prev => prev.map(result => {
+        if (result.type !== "video" || !result.jobId) return result;
+        const update = updates.find(u => u.jobId === result.jobId);
+        if (!update?.providerGenerationId) return result;
+        return { ...result, providerGenerationId: update.providerGenerationId };
+      }));
+    };
+
+    fetchMissingGenIds();
+  }, [jobsMissingGenId.join(",")]);
 
   const handleResultCreated = useCallback((result: LabResult) => {
     setResults(prev => [result, ...prev]);
