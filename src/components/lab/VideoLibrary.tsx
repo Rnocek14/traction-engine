@@ -23,7 +23,7 @@ interface VideoJob {
 }
 
 interface VideoLibraryProps {
-  onSelectVideo?: (url: string, provider: string) => void;
+  onSelectVideo?: (jobId: string, url: string, provider: string) => void;
   className?: string;
 }
 
@@ -113,7 +113,7 @@ export function VideoLibrary({ onSelectVideo, className }: VideoLibraryProps) {
                   <HoverCard key={video.id} openDelay={200} closeDelay={100}>
                     <HoverCardTrigger asChild>
                       <button
-                        onClick={() => video.output_url && onSelectVideo?.(video.output_url, video.provider)}
+                        onClick={() => video.output_url && onSelectVideo?.(video.id, video.output_url, video.provider)}
                         className={cn(
                           "group relative aspect-[9/16] rounded-md overflow-hidden",
                           "bg-secondary/50 hover:ring-2 hover:ring-primary/50 transition-all",
