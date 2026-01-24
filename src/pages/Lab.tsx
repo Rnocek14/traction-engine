@@ -276,10 +276,11 @@ export default function Lab() {
                 {/* Video Library - collapsible at bottom */}
                 <div className="border-t border-border bg-card/30">
                   <VideoLibrary
-                    onSelectVideo={(url, provider) => {
-                      // Create a temporary result for playback
+                    onSelectVideo={(jobId, url, provider) => {
+                      // Create a result with the real job ID for rating to work
                       const tempResult: LabResult = {
-                        id: `library-${Date.now()}`,
+                        id: jobId, // Use actual job ID
+                        jobId: jobId,
                         type: "video",
                         engine: provider as "sora" | "runway" | "luma",
                         status: "done",
