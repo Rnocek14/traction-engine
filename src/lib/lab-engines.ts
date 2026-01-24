@@ -71,38 +71,22 @@ export interface AssemblyOutput {
 // ============ ENGINE IMPLEMENTATIONS ============
 
 /**
- * Generate video using specified engine
- * Uses existing queue-video edge functions
+ * Generate video using specified engine via Lab-specific endpoint
+ * Bypasses script_run validation
  */
 export async function generateVideo(
   engine: VideoEngine,
   input: VideoInput
 ): Promise<{ jobId: string; error?: string }> {
-  // Map aspect ratio to size
-  const sizeMap: Record<string, string> = {
-    "9:16": "720x1280",
-    "16:9": "1280x720",
-    "1:1": "1080x1080",
-  };
-  const size = sizeMap[input.aspectRatio] || "720x1280";
-
-  // Choose the right edge function based on engine
-  const functionName = engine === "sora" 
-    ? "queue-video" 
-    : `queue-video-${engine}`;
-
-  // For Lab testing, we create a temporary script_run or use a test ID
-  // For now, we'll call the edge function directly with minimal params
-  const { data, error } = await supabase.functions.invoke(functionName, {
+  // Use the lab-specific endpoint that doesn't require a real script
+  const { data, error } = await supabase.functions.invoke("lab-queue-video", {
     body: {
-      script_run_id: "lab-test", // Special marker for Lab tests
       prompt: input.prompt,
+      provider: engine,
       settings: {
-        size,
-        requested_seconds: input.duration,
-        provider_seconds: input.duration,
+        size: input.aspectRatio, // Pass as aspect ratio, endpoint will map
+        duration: input.duration,
         style: input.style,
-        camera_direction: input.cameraDirection,
       },
     },
   });
@@ -112,7 +96,7 @@ export async function generateVideo(
   }
 
   return { 
-    jobId: data?.job?.id || data?.id || "", 
+    jobId: data?.job?.id || "", 
     error: data?.error 
   };
 }
