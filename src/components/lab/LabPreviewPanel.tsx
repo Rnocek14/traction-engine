@@ -31,7 +31,6 @@ export function LabPreviewPanel({
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [previewFailed, setPreviewFailed] = useState(false);
-  const [showRating, setShowRating] = useState(false);
 
   const activeResult = results.find(r => r.id === activeResultId);
   const activeIndex = results.findIndex(r => r.id === activeResultId);
@@ -217,15 +216,12 @@ export function LabPreviewPanel({
                   >
                     <ExternalLink className="h-3 w-3" />
                   </Button>
-                  <Button 
-                    size="sm" 
-                    variant={showRating ? "default" : "outline"}
-                    className="h-7 gap-1"
-                    onClick={() => setShowRating(!showRating)}
-                  >
-                    <Star className={cn("h-3 w-3", jobDetails?.accuracy_rating && "fill-yellow-400 text-yellow-400")} />
-                    {jobDetails?.accuracy_rating ? jobDetails.accuracy_rating : "Rate"}
-                  </Button>
+                  {jobDetails?.accuracy_rating && (
+                    <Badge variant="outline" className="h-7 gap-1 text-xs">
+                      <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
+                      {jobDetails.accuracy_rating}
+                    </Badge>
+                  )}
                 </div>
               )}
             </div>
@@ -294,16 +290,16 @@ export function LabPreviewPanel({
               )}
             </div>
 
-            {/* Rating Panel */}
-            {showRating && activeResult.type === "video" && jobDetails && (
+            {/* Rating Panel - Always visible for completed videos without a rating */}
+            {activeResult.status === "done" && activeResult.type === "video" && jobDetails && !jobDetails.accuracy_rating && (
               <VideoRatingPanel
                 jobId={activeResult.id}
                 provider={activeResult.engine}
                 originalPrompt={jobDetails.original_prompt || undefined}
                 enrichedPrompt={jobDetails.enriched_prompt || undefined}
                 styleHints={jobDetails.style_hints || undefined}
-                currentRating={jobDetails.accuracy_rating || 0}
-                currentNotes={jobDetails.accuracy_notes || ""}
+                currentRating={0}
+                currentNotes=""
                 onRated={() => refetchJobDetails()}
               />
             )}
