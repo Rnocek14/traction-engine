@@ -972,8 +972,11 @@ export type Database = {
           accuracy_notes: string | null
           accuracy_rating: number | null
           auto_artifact_flags: string[] | null
+          auto_best_use: string | null
           auto_cinematic_score: number | null
           auto_confidence: number | null
+          auto_defects: Json | null
+          auto_hard_fail: boolean | null
           auto_match_score: number | null
           auto_motion_score: number | null
           auto_overall_score: number | null
@@ -981,6 +984,8 @@ export type Database = {
           auto_rated_at: string | null
           auto_rater_version: string | null
           auto_reasons: string[] | null
+          auto_regen_recommended: boolean | null
+          auto_routing_tags: string[] | null
           created_at: string
           enriched_prompt: string | null
           error: string | null
@@ -1010,8 +1015,11 @@ export type Database = {
           accuracy_notes?: string | null
           accuracy_rating?: number | null
           auto_artifact_flags?: string[] | null
+          auto_best_use?: string | null
           auto_cinematic_score?: number | null
           auto_confidence?: number | null
+          auto_defects?: Json | null
+          auto_hard_fail?: boolean | null
           auto_match_score?: number | null
           auto_motion_score?: number | null
           auto_overall_score?: number | null
@@ -1019,6 +1027,8 @@ export type Database = {
           auto_rated_at?: string | null
           auto_rater_version?: string | null
           auto_reasons?: string[] | null
+          auto_regen_recommended?: boolean | null
+          auto_routing_tags?: string[] | null
           created_at?: string
           enriched_prompt?: string | null
           error?: string | null
@@ -1048,8 +1058,11 @@ export type Database = {
           accuracy_notes?: string | null
           accuracy_rating?: number | null
           auto_artifact_flags?: string[] | null
+          auto_best_use?: string | null
           auto_cinematic_score?: number | null
           auto_confidence?: number | null
+          auto_defects?: Json | null
+          auto_hard_fail?: boolean | null
           auto_match_score?: number | null
           auto_motion_score?: number | null
           auto_overall_score?: number | null
@@ -1057,6 +1070,8 @@ export type Database = {
           auto_rated_at?: string | null
           auto_rater_version?: string | null
           auto_reasons?: string[] | null
+          auto_regen_recommended?: boolean | null
+          auto_routing_tags?: string[] | null
           created_at?: string
           enriched_prompt?: string | null
           error?: string | null
