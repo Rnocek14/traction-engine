@@ -915,53 +915,74 @@ export type Database = {
       }
       video_jobs: {
         Row: {
+          accuracy_notes: string | null
+          accuracy_rating: number | null
           created_at: string
+          enriched_prompt: string | null
           error: string | null
           id: string
           openai_status: string | null
           openai_video_id: string | null
+          original_prompt: string | null
           output_url: string | null
           progress: number | null
           provider: string
+          rated_at: string | null
+          rated_by: string | null
           request_id: string | null
           script_run_id: string
           settings: Json | null
           spritesheet_url: string | null
           status: string
+          style_hints: string | null
           thumbnail_url: string | null
           updated_at: string
         }
         Insert: {
+          accuracy_notes?: string | null
+          accuracy_rating?: number | null
           created_at?: string
+          enriched_prompt?: string | null
           error?: string | null
           id?: string
           openai_status?: string | null
           openai_video_id?: string | null
+          original_prompt?: string | null
           output_url?: string | null
           progress?: number | null
           provider?: string
+          rated_at?: string | null
+          rated_by?: string | null
           request_id?: string | null
           script_run_id: string
           settings?: Json | null
           spritesheet_url?: string | null
           status?: string
+          style_hints?: string | null
           thumbnail_url?: string | null
           updated_at?: string
         }
         Update: {
+          accuracy_notes?: string | null
+          accuracy_rating?: number | null
           created_at?: string
+          enriched_prompt?: string | null
           error?: string | null
           id?: string
           openai_status?: string | null
           openai_video_id?: string | null
+          original_prompt?: string | null
           output_url?: string | null
           progress?: number | null
           provider?: string
+          rated_at?: string | null
+          rated_by?: string | null
           request_id?: string | null
           script_run_id?: string
           settings?: Json | null
           spritesheet_url?: string | null
           status?: string
+          style_hints?: string | null
           thumbnail_url?: string | null
           updated_at?: string
         }

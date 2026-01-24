@@ -18,6 +18,9 @@ interface LabVideoRequest {
     duration: number;
     style?: string;
   };
+  // Prompt tracking for analysis
+  original_prompt?: string;  // Raw user input before enrichment
+  style_hints?: string;      // Style hints used for enrichment
   // For Luma extend modes:
   extend_generation_id?: string; // Luma generation ID for seamless continuation
   reference_image_url?: string;  // Image URL for visual reference
@@ -36,7 +39,16 @@ Deno.serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     const body: LabVideoRequest = await req.json();
-    const { prompt, provider, settings, extend_generation_id, reference_image_url, starting_frame_url } = body;
+    const { 
+      prompt, 
+      provider, 
+      settings, 
+      original_prompt,
+      style_hints,
+      extend_generation_id, 
+      reference_image_url, 
+      starting_frame_url 
+    } = body;
     
     // Support legacy parameter name for backwards compatibility
     const effectiveReferenceUrl = reference_image_url || starting_frame_url;
@@ -80,19 +92,23 @@ Deno.serve(async (req) => {
 
     const providerSize = sizeMap[provider]?.[settings.size] || settings.size;
 
-    // Create video job
+    // Create video job with prompt tracking
     const { data: job, error: jobError } = await supabase
       .from("video_jobs")
       .insert({
         script_run_id: labScriptId,
         provider,
         status: "queued",
+        // Prompt tracking columns for analysis
+        original_prompt: original_prompt || null,
+        enriched_prompt: prompt, // The final prompt sent to provider
+        style_hints: style_hints || null,
         settings: {
           size: providerSize,
           requested_seconds: settings.duration,
           provider_seconds: settings.duration,
           style: settings.style,
-          prompt: prompt.substring(0, 500), // Truncate for storage
+          prompt: prompt.substring(0, 500), // Truncate for legacy storage
           lab_mode: true,
         },
       })

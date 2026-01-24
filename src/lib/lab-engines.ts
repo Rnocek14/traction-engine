@@ -25,6 +25,9 @@ export interface VideoInput {
   aspectRatio: "9:16" | "16:9" | "1:1";
   style?: string;
   cameraDirection?: string;
+  // Prompt tracking for analysis
+  originalPrompt?: string;  // Raw user input before enrichment
+  styleHints?: string;      // Style hints used for enrichment
   // Luma extend modes:
   extendGenerationId?: string; // Continue seamlessly from Luma generation ID
   referenceImageUrl?: string;  // Use image as visual reference
@@ -92,6 +95,9 @@ export async function generateVideo(
         duration: input.duration,
         style: input.style,
       },
+      // Prompt tracking for analysis
+      original_prompt: input.originalPrompt,
+      style_hints: input.styleHints,
       // Luma extend modes
       extend_generation_id: input.extendGenerationId,
       reference_image_url: input.referenceImageUrl,
