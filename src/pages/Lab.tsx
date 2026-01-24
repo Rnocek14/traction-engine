@@ -60,6 +60,11 @@ export default function Lab() {
   });
   const [extendHandler, setExtendHandler] = useState<((sourceUrl: string, engine: import("@/lib/lab-engines").VideoEngine) => void) | null>(null);
   
+  // Quick-compare state
+  const [compareJobIdA, setCompareJobIdA] = useState<string | null>(null);
+  const [compareJobIdB, setCompareJobIdB] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<string>("generate");
+  
   // Track if we've done initial hydration
   const isHydrated = useRef(false);
 
@@ -243,7 +248,7 @@ export default function Lab() {
       </header>
 
       {/* Main Content - Tabs for Generate vs Learning vs Compare */}
-      <Tabs defaultValue="generate" className="flex-1 min-h-0 flex flex-col">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 min-h-0 flex flex-col">
         <div className="px-4 py-1.5 border-b bg-card/30 flex items-center justify-between">
           <TabsList className="h-8">
             <TabsTrigger value="generate" className="gap-1.5 text-xs h-7">
@@ -292,13 +297,25 @@ export default function Lab() {
                 onSelectResult={handleSelectResult}
                 onAddResult={handleResultCreated}
                 onExtendVideo={extendHandler || undefined}
+                compareJobIdA={compareJobIdA}
+                compareJobIdB={compareJobIdB}
+                onSetCompareA={setCompareJobIdA}
+                onSetCompareB={setCompareJobIdB}
+                onGoToCompare={() => setActiveTab("compare")}
               />
             </ResizablePanel>
           </ResizablePanelGroup>
         </TabsContent>
 
         <TabsContent value="compare" className="flex-1 min-h-0 m-0">
-          <ComparePanel />
+          <ComparePanel
+            initialJobIdA={compareJobIdA}
+            initialJobIdB={compareJobIdB}
+            onJobIdsChange={(a, b) => {
+              setCompareJobIdA(a);
+              setCompareJobIdB(b);
+            }}
+          />
         </TabsContent>
 
         <TabsContent value="learning" className="flex-1 min-h-0 m-0">

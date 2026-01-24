@@ -18,6 +18,12 @@ interface LabPreviewPanelProps {
   onSelectResult: (id: string) => void;
   onAddResult?: (result: LabResult) => void;
   onExtendVideo?: (generationIdOrImageUrl: string, engine: VideoEngine) => void;
+  // Quick-compare support
+  compareJobIdA?: string | null;
+  compareJobIdB?: string | null;
+  onSetCompareA?: (id: string | null) => void;
+  onSetCompareB?: (id: string | null) => void;
+  onGoToCompare?: () => void;
 }
 
 export function LabPreviewPanel({
@@ -27,6 +33,11 @@ export function LabPreviewPanel({
   onSelectResult,
   onAddResult,
   onExtendVideo,
+  compareJobIdA,
+  compareJobIdB,
+  onSetCompareA,
+  onSetCompareB,
+  onGoToCompare,
 }: LabPreviewPanelProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -298,6 +309,11 @@ export function LabPreviewPanel({
         activeResultId={activeResultId}
         onSelectResult={onSelectResult}
         onSelectLibraryVideo={handleLibrarySelect}
+        compareJobIdA={compareJobIdA}
+        compareJobIdB={compareJobIdB}
+        onSetCompareA={onSetCompareA}
+        onSetCompareB={onSetCompareB}
+        onGoToCompare={onGoToCompare}
       />
     </div>
   );

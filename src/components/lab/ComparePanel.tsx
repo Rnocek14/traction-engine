@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { 
   Scale, Loader2, AlertCircle, Trophy, Target, 
@@ -60,12 +60,40 @@ const DELTA_LABELS: Record<keyof ComparisonDeltas, string> = {
 
 interface ComparePanelProps {
   className?: string;
+  initialJobIdA?: string | null;
+  initialJobIdB?: string | null;
+  onJobIdsChange?: (a: string | null, b: string | null) => void;
 }
 
-export function ComparePanel({ className }: ComparePanelProps) {
-  const [jobIdA, setJobIdA] = useState<string | null>(null);
-  const [jobIdB, setJobIdB] = useState<string | null>(null);
+export function ComparePanel({ 
+  className, 
+  initialJobIdA, 
+  initialJobIdB, 
+  onJobIdsChange 
+}: ComparePanelProps) {
+  const [jobIdA, setJobIdA] = useState<string | null>(initialJobIdA ?? null);
+  const [jobIdB, setJobIdB] = useState<string | null>(initialJobIdB ?? null);
   const [result, setResult] = useState<ComparisonResult | null>(null);
+
+  // Sync with initial props when they change (from filmstrip quick-compare)
+  useEffect(() => {
+    if (initialJobIdA !== undefined) setJobIdA(initialJobIdA);
+  }, [initialJobIdA]);
+
+  useEffect(() => {
+    if (initialJobIdB !== undefined) setJobIdB(initialJobIdB);
+  }, [initialJobIdB]);
+
+  // Notify parent of changes
+  const handleSetJobIdA = (id: string | null) => {
+    setJobIdA(id);
+    onJobIdsChange?.(id, jobIdB);
+  };
+
+  const handleSetJobIdB = (id: string | null) => {
+    setJobIdB(id);
+    onJobIdsChange?.(jobIdA, id);
+  };
 
   // Fetch available completed video jobs
   const { data: videoJobs = [], isLoading: loadingJobs } = useQuery({
@@ -182,7 +210,7 @@ export function ComparePanel({ className }: ComparePanelProps) {
             {/* Job A Selection */}
             <div className="space-y-2">
               <label className="text-xs font-medium text-muted-foreground">Video A</label>
-              <Select value={jobIdA || ""} onValueChange={setJobIdA}>
+              <Select value={jobIdA || ""} onValueChange={handleSetJobIdA}>
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Select video A" />
                 </SelectTrigger>
@@ -241,7 +269,7 @@ export function ComparePanel({ className }: ComparePanelProps) {
             {/* Job B Selection */}
             <div className="space-y-2">
               <label className="text-xs font-medium text-muted-foreground">Video B</label>
-              <Select value={jobIdB || ""} onValueChange={setJobIdB}>
+              <Select value={jobIdB || ""} onValueChange={handleSetJobIdB}>
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Select video B" />
                 </SelectTrigger>

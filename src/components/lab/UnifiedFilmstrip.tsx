@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Film, Star, Loader2, X, Clock, Filter, Sparkles, Target, Heart } from "lucide-react";
+import { Film, Star, Loader2, X, Clock, Filter, Sparkles, Target, Heart, Scale, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -38,6 +38,12 @@ interface UnifiedFilmstripProps {
   onSelectResult: (id: string) => void;
   onSelectLibraryVideo: (jobId: string, url: string, provider: string) => void;
   className?: string;
+  // Quick-compare support
+  compareJobIdA?: string | null;
+  compareJobIdB?: string | null;
+  onSetCompareA?: (id: string | null) => void;
+  onSetCompareB?: (id: string | null) => void;
+  onGoToCompare?: () => void;
 }
 
 type FilterView = "session" | "all" | "rated" | "unrated" | "discoveries";
@@ -49,6 +55,11 @@ export function UnifiedFilmstrip({
   onSelectResult,
   onSelectLibraryVideo,
   className,
+  compareJobIdA,
+  compareJobIdB,
+  onSetCompareA,
+  onSetCompareB,
+  onGoToCompare,
 }: UnifiedFilmstripProps) {
   const [filterView, setFilterView] = useState<FilterView>("session");
   const [providerFilter, setProviderFilter] = useState<ProviderFilter>("all");
@@ -330,6 +341,18 @@ export function UnifiedFilmstrip({
                           <div className="w-1.5 h-1.5 rounded-full bg-success" />
                         </div>
                       )}
+
+                      {/* Compare A/B selection badges */}
+                      {compareJobIdA === item.id && (
+                        <div className="absolute bottom-0.5 left-0.5 bg-primary text-primary-foreground text-[7px] font-bold px-1 py-0.5 rounded">
+                          A
+                        </div>
+                      )}
+                      {compareJobIdB === item.id && (
+                        <div className="absolute bottom-0.5 left-0.5 bg-primary text-primary-foreground text-[7px] font-bold px-1 py-0.5 rounded">
+                          B
+                        </div>
+                      )}
                     </div>
                   </button>
                 </HoverCardTrigger>
@@ -381,6 +404,50 @@ export function UnifiedFilmstrip({
                                 />
                               ))}
                             </div>
+                          )}
+                        </div>
+                      )}
+                      
+                      {/* Quick Compare Actions */}
+                      {onSetCompareA && onSetCompareB && item.status === "done" && (
+                        <div className="flex items-center gap-1.5 pt-2 border-t border-border mt-2">
+                          <Button
+                            size="sm"
+                            variant={compareJobIdA === item.id ? "default" : "outline"}
+                            className="h-6 text-[10px] flex-1 gap-1"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onSetCompareA(compareJobIdA === item.id ? null : item.id);
+                            }}
+                          >
+                            {compareJobIdA === item.id && <Check className="h-2.5 w-2.5" />}
+                            Set A
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant={compareJobIdB === item.id ? "default" : "outline"}
+                            className="h-6 text-[10px] flex-1 gap-1"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onSetCompareB(compareJobIdB === item.id ? null : item.id);
+                            }}
+                          >
+                            {compareJobIdB === item.id && <Check className="h-2.5 w-2.5" />}
+                            Set B
+                          </Button>
+                          {compareJobIdA && compareJobIdB && compareJobIdA !== compareJobIdB && onGoToCompare && (
+                            <Button
+                              size="sm"
+                              variant="default"
+                              className="h-6 text-[10px] gap-1"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onGoToCompare();
+                              }}
+                            >
+                              <Scale className="h-2.5 w-2.5" />
+                              Compare
+                            </Button>
                           )}
                         </div>
                       )}
