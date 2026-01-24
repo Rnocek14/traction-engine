@@ -174,22 +174,30 @@ async function maybeLearn(
     return false;
   }
 
-  let syntheticRating: number | null = null;
+  // Convert 0-100 scores to 1-5 ratings for dual-axis learning
+  const scoreToRating = (score: number): number => {
+    if (score >= 80) return 5;
+    if (score >= 60) return 4;
+    if (score >= 40) return 3;
+    if (score >= 20) return 2;
+    return 1;
+  };
 
-  if (rating.overall_score >= LEARN_HIGH_THRESHOLD) {
-    syntheticRating = 5; // Treat as excellent
-  } else if (rating.overall_score <= LEARN_LOW_THRESHOLD) {
-    syntheticRating = 1; // Treat as poor
-  }
+  const matchRating = scoreToRating(rating.match_score);
+  const preferenceRating = scoreToRating(rating.quality_score);
 
-  if (syntheticRating === null) {
-    console.log(`Skipping learning: score ${rating.overall_score} in neutral zone`);
+  // Only learn from extremes (both high or both low)
+  const bothHigh = matchRating >= 4 && preferenceRating >= 4;
+  const bothLow = matchRating <= 2 && preferenceRating <= 2;
+
+  if (!bothHigh && !bothLow) {
+    console.log(`Skipping learning: ratings not aligned (match=${matchRating}, pref=${preferenceRating})`);
     return false;
   }
 
-  console.log(`Auto-learning: score=${rating.overall_score}, synthetic_rating=${syntheticRating}`);
+  console.log(`Auto-learning: match=${matchRating}, pref=${preferenceRating}, source=auto`);
 
-  // Invoke the existing analyze-prompt-success function
+  // Invoke analyze-prompt-success with dual-axis ratings
   const { error } = await supabase.functions.invoke("analyze-prompt-success", {
     body: {
       jobId: job.id,
@@ -197,7 +205,8 @@ async function maybeLearn(
       originalPrompt: job.original_prompt,
       enrichedPrompt: job.enriched_prompt,
       styleHints: job.style_hints,
-      rating: syntheticRating,
+      match_rating: matchRating,
+      preference_rating: preferenceRating,
       source: "auto",
     },
   });
