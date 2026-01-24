@@ -21,7 +21,13 @@ interface AnalyzeRequest {
   originalPrompt?: string;
   style_hints?: string;
   styleHints?: string;
-  rating: number;
+  // Legacy single rating (deprecated, kept for backwards compat)
+  rating?: number;
+  // Dual-axis ratings (preferred)
+  match_rating?: number;
+  matchRating?: number;
+  preference_rating?: number;
+  preferenceRating?: number;
   source?: "human" | "auto"; // Track learning source
 }
 
@@ -250,10 +256,17 @@ Deno.serve(async (req) => {
     const enriched_prompt = body.enriched_prompt || body.enrichedPrompt || "";
     const original_prompt = body.original_prompt || body.originalPrompt;
     const style_hints = body.style_hints || body.styleHints;
-    const rating = body.rating;
     const source = body.source || "human";
 
-    console.log(`Analyzing prompt (source: ${source}, rating: ${rating}, provider: ${provider})`);
+    // Support dual-axis ratings (preferred) or legacy single rating
+    const matchRating = body.match_rating || body.matchRating;
+    const preferenceRating = body.preference_rating || body.preferenceRating;
+    const legacyRating = body.rating;
+
+    // Determine which rating mode we're using
+    const isDualAxis = matchRating !== undefined && preferenceRating !== undefined;
+    
+    console.log(`Analyzing prompt (source: ${source}, dual-axis: ${isDualAxis}, provider: ${provider})`);
 
     if (!enriched_prompt) {
       return new Response(
@@ -262,19 +275,76 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Determine learning type
-    const isSuccess = rating >= 4;
-    const isFailure = rating <= 2;
+    // DUAL-AXIS LEARNING MATRIX
+    // 1. Match ≥4 AND Preference ≥4 → Positive learning
+    // 2. Match ≤2 AND Preference ≤2 → Negative learning  
+    // 3. Match ≤2 AND Preference ≥4 → SERENDIPITY - DO NOT learn (happy accident)
+    // 4. Match ≥4 AND Preference ≤2 → Accurate but disliked (no learning for now)
+    // Neutral (3) on either axis → no learning
+
+    let isSuccess = false;
+    let isFailure = false;
+    let isSerendipity = false;
+    let learningRating = 3; // Default neutral
+
+    if (isDualAxis) {
+      const matchHigh = matchRating >= 4;
+      const matchLow = matchRating <= 2;
+      const prefHigh = preferenceRating >= 4;
+      const prefLow = preferenceRating <= 2;
+
+      if (matchHigh && prefHigh) {
+        isSuccess = true;
+        learningRating = 5;
+        console.log(`Dual-axis: Match ${matchRating}, Pref ${preferenceRating} → POSITIVE learning`);
+      } else if (matchLow && prefLow) {
+        isFailure = true;
+        learningRating = 1;
+        console.log(`Dual-axis: Match ${matchRating}, Pref ${preferenceRating} → NEGATIVE learning`);
+      } else if (matchLow && prefHigh) {
+        isSerendipity = true;
+        console.log(`Dual-axis: Match ${matchRating}, Pref ${preferenceRating} → SERENDIPITY (no learning)`);
+      } else if (matchHigh && prefLow) {
+        console.log(`Dual-axis: Match ${matchRating}, Pref ${preferenceRating} → Accurate but disliked (no learning)`);
+      } else {
+        console.log(`Dual-axis: Match ${matchRating}, Pref ${preferenceRating} → Neutral (no learning)`);
+      }
+    } else if (legacyRating !== undefined) {
+      // Legacy single-rating fallback
+      isSuccess = legacyRating >= 4;
+      isFailure = legacyRating <= 2;
+      learningRating = legacyRating;
+      console.log(`Legacy rating: ${legacyRating} → ${isSuccess ? "positive" : isFailure ? "negative" : "neutral"}`);
+    }
+
+    // Serendipity: flag job but don't learn patterns
+    if (isSerendipity && job_id) {
+      await supabase
+        .from("video_jobs")
+        .update({ is_serendipity: true })
+        .eq("id", job_id);
+      
+      return new Response(
+        JSON.stringify({ 
+          learned: false, 
+          reason: "Serendipity detected - happy accident flagged, no pattern learning",
+          is_serendipity: true,
+          match_rating: matchRating,
+          preference_rating: preferenceRating,
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
     
-    // Only learn from clear signals (very good or very bad)
+    // Only learn from clear signals
     if (!isSuccess && !isFailure) {
       return new Response(
-        JSON.stringify({ learned: false, reason: "Neutral rating (3) - no clear learning signal" }),
+        JSON.stringify({ learned: false, reason: "No clear learning signal (neutral or conflicting ratings)" }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    console.log(`Analyzing ${isSuccess ? "successful" : "failed"} prompt for ${provider} (rating: ${rating})`);
+    console.log(`Learning ${isSuccess ? "positive" : "negative"} patterns for ${provider}`);
 
     // Extract lexical patterns
     const patterns = extractPatterns(enriched_prompt);
@@ -289,7 +359,7 @@ Deno.serve(async (req) => {
           provider,
           patternType,
           patternValue,
-          rating,
+          learningRating,
           isSuccess,
           enriched_prompt,
           source
@@ -308,7 +378,7 @@ Deno.serve(async (req) => {
           provider,
           "style_hint",
           hint,
-          rating,
+          learningRating,
           isSuccess,
           enriched_prompt,
           source
@@ -329,7 +399,7 @@ Deno.serve(async (req) => {
           provider,
           "semantic_trait",
           trait.toLowerCase(),
-          rating,
+          learningRating,
           true,
           enriched_prompt,
           source
@@ -348,6 +418,8 @@ Deno.serve(async (req) => {
         patterns_count: learnedPatterns.length,
         patterns: learnedPatterns,
         semantic_traits: semanticTraits,
+        match_rating: matchRating,
+        preference_rating: preferenceRating,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

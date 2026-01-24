@@ -981,8 +981,11 @@ export type Database = {
           created_at: string
           enriched_prompt: string | null
           error: string | null
+          human_match_rating: number | null
+          human_preference_rating: number | null
           human_rating_override: boolean | null
           id: string
+          is_serendipity: boolean
           openai_status: string | null
           openai_video_id: string | null
           original_prompt: string | null
@@ -1013,8 +1016,11 @@ export type Database = {
           created_at?: string
           enriched_prompt?: string | null
           error?: string | null
+          human_match_rating?: number | null
+          human_preference_rating?: number | null
           human_rating_override?: boolean | null
           id?: string
+          is_serendipity?: boolean
           openai_status?: string | null
           openai_video_id?: string | null
           original_prompt?: string | null
@@ -1045,8 +1051,11 @@ export type Database = {
           created_at?: string
           enriched_prompt?: string | null
           error?: string | null
+          human_match_rating?: number | null
+          human_preference_rating?: number | null
           human_rating_override?: boolean | null
           id?: string
+          is_serendipity?: boolean
           openai_status?: string | null
           openai_video_id?: string | null
           original_prompt?: string | null

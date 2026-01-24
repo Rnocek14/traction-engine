@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Star, Save, Loader2, Sparkles, Cpu, Info } from "lucide-react";
+import { Save, Loader2, Sparkles, Cpu, Info } from "lucide-react";
 import { useMutation } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { triggerAutoRating } from "@/lib/lab-ratings";
+import { DualAxisRating } from "./DualAxisRating";
 
 interface VideoRatingPanelProps {
   jobId: string;
@@ -18,8 +19,13 @@ interface VideoRatingPanelProps {
   originalPrompt?: string;
   enrichedPrompt?: string;
   styleHints?: string;
+  // Legacy single rating (for backwards compat display)
   currentRating?: number;
   currentNotes?: string;
+  // Dual-axis ratings
+  humanMatchRating?: number | null;
+  humanPreferenceRating?: number | null;
+  isSerendipity?: boolean | null;
   // Auto-rating data
   autoMatchScore?: number | null;
   autoQualityScore?: number | null;
@@ -38,6 +44,9 @@ export function VideoRatingPanel({
   styleHints,
   currentRating = 0,
   currentNotes = "",
+  humanMatchRating,
+  humanPreferenceRating,
+  isSerendipity: currentSerendipity,
   autoMatchScore,
   autoQualityScore,
   autoOverallScore,
@@ -47,52 +56,82 @@ export function VideoRatingPanel({
   className,
 }: VideoRatingPanelProps) {
   const { toast } = useToast();
-  const [rating, setRating] = useState(currentRating);
-  const [hoveredRating, setHoveredRating] = useState(0);
+  
+  // Dual-axis state
+  const [matchRating, setMatchRating] = useState(humanMatchRating ?? 0);
+  const [preferenceRating, setPreferenceRating] = useState(humanPreferenceRating ?? 0);
   const [notes, setNotes] = useState(currentNotes);
   const [showPrompts, setShowPrompts] = useState(false);
 
+  const hasRatings = matchRating > 0 && preferenceRating > 0;
+
   const ratingMutation = useMutation({
     mutationFn: async () => {
-      // Save rating to video_jobs table
+      // Determine serendipity flag
+      const isSerendipity = matchRating <= 2 && preferenceRating >= 4;
+      
+      // Save dual-axis ratings to video_jobs table
       const { error: updateError } = await supabase
         .from("video_jobs")
         .update({
-          accuracy_rating: rating,
+          human_match_rating: matchRating,
+          human_preference_rating: preferenceRating,
+          is_serendipity: isSerendipity,
           accuracy_notes: notes || null,
           rated_at: new Date().toISOString(),
+          human_rating_override: true,
+          // Keep legacy field in sync with preference (for backwards compat)
+          accuracy_rating: preferenceRating,
         })
         .eq("id", jobId);
 
       if (updateError) throw updateError;
 
-      // Trigger learning analysis if rating is high (4-5)
-      if (rating >= 4 && enrichedPrompt) {
-        const { error: analyzeError } = await supabase.functions.invoke("analyze-prompt-success", {
+      // Trigger learning analysis with dual-axis ratings
+      if (enrichedPrompt) {
+        const { data, error: analyzeError } = await supabase.functions.invoke("analyze-prompt-success", {
           body: {
             job_id: jobId,
             provider,
             enriched_prompt: enrichedPrompt,
             original_prompt: originalPrompt,
             style_hints: styleHints,
-            rating,
+            match_rating: matchRating,
+            preference_rating: preferenceRating,
+            source: "human",
           },
         });
         
         if (analyzeError) {
           console.error("Learning analysis failed:", analyzeError);
           // Don't throw - rating was still saved
+        } else {
+          console.log("Learning result:", data);
         }
       }
 
-      return { success: true };
+      return { success: true, isSerendipity };
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
+      const matchHigh = matchRating >= 4;
+      const prefHigh = preferenceRating >= 4;
+      const matchLow = matchRating <= 2;
+      const prefLow = preferenceRating <= 2;
+
+      let message = "Feedback recorded";
+      if (matchHigh && prefHigh) {
+        message = "Learning positive patterns from this!";
+      } else if (matchLow && prefLow) {
+        message = "Learning to avoid these patterns";
+      } else if (data.isSerendipity) {
+        message = "Happy accident saved! (no prompt learning)";
+      } else if (matchHigh && prefLow) {
+        message = "Noted: accurate but not your vibe";
+      }
+
       toast({
         title: "Rating saved",
-        description: rating >= 4 
-          ? "Learning from this successful prompt!" 
-          : "Feedback recorded",
+        description: message,
       });
       onRated?.();
     },
@@ -124,17 +163,6 @@ export function VideoRatingPanel({
       }
     },
   });
-
-  const getRatingLabel = (r: number) => {
-    switch (r) {
-      case 1: return "Poor match";
-      case 2: return "Below average";
-      case 3: return "Acceptable";
-      case 4: return "Good match";
-      case 5: return "Perfect match";
-      default: return "Rate accuracy";
-    }
-  };
 
   const getScoreColor = (score: number) => {
     if (score >= 80) return "text-success";
@@ -208,56 +236,34 @@ export function VideoRatingPanel({
         </Button>
       )}
 
-      {/* Human Rating Section */}
-      <div className="flex items-center justify-between">
-        <Label className="text-xs font-medium flex items-center gap-1.5">
+      {/* Dual-Axis Human Rating */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-1.5">
           <Sparkles className="h-3 w-3 text-primary" />
-          Your Rating
+          <Label className="text-xs font-medium">Your Rating</Label>
           <Tooltip>
             <TooltipTrigger>
               <Info className="h-3 w-3 text-muted-foreground" />
             </TooltipTrigger>
-            <TooltipContent>
-              <p className="text-xs max-w-48">Your rating overrides AI scores for learning. Rate high (4-5) for prompts that worked well.</p>
+            <TooltipContent className="max-w-64">
+              <p className="text-xs">
+                Rate both axes: <strong>Match</strong> = did it follow your prompt? 
+                <strong> Preference</strong> = do you like the result?
+                Happy accidents (low match, high preference) won't affect prompt learning.
+              </p>
             </TooltipContent>
           </Tooltip>
-        </Label>
-        <span className="text-xs text-muted-foreground">
-          {getRatingLabel(hoveredRating || rating)}
-        </span>
-      </div>
+        </div>
 
-      {/* Star Rating */}
-      <div className="flex items-center gap-1">
-        {[1, 2, 3, 4, 5].map((star) => (
-          <button
-            key={star}
-            onClick={() => setRating(star)}
-            onMouseEnter={() => setHoveredRating(star)}
-            onMouseLeave={() => setHoveredRating(0)}
-            className="p-1 transition-transform hover:scale-110"
-          >
-            <Star
-              className={cn(
-                "h-5 w-5 transition-colors",
-                (hoveredRating || rating) >= star
-                  ? "fill-yellow-400 text-yellow-400"
-                  : "text-muted-foreground/30"
-              )}
-            />
-          </button>
-        ))}
-        
-        {rating >= 4 && (
-          <span className="ml-2 text-[10px] text-primary font-medium">
-            ✨ Will learn from this!
-          </span>
-        )}
-        {rating <= 2 && rating > 0 && (
-          <span className="ml-2 text-[10px] text-destructive font-medium">
-            ⚠️ Will avoid these patterns
-          </span>
-        )}
+        <DualAxisRating
+          matchRating={matchRating}
+          preferenceRating={preferenceRating}
+          onMatchChange={setMatchRating}
+          onPreferenceChange={setPreferenceRating}
+          autoMatchScore={autoMatchScore}
+          autoQualityScore={autoQualityScore}
+          compact
+        />
       </div>
 
       {/* Show prompts toggle */}
@@ -295,7 +301,7 @@ export function VideoRatingPanel({
       )}
 
       {/* Notes */}
-      {rating > 0 && (
+      {hasRatings && (
         <div className="space-y-1.5">
           <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">
             Notes (optional)
@@ -310,7 +316,7 @@ export function VideoRatingPanel({
       )}
 
       {/* Save Button */}
-      {rating > 0 && (
+      {hasRatings && (
         <Button
           onClick={() => ratingMutation.mutate()}
           disabled={ratingMutation.isPending}

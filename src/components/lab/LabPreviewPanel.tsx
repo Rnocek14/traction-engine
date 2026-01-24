@@ -249,6 +249,9 @@ export function LabPreviewPanel({
                       styleHints={jobDetails?.style_hints || undefined}
                       currentRating={jobDetails?.accuracy_rating || 0}
                       currentNotes=""
+                      humanMatchRating={jobDetails?.human_match_rating}
+                      humanPreferenceRating={jobDetails?.human_preference_rating}
+                      isSerendipity={jobDetails?.is_serendipity}
                       autoMatchScore={jobDetails?.auto_match_score}
                       autoQualityScore={jobDetails?.auto_quality_score}
                       autoOverallScore={jobDetails?.auto_overall_score}
