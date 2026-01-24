@@ -10,17 +10,20 @@ export interface VideoJobDetails {
   original_prompt: string | null;
   enriched_prompt: string | null;
   style_hints: string | null;
-  accuracy_rating: number | null; // Legacy, kept for backwards compat
+  accuracy_rating: number | null;
   accuracy_notes: string | null;
   output_url: string | null;
   status: string;
-  // Auto-rating fields
+  // Auto-rating fields (enhanced 4-dimension)
   auto_match_score: number | null;
   auto_quality_score: number | null;
+  auto_motion_score: number | null;
+  auto_cinematic_score: number | null;
   auto_overall_score: number | null;
   auto_confidence: number | null;
   auto_rated_at: string | null;
   auto_reasons: string[] | null;
+  auto_artifact_flags: string[] | null;
   human_rating_override: boolean | null;
   // Dual-axis human ratings
   human_match_rating: number | null;
@@ -34,9 +37,9 @@ export async function getVideoJobDetails(jobId: string): Promise<VideoJobDetails
     .select(`
       id, provider, original_prompt, enriched_prompt, style_hints, 
       accuracy_rating, accuracy_notes, output_url, status,
-      auto_match_score, auto_quality_score, auto_overall_score, 
-      auto_confidence, auto_rated_at, auto_reasons, human_rating_override,
-      human_match_rating, human_preference_rating, is_serendipity
+      auto_match_score, auto_quality_score, auto_motion_score, auto_cinematic_score,
+      auto_overall_score, auto_confidence, auto_rated_at, auto_reasons, auto_artifact_flags,
+      human_rating_override, human_match_rating, human_preference_rating, is_serendipity
     `)
     .eq("id", jobId)
     .single();

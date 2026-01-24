@@ -29,9 +29,12 @@ interface VideoRatingPanelProps {
   // Auto-rating data
   autoMatchScore?: number | null;
   autoQualityScore?: number | null;
+  autoMotionScore?: number | null;
+  autoCinematicScore?: number | null;
   autoOverallScore?: number | null;
   autoConfidence?: number | null;
   autoReasons?: string[] | null;
+  autoArtifactFlags?: string[] | null;
   onRated?: () => void;
   className?: string;
 }
@@ -49,9 +52,12 @@ export function VideoRatingPanel({
   isSerendipity: currentSerendipity,
   autoMatchScore,
   autoQualityScore,
+  autoMotionScore,
+  autoCinematicScore,
   autoOverallScore,
   autoConfidence,
   autoReasons,
+  autoArtifactFlags,
   onRated,
   className,
 }: VideoRatingPanelProps) {
@@ -209,12 +215,38 @@ export function VideoRatingPanel({
               </div>
               <Progress value={autoQualityScore || 0} className="h-1" />
             </div>
+            <div className="space-y-1">
+              <div className="flex justify-between text-muted-foreground">
+                <span>Motion</span>
+                <span className={getScoreColor(autoMotionScore || 0)}>{autoMotionScore || 0}</span>
+              </div>
+              <Progress value={autoMotionScore || 0} className="h-1" />
+            </div>
+            <div className="space-y-1">
+              <div className="flex justify-between text-muted-foreground">
+                <span>Cinematic</span>
+                <span className={getScoreColor(autoCinematicScore || 0)}>{autoCinematicScore || 0}</span>
+              </div>
+              <Progress value={autoCinematicScore || 0} className="h-1" />
+            </div>
           </div>
 
+          {autoArtifactFlags && autoArtifactFlags.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {autoArtifactFlags.map((flag) => (
+                <Badge key={flag} variant="destructive" className="text-[9px] h-4">
+                  {flag.replace(/_/g, " ")}
+                </Badge>
+              ))}
+            </div>
+          )}
+
           {autoReasons && autoReasons.length > 0 && (
-            <div className="text-[10px] text-muted-foreground">
-              <span className="font-medium">Notes: </span>
-              {autoReasons.slice(0, 2).join(". ")}
+            <div className="text-[10px] text-muted-foreground space-y-0.5">
+              <span className="font-medium">Analysis: </span>
+              {autoReasons.slice(0, 3).map((reason, i) => (
+                <div key={i} className="pl-2 text-muted-foreground/80">• {reason}</div>
+              ))}
             </div>
           )}
         </div>
