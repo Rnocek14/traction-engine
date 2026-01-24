@@ -1324,6 +1324,29 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      get_compare_queue_health: {
+        Args: never
+        Returns: {
+          done_count: number
+          failed_count: number
+          oldest_pending_age_seconds: number
+          pending_count: number
+          running_count: number
+          stale_running_count: number
+        }[]
+      }
+      get_cron_status: {
+        Args: never
+        Returns: {
+          active: boolean
+          jobname: string
+          last_end: string
+          last_return_message: string
+          last_start: string
+          last_status: string
+          schedule: string
+        }[]
+      }
       has_any_role: {
         Args: {
           _roles: Database["public"]["Enums"]["app_role"][]
