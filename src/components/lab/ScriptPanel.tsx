@@ -1,14 +1,11 @@
 import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
-import { FileText, Loader2, Sparkles, Copy, Check } from "lucide-react";
+import { FileText, Copy, Check, Wand2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { useToast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
 
 interface ScriptPanelProps {
   className?: string;
@@ -17,75 +14,56 @@ interface ScriptPanelProps {
 
 type ScriptPreset = "luna" | "educational" | "story" | "hook";
 
-const PRESETS: { id: ScriptPreset; name: string; description: string }[] = [
-  { id: "luna", name: "Luna Tone", description: "Warm, conversational persona" },
-  { id: "educational", name: "Educational", description: "Clear, informative style" },
-  { id: "story", name: "Story", description: "Narrative, engaging format" },
-  { id: "hook", name: "Hook Only", description: "Short, attention-grabbing" },
+const PRESETS: { id: ScriptPreset; name: string; description: string; template: string }[] = [
+  { 
+    id: "luna", 
+    name: "Luna Tone", 
+    description: "Warm, conversational persona",
+    template: "You know what nobody talks about? [Topic]. Here's what I learned after [experience]..."
+  },
+  { 
+    id: "educational", 
+    name: "Educational", 
+    description: "Clear, informative style",
+    template: "Let me explain [Topic] in simple terms. First, [point 1]. Second, [point 2]. The key takeaway is..."
+  },
+  { 
+    id: "story", 
+    name: "Story", 
+    description: "Narrative, engaging format",
+    template: "It was 3am when I realized [discovery]. This changed everything about how I think about [topic]..."
+  },
+  { 
+    id: "hook", 
+    name: "Hook Only", 
+    description: "Short, attention-grabbing",
+    template: "Stop scrolling. This will save you [benefit]."
+  },
 ];
 
 export function ScriptPanel({ className, onScriptGenerated }: ScriptPanelProps) {
-  const { toast } = useToast();
-
   const [preset, setPreset] = useState<ScriptPreset>("luna");
-  const [topic, setTopic] = useState("");
-  const [generatedScript, setGeneratedScript] = useState("");
-  const [generatedVoiceover, setGeneratedVoiceover] = useState("");
+  const [script, setScript] = useState("");
   const [copied, setCopied] = useState(false);
 
-  const generateMutation = useMutation({
-    mutationFn: async () => {
-      // For Lab testing, we use a simplified script generation
-      // In production this would use the full generate-script edge function
-      const { data, error } = await supabase.functions.invoke("generate-script", {
-        body: {
-          topic: topic || "A fascinating discovery",
-          preset,
-          lab_mode: true, // Signal this is a Lab test
-        },
-      });
-
-      if (error) throw error;
-      return data;
-    },
-    onSuccess: (data) => {
-      if (data.error) {
-        toast({
-          title: "Script generation failed",
-          description: data.error,
-          variant: "destructive",
-        });
-        return;
-      }
-
-      const script = data.script_content || data.script || "";
-      const voiceover = data.voiceover || script;
-
-      setGeneratedScript(typeof script === "string" ? script : JSON.stringify(script, null, 2));
-      setGeneratedVoiceover(voiceover);
-      onScriptGenerated?.(script, voiceover);
-
-      toast({
-        title: "Script generated",
-        description: `${preset} preset • ${voiceover.split(/\s+/).length} words`,
-      });
-    },
-    onError: (error) => {
-      toast({
-        title: "Script generation failed",
-        description: error.message,
-        variant: "destructive",
-      });
-    },
-  });
-
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(generatedVoiceover || generatedScript);
+    await navigator.clipboard.writeText(script);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const wordCount = (generatedVoiceover || generatedScript).split(/\s+/).filter(Boolean).length;
+  const handleApplyTemplate = () => {
+    const template = PRESETS.find(p => p.id === preset)?.template || "";
+    setScript(template);
+    onScriptGenerated?.(template, template);
+  };
+
+  const handleScriptChange = (value: string) => {
+    setScript(value);
+    onScriptGenerated?.(value, value);
+  };
+
+  const wordCount = script.split(/\s+/).filter(Boolean).length;
   const estimatedDuration = Math.ceil(wordCount / 2.5);
 
   return (
@@ -95,10 +73,10 @@ export function ScriptPanel({ className, onScriptGenerated }: ScriptPanelProps) 
         <div className="flex items-center gap-2">
           <FileText className="h-4 w-4 text-primary" />
           <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-            Script Generation
+            Script Editor
           </span>
         </div>
-        {generatedScript && (
+        {script && (
           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleCopy}>
             {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
           </Button>
@@ -107,7 +85,7 @@ export function ScriptPanel({ className, onScriptGenerated }: ScriptPanelProps) 
 
       {/* Preset Selector */}
       <div className="space-y-2">
-        <Label className="text-xs text-muted-foreground">Style Preset</Label>
+        <Label className="text-xs text-muted-foreground">Template Presets</Label>
         <RadioGroup
           value={preset}
           onValueChange={(v) => setPreset(v as ScriptPreset)}
@@ -134,70 +112,42 @@ export function ScriptPanel({ className, onScriptGenerated }: ScriptPanelProps) 
             </div>
           ))}
         </RadioGroup>
+        <Button 
+          variant="outline" 
+          size="sm" 
+          className="w-full h-7 text-xs"
+          onClick={handleApplyTemplate}
+        >
+          <Wand2 className="h-3 w-3 mr-1" />
+          Apply Template
+        </Button>
       </div>
 
-      {/* Topic Input */}
-      <div className="space-y-2">
-        <Label className="text-xs text-muted-foreground">Topic / Prompt</Label>
+      {/* Script Editor */}
+      <div className="space-y-2 flex-1">
+        <div className="flex justify-between">
+          <Label className="text-xs text-muted-foreground">Script / Voiceover</Label>
+          <div className="flex gap-1">
+            <Badge variant="outline" className="h-5 text-[10px]">
+              {wordCount} words
+            </Badge>
+            <Badge variant="outline" className="h-5 text-[10px]">
+              ~{estimatedDuration}s
+            </Badge>
+          </div>
+        </div>
         <Textarea
-          value={topic}
-          onChange={(e) => setTopic(e.target.value)}
-          placeholder="What should the script be about? (optional)"
-          className="text-xs bg-secondary/30 border-border/30 min-h-[60px] resize-none"
+          value={script}
+          onChange={(e) => handleScriptChange(e.target.value)}
+          placeholder="Write your script here, or apply a template above..."
+          className="text-xs bg-secondary/30 border-border/30 min-h-[150px] resize-none flex-1"
         />
       </div>
 
-      {/* Generate Button */}
-      <Button
-        onClick={() => generateMutation.mutate()}
-        disabled={generateMutation.isPending}
-        className="w-full"
-      >
-        {generateMutation.isPending ? (
-          <>
-            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            Generating...
-          </>
-        ) : (
-          <>
-            <Sparkles className="h-4 w-4 mr-2" />
-            Generate with {PRESETS.find(p => p.id === preset)?.name}
-          </>
-        )}
-      </Button>
-
-      {/* Output */}
-      {generatedScript && (
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <Label className="text-xs text-muted-foreground">Generated Script</Label>
-            <div className="flex gap-1">
-              <Badge variant="outline" className="h-5 text-[10px]">
-                {wordCount} words
-              </Badge>
-              <Badge variant="outline" className="h-5 text-[10px]">
-                ~{estimatedDuration}s
-              </Badge>
-            </div>
-          </div>
-          
-          <div className="rounded-lg border bg-secondary/20 p-3 max-h-[200px] overflow-y-auto">
-            <p className="text-xs whitespace-pre-wrap">
-              {generatedVoiceover || generatedScript}
-            </p>
-          </div>
-
-          {/* Scene beats if available */}
-          {typeof generatedScript === "object" && (
-            <div className="space-y-1">
-              <Label className="text-[10px] text-muted-foreground">Scene Beats</Label>
-              <pre className="text-[10px] text-muted-foreground bg-secondary/30 p-2 rounded overflow-x-auto">
-                {JSON.stringify(generatedScript, null, 2)}
-              </pre>
-            </div>
-          )}
-        </div>
-      )}
+      {/* Tip */}
+      <p className="text-[10px] text-muted-foreground">
+        💡 This is manual mode - write or paste your script. AI generation requires auth.
+      </p>
     </div>
   );
 }
