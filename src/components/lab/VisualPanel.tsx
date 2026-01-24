@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Video, Loader2, Play, RefreshCw, Beaker, AlertCircle } from "lucide-react";
+import { Video, Loader2, Play, Beaker, AlertCircle, Copy, ExternalLink, Eye } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -24,6 +24,7 @@ import {
   getVideoJobStatus,
 } from "@/lib/lab-engines";
 import { STYLE_PRESETS } from "@/data/style-presets";
+import { VideoPreview } from "./VideoPreview";
 
 interface VisualPanelProps {
   className?: string;
@@ -48,9 +49,16 @@ export function VisualPanel({ className, onVideoGenerated }: VisualPanelProps) {
   const [aspectRatio, setAspectRatio] = useState<"9:16" | "16:9" | "1:1">("9:16");
   const [stylePreset, setStylePreset] = useState("");
   const [generatedVideos, setGeneratedVideos] = useState<GeneratedVideo[]>([]);
+  const [activePreviewUrl, setActivePreviewUrl] = useState<string | null>(null);
 
   // Get valid durations for selected engine
   const validDurations = ENGINE_DURATIONS[selectedEngine];
+
+  // Memoize job IDs to prevent unnecessary re-fetches
+  const jobIds = useMemo(
+    () => generatedVideos.map(v => v.jobId).join(","),
+    [generatedVideos]
+  );
 
   // Auto-adjust duration when engine changes
   useEffect(() => {
@@ -116,7 +124,7 @@ export function VisualPanel({ className, onVideoGenerated }: VisualPanelProps) {
 
   // Poll for job status updates
   useQuery({
-    queryKey: ["lab-video-jobs", generatedVideos.map(v => v.jobId)],
+    queryKey: ["lab-video-jobs", jobIds],
     queryFn: async () => {
       const activeJobs = generatedVideos.filter(
         v => v.status === "queued" || v.status === "running"
@@ -136,9 +144,10 @@ export function VisualPanel({ className, onVideoGenerated }: VisualPanelProps) {
           const update = updates.find(u => u.jobId === video.jobId);
           if (!update) return video;
 
-          // Notify on completion
+          // Notify on completion and auto-select preview
           if (update.status === "done" && video.status !== "done" && update.outputUrl) {
             onVideoGenerated?.(update.outputUrl, video.engine);
+            setActivePreviewUrl(update.outputUrl);
           }
 
           return {
@@ -182,6 +191,12 @@ export function VisualPanel({ className, onVideoGenerated }: VisualPanelProps) {
     VIDEO_ENGINES.forEach(engine => {
       generateMutation.mutate(engine.id);
     });
+  };
+
+  const handleCopyUrl = async (url?: string) => {
+    if (!url) return;
+    await navigator.clipboard.writeText(url);
+    toast({ title: "Copied", description: "Video URL copied to clipboard" });
   };
 
   const getStatusBadge = (video: GeneratedVideo) => {
@@ -333,28 +348,62 @@ export function VisualPanel({ className, onVideoGenerated }: VisualPanelProps) {
         </Button>
       </div>
 
+      {/* Active Preview */}
+      {activePreviewUrl && (
+        <div className="space-y-2 border rounded-lg p-3 bg-background/50">
+          <div className="flex justify-between items-center">
+            <Label className="text-xs text-muted-foreground">Active Preview</Label>
+            <div className="flex gap-1">
+              <Button 
+                size="sm" 
+                variant="ghost" 
+                className="h-6 text-[10px]"
+                onClick={() => handleCopyUrl(activePreviewUrl)}
+              >
+                <Copy className="h-3 w-3 mr-1" /> Copy URL
+              </Button>
+              <Button 
+                size="sm" 
+                variant="ghost" 
+                className="h-6 text-[10px]"
+                onClick={() => window.open(activePreviewUrl, "_blank")}
+              >
+                <ExternalLink className="h-3 w-3 mr-1" /> Open
+              </Button>
+            </div>
+          </div>
+          <div className="aspect-video bg-black rounded-lg overflow-hidden">
+            <VideoPreview url={activePreviewUrl} className="w-full h-full" />
+          </div>
+        </div>
+      )}
+
       {/* Generated Videos Grid */}
       {generatedVideos.length > 0 && (
         <div className="space-y-2">
-          <Label className="text-xs text-muted-foreground">Results</Label>
+          <Label className="text-xs text-muted-foreground">Results ({generatedVideos.length})</Label>
           <div className="grid grid-cols-2 gap-2 max-h-[300px] overflow-y-auto">
             {generatedVideos.map((video, idx) => (
               <div
                 key={video.jobId || idx}
-                className="rounded-lg border bg-secondary/20 overflow-hidden"
+                className={cn(
+                  "rounded-lg border bg-secondary/20 overflow-hidden cursor-pointer transition-colors",
+                  activePreviewUrl === video.outputUrl && "ring-2 ring-primary"
+                )}
+                onClick={() => video.outputUrl && setActivePreviewUrl(video.outputUrl)}
               >
                 {/* Video preview */}
                 <div className="aspect-video bg-black/50 relative">
                   {video.status === "done" && video.outputUrl ? (
                     <video
                       src={video.outputUrl}
-                      controls
                       className="w-full h-full object-contain"
+                      muted
                     />
                   ) : video.status === "failed" ? (
                     <div className="flex flex-col items-center justify-center h-full text-destructive">
                       <AlertCircle className="h-6 w-6 mb-1" />
-                      <span className="text-[10px]">{video.error || "Failed"}</span>
+                      <span className="text-[10px] px-2 text-center">{video.error || "Failed"}</span>
                     </div>
                   ) : (
                     <div className="flex flex-col items-center justify-center h-full">
@@ -366,17 +415,47 @@ export function VisualPanel({ className, onVideoGenerated }: VisualPanelProps) {
                   )}
                 </div>
 
-                {/* Metadata */}
-                <div className="p-2 flex items-center justify-between">
-                  {getEngineBadge(video.engine)}
-                  <div className="flex items-center gap-2">
-                    {getStatusBadge(video)}
-                    {video.status === "done" && (
-                      <span className="text-[10px] text-muted-foreground">
-                        {((Date.now() - video.startTime) / 1000).toFixed(1)}s
-                      </span>
-                    )}
+                {/* Metadata + Actions */}
+                <div className="p-2 space-y-1">
+                  <div className="flex items-center justify-between">
+                    {getEngineBadge(video.engine)}
+                    <div className="flex items-center gap-2">
+                      {getStatusBadge(video)}
+                      {video.status === "done" && (
+                        <span className="text-[10px] text-muted-foreground">
+                          {((Date.now() - video.startTime) / 1000).toFixed(1)}s
+                        </span>
+                      )}
+                    </div>
                   </div>
+
+                  {/* Action buttons for completed videos */}
+                  {video.status === "done" && video.outputUrl && (
+                    <div className="flex gap-1 pt-1">
+                      <Button 
+                        size="sm" 
+                        variant="secondary" 
+                        className="h-6 text-[10px] flex-1"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleCopyUrl(video.outputUrl);
+                        }}
+                      >
+                        <Copy className="h-3 w-3 mr-1" /> Copy URL
+                      </Button>
+                      <Button 
+                        size="sm" 
+                        variant="ghost" 
+                        className="h-6 text-[10px]"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActivePreviewUrl(video.outputUrl!);
+                        }}
+                      >
+                        <Eye className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
