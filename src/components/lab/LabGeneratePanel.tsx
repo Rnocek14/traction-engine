@@ -29,6 +29,7 @@ import {
   getValidDuration,
   generateVideo,
   generateVoice,
+  enrichPrompt,
 } from "@/lib/lab-engines";
 import { STYLE_PRESETS } from "@/data/style-presets";
 
@@ -119,6 +120,8 @@ export function LabGeneratePanel({
   const [stylePreset, setStylePreset] = useState("");
   const [chainMode, setChainMode] = useState(false);
   const [selectedChainSource, setSelectedChainSource] = useState<string>("");
+  const [autoEnhance, setAutoEnhance] = useState(true);
+  const [isEnriching, setIsEnriching] = useState(false);
   
   // Voice state
   const [voiceProvider, setVoiceProvider] = useState<VoiceEngine>("elevenlabs");
@@ -173,23 +176,20 @@ export function LabGeneratePanel({
   const videoMutation = useMutation({
     mutationFn: async ({ 
       engine, 
+      prompt,
       extendGenerationId, 
       referenceImageUrl 
     }: { 
       engine: VideoEngine; 
+      prompt?: string;  // Pre-built prompt (for auto-enhance flow)
       extendGenerationId?: string;  // Luma: seamless continuation
       referenceImageUrl?: string;   // Luma: visual reference
     }) => {
-      const presetData = STYLE_PRESETS.find(p => p.id === stylePreset);
-      const styleNotes = presetData?.guide?.custom_notes 
-        ? `${presetData.guide.custom_notes}. ` 
-        : "";
-      const fullPrompt = stylePreset 
-        ? `${styleNotes}${videoPrompt}`.trim()
-        : videoPrompt;
+      // Use provided prompt or fallback to videoPrompt
+      const finalPrompt = prompt || videoPrompt;
 
       return generateVideo(engine, {
-        prompt: fullPrompt,
+        prompt: finalPrompt,
         duration: getValidDuration(engine, duration),
         aspectRatio,
         style: stylePreset,
@@ -286,20 +286,67 @@ export function LabGeneratePanel({
     },
   });
 
-  const handleVideoGenerate = () => {
+  const handleVideoGenerate = async () => {
     if (!videoPrompt.trim()) {
       toast({ title: "Prompt required", variant: "destructive" });
       return;
     }
-    videoMutation.mutate({ engine: selectedVideoEngine });
+
+    let finalPrompt = videoPrompt;
+    
+    // Auto-enhance prompt if enabled
+    if (autoEnhance) {
+      setIsEnriching(true);
+      try {
+        const { enriched, error } = await enrichPrompt(
+          videoPrompt, 
+          selectedVideoEngine
+        );
+        if (!error && enriched !== videoPrompt) {
+          finalPrompt = enriched;
+          toast({ 
+            title: "Prompt enhanced", 
+            description: enriched.slice(0, 80) + "..." 
+          });
+        }
+      } finally {
+        setIsEnriching(false);
+      }
+    }
+
+    // Generate with the (possibly enriched) prompt
+    const presetData = STYLE_PRESETS.find(p => p.id === stylePreset);
+    const styleNotes = presetData?.guide?.custom_notes 
+      ? `${presetData.guide.custom_notes}. ` 
+      : "";
+    const fullPrompt = stylePreset 
+      ? `${styleNotes}${finalPrompt}`.trim()
+      : finalPrompt;
+
+    videoMutation.mutate({ 
+      engine: selectedVideoEngine,
+      prompt: fullPrompt,
+    });
   };
 
-  const handleVideoAB = () => {
+  const handleVideoAB = async () => {
     if (!videoPrompt.trim()) {
       toast({ title: "Prompt required", variant: "destructive" });
       return;
     }
-    VIDEO_ENGINES.forEach(engine => videoMutation.mutate({ engine: engine.id }));
+    
+    // For A/B, skip enrichment (each engine has different optimal prompts)
+    VIDEO_ENGINES.forEach(engine => {
+      const presetData = STYLE_PRESETS.find(p => p.id === stylePreset);
+      const styleNotes = presetData?.guide?.custom_notes 
+        ? `${presetData.guide.custom_notes}. ` 
+        : "";
+      const fullPrompt = stylePreset 
+        ? `${styleNotes}${videoPrompt}`.trim()
+        : videoPrompt;
+      
+      videoMutation.mutate({ engine: engine.id, prompt: fullPrompt });
+    });
   };
 
   // Extend a completed Luma video (seamless continuation from generation ID)
@@ -470,6 +517,21 @@ export function LabGeneratePanel({
             </div>
           </div>
 
+          {/* Auto-Enhance Toggle */}
+          <div className="flex items-center justify-between p-3 rounded-lg bg-primary/5 border border-primary/20">
+            <div className="flex items-center gap-3">
+              <Sparkles className="h-4 w-4 text-primary shrink-0" />
+              <div>
+                <Label className="text-xs font-medium">Auto-Enhance</Label>
+                <p className="text-[10px] text-muted-foreground">GPT-4o enriches your prompt</p>
+              </div>
+            </div>
+            <Switch
+              checked={autoEnhance}
+              onCheckedChange={setAutoEnhance}
+            />
+          </div>
+
           {/* Chain Mode Toggle */}
           <div className="flex items-center justify-between p-3 rounded-lg bg-secondary/30 border border-border/50">
             <div className="flex items-center gap-3">
@@ -506,20 +568,25 @@ export function LabGeneratePanel({
           <div className="flex gap-2 pt-2">
             <Button
               onClick={handleVideoGenerate}
-              disabled={videoMutation.isPending || !videoPrompt.trim()}
+              disabled={videoMutation.isPending || isEnriching || !videoPrompt.trim()}
               className="flex-1 h-10"
             >
-              {videoMutation.isPending ? (
+              {isEnriching ? (
+                <>
+                  <Sparkles className="h-4 w-4 mr-2 animate-pulse" />
+                  Enhancing...
+                </>
+              ) : videoMutation.isPending ? (
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
               ) : (
                 <Play className="h-4 w-4 mr-2" />
               )}
-              Generate
+              {!isEnriching && "Generate"}
             </Button>
             <Button
               variant="secondary"
               onClick={handleVideoAB}
-              disabled={videoMutation.isPending || !videoPrompt.trim()}
+              disabled={videoMutation.isPending || isEnriching || !videoPrompt.trim()}
               title="A/B test all 3 engines"
               className="h-10 px-4"
             >
