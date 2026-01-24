@@ -191,11 +191,15 @@ export function LabGeneratePanel({
     mutationFn: async ({ 
       engine, 
       prompt,
+      originalPrompt,
+      usedStyleHints,
       extendGenerationId, 
       referenceImageUrl 
     }: { 
       engine: VideoEngine; 
       prompt?: string;  // Pre-built prompt (for auto-enhance flow)
+      originalPrompt?: string; // Raw user input before enrichment
+      usedStyleHints?: string; // Style hints used for enrichment
       extendGenerationId?: string;  // Luma: seamless continuation
       referenceImageUrl?: string;   // Luma: visual reference
     }) => {
@@ -207,6 +211,8 @@ export function LabGeneratePanel({
         duration: getValidDuration(engine, duration),
         aspectRatio,
         style: stylePreset,
+        originalPrompt,
+        styleHints: usedStyleHints,
         extendGenerationId,
         referenceImageUrl,
       });
@@ -336,7 +342,7 @@ export function LabGeneratePanel({
     executeVideoGeneration(videoPrompt);
   };
 
-  const executeVideoGeneration = (promptToUse: string) => {
+  const executeVideoGeneration = (promptToUse: string, wasEnriched: boolean = false) => {
     const presetData = STYLE_PRESETS.find(p => p.id === stylePreset);
     const styleNotes = presetData?.guide?.custom_notes 
       ? `${presetData.guide.custom_notes}. ` 
@@ -348,17 +354,20 @@ export function LabGeneratePanel({
     videoMutation.mutate({ 
       engine: selectedVideoEngine,
       prompt: fullPrompt,
+      // Track original prompt and style hints for analysis
+      originalPrompt: wasEnriched ? originalPromptForPreview : videoPrompt,
+      usedStyleHints: autoEnhance && styleHints.trim() ? styleHints.trim() : undefined,
     });
   };
 
   const handleConfirmEnrichedPrompt = () => {
     setShowEnrichedPreview(false);
-    executeVideoGeneration(enrichedPrompt);
+    executeVideoGeneration(enrichedPrompt, true);
   };
 
   const handleUseOriginalPrompt = () => {
     setShowEnrichedPreview(false);
-    executeVideoGeneration(originalPromptForPreview);
+    executeVideoGeneration(originalPromptForPreview, false);
   };
 
   const handleVideoAB = async () => {
