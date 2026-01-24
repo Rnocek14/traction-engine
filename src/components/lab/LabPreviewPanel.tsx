@@ -256,11 +256,26 @@ export function LabPreviewPanel({
                     ) : result.status === "failed" ? (
                       <X className="h-5 w-5 text-destructive" />
                     ) : (
-                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                      <div className="flex flex-col items-center gap-1">
+                        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                        <span className="text-[9px] font-medium text-muted-foreground">
+                          {result.progress}%
+                        </span>
+                      </div>
+                    )}
+                    
+                    {/* Progress bar overlay for running jobs */}
+                    {(result.status === "running" || result.status === "queued") && (
+                      <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/50">
+                        <div 
+                          className="h-full bg-primary transition-all duration-300"
+                          style={{ width: `${result.progress}%` }}
+                        />
+                      </div>
                     )}
                     
                     {/* Engine badge overlay */}
-                    <div className="absolute bottom-0.5 left-0.5">
+                    <div className="absolute top-0.5 left-0.5">
                       <span className={cn(
                         "text-[8px] px-1 rounded font-medium uppercase",
                         getEngineColor(result.engine)
