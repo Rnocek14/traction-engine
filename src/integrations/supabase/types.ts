@@ -975,6 +975,8 @@ export type Database = {
           id: string
           job_a: string
           job_b: string
+          job_max: string
+          job_min: string
           key_defects_a: string[] | null
           key_defects_b: string[] | null
           prompt_hash: string | null
@@ -982,6 +984,7 @@ export type Database = {
           provider_b: string
           reasons: string[]
           winner: string
+          winner_job: string | null
         }
         Insert: {
           confidence: number
@@ -990,6 +993,8 @@ export type Database = {
           id?: string
           job_a: string
           job_b: string
+          job_max: string
+          job_min: string
           key_defects_a?: string[] | null
           key_defects_b?: string[] | null
           prompt_hash?: string | null
@@ -997,6 +1002,7 @@ export type Database = {
           provider_b: string
           reasons?: string[]
           winner: string
+          winner_job?: string | null
         }
         Update: {
           confidence?: number
@@ -1005,6 +1011,8 @@ export type Database = {
           id?: string
           job_a?: string
           job_b?: string
+          job_max?: string
+          job_min?: string
           key_defects_a?: string[] | null
           key_defects_b?: string[] | null
           prompt_hash?: string | null
@@ -1012,6 +1020,7 @@ export type Database = {
           provider_b?: string
           reasons?: string[]
           winner?: string
+          winner_job?: string | null
         }
         Relationships: [
           {
