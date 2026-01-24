@@ -123,11 +123,25 @@ Deno.serve(async (req) => {
     }> = [];
 
     for (const item of queueItems as QueueItem[]) {
-      // Mark as running
-      await supabase
+      // Atomically claim this item (concurrency safety)
+      const { data: claimed, error: claimErr } = await supabase
         .from("video_compare_queue")
         .update({ status: "running", started_at: new Date().toISOString() })
-        .eq("id", item.id);
+        .eq("id", item.id)
+        .eq("status", "pending") // Only claim if still pending
+        .select("id")
+        .maybeSingle();
+
+      if (claimErr) {
+        console.error(`Error claiming queue item ${item.id}:`, claimErr);
+        continue;
+      }
+
+      if (!claimed) {
+        // Another process already claimed this item
+        results.push({ id: item.id, status: "skipped", error: "Already claimed by another process" });
+        continue;
+      }
 
       try {
         // Run the comparison

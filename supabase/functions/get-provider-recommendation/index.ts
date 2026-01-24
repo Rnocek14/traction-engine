@@ -141,10 +141,10 @@ Deno.serve(async (req) => {
     if (fetchError) throw fetchError;
 
     // Check if we have enough data
-    const totalComparisons = (clusterStats || []).reduce(
-      (sum, s) => sum + (s.total_comparisons || 0), 
-      0
-    );
+    // Use max() instead of sum() since total_comparisons is per-provider involvement
+    const totalComparisons = clusterStats && clusterStats.length > 0
+      ? Math.max(...clusterStats.map(s => s.total_comparisons || 0))
+      : 0;
 
     if (!clusterStats || clusterStats.length === 0 || totalComparisons < MIN_COMPARISONS_FOR_RECOMMENDATION) {
       // Fall back to static capabilities
