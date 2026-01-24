@@ -136,6 +136,7 @@ Deno.serve(async (req) => {
         const runwayKey = Deno.env.get("RUNWAY_API_KEY");
         if (!runwayKey) throw new Error("RUNWAY_API_KEY not configured");
 
+        // Try gen3a_turbo first, it's the most widely available model
         const response = await fetch("https://api.dev.runwayml.com/v1/text_to_video", {
           method: "POST",
           headers: {
@@ -144,7 +145,7 @@ Deno.serve(async (req) => {
             "X-Runway-Version": "2024-11-06",
           },
           body: JSON.stringify({
-            model: "gen4.5",
+            model: "gen3a_turbo",
             promptText: prompt,
             duration: settings.duration <= 5 ? 5 : 10,
             ratio: sizeMap.runway[settings.size] || "720:1280",
@@ -153,6 +154,10 @@ Deno.serve(async (req) => {
 
         if (!response.ok) {
           const errorText = await response.text();
+          // Check if it's a model access issue
+          if (errorText.includes("not available")) {
+            throw new Error("Runway model not available for your API plan. Try Sora or Luma instead.");
+          }
           throw new Error(`Runway API error: ${response.status} - ${errorText}`);
         }
 
