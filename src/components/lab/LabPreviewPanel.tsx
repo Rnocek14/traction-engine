@@ -226,23 +226,32 @@ export function LabPreviewPanel({
         )}
       </div>
 
-      {/* Results Strip */}
+      {/* Results Strip - Always visible filmstrip */}
       {results.length > 0 && (
-        <div className="border-t bg-card/50">
-          <div className="p-2">
-            <div className="flex gap-2 overflow-x-auto pb-1">
+        <div className="border-t-2 border-primary/30 bg-card shrink-0">
+          <div className="flex items-center gap-2 px-3 py-2 border-b border-border/50">
+            <span className="text-xs font-medium text-muted-foreground">
+              Results ({results.length})
+            </span>
+            <div className="flex-1" />
+            <span className="text-[10px] text-muted-foreground">
+              Click to preview
+            </span>
+          </div>
+          <div className="p-3">
+            <div className="flex gap-3 overflow-x-auto pb-2">
               {results.map((result) => (
                 <button
                   key={result.id}
                   onClick={() => onSelectResult(result.id)}
                   className={cn(
-                    "flex-shrink-0 w-20 rounded-lg overflow-hidden border-2 transition-all",
+                    "flex-shrink-0 w-24 rounded-lg overflow-hidden border-2 transition-all hover:scale-105",
                     activeResultId === result.id 
-                      ? "border-primary ring-2 ring-primary/20" 
-                      : "border-transparent hover:border-border"
+                      ? "border-primary ring-2 ring-primary/30 shadow-lg shadow-primary/20" 
+                      : "border-border hover:border-primary/50 bg-background"
                   )}
                 >
-                  <div className="aspect-video bg-black/50 relative flex items-center justify-center">
+                  <div className="aspect-video bg-black relative flex items-center justify-center">
                     {result.status === "done" && result.outputUrl ? (
                       result.type === "video" ? (
                         <video
@@ -258,7 +267,7 @@ export function LabPreviewPanel({
                     ) : (
                       <div className="flex flex-col items-center gap-1">
                         <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                        <span className="text-[9px] font-medium text-muted-foreground">
+                        <span className="text-[10px] font-medium text-muted-foreground">
                           {result.progress}%
                         </span>
                       </div>
@@ -266,7 +275,7 @@ export function LabPreviewPanel({
                     
                     {/* Progress bar overlay for running jobs */}
                     {(result.status === "running" || result.status === "queued") && (
-                      <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/50">
+                      <div className="absolute bottom-0 left-0 right-0 h-1.5 bg-black/70">
                         <div 
                           className="h-full bg-primary transition-all duration-300"
                           style={{ width: `${result.progress}%` }}
@@ -275,14 +284,21 @@ export function LabPreviewPanel({
                     )}
                     
                     {/* Engine badge overlay */}
-                    <div className="absolute top-0.5 left-0.5">
+                    <div className="absolute top-1 left-1">
                       <span className={cn(
-                        "text-[8px] px-1 rounded font-medium uppercase",
+                        "text-[9px] px-1.5 py-0.5 rounded font-semibold uppercase shadow-sm",
                         getEngineColor(result.engine)
                       )}>
                         {result.engine.slice(0, 4)}
                       </span>
                     </div>
+
+                    {/* Status indicator for done */}
+                    {result.status === "done" && (
+                      <div className="absolute top-1 right-1">
+                        <div className="w-2 h-2 rounded-full bg-success shadow-sm" />
+                      </div>
+                    )}
                   </div>
                 </button>
               ))}
