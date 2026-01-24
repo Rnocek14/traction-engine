@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Beaker, Brain } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   ResizablePanelGroup,
@@ -12,7 +13,6 @@ import {
 import { LabGeneratePanel, LabResult } from "@/components/lab/LabGeneratePanel";
 import { LabPreviewPanel } from "@/components/lab/LabPreviewPanel";
 import { LearningInspector } from "@/components/lab/LearningInspector";
-import { VideoLibrary } from "@/components/lab/VideoLibrary";
 import { getVideoJobStatus } from "@/lib/lab-engines";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -205,50 +205,62 @@ export default function Lab() {
     setActiveResultId(id);
   }, []);
 
+  // Count active jobs for header badge
+  const activeJobCount = results.filter(
+    r => r.type === "video" && (r.status === "queued" || r.status === "running")
+  ).length;
+
   return (
     <div className="h-screen flex flex-col bg-background">
-      {/* Header */}
-      <header className="flex items-center justify-between px-4 py-2 border-b bg-card/50">
+      {/* Compact Header */}
+      <header className="flex items-center justify-between px-4 py-1.5 border-b bg-card/50">
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon" asChild>
+          <Button variant="ghost" size="icon" className="h-8 w-8" asChild>
             <Link to="/studio">
               <ArrowLeft className="h-4 w-4" />
             </Link>
           </Button>
           <div className="flex items-center gap-2">
-            <Beaker className="h-5 w-5 text-primary" />
-            <h1 className="text-lg font-semibold">Video Lab</h1>
+            <Beaker className="h-4 w-4 text-primary" />
+            <h1 className="text-sm font-semibold">Video Lab</h1>
           </div>
-          <span className="text-xs text-muted-foreground bg-secondary/50 px-2 py-0.5 rounded">
+          <Badge variant="secondary" className="text-[10px] h-5">
             R&D Sandbox
-          </span>
+          </Badge>
         </div>
 
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span>{results.length} results</span>
+        <div className="flex items-center gap-3">
+          {activeJobCount > 0 && (
+            <Badge variant="default" className="text-[10px] h-5 bg-primary/80">
+              {activeJobCount} generating
+            </Badge>
+          )}
+          <span className="text-[11px] text-muted-foreground">
+            {results.filter(r => r.type === "video").length} videos
+          </span>
         </div>
       </header>
 
       {/* Main Content - Tabs for Generate vs Learning */}
       <Tabs defaultValue="generate" className="flex-1 min-h-0 flex flex-col">
-        <div className="px-4 pt-2 border-b bg-card/30">
-          <TabsList className="h-9">
-            <TabsTrigger value="generate" className="gap-2">
-              <Beaker className="h-4 w-4" />
+        <div className="px-4 py-1.5 border-b bg-card/30">
+          <TabsList className="h-8">
+            <TabsTrigger value="generate" className="gap-1.5 text-xs h-7">
+              <Beaker className="h-3.5 w-3.5" />
               Generate
             </TabsTrigger>
-            <TabsTrigger value="learning" className="gap-2">
-              <Brain className="h-4 w-4" />
-              Learning Inspector
+            <TabsTrigger value="learning" className="gap-1.5 text-xs h-7">
+              <Brain className="h-3.5 w-3.5" />
+              Learning
             </TabsTrigger>
           </TabsList>
         </div>
 
         <TabsContent value="generate" className="flex-1 min-h-0 m-0">
           <ResizablePanelGroup direction="horizontal" className="h-full">
-            {/* Left: Generate Panel */}
-            <ResizablePanel defaultSize={35} minSize={25} maxSize={50}>
-              <div className="h-full overflow-y-auto overflow-x-hidden p-4 border-r border-border">
+            {/* Left: Generate Panel - narrower */}
+            <ResizablePanel defaultSize={30} minSize={22} maxSize={45}>
+              <div className="h-full overflow-y-auto overflow-x-hidden p-3 border-r border-border">
                 <LabGeneratePanel
                   results={results}
                   onResultCreated={handleResultCreated}
@@ -260,39 +272,15 @@ export default function Lab() {
 
             <ResizableHandle withHandle className="bg-border/50 hover:bg-primary/20 transition-colors" />
 
-            {/* Right: Preview + Library */}
-            <ResizablePanel defaultSize={65} minSize={40}>
-              <div className="h-full flex flex-col overflow-hidden">
-                {/* Main Preview */}
-                <div className="flex-1 min-h-0 overflow-hidden">
-                  <LabPreviewPanel
-                    results={results}
-                    activeResultId={activeResultId}
-                    onSelectResult={handleSelectResult}
-                    onExtendVideo={extendHandler || undefined}
-                  />
-                </div>
-                
-                {/* Video Library - collapsible at bottom */}
-                <div className="border-t border-border bg-card/30">
-                  <VideoLibrary
-                    onSelectVideo={(jobId, url, provider) => {
-                      // Create a result with the real job ID for rating to work
-                      const tempResult: LabResult = {
-                        id: jobId, // Use actual job ID
-                        jobId: jobId,
-                        type: "video",
-                        engine: provider as "sora" | "runway" | "luma",
-                        status: "done",
-                        progress: 100,
-                        outputUrl: url,
-                        startTime: Date.now(),
-                      };
-                      handleResultCreated(tempResult);
-                    }}
-                  />
-                </div>
-              </div>
+            {/* Right: Preview with integrated filmstrip */}
+            <ResizablePanel defaultSize={70} minSize={45}>
+              <LabPreviewPanel
+                results={results}
+                activeResultId={activeResultId}
+                onSelectResult={handleSelectResult}
+                onAddResult={handleResultCreated}
+                onExtendVideo={extendHandler || undefined}
+              />
             </ResizablePanel>
           </ResizablePanelGroup>
         </TabsContent>
