@@ -1,5 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "jsr:@supabase/supabase-js@2";
+import { createClient, SupabaseClient } from "jsr:@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -10,6 +10,7 @@ const corsHeaders = {
 // TYPE DEFINITIONS
 // ═══════════════════════════════════════════════════════════════════
 
+type AnyObj = Record<string, unknown>;
 type ComparisonWinner = "A" | "B" | "tie";
 
 interface ComparisonDeltas {
@@ -59,6 +60,21 @@ function assertAllowedImageUrl(url: string): void {
   if (!ALLOWED_URL_PREFIXES.some(p => url.startsWith(p))) {
     throw new Error("Image URL is not from an allowed domain");
   }
+}
+
+function safeJsonParse<T>(raw: string): T | null {
+  const trimmed = raw.trim();
+  try { return JSON.parse(trimmed) as T; } catch { /* ignore */ }
+  const m = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (m?.[1]) {
+    try { return JSON.parse(m[1]) as T; } catch { /* ignore */ }
+  }
+  const start = trimmed.indexOf("{");
+  const end = trimmed.lastIndexOf("}");
+  if (start !== -1 && end !== -1 && end > start) {
+    try { return JSON.parse(trimmed.slice(start, end + 1)) as T; } catch { /* ignore */ }
+  }
+  return null;
 }
 
 async function extractThumbnailOnDemand(
@@ -152,10 +168,8 @@ Be objective. Provider names should not influence judgment.`;
 
     const data = await response.json();
     const content = data.choices?.[0]?.message?.content || "";
-    let jsonStr = content;
-    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-    if (jsonMatch) jsonStr = jsonMatch[1];
-    const parsed = JSON.parse(jsonStr);
+    const parsed = safeJsonParse<AnyObj>(content);
+    if (!parsed) throw new Error("Model did not return valid JSON");
 
     // Validate winner
     const winner: ComparisonWinner = parsed.winner === "A" ? "A" : parsed.winner === "B" ? "B" : "tie";

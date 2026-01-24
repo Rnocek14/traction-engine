@@ -1,12 +1,12 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "jsr:@supabase/supabase-js@2";
+import { createClient, SupabaseClient } from "jsr:@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const RATER_VERSION = "vlm-v2.4-calibrated";
+const RATER_VERSION = "vlm-v2.5-hardened";
 
 // Thresholds
 const CONFIDENCE_THRESHOLD = 0.75;
@@ -20,13 +20,19 @@ type DimensionKey = "temporal" | "motion" | "fidelity" | "adherence" | "cinemati
 type DimensionScores = Record<DimensionKey, number>;
 type DefectSeverity = "minor" | "moderate" | "severe";
 
+type DefectType =
+  | "flicker" | "morphing" | "identity_drift" | "physics_violation" | "limb_anomaly"
+  | "text_corruption" | "edge_bleeding" | "uncanny_face" | "unnatural_motion"
+  | "inconsistent_lighting" | "over_smoothing" | "blur_artifact" | "texture_crawl"
+  | "missing_element" | "wrong_subject" | "floaty_motion" | "jitter";
+
 interface DefectDimensionMapping {
   dimensions: DimensionKey[];
   weights: Partial<Record<DimensionKey, number>>;
 }
 
 interface Defect {
-  type: string;
+  type: DefectType;
   severity: DefectSeverity;
   evidence: string;
   deduction: number;
@@ -66,6 +72,28 @@ interface VideoJob {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// JSON PARSING HELPER
+// ═══════════════════════════════════════════════════════════════════
+
+function safeJsonParse<T>(raw: string): T | null {
+  const trimmed = raw.trim();
+  // Try direct parse first
+  try { return JSON.parse(trimmed) as T; } catch { /* ignore */ }
+  // Try fenced block
+  const m = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (m?.[1]) {
+    try { return JSON.parse(m[1]) as T; } catch { /* ignore */ }
+  }
+  // Try first {...} object substring (last resort)
+  const start = trimmed.indexOf("{");
+  const end = trimmed.lastIndexOf("}");
+  if (start !== -1 && end !== -1 && end > start) {
+    try { return JSON.parse(trimmed.slice(start, end + 1)) as T; } catch { /* ignore */ }
+  }
+  return null;
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // ALLOWLISTS
 // ═══════════════════════════════════════════════════════════════════
 
@@ -84,7 +112,7 @@ const DEFECT_TYPE_ALLOWLIST = new Set<string>([
 ]);
 
 // Defect → dimension mapping with per-dimension weights
-const DEFECT_DIMENSION_MAP: Record<string, DefectDimensionMapping> = {
+const DEFECT_DIMENSION_MAP: Record<DefectType, DefectDimensionMapping> = {
   flicker: { dimensions: ["temporal"], weights: { temporal: 1.0 } },
   identity_drift: { dimensions: ["temporal"], weights: { temporal: 1.0 } },
   morphing: { dimensions: ["temporal", "fidelity"], weights: { temporal: 0.6, fidelity: 0.4 } },
@@ -204,7 +232,7 @@ function sanitizeDefects(raw: unknown): Defect[] {
     .filter((d): d is AnyObj => typeof d === "object" && d !== null)
     .map((d) => {
       const rawType = String(d.type || "unnatural_motion").toLowerCase().trim();
-      const type = DEFECT_TYPE_ALLOWLIST.has(rawType) ? rawType : "unnatural_motion";
+      const type: DefectType = DEFECT_TYPE_ALLOWLIST.has(rawType) ? rawType as DefectType : "unnatural_motion";
       const rawSeverity = String(d.severity || "minor").toLowerCase();
       const severity: DefectSeverity = rawSeverity === "severe" ? "severe" : rawSeverity === "moderate" ? "moderate" : "minor";
       const deduction = Math.max(0, Math.min(60, Math.round(Number(d.deduction) || 5)));
@@ -282,10 +310,8 @@ OUTPUT (JSON only):
 
     const data = await response.json();
     const content = data.choices?.[0]?.message?.content || "";
-    let jsonStr = content;
-    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-    if (jsonMatch) jsonStr = jsonMatch[1];
-    const parsed = JSON.parse(jsonStr);
+    const parsed = safeJsonParse<AnyObj>(content);
+    if (!parsed) throw new Error("Model did not return valid JSON");
 
     // Parse scores
     let promptAdherence = Math.max(0, Math.min(100, Math.round(parsed.prompt_adherence || 70)));
@@ -349,7 +375,7 @@ OUTPUT (JSON only):
     else if (overallScore < 68 || regenRecommended) bestUse = "draft_only";
     else if (overallScore >= 88 && severeDefects.length === 0 && moderateDefects.length === 0) bestUse = "final";
 
-    console.log(`VLM v2.4: adhere=${promptAdherence}, temporal=${temporalConsistency}, motion=${motionRealism}, fidelity=${visualFidelity}, cinematic=${cinematicQuality}, overall=${overallScore}`);
+    console.log(`VLM v2.5: adhere=${promptAdherence}, temporal=${temporalConsistency}, motion=${motionRealism}, fidelity=${visualFidelity}, cinematic=${cinematicQuality}, overall=${overallScore}`);
 
     return {
       prompt_adherence: promptAdherence,
@@ -381,7 +407,7 @@ OUTPUT (JSON only):
   }
 }
 
-async function maybeLearn(supabase: ReturnType<typeof createClient>, job: VideoJob, rating: AutoRatingResult): Promise<boolean> {
+async function maybeLearn(supabase: SupabaseClient, job: VideoJob, rating: AutoRatingResult): Promise<boolean> {
   if (rating.confidence < CONFIDENCE_THRESHOLD) return false;
 
   const scoreToRating = (s: number): number => s >= 85 ? 5 : s >= 75 ? 4 : s >= 65 ? 3 : s >= 55 ? 2 : 1;
@@ -401,7 +427,7 @@ async function maybeLearn(supabase: ReturnType<typeof createClient>, job: VideoJ
   return !error;
 }
 
-async function persistRating(supabase: ReturnType<typeof createClient>, jobId: string, rating: AutoRatingResult): Promise<void> {
+async function persistRating(supabase: SupabaseClient, jobId: string, rating: AutoRatingResult): Promise<void> {
   const { error } = await supabase.from("video_jobs").update({
     auto_match_score: rating.prompt_adherence, auto_quality_score: rating.visual_fidelity, auto_motion_score: rating.motion_realism, auto_cinematic_score: rating.cinematic_quality,
     auto_overall_score: rating.overall_score, auto_confidence: rating.confidence, auto_rated_at: new Date().toISOString(), auto_rater_version: RATER_VERSION,
