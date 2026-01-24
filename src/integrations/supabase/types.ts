@@ -492,6 +492,7 @@ export type Database = {
           id: string
           last_failure_at: string | null
           last_success_at: string | null
+          learning_source: string | null
           pattern_type: string
           pattern_value: string
           provider: string
@@ -508,6 +509,7 @@ export type Database = {
           id?: string
           last_failure_at?: string | null
           last_success_at?: string | null
+          learning_source?: string | null
           pattern_type: string
           pattern_value: string
           provider: string
@@ -524,6 +526,7 @@ export type Database = {
           id?: string
           last_failure_at?: string | null
           last_success_at?: string | null
+          learning_source?: string | null
           pattern_type?: string
           pattern_value?: string
           provider?: string
@@ -968,9 +971,17 @@ export type Database = {
         Row: {
           accuracy_notes: string | null
           accuracy_rating: number | null
+          auto_confidence: number | null
+          auto_match_score: number | null
+          auto_overall_score: number | null
+          auto_quality_score: number | null
+          auto_rated_at: string | null
+          auto_rater_version: string | null
+          auto_reasons: string[] | null
           created_at: string
           enriched_prompt: string | null
           error: string | null
+          human_rating_override: boolean | null
           id: string
           openai_status: string | null
           openai_video_id: string | null
@@ -992,9 +1003,17 @@ export type Database = {
         Insert: {
           accuracy_notes?: string | null
           accuracy_rating?: number | null
+          auto_confidence?: number | null
+          auto_match_score?: number | null
+          auto_overall_score?: number | null
+          auto_quality_score?: number | null
+          auto_rated_at?: string | null
+          auto_rater_version?: string | null
+          auto_reasons?: string[] | null
           created_at?: string
           enriched_prompt?: string | null
           error?: string | null
+          human_rating_override?: boolean | null
           id?: string
           openai_status?: string | null
           openai_video_id?: string | null
@@ -1016,9 +1035,17 @@ export type Database = {
         Update: {
           accuracy_notes?: string | null
           accuracy_rating?: number | null
+          auto_confidence?: number | null
+          auto_match_score?: number | null
+          auto_overall_score?: number | null
+          auto_quality_score?: number | null
+          auto_rated_at?: string | null
+          auto_rater_version?: string | null
+          auto_reasons?: string[] | null
           created_at?: string
           enriched_prompt?: string | null
           error?: string | null
+          human_rating_override?: boolean | null
           id?: string
           openai_status?: string | null
           openai_video_id?: string | null

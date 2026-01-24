@@ -240,7 +240,7 @@ export function LabPreviewPanel({
               {/* Inline rating overlay when video ends */}
               {showRatingPanel && activeResult.status === "done" && activeResult.type === "video" && (
                 <div className="absolute inset-0 bg-black/80 flex items-center justify-center p-4">
-                  <div className="bg-card rounded-lg p-4 max-w-md w-full">
+                  <div className="bg-card rounded-lg p-4 max-w-md w-full max-h-[80%] overflow-y-auto">
                     <VideoRatingPanel
                       jobId={activeResult.id}
                       provider={activeResult.engine}
@@ -249,6 +249,11 @@ export function LabPreviewPanel({
                       styleHints={jobDetails?.style_hints || undefined}
                       currentRating={jobDetails?.accuracy_rating || 0}
                       currentNotes=""
+                      autoMatchScore={jobDetails?.auto_match_score}
+                      autoQualityScore={jobDetails?.auto_quality_score}
+                      autoOverallScore={jobDetails?.auto_overall_score}
+                      autoConfidence={jobDetails?.auto_confidence}
+                      autoReasons={jobDetails?.auto_reasons}
                       onRated={() => {
                         refetchJobDetails();
                         setShowRatingPanel(false);

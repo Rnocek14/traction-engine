@@ -12,12 +12,17 @@ const corsHeaders = {
 };
 
 interface AnalyzeRequest {
-  job_id: string;
+  job_id?: string;
+  jobId?: string; // Support both naming conventions
   provider: "sora" | "runway" | "luma";
-  enriched_prompt: string;
+  enriched_prompt?: string;
+  enrichedPrompt?: string;
   original_prompt?: string;
+  originalPrompt?: string;
   style_hints?: string;
+  styleHints?: string;
   rating: number;
+  source?: "human" | "auto"; // Track learning source
 }
 
 // Keywords/phrases to detect each pattern type
@@ -156,13 +161,14 @@ async function upsertPatternLearning(
   patternValue: string,
   rating: number,
   isSuccess: boolean,
-  prompt: string
+  prompt: string,
+  source: "human" | "auto" = "human"
 ): Promise<void> {
   const supabase = createClient(supabaseUrl, supabaseKey);
   
   const { data: existing } = await supabase
     .from("prompt_learnings")
-    .select("id, total_uses, successful_uses, failed_uses, average_rating, example_prompts, avoid_pattern")
+    .select("id, total_uses, successful_uses, failed_uses, average_rating, example_prompts, avoid_pattern, learning_source")
     .eq("provider", provider)
     .eq("pattern_type", patternType)
     .eq("pattern_value", patternValue)
@@ -219,6 +225,7 @@ async function upsertPatternLearning(
         average_rating: rating,
         example_prompts: isSuccess ? [prompt.substring(0, 200)] : [],
         avoid_pattern: false,
+        learning_source: source,
         ...(isSuccess ? { last_success_at: now } : { last_failure_at: now }),
       });
   }
@@ -235,14 +242,25 @@ Deno.serve(async (req) => {
     const openaiKey = Deno.env.get("OPENAI_API_KEY");
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const { 
-      job_id, 
-      provider, 
-      enriched_prompt, 
-      original_prompt, 
-      style_hints, 
-      rating 
-    } = await req.json() as AnalyzeRequest;
+    const body = await req.json() as AnalyzeRequest;
+    
+    // Normalize field names (support both snake_case and camelCase)
+    const job_id = body.job_id || body.jobId;
+    const provider = body.provider;
+    const enriched_prompt = body.enriched_prompt || body.enrichedPrompt || "";
+    const original_prompt = body.original_prompt || body.originalPrompt;
+    const style_hints = body.style_hints || body.styleHints;
+    const rating = body.rating;
+    const source = body.source || "human";
+
+    console.log(`Analyzing prompt (source: ${source}, rating: ${rating}, provider: ${provider})`);
+
+    if (!enriched_prompt) {
+      return new Response(
+        JSON.stringify({ learned: false, reason: "No enriched prompt provided" }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     // Determine learning type
     const isSuccess = rating >= 4;
@@ -273,7 +291,8 @@ Deno.serve(async (req) => {
           patternValue,
           rating,
           isSuccess,
-          enriched_prompt
+          enriched_prompt,
+          source
         );
         learnedPatterns.push(`${patternType}:${patternValue}`);
       }
@@ -291,7 +310,8 @@ Deno.serve(async (req) => {
           hint,
           rating,
           isSuccess,
-          enriched_prompt
+          enriched_prompt,
+          source
         );
         learnedPatterns.push(`style_hint:${hint}`);
       }
@@ -311,7 +331,8 @@ Deno.serve(async (req) => {
           trait.toLowerCase(),
           rating,
           true,
-          enriched_prompt
+          enriched_prompt,
+          source
         );
         learnedPatterns.push(`semantic_trait:${trait}`);
       }
