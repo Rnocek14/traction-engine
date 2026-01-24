@@ -14,6 +14,7 @@ export interface EngineJobStatus {
   progress?: number;
   outputUrl?: string;
   error?: string;
+  providerGenerationId?: string; // Luma generation ID for extend mode
 }
 
 // ============ VIDEO ENGINE TYPES ============
@@ -24,7 +25,9 @@ export interface VideoInput {
   aspectRatio: "9:16" | "16:9" | "1:1";
   style?: string;
   cameraDirection?: string;
-  startingFrameUrl?: string; // For extend/chain mode (Luma, Runway)
+  // Luma extend modes:
+  extendGenerationId?: string; // Continue seamlessly from Luma generation ID
+  referenceImageUrl?: string;  // Use image as visual reference
 }
 
 export interface VideoOutput {
@@ -78,7 +81,7 @@ export interface AssemblyOutput {
 export async function generateVideo(
   engine: VideoEngine,
   input: VideoInput
-): Promise<{ jobId: string; error?: string }> {
+): Promise<{ jobId: string; providerGenerationId?: string; error?: string }> {
   // Use the lab-specific endpoint that doesn't require a real script
   const { data, error } = await supabase.functions.invoke("lab-queue-video", {
     body: {
@@ -89,7 +92,9 @@ export async function generateVideo(
         duration: input.duration,
         style: input.style,
       },
-      starting_frame_url: input.startingFrameUrl, // For extend/chain mode
+      // Luma extend modes
+      extend_generation_id: input.extendGenerationId,
+      reference_image_url: input.referenceImageUrl,
     },
   });
 
@@ -99,6 +104,7 @@ export async function generateVideo(
 
   return { 
     jobId: data?.job?.id || "", 
+    providerGenerationId: data?.job?.provider_job_id,
     error: data?.error 
   };
 }
@@ -111,7 +117,7 @@ export async function getVideoJobStatus(
 ): Promise<EngineJobStatus> {
   const { data, error } = await supabase
     .from("video_jobs")
-    .select("status, progress, output_url, error")
+    .select("status, progress, output_url, error, openai_video_id, settings")
     .eq("id", jobId)
     .single();
 
@@ -119,11 +125,16 @@ export async function getVideoJobStatus(
     return { status: "failed", error: error?.message || "Job not found" };
   }
 
+  // Extract provider generation ID (stored in openai_video_id or settings.provider_job_id)
+  const settings = data.settings as Record<string, unknown> | null;
+  const providerGenerationId = (settings?.provider_job_id as string) || data.openai_video_id || undefined;
+
   return {
     status: data.status as EngineJobStatus["status"],
     progress: data.progress || 0,
     outputUrl: data.output_url || undefined,
     error: data.error || undefined,
+    providerGenerationId,
   };
 }
 

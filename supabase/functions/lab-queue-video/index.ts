@@ -18,7 +18,9 @@ interface LabVideoRequest {
     duration: number;
     style?: string;
   };
-  starting_frame_url?: string; // For extending/chaining videos
+  // For Luma extend modes:
+  extend_generation_id?: string; // Luma generation ID for seamless continuation
+  reference_image_url?: string;  // Image URL for visual reference
 }
 
 Deno.serve(async (req) => {
@@ -32,7 +34,7 @@ Deno.serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     const body: LabVideoRequest = await req.json();
-    const { prompt, provider, settings, starting_frame_url } = body;
+    const { prompt, provider, settings, extend_generation_id, reference_image_url } = body;
 
     if (!prompt || !provider) {
       return new Response(
@@ -172,7 +174,7 @@ Deno.serve(async (req) => {
         const lumaKey = Deno.env.get("LUMA_API_KEY");
         if (!lumaKey) throw new Error("LUMA_API_KEY not configured");
 
-        // Build Luma request - supports keyframes for image-to-video (extend mode)
+        // Build Luma request - supports two extend modes
         const lumaRequest: Record<string, unknown> = {
           model: "ray-2",
           prompt,
@@ -180,15 +182,25 @@ Deno.serve(async (req) => {
           loop: false,
         };
 
-        // Add starting frame for extend/chain mode
-        if (starting_frame_url) {
+        // Mode 1: Extend from previous Luma generation (seamless continuation)
+        if (extend_generation_id) {
+          lumaRequest.keyframes = {
+            frame0: {
+              type: "generation",
+              id: extend_generation_id,
+            },
+          };
+          console.log("Luma EXTEND mode: continuing from generation", extend_generation_id);
+        }
+        // Mode 2: Use image as visual reference (more creative freedom)
+        else if (reference_image_url) {
           lumaRequest.keyframes = {
             frame0: {
               type: "image",
-              url: starting_frame_url,
+              url: reference_image_url,
             },
           };
-          console.log("Luma extend mode: using starting frame", starting_frame_url.slice(0, 50));
+          console.log("Luma REFERENCE mode: using image", reference_image_url.slice(0, 50));
         }
 
         const response = await fetch("https://api.lumalabs.ai/dream-machine/v1/generations", {
