@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { 
   Video, Mic, Loader2, Play, Beaker, Link2, Moon, Sun, 
-  Zap, Film, Camera, Sparkles, Ghost, Clapperboard
+  Zap, Film, Camera, Sparkles, Ghost, Clapperboard, Pencil
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import {
   VideoEngine,
@@ -122,6 +130,11 @@ export function LabGeneratePanel({
   const [selectedChainSource, setSelectedChainSource] = useState<string>("");
   const [autoEnhance, setAutoEnhance] = useState(true);
   const [isEnriching, setIsEnriching] = useState(false);
+  
+  // Enriched prompt preview modal state
+  const [showEnrichedPreview, setShowEnrichedPreview] = useState(false);
+  const [enrichedPrompt, setEnrichedPrompt] = useState("");
+  const [originalPromptForPreview, setOriginalPromptForPreview] = useState("");
   
   // Voice state
   const [voiceProvider, setVoiceProvider] = useState<VoiceEngine>("elevenlabs");
@@ -292,41 +305,58 @@ export function LabGeneratePanel({
       return;
     }
 
-    let finalPrompt = videoPrompt;
-    
-    // Auto-enhance prompt if enabled
+    // Auto-enhance prompt if enabled - show preview modal
     if (autoEnhance) {
       setIsEnriching(true);
+      setOriginalPromptForPreview(videoPrompt);
       try {
         const { enriched, error } = await enrichPrompt(
           videoPrompt, 
           selectedVideoEngine
         );
         if (!error && enriched !== videoPrompt) {
-          finalPrompt = enriched;
-          toast({ 
-            title: "Prompt enhanced", 
-            description: enriched.slice(0, 80) + "..." 
-          });
+          setEnrichedPrompt(enriched);
+          setShowEnrichedPreview(true);
+        } else {
+          // No enrichment or error, proceed directly
+          executeVideoGeneration(videoPrompt);
         }
+      } catch (err) {
+        // Fallback to original prompt on error
+        executeVideoGeneration(videoPrompt);
       } finally {
         setIsEnriching(false);
       }
+      return;
     }
 
-    // Generate with the (possibly enriched) prompt
+    // No auto-enhance, generate directly
+    executeVideoGeneration(videoPrompt);
+  };
+
+  const executeVideoGeneration = (promptToUse: string) => {
     const presetData = STYLE_PRESETS.find(p => p.id === stylePreset);
     const styleNotes = presetData?.guide?.custom_notes 
       ? `${presetData.guide.custom_notes}. ` 
       : "";
     const fullPrompt = stylePreset 
-      ? `${styleNotes}${finalPrompt}`.trim()
-      : finalPrompt;
+      ? `${styleNotes}${promptToUse}`.trim()
+      : promptToUse;
 
     videoMutation.mutate({ 
       engine: selectedVideoEngine,
       prompt: fullPrompt,
     });
+  };
+
+  const handleConfirmEnrichedPrompt = () => {
+    setShowEnrichedPreview(false);
+    executeVideoGeneration(enrichedPrompt);
+  };
+
+  const handleUseOriginalPrompt = () => {
+    setShowEnrichedPreview(false);
+    executeVideoGeneration(originalPromptForPreview);
   };
 
   const handleVideoAB = async () => {
@@ -692,10 +722,68 @@ export function LabGeneratePanel({
             ) : (
               <Mic className="h-4 w-4 mr-2" />
             )}
-            Generate Voice
+          Generate Voice
           </Button>
         </TabsContent>
       </Tabs>
+
+      {/* Enriched Prompt Preview Modal */}
+      <Dialog open={showEnrichedPreview} onOpenChange={setShowEnrichedPreview}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-primary" />
+              Enhanced Prompt Preview
+            </DialogTitle>
+            <DialogDescription>
+              GPT-4o has enriched your prompt. You can edit it before generating.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-2">
+            {/* Original prompt */}
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Original</Label>
+              <div className="p-3 rounded-md bg-muted/50 text-sm text-muted-foreground">
+                {originalPromptForPreview}
+              </div>
+            </div>
+            
+            {/* Enriched prompt - editable */}
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
+                <Pencil className="h-3 w-3" />
+                Enhanced (editable)
+              </Label>
+              <Textarea
+                value={enrichedPrompt}
+                onChange={(e) => setEnrichedPrompt(e.target.value)}
+                className="min-h-[160px] text-sm bg-secondary/30 border-border/50"
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button
+              variant="outline"
+              onClick={handleUseOriginalPrompt}
+              className="sm:mr-auto"
+            >
+              Use Original
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => setShowEnrichedPreview(false)}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleConfirmEnrichedPrompt}>
+              <Play className="h-4 w-4 mr-2" />
+              Generate
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
