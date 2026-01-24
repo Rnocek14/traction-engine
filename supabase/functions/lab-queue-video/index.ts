@@ -194,13 +194,15 @@ Deno.serve(async (req) => {
         providerJobId = data.id;
       }
 
-      // Update job with provider ID
+      // Update job with provider ID - set both openai_video_id (for legacy processor queries)
+      // and settings.provider_job_id (for new code)
       if (providerJobId) {
         await supabase
           .from("video_jobs")
           .update({
             status: "running",
             openai_status: "PENDING",
+            openai_video_id: providerJobId, // Required for process-video queries
             settings: {
               ...job.settings,
               provider_job_id: providerJobId,
