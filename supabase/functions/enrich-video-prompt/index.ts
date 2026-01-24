@@ -1,3 +1,12 @@
+/**
+ * Enrich video prompts using GPT-4o + learned patterns
+ * Features:
+ * - Provider-specific optimization
+ * - Time-decayed pattern learning
+ * - Negative pattern avoidance
+ * - Capped learned influence (max 25% of system prompt)
+ */
+
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -17,6 +26,13 @@ interface PatternLearning {
   pattern_value: string;
   average_rating: number;
   successful_uses: number;
+  last_success_at: string | null;
+}
+
+interface AvoidPattern {
+  pattern_type: string;
+  pattern_value: string;
+  failed_uses: number;
 }
 
 const SYSTEM_PROMPT = `You are a cinematographer writing video generation prompts for AI video models.
@@ -47,6 +63,28 @@ const PROVIDER_HINTS: Record<string, string> = {
   luma: "\n\nOptimize for Luma: Emphasize physics-based motion, environmental interactions, and natural movement. Describe how elements flow and interact.",
 };
 
+// Time decay function: patterns from 30+ days ago get 50% weight
+function calculateTimeDecay(lastSuccessAt: string | null): number {
+  if (!lastSuccessAt) return 0.5;
+  
+  const daysSince = (Date.now() - new Date(lastSuccessAt).getTime()) / (1000 * 60 * 60 * 24);
+  
+  if (daysSince <= 7) return 1.0;      // Full weight for first week
+  if (daysSince <= 14) return 0.9;     // 90% for second week
+  if (daysSince <= 30) return 0.75;    // 75% for first month
+  if (daysSince <= 60) return 0.5;     // 50% for second month
+  return 0.25;                          // 25% for older patterns
+}
+
+// Calculate effective score with time decay
+function calculateEffectiveScore(pattern: PatternLearning): number {
+  const baseScore = pattern.average_rating;
+  const usageBoost = Math.log(pattern.successful_uses + 1);
+  const timeDecay = calculateTimeDecay(pattern.last_success_at);
+  
+  return baseScore * usageBoost * timeDecay;
+}
+
 async function getLearnedPatterns(
   supabaseUrl: string,
   supabaseKey: string,
@@ -56,40 +94,107 @@ async function getLearnedPatterns(
   
   const { data, error } = await supabase
     .from("prompt_learnings")
-    .select("pattern_type, pattern_value, average_rating, successful_uses")
+    .select("pattern_type, pattern_value, average_rating, successful_uses, last_success_at")
     .eq("provider", provider)
+    .eq("avoid_pattern", false)
     .gte("successful_uses", 2)
     .gte("average_rating", 4)
-    .order("average_rating", { ascending: false })
-    .limit(15);
+    .limit(30); // Fetch more, then filter by score
 
   if (error) {
     console.error("Failed to fetch learned patterns:", error);
     return [];
   }
 
-  return data || [];
+  if (!data || data.length === 0) return [];
+
+  // Sort by effective score (includes time decay)
+  const scored = data.map(p => ({
+    ...p,
+    effectiveScore: calculateEffectiveScore(p as PatternLearning)
+  }));
+  
+  scored.sort((a, b) => b.effectiveScore - a.effectiveScore);
+  
+  // Return top 15 by effective score
+  return scored.slice(0, 15) as PatternLearning[];
 }
 
-function buildLearningsHint(patterns: PatternLearning[]): string {
-  if (patterns.length === 0) return "";
+async function getAvoidPatterns(
+  supabaseUrl: string,
+  supabaseKey: string,
+  provider: string
+): Promise<AvoidPattern[]> {
+  const supabase = createClient(supabaseUrl, supabaseKey);
+  
+  const { data, error } = await supabase
+    .from("prompt_learnings")
+    .select("pattern_type, pattern_value, failed_uses")
+    .eq("provider", provider)
+    .eq("avoid_pattern", true)
+    .order("failed_uses", { ascending: false })
+    .limit(10);
 
-  const grouped: Record<string, string[]> = {};
-  for (const p of patterns) {
-    if (!grouped[p.pattern_type]) grouped[p.pattern_type] = [];
-    grouped[p.pattern_type].push(p.pattern_value);
+  if (error) {
+    console.error("Failed to fetch avoid patterns:", error);
+    return [];
   }
 
+  return (data || []) as AvoidPattern[];
+}
+
+function buildLearningsHint(
+  positivePatterns: PatternLearning[], 
+  avoidPatterns: AvoidPattern[]
+): string {
   const hints: string[] = [];
-  if (grouped.camera) hints.push(`Preferred camera: ${grouped.camera.slice(0, 3).join(", ")}`);
-  if (grouped.lighting) hints.push(`Preferred lighting: ${grouped.lighting.slice(0, 3).join(", ")}`);
-  if (grouped.motion) hints.push(`Preferred motion: ${grouped.motion.slice(0, 3).join(", ")}`);
-  if (grouped.mood) hints.push(`Preferred mood: ${grouped.mood.slice(0, 3).join(", ")}`);
-  if (grouped.style_hint) hints.push(`Successful style hints: ${grouped.style_hint.slice(0, 3).join(", ")}`);
+  
+  // Positive patterns (preferred)
+  if (positivePatterns.length > 0) {
+    const grouped: Record<string, string[]> = {};
+    for (const p of positivePatterns) {
+      if (!grouped[p.pattern_type]) grouped[p.pattern_type] = [];
+      if (grouped[p.pattern_type].length < 3) { // Cap at 3 per type
+        grouped[p.pattern_type].push(p.pattern_value);
+      }
+    }
+
+    const positiveHints: string[] = [];
+    if (grouped.camera) positiveHints.push(`Camera: ${grouped.camera.join(", ")}`);
+    if (grouped.lighting) positiveHints.push(`Lighting: ${grouped.lighting.join(", ")}`);
+    if (grouped.motion) positiveHints.push(`Motion: ${grouped.motion.join(", ")}`);
+    if (grouped.mood) positiveHints.push(`Mood: ${grouped.mood.join(", ")}`);
+    if (grouped.semantic_trait) positiveHints.push(`Traits: ${grouped.semantic_trait.join(", ")}`);
+    if (grouped.style_hint) positiveHints.push(`Styles: ${grouped.style_hint.join(", ")}`);
+
+    if (positiveHints.length > 0) {
+      hints.push("LEARNED PREFERENCES (use when appropriate):");
+      hints.push(...positiveHints);
+    }
+  }
+
+  // Negative patterns (avoid)
+  if (avoidPatterns.length > 0) {
+    const avoidList = avoidPatterns
+      .slice(0, 5) // Cap at 5 avoid patterns
+      .map(p => p.pattern_value);
+    
+    hints.push("");
+    hints.push("AVOID FOR THIS PROVIDER:");
+    hints.push(`- ${avoidList.join(", ")}`);
+  }
 
   if (hints.length === 0) return "";
 
-  return `\n\nLEARNED PREFERENCES (patterns that work well for this provider):\n${hints.join("\n")}`;
+  // Cap total hint length (roughly 25% of base system prompt)
+  const hintText = hints.join("\n");
+  const maxLength = 400; // ~25% of base prompt tokens
+  
+  if (hintText.length > maxLength) {
+    return "\n\n" + hintText.substring(0, maxLength) + "...";
+  }
+
+  return "\n\n" + hintText;
 }
 
 Deno.serve(async (req) => {
@@ -115,24 +220,26 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Initialize Supabase to fetch learned patterns
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Build system prompt with optional provider hints AND learned patterns
+    // Build system prompt with provider hints + learned patterns
     let systemPrompt = SYSTEM_PROMPT;
     if (provider && PROVIDER_HINTS[provider]) {
       systemPrompt += PROVIDER_HINTS[provider];
     }
 
-    // Fetch and apply learned patterns for this provider
+    // Fetch learned patterns (both positive and negative)
     if (provider) {
-      const learnedPatterns = await getLearnedPatterns(supabaseUrl, supabaseServiceKey, provider);
-      const learningsHint = buildLearningsHint(learnedPatterns);
+      const [positivePatterns, avoidPatterns] = await Promise.all([
+        getLearnedPatterns(supabaseUrl, supabaseServiceKey, provider),
+        getAvoidPatterns(supabaseUrl, supabaseServiceKey, provider),
+      ]);
+      
+      const learningsHint = buildLearningsHint(positivePatterns, avoidPatterns);
       if (learningsHint) {
         systemPrompt += learningsHint;
-        console.log(`Applied ${learnedPatterns.length} learned patterns for ${provider}`);
+        console.log(`Applied ${positivePatterns.length} positive, ${avoidPatterns.length} avoid patterns for ${provider}`);
       }
     }
 
