@@ -14,12 +14,25 @@ export interface VideoJobDetails {
   accuracy_notes: string | null;
   output_url: string | null;
   status: string;
+  // Auto-rating fields
+  auto_match_score: number | null;
+  auto_quality_score: number | null;
+  auto_overall_score: number | null;
+  auto_confidence: number | null;
+  auto_rated_at: string | null;
+  auto_reasons: string[] | null;
+  human_rating_override: boolean | null;
 }
 
 export async function getVideoJobDetails(jobId: string): Promise<VideoJobDetails | null> {
   const { data, error } = await supabase
     .from("video_jobs")
-    .select("id, provider, original_prompt, enriched_prompt, style_hints, accuracy_rating, accuracy_notes, output_url, status")
+    .select(`
+      id, provider, original_prompt, enriched_prompt, style_hints, 
+      accuracy_rating, accuracy_notes, output_url, status,
+      auto_match_score, auto_quality_score, auto_overall_score, 
+      auto_confidence, auto_rated_at, auto_reasons, human_rating_override
+    `)
     .eq("id", jobId)
     .single();
 
@@ -29,6 +42,22 @@ export async function getVideoJobDetails(jobId: string): Promise<VideoJobDetails
   }
 
   return data as VideoJobDetails;
+}
+
+/**
+ * Trigger auto-rating for a video job
+ */
+export async function triggerAutoRating(jobId: string): Promise<{ success: boolean; error?: string }> {
+  const { data, error } = await supabase.functions.invoke("auto-rate-video", {
+    body: { jobId },
+  });
+
+  if (error) {
+    console.error("Auto-rating failed:", error);
+    return { success: false, error: error.message };
+  }
+
+  return { success: true, ...data };
 }
 
 export async function getPromptLearnings(provider?: string) {
