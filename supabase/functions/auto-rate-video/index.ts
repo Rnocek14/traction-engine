@@ -526,7 +526,14 @@ Deno.serve(async (req) => {
 
     const prompt = job.enriched_prompt || job.original_prompt;
     if (!prompt) {
-      throw new Error("Job has no prompt");
+      console.log(`Job ${jobId} has no prompt, cannot auto-rate`);
+      return new Response(JSON.stringify({
+        error: "This video has no prompt stored. Auto-rating requires a prompt to evaluate against.",
+        suggestion: "This may be an older video created before prompt tracking was enabled. Use human rating instead.",
+      }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     // Score the video using the thumbnail/spritesheet
