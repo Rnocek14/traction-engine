@@ -1,6 +1,7 @@
 /**
- * Analyze successful prompts and extract learnable patterns
- * This powers the self-improving prompt optimization system
+ * Analyze prompts and extract learnable patterns
+ * Supports BOTH positive learning (rating >= 4) and negative learning (rating <= 2)
+ * Also extracts semantic traits via LLM classification
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -18,17 +19,6 @@ interface AnalyzeRequest {
   style_hints?: string;
   rating: number;
 }
-
-// Pattern categories we want to learn from successful prompts
-const PATTERN_TYPES = [
-  "subject",      // What is the main focus (person, car, animal, etc.)
-  "camera",       // Shot type and camera movement
-  "lighting",     // Lighting setup and quality
-  "motion",       // How things move
-  "environment",  // Setting and location
-  "mood",         // Emotional tone
-  "style_hint",   // User-provided style hints that worked
-] as const;
 
 // Keywords/phrases to detect each pattern type
 const PATTERN_DETECTORS: Record<string, RegExp[]> = {
@@ -102,6 +92,138 @@ function extractPatterns(prompt: string): Map<string, Set<string>> {
   return patterns;
 }
 
+// LLM-based semantic trait extraction
+async function extractSemanticTraits(
+  prompt: string, 
+  openaiKey: string
+): Promise<string[]> {
+  try {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${openaiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content: `You are a video prompt analyst. Extract 2-4 high-level semantic traits from the prompt.
+            
+Return ONLY a JSON array of trait strings. Examples:
+- "physics-driven motion"
+- "single-subject cinematic framing"
+- "environmental interaction emphasis"
+- "high-energy camera language"
+- "intimate character focus"
+- "atmospheric world-building"
+- "abstract visual metaphor"
+
+Keep traits concise (2-4 words). Return only the JSON array, nothing else.`
+          },
+          { role: "user", content: prompt }
+        ],
+        temperature: 0.3,
+        max_tokens: 100,
+      }),
+    });
+
+    if (!response.ok) return [];
+    
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content?.trim();
+    if (!content) return [];
+    
+    try {
+      const traits = JSON.parse(content);
+      return Array.isArray(traits) ? traits.slice(0, 4) : [];
+    } catch {
+      return [];
+    }
+  } catch (error) {
+    console.error("Semantic extraction failed:", error);
+    return [];
+  }
+}
+
+// Update or insert a pattern learning
+async function upsertPatternLearning(
+  supabaseUrl: string,
+  supabaseKey: string,
+  provider: string,
+  patternType: string,
+  patternValue: string,
+  rating: number,
+  isSuccess: boolean,
+  prompt: string
+): Promise<void> {
+  const supabase = createClient(supabaseUrl, supabaseKey);
+  
+  const { data: existing } = await supabase
+    .from("prompt_learnings")
+    .select("id, total_uses, successful_uses, failed_uses, average_rating, example_prompts, avoid_pattern")
+    .eq("provider", provider)
+    .eq("pattern_type", patternType)
+    .eq("pattern_value", patternValue)
+    .single();
+
+  const now = new Date().toISOString();
+
+  if (existing) {
+    const ex = existing as Record<string, unknown>;
+    const totalUses = (ex.total_uses as number) || 0;
+    const successfulUses = (ex.successful_uses as number) || 0;
+    const failedUses = (ex.failed_uses as number) || 0;
+    const avgRating = (ex.average_rating as number) || 0;
+    const examplePrompts = (ex.example_prompts as string[]) || [];
+    
+    const newTotalUses = totalUses + 1;
+    const newSuccessfulUses = successfulUses + (isSuccess ? 1 : 0);
+    const newFailedUses = failedUses + (isSuccess ? 0 : 1);
+    const newAverage = ((avgRating * totalUses) + rating) / newTotalUses;
+    
+    // Calculate if pattern should be avoided (>60% failure rate)
+    const failureRate = newFailedUses / newTotalUses;
+    const shouldAvoid = newTotalUses >= 3 && failureRate > 0.6;
+    
+    // Keep last 5 example prompts
+    const examples = [...examplePrompts];
+    if (isSuccess) {
+      if (examples.length >= 5) examples.shift();
+      examples.push(prompt.substring(0, 200));
+    }
+
+    await supabase
+      .from("prompt_learnings")
+      .update({
+        total_uses: newTotalUses,
+        successful_uses: newSuccessfulUses,
+        failed_uses: newFailedUses,
+        average_rating: Math.round(newAverage * 100) / 100,
+        example_prompts: examples,
+        avoid_pattern: shouldAvoid,
+        ...(isSuccess ? { last_success_at: now } : { last_failure_at: now }),
+      })
+      .eq("id", ex.id as string);
+  } else {
+    await supabase
+      .from("prompt_learnings")
+      .insert({
+        provider,
+        pattern_type: patternType,
+        pattern_value: patternValue,
+        total_uses: 1,
+        successful_uses: isSuccess ? 1 : 0,
+        failed_uses: isSuccess ? 0 : 1,
+        average_rating: rating,
+        example_prompts: isSuccess ? [prompt.substring(0, 200)] : [],
+        avoid_pattern: false,
+        ...(isSuccess ? { last_success_at: now } : { last_failure_at: now }),
+      });
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -110,6 +232,7 @@ Deno.serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const openaiKey = Deno.env.get("OPENAI_API_KEY");
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     const { 
@@ -121,124 +244,89 @@ Deno.serve(async (req) => {
       rating 
     } = await req.json() as AnalyzeRequest;
 
-    // Only learn from successful prompts (rating >= 4)
-    if (rating < 4) {
+    // Determine learning type
+    const isSuccess = rating >= 4;
+    const isFailure = rating <= 2;
+    
+    // Only learn from clear signals (very good or very bad)
+    if (!isSuccess && !isFailure) {
       return new Response(
-        JSON.stringify({ learned: false, reason: "Rating too low for learning" }),
+        JSON.stringify({ learned: false, reason: "Neutral rating (3) - no clear learning signal" }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    console.log(`Analyzing successful prompt for ${provider} (rating: ${rating})`);
+    console.log(`Analyzing ${isSuccess ? "successful" : "failed"} prompt for ${provider} (rating: ${rating})`);
 
-    // Extract patterns from the enriched prompt
+    // Extract lexical patterns
     const patterns = extractPatterns(enriched_prompt);
     const learnedPatterns: string[] = [];
 
     // Process each pattern type
     for (const [patternType, values] of patterns) {
       for (const patternValue of values) {
-        // Upsert the pattern learning
-        const { data: existing } = await supabase
-          .from("prompt_learnings")
-          .select("id, total_uses, successful_uses, average_rating, example_prompts")
-          .eq("provider", provider)
-          .eq("pattern_type", patternType)
-          .eq("pattern_value", patternValue)
-          .single();
-
-        if (existing) {
-          // Update existing pattern
-          const newTotalUses = existing.total_uses + 1;
-          const newSuccessfulUses = existing.successful_uses + 1;
-          const currentAvg = existing.average_rating || 0;
-          const newAverage = ((currentAvg * existing.total_uses) + rating) / newTotalUses;
-          
-          // Keep last 5 example prompts
-          const examples = existing.example_prompts || [];
-          if (examples.length >= 5) examples.shift();
-          examples.push(enriched_prompt.substring(0, 200));
-
-          await supabase
-            .from("prompt_learnings")
-            .update({
-              total_uses: newTotalUses,
-              successful_uses: newSuccessfulUses,
-              average_rating: Math.round(newAverage * 100) / 100,
-              example_prompts: examples,
-            })
-            .eq("id", existing.id);
-        } else {
-          // Insert new pattern
-          await supabase
-            .from("prompt_learnings")
-            .insert({
-              provider,
-              pattern_type: patternType,
-              pattern_value: patternValue,
-              total_uses: 1,
-              successful_uses: 1,
-              average_rating: rating,
-              example_prompts: [enriched_prompt.substring(0, 200)],
-            });
-        }
-
+        await upsertPatternLearning(
+          supabaseUrl,
+          supabaseServiceKey,
+          provider,
+          patternType,
+          patternValue,
+          rating,
+          isSuccess,
+          enriched_prompt
+        );
         learnedPatterns.push(`${patternType}:${patternValue}`);
       }
     }
 
-    // Also learn from style hints if provided
+    // Learn from style hints
     if (style_hints) {
       const hints = style_hints.split(/[,;]/).map(h => h.trim().toLowerCase()).filter(Boolean);
-      
       for (const hint of hints) {
-        const { data: existing } = await supabase
-          .from("prompt_learnings")
-          .select("id, total_uses, successful_uses, average_rating")
-          .eq("provider", provider)
-          .eq("pattern_type", "style_hint")
-          .eq("pattern_value", hint)
-          .single();
-
-        if (existing) {
-          const newTotalUses = existing.total_uses + 1;
-          const newSuccessfulUses = existing.successful_uses + 1;
-          const currentAvg = existing.average_rating || 0;
-          const newAverage = ((currentAvg * existing.total_uses) + rating) / newTotalUses;
-
-          await supabase
-            .from("prompt_learnings")
-            .update({
-              total_uses: newTotalUses,
-              successful_uses: newSuccessfulUses,
-              average_rating: Math.round(newAverage * 100) / 100,
-            })
-            .eq("id", existing.id);
-        } else {
-          await supabase
-            .from("prompt_learnings")
-            .insert({
-              provider,
-              pattern_type: "style_hint",
-              pattern_value: hint,
-              total_uses: 1,
-              successful_uses: 1,
-              average_rating: rating,
-            });
-        }
-
+        await upsertPatternLearning(
+          supabaseUrl,
+          supabaseServiceKey,
+          provider,
+          "style_hint",
+          hint,
+          rating,
+          isSuccess,
+          enriched_prompt
+        );
         learnedPatterns.push(`style_hint:${hint}`);
       }
     }
 
-    console.log(`Learned ${learnedPatterns.length} patterns for ${provider}`);
+    // Extract semantic traits (only for successes, uses LLM)
+    let semanticTraits: string[] = [];
+    if (isSuccess && openaiKey) {
+      semanticTraits = await extractSemanticTraits(enriched_prompt, openaiKey);
+      
+      for (const trait of semanticTraits) {
+        await upsertPatternLearning(
+          supabaseUrl,
+          supabaseServiceKey,
+          provider,
+          "semantic_trait",
+          trait.toLowerCase(),
+          rating,
+          true,
+          enriched_prompt
+        );
+        learnedPatterns.push(`semantic_trait:${trait}`);
+      }
+    }
+
+    console.log(`Learned ${learnedPatterns.length} patterns for ${provider} (${isSuccess ? "positive" : "negative"})`);
 
     return new Response(
       JSON.stringify({
         learned: true,
+        learning_type: isSuccess ? "positive" : "negative",
         provider,
         patterns_count: learnedPatterns.length,
         patterns: learnedPatterns,
+        semantic_traits: semanticTraits,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

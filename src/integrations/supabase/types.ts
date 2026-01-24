@@ -485,9 +485,13 @@ export type Database = {
       prompt_learnings: {
         Row: {
           average_rating: number | null
+          avoid_pattern: boolean
           created_at: string
           example_prompts: string[] | null
+          failed_uses: number
           id: string
+          last_failure_at: string | null
+          last_success_at: string | null
           pattern_type: string
           pattern_value: string
           provider: string
@@ -497,9 +501,13 @@ export type Database = {
         }
         Insert: {
           average_rating?: number | null
+          avoid_pattern?: boolean
           created_at?: string
           example_prompts?: string[] | null
+          failed_uses?: number
           id?: string
+          last_failure_at?: string | null
+          last_success_at?: string | null
           pattern_type: string
           pattern_value: string
           provider: string
@@ -509,9 +517,13 @@ export type Database = {
         }
         Update: {
           average_rating?: number | null
+          avoid_pattern?: boolean
           created_at?: string
           example_prompts?: string[] | null
+          failed_uses?: number
           id?: string
+          last_failure_at?: string | null
+          last_success_at?: string | null
           pattern_type?: string
           pattern_value?: string
           provider?: string
