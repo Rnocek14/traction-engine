@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { Link } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Beaker } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -7,40 +8,82 @@ import {
   ResizablePanel,
   ResizableHandle,
 } from "@/components/ui/resizable";
-import { ScriptPanel } from "@/components/lab/ScriptPanel";
-import { VoicePanel } from "@/components/lab/VoicePanel";
-import { VisualPanel } from "@/components/lab/VisualPanel";
-import { AssemblyPanel } from "@/components/lab/AssemblyPanel";
-import { VideoEngine } from "@/lib/lab-engines";
+import { LabGeneratePanel, LabResult } from "@/components/lab/LabGeneratePanel";
+import { LabPreviewPanel } from "@/components/lab/LabPreviewPanel";
+import { getVideoJobStatus } from "@/lib/lab-engines";
 
 /**
- * Video Lab - R&D Sandbox for Engine Testing
+ * Video Lab - 2-Column R&D Sandbox
  * 
- * This is NOT the production Studio. This is a chaos-allowed sandbox
- * for testing each AI engine independently and in combination.
- * 
- * No scheduling, no posting, no automation pressure.
+ * Left: Generate (video/voice controls)
+ * Right: Preview (always-visible result + strip)
  */
 export default function Lab() {
-  // Cross-panel state for easy asset passing
-  const [voiceoverText, setVoiceoverText] = useState("");
-  const [generatedAudioUrl, setGeneratedAudioUrl] = useState<string>();
-  const [generatedVideoUrls, setGeneratedVideoUrls] = useState<string[]>([]);
+  const [results, setResults] = useState<LabResult[]>([]);
+  const [activeResultId, setActiveResultId] = useState<string | null>(null);
 
-  // Handle script generation
-  const handleScriptGenerated = (script: string, voiceover: string) => {
-    setVoiceoverText(voiceover);
-  };
+  // Memoize job IDs for polling
+  const activeJobIds = useMemo(
+    () => results
+      .filter(r => r.type === "video" && (r.status === "queued" || r.status === "running"))
+      .map(r => r.jobId)
+      .filter(Boolean) as string[],
+    [results]
+  );
 
-  // Handle voice generation
-  const handleAudioGenerated = (url: string) => {
-    setGeneratedAudioUrl(url);
-  };
+  const jobIdsKey = activeJobIds.join(",");
 
-  // Handle video generation
-  const handleVideoGenerated = (url: string, engine: VideoEngine) => {
-    setGeneratedVideoUrls(prev => [...prev, url]);
-  };
+  // Poll for video job status updates
+  useQuery({
+    queryKey: ["lab-video-jobs", jobIdsKey],
+    queryFn: async () => {
+      if (activeJobIds.length === 0) return null;
+
+      const updates = await Promise.all(
+        activeJobIds.map(async jobId => {
+          const status = await getVideoJobStatus(jobId);
+          return { jobId, ...status };
+        })
+      );
+
+      setResults(prev => prev.map(result => {
+        if (result.type !== "video" || !result.jobId) return result;
+        
+        const update = updates.find(u => u.jobId === result.jobId);
+        if (!update) return result;
+
+        // Auto-select on completion
+        if (update.status === "done" && result.status !== "done" && update.outputUrl) {
+          setActiveResultId(result.id);
+        }
+
+        return {
+          ...result,
+          status: update.status,
+          progress: update.progress || result.progress,
+          outputUrl: update.outputUrl,
+          error: update.error,
+        };
+      }));
+
+      return updates;
+    },
+    enabled: activeJobIds.length > 0,
+    refetchInterval: 3000,
+  });
+
+  const handleResultCreated = useCallback((result: LabResult) => {
+    setResults(prev => [result, ...prev]);
+    setActiveResultId(result.id);
+  }, []);
+
+  const handleResultUpdated = useCallback((id: string, updates: Partial<LabResult>) => {
+    setResults(prev => prev.map(r => r.id === id ? { ...r, ...updates } : r));
+  }, []);
+
+  const handleSelectResult = useCallback((id: string) => {
+    setActiveResultId(id);
+  }, []);
 
   return (
     <div className="h-screen flex flex-col bg-background">
@@ -62,65 +105,32 @@ export default function Lab() {
         </div>
 
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span>Chaos allowed • No automation</span>
+          <span>{results.length} results</span>
         </div>
       </header>
 
-      {/* Main Content - 4 Panel Layout */}
+      {/* Main Content - 2 Column Layout */}
       <div className="flex-1 overflow-hidden">
-        <ResizablePanelGroup direction="vertical">
-          {/* Top Row: Script + Voice */}
-          <ResizablePanel defaultSize={40} minSize={20}>
-            <ResizablePanelGroup direction="horizontal">
-              {/* Script Panel */}
-              <ResizablePanel defaultSize={50} minSize={25}>
-                <div className="h-full overflow-auto border-r">
-                  <ScriptPanel
-                    onScriptGenerated={handleScriptGenerated}
-                  />
-                </div>
-              </ResizablePanel>
-
-              <ResizableHandle withHandle />
-
-              {/* Voice Panel */}
-              <ResizablePanel defaultSize={50} minSize={25}>
-                <div className="h-full overflow-auto">
-                  <VoicePanel
-                    initialText={voiceoverText}
-                    onAudioGenerated={handleAudioGenerated}
-                  />
-                </div>
-              </ResizablePanel>
-            </ResizablePanelGroup>
+        <ResizablePanelGroup direction="horizontal">
+          {/* Left: Generate Panel */}
+          <ResizablePanel defaultSize={35} minSize={25} maxSize={50}>
+            <div className="h-full overflow-auto p-4 border-r">
+              <LabGeneratePanel
+                onResultCreated={handleResultCreated}
+                onResultUpdated={handleResultUpdated}
+              />
+            </div>
           </ResizablePanel>
 
           <ResizableHandle withHandle />
 
-          {/* Bottom Row: Visual + Assembly */}
-          <ResizablePanel defaultSize={60} minSize={30}>
-            <ResizablePanelGroup direction="horizontal">
-              {/* Visual Panel */}
-              <ResizablePanel defaultSize={65} minSize={40}>
-                <div className="h-full overflow-auto border-r">
-                  <VisualPanel
-                    onVideoGenerated={handleVideoGenerated}
-                  />
-                </div>
-              </ResizablePanel>
-
-              <ResizableHandle withHandle />
-
-              {/* Assembly Panel */}
-              <ResizablePanel defaultSize={35} minSize={25}>
-                <div className="h-full overflow-auto">
-                  <AssemblyPanel
-                    audioUrl={generatedAudioUrl}
-                    videoUrls={generatedVideoUrls}
-                  />
-                </div>
-              </ResizablePanel>
-            </ResizablePanelGroup>
+          {/* Right: Preview Panel */}
+          <ResizablePanel defaultSize={65} minSize={40}>
+            <LabPreviewPanel
+              results={results}
+              activeResultId={activeResultId}
+              onSelectResult={handleSelectResult}
+            />
           </ResizablePanel>
         </ResizablePanelGroup>
       </div>
