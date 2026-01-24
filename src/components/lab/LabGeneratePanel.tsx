@@ -135,6 +135,7 @@ export function LabGeneratePanel({
   const [showEnrichedPreview, setShowEnrichedPreview] = useState(false);
   const [enrichedPrompt, setEnrichedPrompt] = useState("");
   const [originalPromptForPreview, setOriginalPromptForPreview] = useState("");
+  const [styleHints, setStyleHints] = useState("");
   
   // Voice state
   const [voiceProvider, setVoiceProvider] = useState<VoiceEngine>("elevenlabs");
@@ -312,7 +313,8 @@ export function LabGeneratePanel({
       try {
         const { enriched, error } = await enrichPrompt(
           videoPrompt, 
-          selectedVideoEngine
+          selectedVideoEngine,
+          styleHints.trim() || undefined
         );
         if (!error && enriched !== videoPrompt) {
           setEnrichedPrompt(enriched);
@@ -561,6 +563,26 @@ export function LabGeneratePanel({
               onCheckedChange={setAutoEnhance}
             />
           </div>
+
+          {/* Style Hints Input - only shown when auto-enhance is on */}
+          {autoEnhance && (
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
+                <Sparkles className="h-3 w-3" />
+                Style Hints (optional)
+              </Label>
+              <input
+                type="text"
+                value={styleHints}
+                onChange={(e) => setStyleHints(e.target.value)}
+                placeholder="e.g., horror, cinematic, product shot, dreamy..."
+                className="w-full h-9 px-3 text-xs rounded-md bg-secondary/30 border border-border/50 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+              />
+              <p className="text-[10px] text-muted-foreground">
+                Guides GPT-4o's cinematic direction
+              </p>
+            </div>
+          )}
 
           {/* Chain Mode Toggle */}
           <div className="flex items-center justify-between p-3 rounded-lg bg-secondary/30 border border-border/50">
