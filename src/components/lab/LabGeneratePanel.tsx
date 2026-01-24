@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { 
   Video, Mic, Loader2, Play, Beaker, Link2, Moon, Sun, 
-  Zap, Film, Camera, Sparkles, Ghost, Clapperboard, Pencil
+  Zap, Film, Camera, Sparkles, Pencil, ChevronDown
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,6 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
-import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
@@ -27,6 +26,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { useToast } from "@/hooks/use-toast";
 import {
   VideoEngine,
@@ -40,6 +44,7 @@ import {
   enrichPrompt,
 } from "@/lib/lab-engines";
 import { STYLE_PRESETS } from "@/data/style-presets";
+import { GenerationQueue } from "./GenerationQueue";
 
 // ============ QUICK PRESETS ============
 const QUICK_STYLES = [
@@ -463,40 +468,58 @@ export function LabGeneratePanel({
             </div>
           </div>
 
-          {/* Quick Style Presets */}
-          <div className="space-y-2">
-            <Label className="text-xs text-muted-foreground">Quick Styles</Label>
-            <div className="grid grid-cols-3 gap-2">
-              {QUICK_STYLES.map(style => (
-                <Button
-                  key={style.id}
-                  size="sm"
-                  variant="outline"
-                  className={cn("h-8 text-xs border justify-start", style.color)}
-                  onClick={() => applyQuickStyle(style.id)}
-                >
-                  <style.icon className="h-3 w-3 mr-1.5 shrink-0" />
-                  <span className="truncate">{style.label}</span>
+          {/* Compact Quick Styles + Templates in popovers */}
+          <div className="flex gap-2">
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5 flex-1">
+                  <Sparkles className="h-3 w-3" />
+                  Quick Styles
+                  <ChevronDown className="h-3 w-3 ml-auto opacity-50" />
                 </Button>
-              ))}
-            </div>
-          </div>
+              </PopoverTrigger>
+              <PopoverContent className="w-64 p-2" align="start">
+                <div className="grid grid-cols-2 gap-1.5">
+                  {QUICK_STYLES.map(style => (
+                    <Button
+                      key={style.id}
+                      size="sm"
+                      variant="outline"
+                      className={cn("h-8 text-xs border justify-start", style.color)}
+                      onClick={() => applyQuickStyle(style.id)}
+                    >
+                      <style.icon className="h-3 w-3 mr-1.5 shrink-0" />
+                      <span className="truncate">{style.label}</span>
+                    </Button>
+                  ))}
+                </div>
+              </PopoverContent>
+            </Popover>
 
-          {/* Prompt Templates */}
-          <div className="space-y-2">
-            <Label className="text-xs text-muted-foreground">Templates</Label>
-            <div className="flex flex-wrap gap-1.5">
-              {PROMPT_TEMPLATES.map(template => (
-                <Badge
-                  key={template.id}
-                  variant="outline"
-                  className="cursor-pointer hover:bg-secondary/50 text-xs py-1"
-                  onClick={() => applyTemplate(template.id)}
-                >
-                  {template.label}
-                </Badge>
-              ))}
-            </div>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5 flex-1">
+                  <Film className="h-3 w-3" />
+                  Templates
+                  <ChevronDown className="h-3 w-3 ml-auto opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-56 p-2" align="start">
+                <div className="space-y-1">
+                  {PROMPT_TEMPLATES.map(template => (
+                    <Button
+                      key={template.id}
+                      size="sm"
+                      variant="ghost"
+                      className="w-full justify-start text-xs h-8"
+                      onClick={() => applyTemplate(template.id)}
+                    >
+                      {template.label}
+                    </Button>
+                  ))}
+                </div>
+              </PopoverContent>
+            </Popover>
           </div>
 
           {/* Prompt */}
@@ -625,12 +648,15 @@ export function LabGeneratePanel({
           )}
 
 
+          {/* Generation Queue */}
+          <GenerationQueue results={results} />
+
           {/* Actions */}
-          <div className="flex gap-2 pt-2">
+          <div className="flex gap-2">
             <Button
               onClick={handleVideoGenerate}
               disabled={videoMutation.isPending || isEnriching || !videoPrompt.trim()}
-              className="flex-1 h-10"
+              className="flex-1 h-9"
             >
               {isEnriching ? (
                 <>
@@ -649,9 +675,9 @@ export function LabGeneratePanel({
               onClick={handleVideoAB}
               disabled={videoMutation.isPending || isEnriching || !videoPrompt.trim()}
               title="A/B test all 3 engines"
-              className="h-10 px-4"
+              className="h-9 px-3"
             >
-              <Beaker className="h-4 w-4 mr-1.5" />
+              <Beaker className="h-4 w-4 mr-1" />
               A/B
             </Button>
           </div>

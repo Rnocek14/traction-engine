@@ -1,11 +1,12 @@
 import { useRef, useEffect, useState, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Copy, ExternalLink, Download, Play, Pause, Video, Mic, Loader2, AlertCircle, X, FastForward, ImageIcon, Star } from "lucide-react";
+import { Video, Mic, Loader2, AlertCircle, Star } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { useToast } from "@/hooks/use-toast";
 import { VideoRatingPanel } from "./VideoRatingPanel";
+import { VideoActionBar } from "./VideoActionBar";
+import { UnifiedFilmstrip } from "./UnifiedFilmstrip";
 import { getVideoJobDetails } from "@/lib/lab-ratings";
 import type { LabResult } from "./LabGeneratePanel";
 import type { VideoEngine } from "@/lib/lab-engines";
@@ -15,30 +16,31 @@ interface LabPreviewPanelProps {
   results: LabResult[];
   activeResultId: string | null;
   onSelectResult: (id: string) => void;
-  // Pass generation ID for seamless extend, or thumbnail URL for reference mode
+  onAddResult?: (result: LabResult) => void;
   onExtendVideo?: (generationIdOrImageUrl: string, engine: VideoEngine) => void;
 }
 
-export function LabPreviewPanel({ 
-  className, 
-  results, 
-  activeResultId, 
+export function LabPreviewPanel({
+  className,
+  results,
+  activeResultId,
   onSelectResult,
+  onAddResult,
   onExtendVideo,
 }: LabPreviewPanelProps) {
-  const { toast } = useToast();
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [previewFailed, setPreviewFailed] = useState(false);
+  const [showRatingPanel, setShowRatingPanel] = useState(false);
 
-  const activeResult = results.find(r => r.id === activeResultId);
-  const activeIndex = results.findIndex(r => r.id === activeResultId);
+  const activeResult = results.find((r) => r.id === activeResultId);
+  const activeIndex = results.findIndex((r) => r.id === activeResultId);
 
   // Fetch job details for rating
   const { data: jobDetails, refetch: refetchJobDetails } = useQuery({
     queryKey: ["video-job-details", activeResultId],
-    queryFn: () => activeResultId ? getVideoJobDetails(activeResultId) : null,
+    queryFn: () => (activeResultId ? getVideoJobDetails(activeResultId) : null),
     enabled: !!activeResultId && activeResult?.status === "done" && activeResult?.type === "video",
   });
 
@@ -46,6 +48,7 @@ export function LabPreviewPanel({
   useEffect(() => {
     setPreviewFailed(false);
     setIsPlaying(false);
+    setShowRatingPanel(false);
   }, [activeResultId]);
 
   // Auto-play when result is ready
@@ -59,24 +62,10 @@ export function LabPreviewPanel({
     }
   }, [activeResult?.status, activeResult?.outputUrl]);
 
-  const handleCopyUrl = async (url?: string) => {
-    if (!url) return;
-    await navigator.clipboard.writeText(url);
-    toast({ title: "Copied", description: "URL copied to clipboard" });
-  };
-
-  const handleDownload = (url?: string, type?: "video" | "audio") => {
-    if (!url) return;
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `lab-${type}-${Date.now()}.${type === "video" ? "mp4" : "mp3"}`;
-    a.click();
-  };
-
   const togglePlayback = useCallback(() => {
     const element = activeResult?.type === "video" ? videoRef.current : audioRef.current;
     if (!element) return;
-    
+
     if (isPlaying) {
       element.pause();
     } else {
@@ -85,39 +74,31 @@ export function LabPreviewPanel({
   }, [activeResult?.type, isPlaying]);
 
   // Keyboard navigation
-  const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    if (results.length === 0) return;
-    
-    // Don't interfere with inputs
-    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      if (results.length === 0) return;
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
 
-    if (e.key === "ArrowLeft") {
-      e.preventDefault();
-      const newIndex = activeIndex <= 0 ? results.length - 1 : activeIndex - 1;
-      onSelectResult(results[newIndex].id);
-    } else if (e.key === "ArrowRight") {
-      e.preventDefault();
-      const newIndex = activeIndex >= results.length - 1 ? 0 : activeIndex + 1;
-      onSelectResult(results[newIndex].id);
-    } else if (e.key === " " && activeResult?.status === "done") {
-      e.preventDefault();
-      togglePlayback();
-    }
-  }, [results, activeIndex, activeResult, onSelectResult, togglePlayback]);
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        const newIndex = activeIndex <= 0 ? results.length - 1 : activeIndex - 1;
+        onSelectResult(results[newIndex].id);
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        const newIndex = activeIndex >= results.length - 1 ? 0 : activeIndex + 1;
+        onSelectResult(results[newIndex].id);
+      } else if (e.key === " " && activeResult?.status === "done") {
+        e.preventDefault();
+        togglePlayback();
+      }
+    },
+    [results, activeIndex, activeResult, onSelectResult, togglePlayback]
+  );
 
   useEffect(() => {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleKeyDown]);
-
-  const getStatusColor = (status: LabResult["status"]) => {
-    switch (status) {
-      case "queued": return "text-warning";
-      case "running": return "text-primary";
-      case "done": return "text-success";
-      case "failed": return "text-destructive";
-    }
-  };
 
   const getEngineColor = (engine: string) => {
     const colors: Record<string, string> = {
@@ -130,99 +111,67 @@ export function LabPreviewPanel({
     return colors[engine] || "bg-secondary text-secondary-foreground";
   };
 
+  const getStatusColor = (status: LabResult["status"]) => {
+    switch (status) {
+      case "queued":
+        return "text-warning";
+      case "running":
+        return "text-primary";
+      case "done":
+        return "text-success";
+      case "failed":
+        return "text-destructive";
+    }
+  };
+
+  // Handler for library video selection
+  const handleLibrarySelect = (jobId: string, url: string, provider: string) => {
+    // Check if already in results
+    const existing = results.find((r) => r.id === jobId);
+    if (existing) {
+      onSelectResult(jobId);
+    } else if (onAddResult) {
+      // Add to results then select
+      const tempResult: LabResult = {
+        id: jobId,
+        jobId: jobId,
+        type: "video",
+        engine: provider as "sora" | "runway" | "luma",
+        status: "done",
+        progress: 100,
+        outputUrl: url,
+        startTime: Date.now(),
+      };
+      onAddResult(tempResult);
+    }
+  };
+
   return (
     <div className={cn("flex flex-col h-full overflow-hidden", className)}>
-      {/* Main Preview Area - uses min-h-0 to allow shrinking */}
+      {/* Main Preview Area */}
       <div className="flex-1 min-h-0 flex flex-col">
         {activeResult ? (
           <div className="flex-1 min-h-0 flex flex-col">
-            {/* Preview Header */}
-            <div className="flex items-center justify-between p-3 border-b bg-card/50">
-              <div className="flex items-center gap-2">
-                {activeResult.type === "video" ? (
-                  <Video className="h-4 w-4 text-muted-foreground" />
-                ) : (
-                  <Mic className="h-4 w-4 text-muted-foreground" />
-                )}
-                <Badge variant="outline" className={cn("text-xs", getEngineColor(activeResult.engine))}>
-                  {activeResult.engine.toUpperCase()}
+            {/* Minimal header - just status */}
+            <div className="flex items-center gap-2 p-2 border-b bg-card/30">
+              {activeResult.type === "video" ? (
+                <Video className="h-3.5 w-3.5 text-muted-foreground" />
+              ) : (
+                <Mic className="h-3.5 w-3.5 text-muted-foreground" />
+              )}
+              <Badge variant="outline" className={cn("text-[10px] h-5", getEngineColor(activeResult.engine))}>
+                {activeResult.engine.toUpperCase()}
+              </Badge>
+              <Badge variant="outline" className={cn("text-[10px] h-5", getStatusColor(activeResult.status))}>
+                {activeResult.status === "running" && <Loader2 className="h-2.5 w-2.5 mr-1 animate-spin" />}
+                {activeResult.status}
+                {activeResult.status === "running" && ` ${activeResult.progress}%`}
+              </Badge>
+              {jobDetails?.accuracy_rating && (
+                <Badge variant="outline" className="text-[10px] h-5 gap-1 ml-auto">
+                  <Star className="h-2.5 w-2.5 fill-yellow-400 text-yellow-400" />
+                  {jobDetails.accuracy_rating}
                 </Badge>
-                <Badge variant="outline" className={cn("text-xs", getStatusColor(activeResult.status))}>
-                  {activeResult.status === "running" && (
-                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                  )}
-                  {activeResult.status}
-                  {activeResult.status === "running" && ` ${activeResult.progress}%`}
-                </Badge>
-              </div>
-              
-              {activeResult.status === "done" && activeResult.outputUrl && (
-                <div className="flex gap-1">
-                  {/* Luma: Extend (seamless continuation) - requires generation ID */}
-                  {activeResult.type === "video" && activeResult.engine === "luma" && onExtendVideo && activeResult.providerGenerationId && (
-                    <Button 
-                      size="sm" 
-                      variant="secondary"
-                      className="h-7 text-xs gap-1"
-                      onClick={() => onExtendVideo(activeResult.providerGenerationId!, activeResult.engine as VideoEngine)}
-                      title="Continue seamlessly from last frame"
-                    >
-                      <FastForward className="h-3 w-3" />
-                      Extend
-                    </Button>
-                  )}
-                  {/* Luma: Reference (image-based, more creative) - only shows if thumbnail available */}
-                  {activeResult.type === "video" && activeResult.engine === "luma" && onExtendVideo && activeResult.thumbnailUrl && (
-                    <Button 
-                      size="sm" 
-                      variant="outline"
-                      className="h-7 text-xs gap-1"
-                      onClick={() => onExtendVideo(activeResult.thumbnailUrl!, activeResult.engine as VideoEngine)}
-                      title="Use thumbnail as visual reference (more creative freedom)"
-                    >
-                      <ImageIcon className="h-3 w-3" />
-                      Reference
-                    </Button>
-                  )}
-                  <Button 
-                    size="sm" 
-                    variant="ghost" 
-                    className="h-7"
-                    onClick={togglePlayback}
-                  >
-                    {isPlaying ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
-                  </Button>
-                  <Button 
-                    size="sm" 
-                    variant="ghost" 
-                    className="h-7"
-                    onClick={() => handleCopyUrl(activeResult.outputUrl)}
-                  >
-                    <Copy className="h-3 w-3" />
-                  </Button>
-                  <Button 
-                    size="sm" 
-                    variant="ghost" 
-                    className="h-7"
-                    onClick={() => handleDownload(activeResult.outputUrl, activeResult.type)}
-                  >
-                    <Download className="h-3 w-3" />
-                  </Button>
-                  <Button 
-                    size="sm" 
-                    variant="ghost" 
-                    className="h-7"
-                    onClick={() => window.open(activeResult.outputUrl, "_blank")}
-                  >
-                    <ExternalLink className="h-3 w-3" />
-                  </Button>
-                  {jobDetails?.accuracy_rating && (
-                    <Badge variant="outline" className="h-7 gap-1 text-xs">
-                      <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
-                      {jobDetails.accuracy_rating}
-                    </Badge>
-                  )}
-                </div>
               )}
             </div>
 
@@ -233,12 +182,11 @@ export function LabPreviewPanel({
                   <div className="flex flex-col items-center gap-3 text-muted-foreground">
                     <AlertCircle className="h-8 w-8" />
                     <p className="text-sm">Preview failed to load</p>
-                    <Button 
-                      size="sm" 
+                    <Button
+                      size="sm"
                       variant="secondary"
                       onClick={() => window.open(activeResult.outputUrl, "_blank")}
                     >
-                      <ExternalLink className="h-4 w-4 mr-2" />
                       Open in new tab
                     </Button>
                   </div>
@@ -259,8 +207,8 @@ export function LabPreviewPanel({
                   />
                 ) : (
                   <div className="flex flex-col items-center gap-4 p-8">
-                    <div className="w-32 h-32 rounded-full bg-primary/20 flex items-center justify-center">
-                      <Mic className="h-12 w-12 text-primary" />
+                    <div className="w-24 h-24 rounded-full bg-primary/20 flex items-center justify-center">
+                      <Mic className="h-10 w-10 text-primary" />
                     </div>
                     <audio
                       ref={audioRef}
@@ -288,19 +236,38 @@ export function LabPreviewPanel({
                   </p>
                 </div>
               )}
+
+              {/* Inline rating overlay when video ends */}
+              {showRatingPanel && activeResult.status === "done" && activeResult.type === "video" && (
+                <div className="absolute inset-0 bg-black/80 flex items-center justify-center p-4">
+                  <div className="bg-card rounded-lg p-4 max-w-md w-full">
+                    <VideoRatingPanel
+                      jobId={activeResult.id}
+                      provider={activeResult.engine}
+                      originalPrompt={jobDetails?.original_prompt || undefined}
+                      enrichedPrompt={jobDetails?.enriched_prompt || undefined}
+                      styleHints={jobDetails?.style_hints || undefined}
+                      currentRating={jobDetails?.accuracy_rating || 0}
+                      currentNotes=""
+                      onRated={() => {
+                        refetchJobDetails();
+                        setShowRatingPanel(false);
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
 
-            {/* Rating Panel - Always visible for completed videos without a rating */}
-            {activeResult.status === "done" && activeResult.type === "video" && jobDetails && !jobDetails.accuracy_rating && (
-              <VideoRatingPanel
-                jobId={activeResult.id}
-                provider={activeResult.engine}
-                originalPrompt={jobDetails.original_prompt || undefined}
-                enrichedPrompt={jobDetails.enriched_prompt || undefined}
-                styleHints={jobDetails.style_hints || undefined}
-                currentRating={0}
-                currentNotes=""
-                onRated={() => refetchJobDetails()}
+            {/* Action bar - only for completed videos */}
+            {activeResult.status === "done" && activeResult.type === "video" && activeResult.outputUrl && (
+              <VideoActionBar
+                result={activeResult}
+                jobDetails={jobDetails}
+                isPlaying={isPlaying}
+                onTogglePlayback={togglePlayback}
+                onExtendVideo={onExtendVideo}
+                onOpenRating={() => setShowRatingPanel(true)}
               />
             )}
           </div>
@@ -314,94 +281,13 @@ export function LabPreviewPanel({
         )}
       </div>
 
-      {/* Results Strip - Always visible filmstrip */}
-      {results.length > 0 && (
-        <div className="border-t-2 border-primary/30 bg-card shrink-0">
-          <div className="flex items-center gap-2 px-3 py-2 border-b border-border/50">
-            <span className="text-xs font-medium text-muted-foreground">
-              Results ({results.length})
-            </span>
-            <div className="flex-1" />
-            <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
-              <span className="flex items-center gap-1">
-                <kbd className="px-1 py-0.5 rounded bg-muted text-[9px] font-mono">←</kbd>
-                <kbd className="px-1 py-0.5 rounded bg-muted text-[9px] font-mono">→</kbd>
-                navigate
-              </span>
-              <span className="flex items-center gap-1">
-                <kbd className="px-1.5 py-0.5 rounded bg-muted text-[9px] font-mono">Space</kbd>
-                play/pause
-              </span>
-            </div>
-          </div>
-          <div className="p-3">
-            <div className="flex gap-3 overflow-x-auto pb-2">
-              {results.map((result) => (
-                <button
-                  key={result.id}
-                  onClick={() => onSelectResult(result.id)}
-                  className={cn(
-                    "flex-shrink-0 w-24 rounded-lg overflow-hidden border-2 transition-all hover:scale-105",
-                    activeResultId === result.id 
-                      ? "border-primary ring-2 ring-primary/30 shadow-lg shadow-primary/20" 
-                      : "border-border hover:border-primary/50 bg-background"
-                  )}
-                >
-                  <div className="aspect-video bg-black relative flex items-center justify-center">
-                    {result.status === "done" && result.outputUrl ? (
-                      result.type === "video" ? (
-                        <video
-                          src={result.outputUrl}
-                          className="w-full h-full object-cover"
-                          muted
-                        />
-                      ) : (
-                        <Mic className="h-5 w-5 text-primary" />
-                      )
-                    ) : result.status === "failed" ? (
-                      <X className="h-5 w-5 text-destructive" />
-                    ) : (
-                      <div className="flex flex-col items-center gap-1">
-                        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                        <span className="text-[10px] font-medium text-muted-foreground">
-                          {result.progress}%
-                        </span>
-                      </div>
-                    )}
-                    
-                    {/* Progress bar overlay for running jobs */}
-                    {(result.status === "running" || result.status === "queued") && (
-                      <div className="absolute bottom-0 left-0 right-0 h-1.5 bg-black/70">
-                        <div 
-                          className="h-full bg-primary transition-all duration-300"
-                          style={{ width: `${result.progress}%` }}
-                        />
-                      </div>
-                    )}
-                    
-                    {/* Engine badge overlay */}
-                    <div className="absolute top-1 left-1">
-                      <span className={cn(
-                        "text-[9px] px-1.5 py-0.5 rounded font-semibold uppercase shadow-sm",
-                        getEngineColor(result.engine)
-                      )}>
-                        {result.engine.slice(0, 4)}
-                      </span>
-                    </div>
-
-                    {/* Status indicator for done */}
-                    {result.status === "done" && (
-                      <div className="absolute top-1 right-1">
-                        <div className="w-2 h-2 rounded-full bg-success shadow-sm" />
-                      </div>
-                    )}
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Unified Filmstrip */}
+      <UnifiedFilmstrip
+        sessionResults={results}
+        activeResultId={activeResultId}
+        onSelectResult={onSelectResult}
+        onSelectLibraryVideo={handleLibrarySelect}
+      />
     </div>
   );
 }
