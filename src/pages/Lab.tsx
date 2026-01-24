@@ -110,11 +110,11 @@ export default function Lab() {
       </header>
 
       {/* Main Content - 2 Column Layout */}
-      <div className="flex-1 overflow-hidden">
-        <ResizablePanelGroup direction="horizontal">
+      <div className="flex-1 min-h-0 overflow-hidden">
+        <ResizablePanelGroup direction="horizontal" className="h-full">
           {/* Left: Generate Panel */}
           <ResizablePanel defaultSize={35} minSize={25} maxSize={50}>
-            <div className="h-full overflow-auto p-4 border-r">
+            <div className="h-full overflow-y-auto overflow-x-hidden p-4 border-r border-border">
               <LabGeneratePanel
                 results={results}
                 onResultCreated={handleResultCreated}
@@ -123,15 +123,17 @@ export default function Lab() {
             </div>
           </ResizablePanel>
 
-          <ResizableHandle withHandle />
+          <ResizableHandle withHandle className="bg-border/50 hover:bg-primary/20 transition-colors" />
 
           {/* Right: Preview Panel */}
           <ResizablePanel defaultSize={65} minSize={40}>
-            <LabPreviewPanel
-              results={results}
-              activeResultId={activeResultId}
-              onSelectResult={handleSelectResult}
-            />
+            <div className="h-full overflow-hidden">
+              <LabPreviewPanel
+                results={results}
+                activeResultId={activeResultId}
+                onSelectResult={handleSelectResult}
+              />
+            </div>
           </ResizablePanel>
         </ResizablePanelGroup>
       </div>
