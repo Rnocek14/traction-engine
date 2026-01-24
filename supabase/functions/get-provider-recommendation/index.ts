@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { deriveClusterKey } from "../_shared/cluster-utils.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -7,7 +8,7 @@ const corsHeaders = {
 
 // Configuration
 const MIN_COMPARISONS_FOR_RECOMMENDATION = 5;
-const CONFIDENCE_WEIGHT = 0.3; // How much confidence affects the score
+const CONFIDENCE_WEIGHT = 0.3;
 
 interface ClusterStats {
   provider: string;
@@ -26,7 +27,7 @@ interface ProviderCapabilities {
   defaultScore: number;
 }
 
-// Static fallback provider capabilities (used when not enough data)
+// Static fallback provider capabilities
 const PROVIDER_DEFAULTS: ProviderCapabilities[] = [
   {
     provider: "sora",
@@ -49,14 +50,6 @@ const PROVIDER_DEFAULTS: ProviderCapabilities[] = [
 ];
 
 /**
- * Derives cluster key from routing tags
- */
-function deriveClusterKey(tags: string[]): string {
-  if (!tags || tags.length === 0) return "general";
-  return [...tags].sort().slice(0, 3).join("|");
-}
-
-/**
  * Calculates win rate with confidence weighting
  */
 function calculateWeightedScore(stats: ClusterStats): number {
@@ -65,7 +58,6 @@ function calculateWeightedScore(stats: ClusterStats): number {
   const winRate = stats.wins / stats.total_comparisons;
   const confidence = stats.avg_confidence || 0.5;
   
-  // Weighted score: base win rate + confidence bonus
   return winRate * (1 - CONFIDENCE_WEIGHT) + winRate * confidence * CONFIDENCE_WEIGHT;
 }
 
@@ -85,11 +77,9 @@ function getFallbackRecommendation(tags: string[]): {
   for (const provider of PROVIDER_DEFAULTS) {
     let score = provider.defaultScore;
     
-    // Boost for matching strengths
     const matchingStrengths = provider.strengths.filter(s => tagSet.has(s));
     score += matchingStrengths.length * 5;
     
-    // Penalty for matching weaknesses
     const matchingWeaknesses = provider.weaknesses.filter(w => tagSet.has(w));
     score -= matchingWeaknesses.length * 8;
     
@@ -130,6 +120,7 @@ Deno.serve(async (req) => {
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    // Use shared cluster key derivation
     const clusterKey = deriveClusterKey(routingTags);
 
     // Fetch stats for this cluster
@@ -140,14 +131,12 @@ Deno.serve(async (req) => {
 
     if (fetchError) throw fetchError;
 
-    // Check if we have enough data
-    // Use max() instead of sum() since total_comparisons is per-provider involvement
+    // Check if we have enough data (use max, not sum)
     const totalComparisons = clusterStats && clusterStats.length > 0
       ? Math.max(...clusterStats.map(s => s.total_comparisons || 0))
       : 0;
 
     if (!clusterStats || clusterStats.length === 0 || totalComparisons < MIN_COMPARISONS_FOR_RECOMMENDATION) {
-      // Fall back to static capabilities
       const fallback = getFallbackRecommendation(routingTags);
       
       return new Response(JSON.stringify({
@@ -175,16 +164,13 @@ Deno.serve(async (req) => {
       avgConfidence: stats.avg_confidence,
     }));
 
-    // Sort by score
     providerScores.sort((a, b) => b.score - a.score);
 
     const best = providerScores[0];
     const runnerUp = providerScores[1];
 
-    // Calculate confidence in recommendation
     let recommendationConfidence = best.score;
     if (runnerUp) {
-      // Reduce confidence if close race
       const margin = best.score - runnerUp.score;
       recommendationConfidence = Math.min(best.score, 0.5 + margin * 2);
     }

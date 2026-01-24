@@ -1,8 +1,9 @@
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { deriveClusterKey } from "../_shared/cluster-utils.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
 };
 
 // Configuration
@@ -22,17 +23,15 @@ interface VideoJobCandidate {
   enriched_prompt: string | null;
 }
 
-interface ClusterGroup {
-  clusterKey: string;
-  jobs: VideoJobCandidate[];
-}
-
 /**
- * Derives a cluster key from routing tags (top 3, sorted)
+ * Validates cron secret for scheduled invocations
  */
-function deriveClusterKey(tags: string[] | null): string {
-  if (!tags || tags.length === 0) return "general";
-  return [...tags].sort().slice(0, 3).join("|");
+function validateCronAuth(req: Request): boolean {
+  const cronSecret = Deno.env.get("CRON_SECRET");
+  if (!cronSecret) return true; // No secret configured, allow all
+  
+  const providedSecret = req.headers.get("x-cron-secret");
+  return providedSecret === cronSecret;
 }
 
 /**
@@ -63,7 +62,7 @@ async function pairAlreadyExists(
   const jobMin = jobA < jobB ? jobA : jobB;
   const jobMax = jobA < jobB ? jobB : jobA;
   
-  // Check video_comparisons table (pair-only, ignoring prompt_hash for now)
+  // Check video_comparisons table (pair-only)
   const { data: existingComparison, error: compErr } = await supabase
     .from("video_comparisons")
     .select("id")
@@ -88,11 +87,6 @@ async function pairAlreadyExists(
 
 /**
  * Selects valid pairs for comparison from a cluster
- * Rules:
- * - Different providers (most valuable signal)
- * - Both have images (thumbnail or spritesheet)
- * - At least one has high confidence
- * - At least one has good overall score
  */
 function selectPairsFromCluster(jobs: VideoJobCandidate[], maxPairs: number): Array<[VideoJobCandidate, VideoJobCandidate]> {
   const pairs: Array<[VideoJobCandidate, VideoJobCandidate]> = [];
@@ -163,6 +157,14 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // Validate cron auth if configured
+  if (!validateCronAuth(req)) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -202,7 +204,7 @@ Deno.serve(async (req) => {
       const pairs = selectPairsFromCluster(jobs, Math.min(3, MAX_PAIRS_PER_RUN - totalQueued));
       
       for (const [jobA, jobB] of pairs) {
-        // Check if already compared/queued (pair-only check, no cluster dependency)
+        // Check if already compared/queued (pair-only check)
         const exists = await pairAlreadyExists(supabase, jobA.id, jobB.id);
         if (exists) continue;
         

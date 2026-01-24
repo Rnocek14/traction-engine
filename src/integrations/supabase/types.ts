@@ -1177,6 +1177,11 @@ export type Database = {
           rated_at: string | null
           rated_by: string | null
           request_id: string | null
+          routed_provider: string | null
+          routing_cluster_key: string | null
+          routing_confidence: number | null
+          routing_reason: string | null
+          routing_source: string | null
           script_run_id: string
           settings: Json | null
           spritesheet_url: string | null
@@ -1220,6 +1225,11 @@ export type Database = {
           rated_at?: string | null
           rated_by?: string | null
           request_id?: string | null
+          routed_provider?: string | null
+          routing_cluster_key?: string | null
+          routing_confidence?: number | null
+          routing_reason?: string | null
+          routing_source?: string | null
           script_run_id: string
           settings?: Json | null
           spritesheet_url?: string | null
@@ -1263,6 +1273,11 @@ export type Database = {
           rated_at?: string | null
           rated_by?: string | null
           request_id?: string | null
+          routed_provider?: string | null
+          routing_cluster_key?: string | null
+          routing_confidence?: number | null
+          routing_reason?: string | null
+          routing_source?: string | null
           script_run_id?: string
           settings?: Json | null
           spritesheet_url?: string | null
@@ -1286,6 +1301,29 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      claim_compare_queue: {
+        Args: { p_limit: number }
+        Returns: {
+          cluster_key: string
+          completed_at: string | null
+          created_at: string
+          error: string | null
+          id: string
+          job_a: string
+          job_b: string
+          priority: number
+          prompt_hash: string | null
+          reason: string | null
+          started_at: string | null
+          status: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "video_compare_queue"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       has_any_role: {
         Args: {
           _roles: Database["public"]["Enums"]["app_role"][]
