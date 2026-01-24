@@ -161,14 +161,14 @@ export function LabPreviewPanel({
                       Extend
                     </Button>
                   )}
-                  {/* Luma: Reference (image-based, more creative) - uses thumbnail or video URL */}
-                  {activeResult.type === "video" && activeResult.engine === "luma" && onExtendVideo && (
+                  {/* Luma: Reference (image-based, more creative) - only shows if thumbnail available */}
+                  {activeResult.type === "video" && activeResult.engine === "luma" && onExtendVideo && activeResult.thumbnailUrl && (
                     <Button 
                       size="sm" 
                       variant="outline"
                       className="h-7 text-xs gap-1"
-                      onClick={() => onExtendVideo(activeResult.thumbnailUrl || activeResult.outputUrl!, activeResult.engine as VideoEngine)}
-                      title="Use as visual reference (more creative freedom)"
+                      onClick={() => onExtendVideo(activeResult.thumbnailUrl!, activeResult.engine as VideoEngine)}
+                      title="Use thumbnail as visual reference (more creative freedom)"
                     >
                       <ImageIcon className="h-3 w-3" />
                       Reference
