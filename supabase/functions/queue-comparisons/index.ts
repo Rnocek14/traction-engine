@@ -53,42 +53,36 @@ function groupByCluster(jobs: VideoJobCandidate[]): Map<string, VideoJobCandidat
 
 /**
  * Checks if a pair has already been compared or queued
+ * Uses canonical ordering (job_min, job_max) for consistent lookups
  */
 async function pairAlreadyExists(
   supabase: SupabaseClient,
   jobA: string,
-  jobB: string,
-  clusterKey: string
+  jobB: string
 ): Promise<boolean> {
   const jobMin = jobA < jobB ? jobA : jobB;
   const jobMax = jobA < jobB ? jobB : jobA;
   
-  // Check video_comparisons table
-  const { data: existingComparison } = await supabase
+  // Check video_comparisons table (pair-only, ignoring prompt_hash for now)
+  const { data: existingComparison, error: compErr } = await supabase
     .from("video_comparisons")
     .select("id")
     .eq("job_min", jobMin)
     .eq("job_max", jobMax)
     .maybeSingle();
   
+  if (compErr) throw compErr;
   if (existingComparison) return true;
   
-  // Check queue for pending/running
-  const { data: existingQueue } = await supabase
-    .from("video_compare_queue")
-    .select("id")
-    .or(`status.eq.pending,status.eq.running`)
-    .eq("cluster_key", clusterKey)
-    .maybeSingle();
-  
-  // More specific check using the unique constraint pattern
-  const { data: queueMatch } = await supabase
+  // Check queue for this specific pair (either orientation), pending or running
+  const { data: queueMatch, error: queueErr } = await supabase
     .from("video_compare_queue")
     .select("id")
     .or(`and(job_a.eq.${jobMin},job_b.eq.${jobMax}),and(job_a.eq.${jobMax},job_b.eq.${jobMin})`)
     .in("status", ["pending", "running"])
     .maybeSingle();
   
+  if (queueErr) throw queueErr;
   return !!queueMatch;
 }
 
@@ -208,8 +202,8 @@ Deno.serve(async (req) => {
       const pairs = selectPairsFromCluster(jobs, Math.min(3, MAX_PAIRS_PER_RUN - totalQueued));
       
       for (const [jobA, jobB] of pairs) {
-        // Check if already compared/queued
-        const exists = await pairAlreadyExists(supabase, jobA.id, jobB.id, clusterKey);
+        // Check if already compared/queued (pair-only check, no cluster dependency)
+        const exists = await pairAlreadyExists(supabase, jobA.id, jobB.id);
         if (exists) continue;
         
         // Calculate priority based on quality
