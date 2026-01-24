@@ -30,21 +30,33 @@ interface VideoJobOption {
   created_at: string;
 }
 
+type ComparisonWinner = "A" | "B" | "tie";
+
+type ComparisonDeltas = {
+  prompt_adherence: number;
+  temporal_consistency: number;
+  motion_quality: number;
+  fidelity: number;
+  cinematic_quality: number;
+};
+
 interface ComparisonResult {
-  winner: "A" | "B" | "tie";
+  winner: ComparisonWinner;
   confidence: number;
-  deltas: {
-    prompt_adherence: number;
-    temporal_consistency: number;
-    motion_quality: number;
-    fidelity: number;
-    cinematic_quality: number;
-  };
+  deltas: ComparisonDeltas;
   reasons: string[];
   key_defects_a: string[];
   key_defects_b: string[];
   stored: boolean;
 }
+
+const DELTA_LABELS: Record<keyof ComparisonDeltas, string> = {
+  prompt_adherence: "Prompt Adherence",
+  temporal_consistency: "Temporal Consistency",
+  motion_quality: "Motion Quality",
+  fidelity: "Visual Fidelity",
+  cinematic_quality: "Cinematic Quality",
+};
 
 interface ComparePanelProps {
   className?: string;
@@ -108,7 +120,7 @@ export function ComparePanel({ className }: ComparePanelProps) {
     return colors[provider] || "bg-secondary text-secondary-foreground";
   };
 
-  const getWinnerLabel = (winner: "A" | "B" | "tie") => {
+  const getWinnerLabel = (winner: ComparisonWinner) => {
     if (winner === "tie") return { label: "Tie", color: "text-muted-foreground" };
     return { 
       label: winner === "A" ? "Video A" : "Video B", 
@@ -338,16 +350,17 @@ export function ComparePanel({ className }: ComparePanelProps) {
                 <div>
                   <p className="text-xs font-medium mb-2">Per-Dimension Deltas (A vs B)</p>
                   <div className="space-y-1">
-                    {Object.entries(result.deltas).map(([key, delta]) => (
-                      <div key={key} className="flex items-center justify-between py-1 px-2 rounded bg-muted/30">
-                        <span className="text-xs capitalize">
-                          {key.replace(/_/g, " ")}
-                        </span>
-                        <span className={cn("text-xs font-mono font-medium", getDeltaColor(delta))}>
-                          {formatDelta(delta)}
-                        </span>
-                      </div>
-                    ))}
+                    {(Object.keys(DELTA_LABELS) as (keyof ComparisonDeltas)[]).map((key) => {
+                      const delta = result.deltas[key];
+                      return (
+                        <div key={key} className="flex items-center justify-between py-1 px-2 rounded bg-muted/30">
+                          <span className="text-xs">{DELTA_LABELS[key]}</span>
+                          <span className={cn("text-xs font-mono font-medium", getDeltaColor(delta))}>
+                            {formatDelta(delta)}
+                          </span>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
 
