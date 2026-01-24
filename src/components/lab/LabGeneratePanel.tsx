@@ -300,9 +300,9 @@ export function LabGeneratePanel({
   const wordCount = voiceText.split(/\s+/).filter(Boolean).length;
 
   return (
-    <div className={cn("flex flex-col h-full", className)}>
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "video" | "voice")} className="flex-1 flex flex-col">
-        <TabsList className="grid w-full grid-cols-2 mb-3">
+    <div className={cn("flex flex-col", className)}>
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "video" | "voice")} className="flex flex-col">
+        <TabsList className="grid w-full grid-cols-2 mb-4">
           <TabsTrigger value="video" className="text-xs">
             <Video className="h-3 w-3 mr-1" /> Video
           </TabsTrigger>
@@ -312,9 +312,9 @@ export function LabGeneratePanel({
         </TabsList>
 
         {/* Video Tab */}
-        <TabsContent value="video" className="flex-1 flex flex-col gap-3 mt-0 overflow-y-auto">
+        <TabsContent value="video" className="flex flex-col gap-4 mt-0">
           {/* Engine Selector */}
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             <Label className="text-xs text-muted-foreground">Engine</Label>
             <div className="flex gap-1">
               {VIDEO_ENGINES.map(engine => (
@@ -322,7 +322,7 @@ export function LabGeneratePanel({
                   key={engine.id}
                   size="sm"
                   variant={selectedVideoEngine === engine.id ? "default" : "outline"}
-                  className="flex-1 h-7 text-xs"
+                  className="flex-1 h-8 text-xs"
                   onClick={() => setSelectedVideoEngine(engine.id)}
                 >
                   {engine.name}
@@ -332,33 +332,33 @@ export function LabGeneratePanel({
           </div>
 
           {/* Quick Style Presets */}
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             <Label className="text-xs text-muted-foreground">Quick Styles</Label>
-            <div className="flex flex-wrap gap-1.5">
+            <div className="grid grid-cols-3 gap-2">
               {QUICK_STYLES.map(style => (
                 <Button
                   key={style.id}
                   size="sm"
                   variant="outline"
-                  className={cn("h-7 text-xs border", style.color)}
+                  className={cn("h-8 text-xs border justify-start", style.color)}
                   onClick={() => applyQuickStyle(style.id)}
                 >
-                  <style.icon className="h-3 w-3 mr-1" />
-                  {style.label}
+                  <style.icon className="h-3 w-3 mr-1.5 shrink-0" />
+                  <span className="truncate">{style.label}</span>
                 </Button>
               ))}
             </div>
           </div>
 
           {/* Prompt Templates */}
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             <Label className="text-xs text-muted-foreground">Templates</Label>
             <div className="flex flex-wrap gap-1.5">
               {PROMPT_TEMPLATES.map(template => (
                 <Badge
                   key={template.id}
                   variant="outline"
-                  className="cursor-pointer hover:bg-secondary/50 text-xs"
+                  className="cursor-pointer hover:bg-secondary/50 text-xs py-1"
                   onClick={() => applyTemplate(template.id)}
                 >
                   {template.label}
@@ -368,20 +368,68 @@ export function LabGeneratePanel({
           </div>
 
           {/* Prompt */}
-          <div className="space-y-1.5 flex-1 min-h-0">
+          <div className="space-y-2">
             <Label className="text-xs text-muted-foreground">Visual Prompt</Label>
             <Textarea
               value={videoPrompt}
               onChange={(e) => setVideoPrompt(e.target.value)}
               placeholder="Describe the visual scene... or pick a quick style above"
-              className="text-xs bg-secondary/30 border-border/30 min-h-[80px] resize-none"
+              className="text-sm bg-secondary/30 border-border/50 min-h-[120px] resize-none"
             />
           </div>
 
+          {/* Settings Row */}
+          <div className="grid grid-cols-3 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">Duration</Label>
+              <Select value={duration.toString()} onValueChange={(v) => setDuration(Number(v))}>
+                <SelectTrigger className="h-9 text-xs bg-popover border-border/50">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-popover border-border z-50">
+                  {validDurations.map(d => (
+                    <SelectItem key={d} value={d.toString()}>{d}s</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">Aspect</Label>
+              <Select value={aspectRatio} onValueChange={(v) => setAspectRatio(v as typeof aspectRatio)}>
+                <SelectTrigger className="h-9 text-xs bg-popover border-border/50">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-popover border-border z-50">
+                  <SelectItem value="9:16">9:16</SelectItem>
+                  <SelectItem value="16:9">16:9</SelectItem>
+                  <SelectItem value="1:1">1:1</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">Cinematic</Label>
+              <Select value={stylePreset || "none"} onValueChange={(v) => setStylePreset(v === "none" ? "" : v)}>
+                <SelectTrigger className="h-9 text-xs bg-popover border-border/50">
+                  <SelectValue placeholder="None" />
+                </SelectTrigger>
+                <SelectContent className="bg-popover border-border z-50">
+                  <SelectItem value="none">None</SelectItem>
+                  {STYLE_PRESETS.map(preset => (
+                    <SelectItem key={preset.id} value={preset.id}>
+                      {preset.icon} {preset.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
           {/* Chain Mode Toggle */}
-          <div className="flex items-center justify-between p-2 rounded-lg bg-secondary/30 border border-border/30">
-            <div className="flex items-center gap-2">
-              <Link2 className="h-4 w-4 text-muted-foreground" />
+          <div className="flex items-center justify-between p-3 rounded-lg bg-secondary/30 border border-border/50">
+            <div className="flex items-center gap-3">
+              <Link2 className="h-4 w-4 text-muted-foreground shrink-0" />
               <div>
                 <Label className="text-xs font-medium">Chain Mode</Label>
                 <p className="text-[10px] text-muted-foreground">Use last frame as reference</p>
@@ -396,10 +444,10 @@ export function LabGeneratePanel({
 
           {chainMode && completedVideos.length > 0 && (
             <Select value={selectedChainSource} onValueChange={setSelectedChainSource}>
-              <SelectTrigger className="h-8 text-xs bg-popover">
+              <SelectTrigger className="h-9 text-xs bg-popover border-border/50">
                 <SelectValue placeholder="Select source video" />
               </SelectTrigger>
-              <SelectContent className="bg-popover border-border">
+              <SelectContent className="bg-popover border-border z-50">
                 {completedVideos.map(v => (
                   <SelectItem key={v.id} value={v.id}>
                     {v.engine} — {v.id.slice(0, 8)}...
@@ -409,60 +457,13 @@ export function LabGeneratePanel({
             </Select>
           )}
 
-          {/* Settings Row */}
-          <div className="grid grid-cols-3 gap-2">
-            <div className="space-y-1">
-              <Label className="text-[10px] text-muted-foreground">Duration</Label>
-              <Select value={duration.toString()} onValueChange={(v) => setDuration(Number(v))}>
-                <SelectTrigger className="h-7 text-xs bg-popover">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="bg-popover border-border">
-                  {validDurations.map(d => (
-                    <SelectItem key={d} value={d.toString()}>{d}s</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1">
-              <Label className="text-[10px] text-muted-foreground">Aspect</Label>
-              <Select value={aspectRatio} onValueChange={(v) => setAspectRatio(v as typeof aspectRatio)}>
-                <SelectTrigger className="h-7 text-xs bg-popover">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="bg-popover border-border">
-                  <SelectItem value="9:16">9:16</SelectItem>
-                  <SelectItem value="16:9">16:9</SelectItem>
-                  <SelectItem value="1:1">1:1</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1">
-              <Label className="text-[10px] text-muted-foreground">Cinematic</Label>
-              <Select value={stylePreset || "none"} onValueChange={(v) => setStylePreset(v === "none" ? "" : v)}>
-                <SelectTrigger className="h-7 text-xs bg-popover">
-                  <SelectValue placeholder="None" />
-                </SelectTrigger>
-                <SelectContent className="bg-popover border-border">
-                  <SelectItem value="none">None</SelectItem>
-                  {STYLE_PRESETS.map(preset => (
-                    <SelectItem key={preset.id} value={preset.id}>
-                      {preset.icon} {preset.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
 
           {/* Actions */}
-          <div className="flex gap-2 pt-1">
+          <div className="flex gap-2 pt-2">
             <Button
               onClick={handleVideoGenerate}
               disabled={videoMutation.isPending || !videoPrompt.trim()}
-              className="flex-1 h-9"
+              className="flex-1 h-10"
             >
               {videoMutation.isPending ? (
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -476,18 +477,18 @@ export function LabGeneratePanel({
               onClick={handleVideoAB}
               disabled={videoMutation.isPending || !videoPrompt.trim()}
               title="A/B test all 3 engines"
-              className="h-9 px-3"
+              className="h-10 px-4"
             >
-              <Beaker className="h-4 w-4 mr-1" />
+              <Beaker className="h-4 w-4 mr-1.5" />
               A/B
             </Button>
           </div>
         </TabsContent>
 
         {/* Voice Tab */}
-        <TabsContent value="voice" className="flex-1 flex flex-col gap-3 mt-0 overflow-y-auto">
+        <TabsContent value="voice" className="flex flex-col gap-4 mt-0">
           {/* Provider */}
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             <Label className="text-xs text-muted-foreground">Provider</Label>
             <div className="flex gap-1">
               {VOICE_ENGINES.map(engine => (
@@ -495,7 +496,7 @@ export function LabGeneratePanel({
                   key={engine.id}
                   size="sm"
                   variant={voiceProvider === engine.id ? "default" : "outline"}
-                  className="flex-1 h-7 text-xs"
+                  className="flex-1 h-8 text-xs"
                   onClick={() => setVoiceProvider(engine.id)}
                 >
                   {engine.name}
@@ -505,7 +506,7 @@ export function LabGeneratePanel({
           </div>
 
           {/* Text Input */}
-          <div className="space-y-1.5 flex-1 min-h-0">
+          <div className="space-y-2">
             <div className="flex justify-between">
               <Label className="text-xs text-muted-foreground">Text to Speak</Label>
               <span className="text-[10px] text-muted-foreground">
@@ -516,18 +517,18 @@ export function LabGeneratePanel({
               value={voiceText}
               onChange={(e) => setVoiceText(e.target.value)}
               placeholder="Enter text to convert to speech..."
-              className="text-xs bg-secondary/30 border-border/30 min-h-[80px] resize-none"
+              className="text-sm bg-secondary/30 border-border/50 min-h-[120px] resize-none"
             />
           </div>
 
           {/* Voice Selection */}
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             <Label className="text-xs text-muted-foreground">Voice</Label>
             <Select value={selectedVoice} onValueChange={setSelectedVoice}>
-              <SelectTrigger className="h-7 text-xs bg-popover">
+              <SelectTrigger className="h-9 text-xs bg-popover border-border/50">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent className="bg-popover border-border">
+              <SelectContent className="bg-popover border-border z-50">
                 {voices.map(v => (
                   <SelectItem key={v.id} value={v.id}>
                     {v.name} — {v.description}
@@ -540,9 +541,9 @@ export function LabGeneratePanel({
           {/* Voice Settings */}
           <div className="grid grid-cols-2 gap-4">
             {voiceProvider === "elevenlabs" && (
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 <div className="flex justify-between">
-                  <Label className="text-[10px] text-muted-foreground">Stability</Label>
+                  <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">Stability</Label>
                   <span className="text-[10px] text-muted-foreground">{stability.toFixed(2)}</span>
                 </div>
                 <Slider
@@ -554,9 +555,9 @@ export function LabGeneratePanel({
                 />
               </div>
             )}
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <div className="flex justify-between">
-                <Label className="text-[10px] text-muted-foreground">Speed</Label>
+                <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">Speed</Label>
                 <span className="text-[10px] text-muted-foreground">{speed.toFixed(1)}x</span>
               </div>
               <Slider
@@ -573,7 +574,7 @@ export function LabGeneratePanel({
           <Button
             onClick={handleVoiceGenerate}
             disabled={voiceMutation.isPending || !voiceText.trim()}
-            className="w-full h-9"
+            className="w-full h-10"
           >
             {voiceMutation.isPending ? (
               <Loader2 className="h-4 w-4 mr-2 animate-spin" />
