@@ -1,4 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -9,6 +10,13 @@ interface EnrichRequest {
   prompt: string;
   provider?: "sora" | "runway" | "luma";
   style_hints?: string;
+}
+
+interface PatternLearning {
+  pattern_type: string;
+  pattern_value: string;
+  average_rating: number;
+  successful_uses: number;
 }
 
 const SYSTEM_PROMPT = `You are a cinematographer writing video generation prompts for AI video models.
@@ -39,6 +47,51 @@ const PROVIDER_HINTS: Record<string, string> = {
   luma: "\n\nOptimize for Luma: Emphasize physics-based motion, environmental interactions, and natural movement. Describe how elements flow and interact.",
 };
 
+async function getLearnedPatterns(
+  supabaseUrl: string,
+  supabaseKey: string,
+  provider: string
+): Promise<PatternLearning[]> {
+  const supabase = createClient(supabaseUrl, supabaseKey);
+  
+  const { data, error } = await supabase
+    .from("prompt_learnings")
+    .select("pattern_type, pattern_value, average_rating, successful_uses")
+    .eq("provider", provider)
+    .gte("successful_uses", 2)
+    .gte("average_rating", 4)
+    .order("average_rating", { ascending: false })
+    .limit(15);
+
+  if (error) {
+    console.error("Failed to fetch learned patterns:", error);
+    return [];
+  }
+
+  return data || [];
+}
+
+function buildLearningsHint(patterns: PatternLearning[]): string {
+  if (patterns.length === 0) return "";
+
+  const grouped: Record<string, string[]> = {};
+  for (const p of patterns) {
+    if (!grouped[p.pattern_type]) grouped[p.pattern_type] = [];
+    grouped[p.pattern_type].push(p.pattern_value);
+  }
+
+  const hints: string[] = [];
+  if (grouped.camera) hints.push(`Preferred camera: ${grouped.camera.slice(0, 3).join(", ")}`);
+  if (grouped.lighting) hints.push(`Preferred lighting: ${grouped.lighting.slice(0, 3).join(", ")}`);
+  if (grouped.motion) hints.push(`Preferred motion: ${grouped.motion.slice(0, 3).join(", ")}`);
+  if (grouped.mood) hints.push(`Preferred mood: ${grouped.mood.slice(0, 3).join(", ")}`);
+  if (grouped.style_hint) hints.push(`Successful style hints: ${grouped.style_hint.slice(0, 3).join(", ")}`);
+
+  if (hints.length === 0) return "";
+
+  return `\n\nLEARNED PREFERENCES (patterns that work well for this provider):\n${hints.join("\n")}`;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -62,10 +115,25 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Build system prompt with optional provider hints
+    // Initialize Supabase to fetch learned patterns
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    // Build system prompt with optional provider hints AND learned patterns
     let systemPrompt = SYSTEM_PROMPT;
     if (provider && PROVIDER_HINTS[provider]) {
       systemPrompt += PROVIDER_HINTS[provider];
+    }
+
+    // Fetch and apply learned patterns for this provider
+    if (provider) {
+      const learnedPatterns = await getLearnedPatterns(supabaseUrl, supabaseServiceKey, provider);
+      const learningsHint = buildLearningsHint(learnedPatterns);
+      if (learningsHint) {
+        systemPrompt += learningsHint;
+        console.log(`Applied ${learnedPatterns.length} learned patterns for ${provider}`);
+      }
     }
 
     // Build user message

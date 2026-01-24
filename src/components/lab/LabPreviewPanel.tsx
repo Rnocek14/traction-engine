@@ -1,9 +1,12 @@
 import { useRef, useEffect, useState, useCallback } from "react";
-import { Copy, ExternalLink, Download, Play, Pause, Video, Mic, Loader2, AlertCircle, X, FastForward, ImageIcon } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { Copy, ExternalLink, Download, Play, Pause, Video, Mic, Loader2, AlertCircle, X, FastForward, ImageIcon, Star } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
+import { VideoRatingPanel } from "./VideoRatingPanel";
+import { getVideoJobDetails } from "@/lib/lab-ratings";
 import type { LabResult } from "./LabGeneratePanel";
 import type { VideoEngine } from "@/lib/lab-engines";
 
@@ -28,9 +31,17 @@ export function LabPreviewPanel({
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [previewFailed, setPreviewFailed] = useState(false);
+  const [showRating, setShowRating] = useState(false);
 
   const activeResult = results.find(r => r.id === activeResultId);
   const activeIndex = results.findIndex(r => r.id === activeResultId);
+
+  // Fetch job details for rating
+  const { data: jobDetails, refetch: refetchJobDetails } = useQuery({
+    queryKey: ["video-job-details", activeResultId],
+    queryFn: () => activeResultId ? getVideoJobDetails(activeResultId) : null,
+    enabled: !!activeResultId && activeResult?.status === "done" && activeResult?.type === "video",
+  });
 
   // Reset error state when active result changes
   useEffect(() => {
@@ -206,6 +217,15 @@ export function LabPreviewPanel({
                   >
                     <ExternalLink className="h-3 w-3" />
                   </Button>
+                  <Button 
+                    size="sm" 
+                    variant={showRating ? "default" : "outline"}
+                    className="h-7 gap-1"
+                    onClick={() => setShowRating(!showRating)}
+                  >
+                    <Star className={cn("h-3 w-3", jobDetails?.accuracy_rating && "fill-yellow-400 text-yellow-400")} />
+                    {jobDetails?.accuracy_rating ? jobDetails.accuracy_rating : "Rate"}
+                  </Button>
                 </div>
               )}
             </div>
@@ -273,6 +293,20 @@ export function LabPreviewPanel({
                 </div>
               )}
             </div>
+
+            {/* Rating Panel */}
+            {showRating && activeResult.type === "video" && jobDetails && (
+              <VideoRatingPanel
+                jobId={activeResult.id}
+                provider={activeResult.engine}
+                originalPrompt={jobDetails.original_prompt || undefined}
+                enrichedPrompt={jobDetails.enriched_prompt || undefined}
+                styleHints={jobDetails.style_hints || undefined}
+                currentRating={jobDetails.accuracy_rating || 0}
+                currentNotes={jobDetails.accuracy_notes || ""}
+                onRated={() => refetchJobDetails()}
+              />
+            )}
           </div>
         ) : (
           <div className="flex-1 flex items-center justify-center bg-black/30">
