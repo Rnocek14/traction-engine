@@ -319,7 +319,16 @@ Deno.serve(async (req) => {
     // Use spritesheet or thumbnail for VLM analysis (GPT-4o doesn't support video URLs)
     const imageUrl = job.spritesheet_url || job.thumbnail_url;
     if (!imageUrl) {
-      throw new Error("Job has no thumbnail or spritesheet for VLM analysis");
+      // No thumbnail available - return a clear error, not fake scores
+      console.log(`Job ${jobId} has no thumbnail/spritesheet for VLM analysis`);
+      return new Response(JSON.stringify({
+        error: `No thumbnail available for ${job.provider} video. Auto-rating requires a thumbnail image.`,
+        provider: job.provider,
+        suggestion: job.provider === "runway" ? "Runway videos don't generate thumbnails yet. Use human rating instead." : "Thumbnail may still be processing.",
+      }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     const prompt = job.enriched_prompt || job.original_prompt;

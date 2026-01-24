@@ -52,7 +52,7 @@ export async function getVideoJobDetails(jobId: string): Promise<VideoJobDetails
 /**
  * Trigger auto-rating for a video job
  */
-export async function triggerAutoRating(jobId: string): Promise<{ success: boolean; error?: string; [key: string]: unknown }> {
+export async function triggerAutoRating(jobId: string): Promise<{ success: boolean; error?: string; suggestion?: string; [key: string]: unknown }> {
   const { data, error } = await supabase.functions.invoke("auto-rate-video", {
     body: { jobId },
   });
@@ -65,7 +65,12 @@ export async function triggerAutoRating(jobId: string): Promise<{ success: boole
   // Check if edge function returned an error in the response body
   if (data?.error) {
     console.error("Auto-rating returned error:", data.error);
-    return { success: false, error: data.error };
+    return { 
+      success: false, 
+      error: data.error,
+      suggestion: data.suggestion,
+      provider: data.provider,
+    };
   }
 
   return { success: true, ...data };
