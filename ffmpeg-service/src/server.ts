@@ -2,6 +2,7 @@ import express from "express";
 import { getJob, getJobByIdempotencyKey, upsertJob, cleanupOldJobs } from "./jobs.js";
 import { runRenderJob, type FFmpegServiceRequest } from "./ffmpeg.js";
 import { validateRenderRequest } from "./validation.js";
+import { extractThumbnail, type ThumbnailRequest } from "./thumbnail.js";
 
 const app = express();
 app.use(express.json({ limit: "50mb" }));
@@ -74,6 +75,33 @@ app.get("/jobs/:job_id", (req, res) => {
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
+});
+
+// Thumbnail extraction endpoint
+app.post("/thumbnail", async (req, res) => {
+  const body = req.body as ThumbnailRequest;
+
+  try {
+    if (!body.job_id || !body.video_url || !body.upload?.thumbnail_path) {
+      return res.status(400).json({
+        error: "Missing required fields: job_id, video_url, upload.thumbnail_path",
+      });
+    }
+
+    console.log(`Extracting thumbnail for job ${body.job_id}`);
+    const result = await extractThumbnail(body);
+
+    return res.json({
+      success: true,
+      ...result,
+    });
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : "error";
+    console.error(`Thumbnail extraction failed for ${body?.job_id}:`, message);
+    return res.status(500).json({
+      error: message,
+    });
+  }
 });
 
 const port = Number(process.env.PORT || 8080);

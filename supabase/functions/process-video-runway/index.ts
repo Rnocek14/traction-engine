@@ -109,20 +109,58 @@ async function downloadAndUpload(
 }
 
 /**
- * Extract a thumbnail frame from video URL
- * Note: Runway provides output URLs but not dedicated thumbnails,
- * so we'll use the first frame if available or skip thumbnail generation
+ * Call FFmpeg service to extract thumbnail from video
  */
-async function generateThumbnailFromVideo(
-  _supabase: any, // eslint-disable-line @typescript-eslint/no-explicit-any
-  _videoUrl: string,
-  _storagePath: string
-): Promise<string | null> {
-  // For now, we'll skip thumbnail generation from video
-  // Runway doesn't provide a direct thumbnail endpoint
-  // A future enhancement could use FFmpeg in a dedicated service
-  console.log("Thumbnail generation from video not implemented for Runway");
-  return null;
+async function extractThumbnailFromVideo(
+  jobId: string,
+  videoUrl: string,
+  supabaseUrl: string,
+  supabaseServiceKey: string
+): Promise<{ thumbnail_url?: string; spritesheet_url?: string }> {
+  const ffmpegServiceUrl = Deno.env.get("FFMPEG_SERVICE_URL");
+  if (!ffmpegServiceUrl) {
+    console.log("FFMPEG_SERVICE_URL not configured, skipping thumbnail extraction");
+    return {};
+  }
+
+  try {
+    const response = await fetch(`${ffmpegServiceUrl}/thumbnail`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        job_id: jobId,
+        video_url: videoUrl,
+        upload: {
+          bucket: "videos",
+          thumbnail_path: `runway/${jobId}/thumbnail.jpg`,
+          spritesheet_path: `runway/${jobId}/spritesheet.jpg`,
+          supabase_url: supabaseUrl,
+          supabase_service_key: supabaseServiceKey,
+        },
+        options: {
+          thumbnail_time: 1.0, // 1 second in
+          spritesheet_frames: 10,
+          spritesheet_cols: 5,
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`Thumbnail extraction failed: ${response.status} ${errorText}`);
+      return {};
+    }
+
+    const result = await response.json();
+    console.log(`Thumbnail extracted for job ${jobId}:`, result);
+    return {
+      thumbnail_url: result.thumbnail_url,
+      spritesheet_url: result.spritesheet_url,
+    };
+  } catch (err) {
+    console.error(`Error extracting thumbnail for job ${jobId}:`, err);
+    return {};
+  }
 }
 
 Deno.serve(async (req) => {
@@ -247,15 +285,25 @@ Deno.serve(async (req) => {
             if (uploadedUrl) {
               updateData.output_url = uploadedUrl;
               console.log(`Uploaded Runway video for job ${job.id}: ${uploadedUrl}`);
+
+              // Extract thumbnail and spritesheet via FFmpeg service
+              const thumbResult = await extractThumbnailFromVideo(
+                job.id,
+                uploadedUrl,
+                supabaseUrl,
+                supabaseServiceKey
+              );
+              if (thumbResult.thumbnail_url) {
+                updateData.thumbnail_url = thumbResult.thumbnail_url;
+              }
+              if (thumbResult.spritesheet_url) {
+                updateData.spritesheet_url = thumbResult.spritesheet_url;
+              }
             } else {
               // Fall back to direct Runway URL (may expire)
               updateData.output_url = primaryOutput;
               console.log(`Using direct Runway URL for job ${job.id}`);
             }
-
-            // Try to get/generate thumbnail
-            // Runway doesn't provide dedicated thumbnails, so we'll skip for now
-            // A future enhancement could extract the first frame
           }
         }
 
