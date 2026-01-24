@@ -110,10 +110,11 @@ Deno.serve(async (req) => {
     const body: ProcessRequest = await req.json().catch(() => ({}));
     const { job_id } = body;
 
-    // Fetch jobs to process (only those with openai_video_id)
+    // Fetch jobs to process (only Sora/OpenAI jobs with openai_video_id)
     let query = supabase
       .from("video_jobs")
       .select("*")
+      .eq("provider", "sora")  // Only process Sora jobs - Luma/Runway have their own processors
       .in("status", ["running", "queued"])
       .not("openai_video_id", "is", null);
 
