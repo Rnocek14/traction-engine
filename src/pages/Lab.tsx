@@ -11,6 +11,7 @@ import {
 import { LabGeneratePanel, LabResult } from "@/components/lab/LabGeneratePanel";
 import { LabPreviewPanel } from "@/components/lab/LabPreviewPanel";
 import { getVideoJobStatus } from "@/lib/lab-engines";
+import { supabase } from "@/integrations/supabase/client";
 
 /**
  * Video Lab - 2-Column R&D Sandbox
@@ -32,8 +33,44 @@ export default function Lab() {
   );
 
   const jobIdsKey = activeJobIds.join(",");
+  const hasActiveJobs = activeJobIds.length > 0;
 
-  // Poll for video job status updates
+  // Trigger provider polling when we have active jobs
+  useEffect(() => {
+    if (!hasActiveJobs) return;
+
+    // Immediately trigger processing
+    const triggerProcessing = async () => {
+      // Call each processor for their respective jobs
+      const providers = new Set(
+        results
+          .filter(r => r.type === "video" && (r.status === "queued" || r.status === "running"))
+          .map(r => r.engine)
+      );
+
+      const processCalls = [];
+      
+      if (providers.has("sora")) {
+        processCalls.push(supabase.functions.invoke("process-video", { body: {} }));
+      }
+      if (providers.has("runway")) {
+        processCalls.push(supabase.functions.invoke("process-video-runway", { body: {} }));
+      }
+      if (providers.has("luma")) {
+        processCalls.push(supabase.functions.invoke("process-video-luma", { body: {} }));
+      }
+
+      await Promise.allSettled(processCalls);
+    };
+
+    triggerProcessing();
+
+    // Poll every 5 seconds
+    const interval = setInterval(triggerProcessing, 5000);
+    return () => clearInterval(interval);
+  }, [hasActiveJobs, results]);
+
+  // Poll for video job status updates from database
   useQuery({
     queryKey: ["lab-video-jobs", jobIdsKey],
     queryFn: async () => {
