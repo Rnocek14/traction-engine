@@ -181,6 +181,10 @@ Deno.serve(async (req) => {
 
     const providerSize = sizeMap[provider]?.[settings.size] || settings.size;
 
+    // IMPORTANT: Always track prompts for auto-rating
+    // If no original_prompt provided, use the final prompt as original (non-enriched flow)
+    const effectiveOriginalPrompt = original_prompt || prompt;
+    
     // Create video job with prompt tracking
     const { data: job, error: jobError } = await supabase
       .from("video_jobs")
@@ -188,9 +192,9 @@ Deno.serve(async (req) => {
         script_run_id: labScriptId,
         provider,
         status: "queued",
-        // Prompt tracking columns for analysis
-        original_prompt: original_prompt || null,
-        enriched_prompt: prompt, // The final prompt sent to provider
+        // Prompt tracking columns for analysis - NEVER null for auto-rating
+        original_prompt: effectiveOriginalPrompt.slice(0, 2000),
+        enriched_prompt: prompt.slice(0, 2000), // The final prompt sent to provider
         style_hints: style_hints || null,
         settings: {
           size: providerSize,
@@ -268,7 +272,7 @@ Deno.serve(async (req) => {
           },
           body: JSON.stringify({
             model: "veo3.1_fast",
-            promptText: prompt,
+            promptText: sanitizedPrompt, // Use sanitized prompt for Runway too
             duration: runwayDuration,
             ratio: runwayRatio,
             audio: false,
@@ -289,9 +293,10 @@ Deno.serve(async (req) => {
         if (!lumaKey) throw new Error("LUMA_API_KEY not configured");
 
         // Build Luma request - supports two extend modes
+        // Use sanitized prompt for Luma to avoid moderation blocks
         const lumaRequest: Record<string, unknown> = {
           model: "ray-2",
-          prompt,
+          prompt: sanitizedPrompt,
           aspect_ratio: sizeMap.luma[settings.size] || "9:16",
           loop: false,
         };
