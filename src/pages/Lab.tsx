@@ -22,6 +22,7 @@ import { supabase } from "@/integrations/supabase/client";
 export default function Lab() {
   const [results, setResults] = useState<LabResult[]>([]);
   const [activeResultId, setActiveResultId] = useState<string | null>(null);
+  const [extendHandler, setExtendHandler] = useState<((sourceUrl: string, engine: import("@/lib/lab-engines").VideoEngine) => void) | null>(null);
 
   // Memoize job IDs for polling
   const activeJobIds = useMemo(
@@ -156,6 +157,7 @@ export default function Lab() {
                 results={results}
                 onResultCreated={handleResultCreated}
                 onResultUpdated={handleResultUpdated}
+                onExtendReady={(handler) => setExtendHandler(() => handler)}
               />
             </div>
           </ResizablePanel>
@@ -169,6 +171,7 @@ export default function Lab() {
                 results={results}
                 activeResultId={activeResultId}
                 onSelectResult={handleSelectResult}
+                onExtendVideo={extendHandler || undefined}
               />
             </div>
           </ResizablePanel>

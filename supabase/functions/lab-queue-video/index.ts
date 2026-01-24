@@ -18,6 +18,7 @@ interface LabVideoRequest {
     duration: number;
     style?: string;
   };
+  starting_frame_url?: string; // For extending/chaining videos
 }
 
 Deno.serve(async (req) => {
@@ -31,7 +32,7 @@ Deno.serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     const body: LabVideoRequest = await req.json();
-    const { prompt, provider, settings } = body;
+    const { prompt, provider, settings, starting_frame_url } = body;
 
     if (!prompt || !provider) {
       return new Response(
@@ -171,18 +172,32 @@ Deno.serve(async (req) => {
         const lumaKey = Deno.env.get("LUMA_API_KEY");
         if (!lumaKey) throw new Error("LUMA_API_KEY not configured");
 
+        // Build Luma request - supports keyframes for image-to-video (extend mode)
+        const lumaRequest: Record<string, unknown> = {
+          model: "ray-2",
+          prompt,
+          aspect_ratio: sizeMap.luma[settings.size] || "9:16",
+          loop: false,
+        };
+
+        // Add starting frame for extend/chain mode
+        if (starting_frame_url) {
+          lumaRequest.keyframes = {
+            frame0: {
+              type: "image",
+              url: starting_frame_url,
+            },
+          };
+          console.log("Luma extend mode: using starting frame", starting_frame_url.slice(0, 50));
+        }
+
         const response = await fetch("https://api.lumalabs.ai/dream-machine/v1/generations", {
           method: "POST",
           headers: {
             Authorization: `Bearer ${lumaKey}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({
-            model: "ray-2",
-            prompt,
-            aspect_ratio: sizeMap.luma[settings.size] || "9:16",
-            loop: false,
-          }),
+          body: JSON.stringify(lumaRequest),
         });
 
         if (!response.ok) {

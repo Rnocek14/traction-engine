@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { 
   Video, Mic, Loader2, Play, Beaker, Link2, Moon, Sun, 
@@ -95,6 +95,7 @@ interface LabGeneratePanelProps {
   results: LabResult[];
   onResultCreated: (result: LabResult) => void;
   onResultUpdated: (id: string, updates: Partial<LabResult>) => void;
+  onExtendReady?: (handler: (sourceUrl: string, engine: VideoEngine) => void) => void;
 }
 
 export function LabGeneratePanel({ 
@@ -102,6 +103,7 @@ export function LabGeneratePanel({
   results,
   onResultCreated,
   onResultUpdated,
+  onExtendReady,
 }: LabGeneratePanelProps) {
   const { toast } = useToast();
   
@@ -168,7 +170,7 @@ export function LabGeneratePanel({
 
   // Video generation mutation
   const videoMutation = useMutation({
-    mutationFn: async (engine: VideoEngine) => {
+    mutationFn: async ({ engine, extendFromUrl }: { engine: VideoEngine; extendFromUrl?: string }) => {
       const presetData = STYLE_PRESETS.find(p => p.id === stylePreset);
       const styleNotes = presetData?.guide?.custom_notes 
         ? `${presetData.guide.custom_notes}. ` 
@@ -177,23 +179,23 @@ export function LabGeneratePanel({
         ? `${styleNotes}${videoPrompt}`.trim()
         : videoPrompt;
 
-      // TODO: Pass chain reference when backend supports it
-      const chainRef = chainMode && selectedChainSource 
+      // Get chain reference if in chain mode or extending
+      const chainRef = extendFromUrl || (chainMode && selectedChainSource 
         ? completedVideos.find(v => v.id === selectedChainSource)?.outputUrl 
-        : undefined;
+        : undefined);
 
       return generateVideo(engine, {
         prompt: fullPrompt,
         duration: getValidDuration(engine, duration),
         aspectRatio,
         style: stylePreset,
-        // referenceUrl: chainRef, // For future chaining support
+        startingFrameUrl: chainRef, // Pass reference for extend/chain
       });
     },
-    onSuccess: (data, engine) => {
+    onSuccess: (data, variables) => {
       if (data.error) {
         toast({
-          title: `${engine} generation failed`,
+          title: `${variables.engine} generation failed`,
           description: data.error,
           variant: "destructive",
         });
@@ -203,24 +205,24 @@ export function LabGeneratePanel({
       const result: LabResult = {
         id: data.jobId,
         type: "video",
-        engine,
+        engine: variables.engine,
         jobId: data.jobId,
         status: "queued",
         progress: 0,
         startTime: Date.now(),
         prompt: videoPrompt,
-        chainedFrom: chainMode ? selectedChainSource : undefined,
+        chainedFrom: variables.extendFromUrl ? "extended" : (chainMode ? selectedChainSource : undefined),
       };
       
       onResultCreated(result);
       toast({
-        title: `${engine} job queued`,
+        title: variables.extendFromUrl ? `${variables.engine} extend queued` : `${variables.engine} job queued`,
         description: `Job ID: ${data.jobId.slice(0, 8)}...`,
       });
     },
-    onError: (error, engine) => {
+    onError: (error, variables) => {
       toast({
-        title: `${engine} generation failed`,
+        title: `${variables.engine} generation failed`,
         description: error.message,
         variant: "destructive",
       });
@@ -278,7 +280,7 @@ export function LabGeneratePanel({
       toast({ title: "Prompt required", variant: "destructive" });
       return;
     }
-    videoMutation.mutate(selectedVideoEngine);
+    videoMutation.mutate({ engine: selectedVideoEngine });
   };
 
   const handleVideoAB = () => {
@@ -286,8 +288,22 @@ export function LabGeneratePanel({
       toast({ title: "Prompt required", variant: "destructive" });
       return;
     }
-    VIDEO_ENGINES.forEach(engine => videoMutation.mutate(engine.id));
+    VIDEO_ENGINES.forEach(engine => videoMutation.mutate({ engine: engine.id }));
   };
+
+  // Extend a completed video (uses last frame as starting reference)
+  const handleExtendVideo = useCallback((sourceVideoUrl: string, engine: VideoEngine) => {
+    if (!videoPrompt.trim()) {
+      toast({ title: "Prompt required for extend", variant: "destructive" });
+      return;
+    }
+    videoMutation.mutate({ engine, extendFromUrl: sourceVideoUrl });
+  }, [videoPrompt, videoMutation, toast]);
+
+  // Expose extend handler to parent
+  useEffect(() => {
+    onExtendReady?.(handleExtendVideo);
+  }, [onExtendReady, handleExtendVideo]);
 
   const handleVoiceGenerate = () => {
     if (!voiceText.trim()) {
