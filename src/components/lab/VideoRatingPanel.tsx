@@ -156,10 +156,11 @@ export function VideoRatingPanel({
         });
         onRated?.();
       } else {
+        // Show specific error with suggestion
         toast({
-          title: "Auto-rating failed",
-          description: data.error || "Unknown error",
-          variant: "destructive",
+          title: "Auto-rating unavailable",
+          description: data.suggestion || data.error || "Unknown error",
+          variant: data.suggestion ? "default" : "destructive",
         });
       }
     },
