@@ -24,6 +24,8 @@ interface AutoRatingResult {
 interface VideoJob {
   id: string;
   output_url: string;
+  thumbnail_url: string | null;
+  spritesheet_url: string | null;
   enriched_prompt: string | null;
   original_prompt: string | null;
   provider: string;
@@ -32,15 +34,60 @@ interface VideoJob {
 }
 
 /**
- * Extract evenly spaced frame timestamps for analysis
+ * Extract thumbnail from video using FFmpeg service (on-demand fallback)
  */
-function getFrameTimestamps(durationSeconds: number, frameCount = 8): number[] {
-  const timestamps: number[] = [];
-  const interval = durationSeconds / (frameCount + 1);
-  for (let i = 1; i <= frameCount; i++) {
-    timestamps.push(Number((interval * i).toFixed(2)));
+async function extractThumbnailOnDemand(
+  jobId: string,
+  videoUrl: string,
+  provider: string,
+  supabaseUrl: string,
+  supabaseServiceKey: string
+): Promise<{ thumbnail_url?: string; spritesheet_url?: string }> {
+  const ffmpegServiceUrl = Deno.env.get("FFMPEG_SERVICE_URL");
+  if (!ffmpegServiceUrl) {
+    console.log("FFMPEG_SERVICE_URL not configured, cannot extract thumbnail");
+    return {};
   }
-  return timestamps;
+
+  try {
+    console.log(`Extracting thumbnail on-demand for job ${jobId} (${provider})`);
+    const response = await fetch(`${ffmpegServiceUrl}/thumbnail`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        job_id: jobId,
+        video_url: videoUrl,
+        upload: {
+          bucket: "videos",
+          thumbnail_path: `${provider}/${jobId}/thumbnail.jpg`,
+          spritesheet_path: `${provider}/${jobId}/spritesheet.jpg`,
+          supabase_url: supabaseUrl,
+          supabase_service_key: supabaseServiceKey,
+        },
+        options: {
+          thumbnail_time: 1.0,
+          spritesheet_frames: 10,
+          spritesheet_cols: 5,
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`Thumbnail extraction failed: ${response.status} ${errorText}`);
+      return {};
+    }
+
+    const result = await response.json();
+    console.log(`Thumbnail extracted for job ${jobId}:`, result);
+    return {
+      thumbnail_url: result.thumbnail_url,
+      spritesheet_url: result.spritesheet_url,
+    };
+  } catch (err) {
+    console.error(`Error extracting thumbnail for job ${jobId}:`, err);
+    return {};
+  }
 }
 
 /**
@@ -253,7 +300,28 @@ Deno.serve(async (req) => {
         if (!prompt || !job.output_url) continue;
 
         // Use spritesheet or thumbnail for VLM analysis (GPT-4o doesn't support video URLs)
-        const imageUrl = job.spritesheet_url || job.thumbnail_url;
+        let imageUrl = job.spritesheet_url || job.thumbnail_url;
+        
+        // Extract on-demand if missing
+        if (!imageUrl && job.output_url) {
+          console.log(`Job ${job.id} has no thumbnail, extracting on-demand...`);
+          const extracted = await extractThumbnailOnDemand(
+            job.id,
+            job.output_url,
+            job.provider,
+            supabaseUrl,
+            serviceKey
+          );
+          if (extracted.thumbnail_url || extracted.spritesheet_url) {
+            // Update job with new thumbnail URLs
+            await supabase.from("video_jobs").update({
+              thumbnail_url: extracted.thumbnail_url,
+              spritesheet_url: extracted.spritesheet_url,
+            }).eq("id", job.id);
+            imageUrl = extracted.spritesheet_url || extracted.thumbnail_url;
+          }
+        }
+        
         if (!imageUrl) {
           console.log(`Job ${job.id} has no thumbnail/spritesheet, skipping auto-rate`);
           continue;
@@ -317,14 +385,38 @@ Deno.serve(async (req) => {
     }
 
     // Use spritesheet or thumbnail for VLM analysis (GPT-4o doesn't support video URLs)
-    const imageUrl = job.spritesheet_url || job.thumbnail_url;
+    let imageUrl = job.spritesheet_url || job.thumbnail_url;
+    
+    // Extract on-demand if missing but video exists
+    if (!imageUrl && job.output_url) {
+      console.log(`Job ${jobId} has no thumbnail, extracting on-demand...`);
+      const extracted = await extractThumbnailOnDemand(
+        job.id,
+        job.output_url,
+        job.provider,
+        supabaseUrl,
+        serviceKey
+      );
+      if (extracted.thumbnail_url || extracted.spritesheet_url) {
+        // Update job with new thumbnail URLs
+        await supabase.from("video_jobs").update({
+          thumbnail_url: extracted.thumbnail_url,
+          spritesheet_url: extracted.spritesheet_url,
+        }).eq("id", job.id);
+        imageUrl = extracted.spritesheet_url || extracted.thumbnail_url;
+      }
+    }
+    
     if (!imageUrl) {
-      // No thumbnail available - return a clear error, not fake scores
+      // Still no thumbnail after extraction attempt
+      const ffmpegConfigured = !!Deno.env.get("FFMPEG_SERVICE_URL");
       console.log(`Job ${jobId} has no thumbnail/spritesheet for VLM analysis`);
       return new Response(JSON.stringify({
         error: `No thumbnail available for ${job.provider} video. Auto-rating requires a thumbnail image.`,
         provider: job.provider,
-        suggestion: job.provider === "runway" ? "Runway videos don't generate thumbnails yet. Use human rating instead." : "Thumbnail may still be processing.",
+        suggestion: ffmpegConfigured 
+          ? "Thumbnail extraction failed. Check FFmpeg service logs." 
+          : "FFMPEG_SERVICE_URL not configured. Set it in Supabase secrets.",
       }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
