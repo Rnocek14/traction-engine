@@ -143,9 +143,10 @@ Deno.serve(async (req) => {
       .insert({
         script_run_id: body.script_run_id,
         provider: "luma",
-        model: getLumaModel(body.settings.model),
         status: "queued",
-        prompt: videoPrompt.slice(0, 2000),
+        // Store prompts in correct columns for auto-rating
+        original_prompt: scenePrompt.slice(0, 2000),
+        enriched_prompt: videoPrompt.slice(0, 2000),
         settings: {
           size: body.settings.size,
           aspect_ratio: mapSizeToLumaAspect(body.settings.size),
@@ -153,6 +154,7 @@ Deno.serve(async (req) => {
           provider_seconds: validDuration,
           clip_id: body.clip_id,
           seed: body.settings.seed,
+          model: getLumaModel(body.settings.model),
           // Provider-neutral task ID storage (set after API call)
           provider_job_id: null,
         },
