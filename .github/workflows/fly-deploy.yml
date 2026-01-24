@@ -1,6 +1,7 @@
 name: Deploy FFmpeg Service to Fly
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
