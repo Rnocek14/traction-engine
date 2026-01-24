@@ -116,6 +116,7 @@ export default function Lab() {
           <ResizablePanel defaultSize={35} minSize={25} maxSize={50}>
             <div className="h-full overflow-auto p-4 border-r">
               <LabGeneratePanel
+                results={results}
                 onResultCreated={handleResultCreated}
                 onResultUpdated={handleResultUpdated}
               />
