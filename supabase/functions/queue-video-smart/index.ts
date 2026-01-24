@@ -5,13 +5,15 @@
  * with automatic fallback on rate limits or quota errors.
  * 
  * Now integrates with comparison-based routing intelligence:
- * 1. Checks cluster stats for historical provider performance
+ * 1. Calls get-provider-recommendation edge function for historical data
  * 2. Falls back to static routing if insufficient data
  * 3. Supports explicit provider override
+ * 4. Persists routing audit data to video_jobs for analytics
  * 
  * Supports: Sora 2, Runway Gen-3/Gen-4, Luma Ray2
  */
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { deriveClusterKey } from "../_shared/cluster-utils.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -47,17 +49,17 @@ interface ProviderResult {
   success: boolean;
   provider: "sora" | "runway" | "luma";
   job?: Record<string, unknown>;
+  jobId?: string;
   error?: string;
 }
 
 interface RecommendationResponse {
-  recommendation: "sora" | "runway" | "luma" | null;
-  confidence: number | null;
+  recommended: "sora" | "runway" | "luma";
+  confidence: number;
+  reason: string;
   dataSource: "comparison_history" | "static_capabilities";
-  totalComparisons: number;
   clusterKey: string;
-  winRates: Record<string, number>;
-  strengths?: string[];
+  totalComparisons: number;
 }
 
 const RATE_LIMIT_INDICATORS = [
@@ -319,71 +321,91 @@ function getFallbackOrder(primary: "sora" | "runway" | "luma"): Array<"sora" | "
 }
 
 /**
- * Get provider recommendation from comparison history
- * Only applies if confidence threshold is met
+ * Get provider recommendation by calling the edge function
+ * This ensures consistent logic with UI and analytics
  */
 async function getComparisonBasedRecommendation(
   supabase: SupabaseClient,
   routingTags?: string[]
-): Promise<{ provider: "sora" | "runway" | "luma" | null; source: string; confidence: number | null; clusterKey: string | null }> {
+): Promise<{ 
+  provider: "sora" | "runway" | "luma" | null; 
+  source: string; 
+  confidence: number | null; 
+  clusterKey: string | null;
+  reason: string | null;
+}> {
   if (!routingTags || routingTags.length === 0) {
-    return { provider: null, source: "no_tags", confidence: null, clusterKey: null };
+    return { provider: null, source: "no_tags", confidence: null, clusterKey: null, reason: null };
   }
 
-  // Derive cluster key from routing tags (same logic as queue-comparisons)
-  const clusterKey = routingTags.slice(0, 3).sort().join("|");
+  // Derive cluster key using shared utility
+  const clusterKey = deriveClusterKey(routingTags);
   
   try {
-    // Fetch cluster stats directly
-    const { data: clusterStats, error } = await supabase
-      .from("provider_cluster_stats")
-      .select("provider, wins, losses, ties, total_comparisons, avg_confidence")
-      .eq("cluster_key", clusterKey);
+    // Call the edge function for consistent recommendation logic
+    const { data, error } = await supabase.functions.invoke("get-provider-recommendation", {
+      body: { routingTags },
+    });
 
     if (error) throw error;
-
-    if (!clusterStats || clusterStats.length === 0) {
-      return { provider: null, source: "no_cluster_data", confidence: null, clusterKey };
+    if (!data) {
+      return { provider: null, source: "no_response", confidence: null, clusterKey, reason: null };
     }
 
-    // Check minimum comparisons threshold
-    const MIN_COMPARISONS = 5;
-    const totalComparisons = Math.max(...clusterStats.map(s => s.total_comparisons || 0));
+    const response = data as RecommendationResponse;
     
-    if (totalComparisons < MIN_COMPARISONS) {
-      return { provider: null, source: "insufficient_data", confidence: null, clusterKey };
-    }
-
-    // Calculate win rates and find best provider
-    let bestProvider: "sora" | "runway" | "luma" | null = null;
-    let bestScore = 0;
-    let bestConfidence: number | null = null;
-
-    for (const stat of clusterStats) {
-      if (stat.total_comparisons === 0) continue;
-      
-      // Score = win_rate * confidence
-      const winRate = stat.wins / stat.total_comparisons;
-      const confidence = stat.avg_confidence || 0.5;
-      const score = winRate * confidence;
-      
-      if (score > bestScore) {
-        bestScore = score;
-        bestProvider = stat.provider as "sora" | "runway" | "luma";
-        bestConfidence = confidence;
-      }
-    }
-
-    // Only recommend if confidence threshold is met
+    // Only use comparison history if confidence threshold is met
     const MIN_CONFIDENCE = 0.65;
-    if (bestConfidence && bestConfidence >= MIN_CONFIDENCE && bestProvider) {
-      return { provider: bestProvider, source: "comparison_history", confidence: bestConfidence, clusterKey };
+    if (response.dataSource === "comparison_history" && response.confidence >= MIN_CONFIDENCE) {
+      return { 
+        provider: response.recommended, 
+        source: response.dataSource, 
+        confidence: response.confidence, 
+        clusterKey: response.clusterKey,
+        reason: response.reason,
+      };
     }
 
-    return { provider: null, source: "low_confidence", confidence: bestConfidence, clusterKey };
+    // Static capabilities are used as fallback info but not for routing override
+    return { 
+      provider: null, 
+      source: response.dataSource, 
+      confidence: response.confidence, 
+      clusterKey: response.clusterKey,
+      reason: response.reason,
+    };
   } catch (err) {
     console.error("Error fetching comparison recommendation:", err);
-    return { provider: null, source: "error", confidence: null, clusterKey };
+    return { provider: null, source: "error", confidence: null, clusterKey, reason: null };
+  }
+}
+
+/**
+ * Persist routing audit data to the video job
+ */
+async function persistRoutingAudit(
+  supabase: SupabaseClient,
+  jobId: string,
+  routedProvider: string,
+  routingSource: string,
+  routingConfidence: number | null,
+  routingClusterKey: string | null,
+  routingReason: string | null
+): Promise<void> {
+  try {
+    await supabase
+      .from("video_jobs")
+      .update({
+        routed_provider: routedProvider,
+        routing_source: routingSource,
+        routing_confidence: routingConfidence,
+        routing_cluster_key: routingClusterKey,
+        routing_reason: routingReason,
+      })
+      .eq("id", jobId);
+  } catch (err) {
+    console.error("Error persisting routing audit:", err);
+    // Non-critical, don't throw
   }
 }
 
@@ -452,6 +474,7 @@ Deno.serve(async (req) => {
       let routingSource = "default";
       let routingConfidence: number | null = null;
       let routingClusterKey: string | null = null;
+      let routingReason: string | null = null;
       
       // First: Try comparison-based routing (if we have routing_tags)
       const comparisonRec = await getComparisonBasedRecommendation(
@@ -464,22 +487,26 @@ Deno.serve(async (req) => {
         routingSource = comparisonRec.source;
         routingConfidence = comparisonRec.confidence;
         routingClusterKey = comparisonRec.clusterKey;
+        routingReason = comparisonRec.reason;
         console.log(`Smart mode: comparison history recommends ${primaryProvider}`, {
           clusterKey: routingClusterKey,
           confidence: routingConfidence,
         });
       } else {
         // Second: Fall back to static hint routing
+        routingClusterKey = comparisonRec.clusterKey; // Keep cluster key for audit
         const hintedProvider = routeByHints(routing_hint);
         if (hintedProvider) {
           primaryProvider = hintedProvider;
           routingSource = "static_hints";
+          routingReason = `shot_type=${routing_hint?.shot_type || "none"}, genre=${routing_hint?.genre || "none"}, chained=${routing_hint?.is_chained || false}`;
           console.log(`Smart mode: static hints recommend ${primaryProvider}`, {
             shot_type: routing_hint?.shot_type,
             genre: routing_hint?.genre,
             is_chained: routing_hint?.is_chained,
           });
         } else {
+          routingReason = "No routing signal, using default";
           console.log("Smart mode: no routing signal, defaulting to sora");
         }
       }
@@ -499,6 +526,24 @@ Deno.serve(async (req) => {
               break;
             }
           }
+        }
+      }
+      
+      // Persist routing audit data if job was created
+      if (result.success && result.job) {
+        const jobId = (result.job as Record<string, unknown>).id as string;
+        if (jobId) {
+          await persistRoutingAudit(
+            supabase,
+            jobId,
+            result.provider, // Actual provider used (may differ if fallback)
+            result.provider !== primaryProvider ? `${routingSource}_fallback` : routingSource,
+            routingConfidence,
+            routingClusterKey,
+            result.provider !== primaryProvider 
+              ? `${routingReason} | Fallback from ${primaryProvider}` 
+              : routingReason
+          );
         }
       }
       

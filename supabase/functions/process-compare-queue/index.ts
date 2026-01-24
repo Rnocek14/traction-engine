@@ -2,7 +2,7 @@ import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
 };
 
 // Configuration
@@ -15,6 +15,7 @@ interface QueueItem {
   cluster_key: string;
   priority: number;
   reason: string | null;
+  started_at: string | null;
 }
 
 interface ComparisonResult {
@@ -31,6 +32,17 @@ interface ComparisonResult {
   stored: boolean;
   provider_a?: string;
   provider_b?: string;
+}
+
+/**
+ * Validates cron secret for scheduled invocations
+ */
+function validateCronAuth(req: Request): boolean {
+  const cronSecret = Deno.env.get("CRON_SECRET");
+  if (!cronSecret) return true; // No secret configured, allow all
+  
+  const providedSecret = req.headers.get("x-cron-secret");
+  return providedSecret === cronSecret;
 }
 
 /**
@@ -63,11 +75,9 @@ async function updateClusterStats(
   confidence: number,
   deltas: ComparisonResult["deltas"]
 ): Promise<void> {
-  // Calculate average delta for win magnitude
   const deltaValues = Object.values(deltas);
   const avgDelta = deltaValues.reduce((sum, d) => sum + Math.abs(d), 0) / deltaValues.length;
   
-  // Call the database function to update stats
   const { error } = await supabase.rpc("update_provider_stats", {
     p_cluster_key: clusterKey,
     p_provider_a: providerA,
@@ -79,37 +89,52 @@ async function updateClusterStats(
   
   if (error) {
     console.error("Error updating cluster stats:", error);
-    // Don't throw - stats update is non-critical
   }
 }
 
 /**
  * Stale runner reaper: Reset items stuck in "running" for > 15 minutes
+ * Only reaps rows with started_at set, appends to error instead of overwriting
  */
 async function reapStaleRunners(supabase: SupabaseClient): Promise<number> {
   const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
   
-  const { data, error } = await supabase
+  // First, fetch stale items to append error message properly
+  const { data: staleItems, error: fetchErr } = await supabase
     .from("video_compare_queue")
-    .update({ 
-      status: "pending", 
-      started_at: null,
-      error: "Stale runner timeout - reset to pending"
-    })
+    .select("id, error")
     .eq("status", "running")
-    .lt("started_at", fifteenMinutesAgo)
-    .select("id");
+    .not("started_at", "is", null)
+    .lt("started_at", fifteenMinutesAgo);
   
-  if (error) {
-    console.error("Error reaping stale runners:", error);
+  if (fetchErr || !staleItems || staleItems.length === 0) {
     return 0;
   }
   
-  const count = data?.length || 0;
-  if (count > 0) {
-    console.log(`Reaped ${count} stale running items`);
+  // Update each with appended error
+  let reaped = 0;
+  for (const item of staleItems) {
+    const newError = item.error 
+      ? `${item.error} | stale timeout reset` 
+      : "stale timeout reset";
+    
+    const { error: updateErr } = await supabase
+      .from("video_compare_queue")
+      .update({ 
+        status: "pending", 
+        started_at: null,
+        error: newError
+      })
+      .eq("id", item.id)
+      .eq("status", "running"); // Double-check still running
+    
+    if (!updateErr) reaped++;
   }
-  return count;
+  
+  if (reaped > 0) {
+    console.log(`Reaped ${reaped} stale running items`);
+  }
+  return reaped;
 }
 
 /**
@@ -120,24 +145,27 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // Validate cron auth if configured
+  if (!validateCronAuth(req)) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // First, reap any stale runners (stuck for > 15 min)
+    // First, reap any stale runners
     const reapedCount = await reapStaleRunners(supabase);
 
-    // Fetch pending items from queue (ordered by priority)
-    const { data: queueItems, error: fetchError } = await supabase
-      .from("video_compare_queue")
-      .select("id, job_a, job_b, cluster_key, priority, reason")
-      .eq("status", "pending")
-      .order("priority", { ascending: false })
-      .order("created_at", { ascending: true })
-      .limit(BATCH_SIZE);
+    // Use atomic claim RPC (FOR UPDATE SKIP LOCKED)
+    const { data: queueItems, error: claimError } = await supabase
+      .rpc("claim_compare_queue", { p_limit: BATCH_SIZE });
 
-    if (fetchError) throw fetchError;
+    if (claimError) throw claimError;
     if (!queueItems || queueItems.length === 0) {
       return new Response(JSON.stringify({ 
         processed: 0, 
@@ -156,26 +184,6 @@ Deno.serve(async (req) => {
     }> = [];
 
     for (const item of queueItems as QueueItem[]) {
-      // Atomically claim this item (concurrency safety)
-      const { data: claimed, error: claimErr } = await supabase
-        .from("video_compare_queue")
-        .update({ status: "running", started_at: new Date().toISOString() })
-        .eq("id", item.id)
-        .eq("status", "pending") // Only claim if still pending
-        .select("id")
-        .maybeSingle();
-
-      if (claimErr) {
-        console.error(`Error claiming queue item ${item.id}:`, claimErr);
-        continue;
-      }
-
-      if (!claimed) {
-        // Another process already claimed this item
-        results.push({ id: item.id, status: "skipped", error: "Already claimed by another process" });
-        continue;
-      }
-
       try {
         // Run the comparison
         const result = await runComparison(supabase, item.job_a, item.job_b);
