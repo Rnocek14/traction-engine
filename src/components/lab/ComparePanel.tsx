@@ -35,8 +35,8 @@ type ComparisonWinner = "A" | "B" | "tie";
 type ComparisonDeltas = {
   prompt_adherence: number;
   temporal_consistency: number;
-  motion_quality: number;
-  fidelity: number;
+  motion_realism: number;
+  visual_fidelity: number;
   cinematic_quality: number;
 };
 
@@ -53,8 +53,8 @@ interface ComparisonResult {
 const DELTA_LABELS: Record<keyof ComparisonDeltas, string> = {
   prompt_adherence: "Prompt Adherence",
   temporal_consistency: "Temporal Consistency",
-  motion_quality: "Motion Quality",
-  fidelity: "Visual Fidelity",
+  motion_realism: "Motion Realism",
+  visual_fidelity: "Visual Fidelity",
   cinematic_quality: "Cinematic Quality",
 };
 
