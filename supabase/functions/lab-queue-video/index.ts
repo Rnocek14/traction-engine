@@ -144,7 +144,7 @@ Deno.serve(async (req) => {
             "X-Runway-Version": "2024-11-06",
           },
           body: JSON.stringify({
-            model: "gen3a_turbo",
+            model: "gen4_turbo",
             promptText: prompt,
             duration: settings.duration <= 5 ? 5 : 10,
             ratio: sizeMap.runway[settings.size] || "720:1280",
@@ -170,6 +170,7 @@ Deno.serve(async (req) => {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
+            model: "ray-2",
             prompt,
             aspect_ratio: sizeMap.luma[settings.size] || "9:16",
             loop: false,
