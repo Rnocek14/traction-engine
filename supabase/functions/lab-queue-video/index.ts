@@ -21,6 +21,8 @@ interface LabVideoRequest {
   // For Luma extend modes:
   extend_generation_id?: string; // Luma generation ID for seamless continuation
   reference_image_url?: string;  // Image URL for visual reference
+  // Legacy parameter (backwards compatibility)
+  starting_frame_url?: string;
 }
 
 Deno.serve(async (req) => {
@@ -34,7 +36,10 @@ Deno.serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     const body: LabVideoRequest = await req.json();
-    const { prompt, provider, settings, extend_generation_id, reference_image_url } = body;
+    const { prompt, provider, settings, extend_generation_id, reference_image_url, starting_frame_url } = body;
+    
+    // Support legacy parameter name for backwards compatibility
+    const effectiveReferenceUrl = reference_image_url || starting_frame_url;
 
     if (!prompt || !provider) {
       return new Response(
@@ -193,14 +198,23 @@ Deno.serve(async (req) => {
           console.log("Luma EXTEND mode: continuing from generation", extend_generation_id);
         }
         // Mode 2: Use image as visual reference (more creative freedom)
-        else if (reference_image_url) {
-          lumaRequest.keyframes = {
-            frame0: {
-              type: "image",
-              url: reference_image_url,
-            },
-          };
-          console.log("Luma REFERENCE mode: using image", reference_image_url.slice(0, 50));
+        // NOTE: Luma requires an IMAGE URL, not a video URL
+        else if (effectiveReferenceUrl) {
+          // Check if this is a video URL - if so, we need to use thumbnail instead
+          const isVideoUrl = effectiveReferenceUrl.match(/\.(mp4|webm|mov)(\?|$)/i);
+          if (isVideoUrl) {
+            console.log("Luma REFERENCE mode: video URL detected, cannot use as image reference. Use Extend mode instead.");
+            // For video URLs, we cannot use image reference - the user should use Extend mode with generation ID
+            // Skip setting keyframes - this will be a fresh generation
+          } else {
+            lumaRequest.keyframes = {
+              frame0: {
+                type: "image",
+                url: effectiveReferenceUrl,
+              },
+            };
+            console.log("Luma REFERENCE mode: using image", effectiveReferenceUrl.slice(0, 50));
+          }
         }
 
         const response = await fetch("https://api.lumalabs.ai/dream-machine/v1/generations", {
