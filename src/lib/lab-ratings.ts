@@ -10,7 +10,7 @@ export interface VideoJobDetails {
   original_prompt: string | null;
   enriched_prompt: string | null;
   style_hints: string | null;
-  accuracy_rating: number | null;
+  accuracy_rating: number | null; // Legacy, kept for backwards compat
   accuracy_notes: string | null;
   output_url: string | null;
   status: string;
@@ -22,6 +22,10 @@ export interface VideoJobDetails {
   auto_rated_at: string | null;
   auto_reasons: string[] | null;
   human_rating_override: boolean | null;
+  // Dual-axis human ratings
+  human_match_rating: number | null;
+  human_preference_rating: number | null;
+  is_serendipity: boolean | null;
 }
 
 export async function getVideoJobDetails(jobId: string): Promise<VideoJobDetails | null> {
@@ -31,7 +35,8 @@ export async function getVideoJobDetails(jobId: string): Promise<VideoJobDetails
       id, provider, original_prompt, enriched_prompt, style_hints, 
       accuracy_rating, accuracy_notes, output_url, status,
       auto_match_score, auto_quality_score, auto_overall_score, 
-      auto_confidence, auto_rated_at, auto_reasons, human_rating_override
+      auto_confidence, auto_rated_at, auto_reasons, human_rating_override,
+      human_match_rating, human_preference_rating, is_serendipity
     `)
     .eq("id", jobId)
     .single();
