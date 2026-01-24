@@ -292,12 +292,12 @@ export function VisualPanel({ className, onVideoGenerated }: VisualPanelProps) {
 
         <div className="space-y-1">
           <Label className="text-[10px] text-muted-foreground">Style</Label>
-          <Select value={stylePreset} onValueChange={setStylePreset}>
+          <Select value={stylePreset || "none"} onValueChange={(v) => setStylePreset(v === "none" ? "" : v)}>
             <SelectTrigger className="h-8 text-xs">
               <SelectValue placeholder="None" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">None</SelectItem>
+              <SelectItem value="none">None</SelectItem>
               {STYLE_PRESETS.map(preset => (
                 <SelectItem key={preset.id} value={preset.id}>
                   {preset.name}
