@@ -44,3 +44,6 @@ verify_jwt = false
 
 [functions.enrich-video-prompt]
 verify_jwt = false
+
+[functions.analyze-prompt-success]
+verify_jwt = false

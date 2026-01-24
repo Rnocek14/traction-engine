@@ -482,6 +482,45 @@ export type Database = {
           },
         ]
       }
+      prompt_learnings: {
+        Row: {
+          average_rating: number | null
+          created_at: string
+          example_prompts: string[] | null
+          id: string
+          pattern_type: string
+          pattern_value: string
+          provider: string
+          successful_uses: number
+          total_uses: number
+          updated_at: string
+        }
+        Insert: {
+          average_rating?: number | null
+          created_at?: string
+          example_prompts?: string[] | null
+          id?: string
+          pattern_type: string
+          pattern_value: string
+          provider: string
+          successful_uses?: number
+          total_uses?: number
+          updated_at?: string
+        }
+        Update: {
+          average_rating?: number | null
+          created_at?: string
+          example_prompts?: string[] | null
+          id?: string
+          pattern_type?: string
+          pattern_value?: string
+          provider?: string
+          successful_uses?: number
+          total_uses?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       resume_exports: {
         Row: {
           export_format: Database["public"]["Enums"]["export_format"] | null
