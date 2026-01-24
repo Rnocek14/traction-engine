@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useCallback } from "react";
-import { Copy, ExternalLink, Download, Play, Pause, Video, Mic, Loader2, AlertCircle, X, FastForward } from "lucide-react";
+import { Copy, ExternalLink, Download, Play, Pause, Video, Mic, Loader2, AlertCircle, X, FastForward, ImageIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -12,7 +12,8 @@ interface LabPreviewPanelProps {
   results: LabResult[];
   activeResultId: string | null;
   onSelectResult: (id: string) => void;
-  onExtendVideo?: (sourceUrl: string, engine: VideoEngine) => void;
+  // Pass generation ID for seamless extend, or thumbnail URL for reference mode
+  onExtendVideo?: (generationIdOrImageUrl: string, engine: VideoEngine) => void;
 }
 
 export function LabPreviewPanel({ 
@@ -147,16 +148,30 @@ export function LabPreviewPanel({
               
               {activeResult.status === "done" && activeResult.outputUrl && (
                 <div className="flex gap-1">
-                  {/* Extend button - only for Luma videos */}
-                  {activeResult.type === "video" && activeResult.engine === "luma" && onExtendVideo && (
+                  {/* Luma: Extend (seamless continuation) - requires generation ID */}
+                  {activeResult.type === "video" && activeResult.engine === "luma" && onExtendVideo && activeResult.providerGenerationId && (
                     <Button 
                       size="sm" 
                       variant="secondary"
                       className="h-7 text-xs gap-1"
-                      onClick={() => onExtendVideo(activeResult.outputUrl!, activeResult.engine as VideoEngine)}
+                      onClick={() => onExtendVideo(activeResult.providerGenerationId!, activeResult.engine as VideoEngine)}
+                      title="Continue seamlessly from last frame"
                     >
                       <FastForward className="h-3 w-3" />
                       Extend
+                    </Button>
+                  )}
+                  {/* Luma: Reference (image-based, more creative) - uses thumbnail or video URL */}
+                  {activeResult.type === "video" && activeResult.engine === "luma" && onExtendVideo && (
+                    <Button 
+                      size="sm" 
+                      variant="outline"
+                      className="h-7 text-xs gap-1"
+                      onClick={() => onExtendVideo(activeResult.thumbnailUrl || activeResult.outputUrl!, activeResult.engine as VideoEngine)}
+                      title="Use as visual reference (more creative freedom)"
+                    >
+                      <ImageIcon className="h-3 w-3" />
+                      Reference
                     </Button>
                   )}
                   <Button 

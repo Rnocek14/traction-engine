@@ -88,6 +88,7 @@ export interface LabResult {
   jobId?: string;
   prompt?: string;
   chainedFrom?: string; // previous result ID for chaining
+  providerGenerationId?: string; // Luma generation ID for extend mode
 }
 
 interface LabGeneratePanelProps {
@@ -170,7 +171,15 @@ export function LabGeneratePanel({
 
   // Video generation mutation
   const videoMutation = useMutation({
-    mutationFn: async ({ engine, extendFromUrl }: { engine: VideoEngine; extendFromUrl?: string }) => {
+    mutationFn: async ({ 
+      engine, 
+      extendGenerationId, 
+      referenceImageUrl 
+    }: { 
+      engine: VideoEngine; 
+      extendGenerationId?: string;  // Luma: seamless continuation
+      referenceImageUrl?: string;   // Luma: visual reference
+    }) => {
       const presetData = STYLE_PRESETS.find(p => p.id === stylePreset);
       const styleNotes = presetData?.guide?.custom_notes 
         ? `${presetData.guide.custom_notes}. ` 
@@ -179,17 +188,13 @@ export function LabGeneratePanel({
         ? `${styleNotes}${videoPrompt}`.trim()
         : videoPrompt;
 
-      // Get chain reference if in chain mode or extending
-      const chainRef = extendFromUrl || (chainMode && selectedChainSource 
-        ? completedVideos.find(v => v.id === selectedChainSource)?.outputUrl 
-        : undefined);
-
       return generateVideo(engine, {
         prompt: fullPrompt,
         duration: getValidDuration(engine, duration),
         aspectRatio,
         style: stylePreset,
-        startingFrameUrl: chainRef, // Pass reference for extend/chain
+        extendGenerationId,
+        referenceImageUrl,
       });
     },
     onSuccess: (data, variables) => {
@@ -202,6 +207,9 @@ export function LabGeneratePanel({
         return;
       }
 
+      const extendMode = variables.extendGenerationId ? "extend" : 
+                         variables.referenceImageUrl ? "reference" : undefined;
+
       const result: LabResult = {
         id: data.jobId,
         type: "video",
@@ -211,12 +219,15 @@ export function LabGeneratePanel({
         progress: 0,
         startTime: Date.now(),
         prompt: videoPrompt,
-        chainedFrom: variables.extendFromUrl ? "extended" : (chainMode ? selectedChainSource : undefined),
+        chainedFrom: extendMode,
+        providerGenerationId: data.providerGenerationId,
       };
       
       onResultCreated(result);
       toast({
-        title: variables.extendFromUrl ? `${variables.engine} extend queued` : `${variables.engine} job queued`,
+        title: extendMode 
+          ? `${variables.engine} ${extendMode} queued` 
+          : `${variables.engine} job queued`,
         description: `Job ID: ${data.jobId.slice(0, 8)}...`,
       });
     },
@@ -291,19 +302,36 @@ export function LabGeneratePanel({
     VIDEO_ENGINES.forEach(engine => videoMutation.mutate({ engine: engine.id }));
   };
 
-  // Extend a completed video (uses last frame as starting reference)
-  const handleExtendVideo = useCallback((sourceVideoUrl: string, engine: VideoEngine) => {
+  // Extend a completed Luma video (seamless continuation from generation ID)
+  const handleExtendVideo = useCallback((generationId: string, engine: VideoEngine) => {
     if (!videoPrompt.trim()) {
       toast({ title: "Prompt required for extend", variant: "destructive" });
       return;
     }
-    videoMutation.mutate({ engine, extendFromUrl: sourceVideoUrl });
+    videoMutation.mutate({ engine, extendGenerationId: generationId });
   }, [videoPrompt, videoMutation, toast]);
 
-  // Expose extend handler to parent
+  // Use image as visual reference (more creative freedom)
+  const handleReferenceVideo = useCallback((imageUrl: string, engine: VideoEngine) => {
+    if (!videoPrompt.trim()) {
+      toast({ title: "Prompt required for reference", variant: "destructive" });
+      return;
+    }
+    videoMutation.mutate({ engine, referenceImageUrl: imageUrl });
+  }, [videoPrompt, videoMutation, toast]);
+
+  // Expose handlers to parent
   useEffect(() => {
-    onExtendReady?.(handleExtendVideo);
-  }, [onExtendReady, handleExtendVideo]);
+    onExtendReady?.((generationIdOrUrl: string, engine: VideoEngine) => {
+      // Determine if this is a generation ID (UUID format) or URL
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(generationIdOrUrl);
+      if (isUuid) {
+        handleExtendVideo(generationIdOrUrl, engine);
+      } else {
+        handleReferenceVideo(generationIdOrUrl, engine);
+      }
+    });
+  }, [onExtendReady, handleExtendVideo, handleReferenceVideo]);
 
   const handleVoiceGenerate = () => {
     if (!voiceText.trim()) {

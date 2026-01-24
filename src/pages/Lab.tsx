@@ -101,6 +101,7 @@ export default function Lab() {
           progress: update.progress || result.progress,
           outputUrl: update.outputUrl,
           error: update.error,
+          providerGenerationId: update.providerGenerationId || result.providerGenerationId,
         };
       }));
 
