@@ -6,34 +6,40 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const RATER_VERSION = "vlm-v2-calibrated";
+const RATER_VERSION = "vlm-v2.1-calibrated";
 
 // Thresholds for auto-learning (calibrated for stricter scoring)
-const LEARN_HIGH_THRESHOLD = 78;  // Auto-learn as positive (recalibrated)
-const LEARN_LOW_THRESHOLD = 55;   // Auto-learn as negative
+const LEARN_HIGH_THRESHOLD = 78;
+const LEARN_LOW_THRESHOLD = 55;
 const CONFIDENCE_THRESHOLD = 0.75;
 
-// Defect types for structured detection
-type DefectType = 
-  | "flicker" 
-  | "morphing" 
-  | "identity_drift" 
-  | "physics_violation" 
-  | "limb_anomaly"
-  | "text_corruption"
-  | "edge_bleeding"
-  | "uncanny_face"
-  | "unnatural_motion"
-  | "inconsistent_lighting"
-  | "over_smoothing"
-  | "blur_artifact"
-  | "texture_crawl"
-  | "missing_element";
+// ═══════════════════════════════════════════════════════════════════
+// ALLOWLISTS FOR HYGIENE
+// ═══════════════════════════════════════════════════════════════════
+
+const ROUTING_TAG_ALLOWLIST = new Set([
+  "low_light", "fast_motion", "character_closeup", "establishing_shot",
+  "text_heavy", "action_sequence", "dialogue", "atmospheric",
+  "product_shot", "nature", "urban", "fantasy", "realistic",
+  "slow_motion", "aerial", "handheld", "static_camera", "portrait"
+]);
+
+const DEFECT_TYPE_ALLOWLIST = new Set([
+  "flicker", "morphing", "identity_drift", "physics_violation", "limb_anomaly",
+  "text_corruption", "edge_bleeding", "uncanny_face", "unnatural_motion",
+  "inconsistent_lighting", "over_smoothing", "blur_artifact", "texture_crawl",
+  "missing_element", "wrong_subject", "floaty_motion", "jitter"
+]);
+
+// Evidence heuristic keywords
+const DIM_KWS = ["prompt", "adherence", "temporal", "flicker", "motion", "physics", "fidelity", "sharp", "lighting", "composition", "depth", "consistency", "realism"];
+const VISUAL_KWS = ["edges", "skin", "texture", "lighting", "shadows", "reflections", "motion blur", "camera", "background", "subject", "hands", "face", "eyes", "hair", "clothing", "environment", "sky", "ground", "water"];
+const QUAL_KWS = ["consistent", "stable", "clean", "natural", "crisp", "artifact", "warping", "banding", "noise", "shimmer", "crawl", "smooth", "seamless", "accurate", "precise", "detailed"];
 
 type DefectSeverity = "minor" | "moderate" | "severe";
 
 interface Defect {
-  type: DefectType;
+  type: string;
   severity: DefectSeverity;
   evidence: string;
   deduction: number;
@@ -189,6 +195,53 @@ LUMA-SPECIFIC ISSUES (Ray-2):
 }
 
 /**
+ * Check if reasons array contains proper evidence for high scores
+ * Requires: dimension keyword + visual keyword + qualifier + min length
+ */
+function hasProperHighScoreEvidence(reasons: string[]): boolean {
+  const evidenceReasons = reasons.filter(r => {
+    const t = r.toLowerCase();
+    const hasDim = DIM_KWS.some(k => t.includes(k));
+    const hasVisual = VISUAL_KWS.some(k => t.includes(k));
+    const hasQual = QUAL_KWS.some(k => t.includes(k));
+    return r.length >= 70 && hasDim && hasVisual && hasQual;
+  });
+  return evidenceReasons.length >= 2;
+}
+
+/**
+ * Sanitize and validate routing tags against allowlist
+ */
+function sanitizeRoutingTags(rawTags: unknown[]): string[] {
+  if (!Array.isArray(rawTags)) return [];
+  return rawTags
+    .map((t) => String(t).toLowerCase().trim().replace(/\s+/g, "_"))
+    .filter((t) => ROUTING_TAG_ALLOWLIST.has(t))
+    .slice(0, 5);
+}
+
+/**
+ * Sanitize and validate defects against allowlist
+ */
+function sanitizeDefects(rawDefects: unknown[]): Defect[] {
+  if (!Array.isArray(rawDefects)) return [];
+  return rawDefects
+    .filter((d): d is Record<string, unknown> => typeof d === "object" && d !== null)
+    .map((d) => {
+      const rawType = String(d.type || "unnatural_motion").toLowerCase().trim();
+      const type = DEFECT_TYPE_ALLOWLIST.has(rawType) ? rawType : "unnatural_motion";
+      const rawSeverity = String(d.severity || "minor").toLowerCase();
+      const severity: DefectSeverity = 
+        rawSeverity === "severe" ? "severe" : 
+        rawSeverity === "moderate" ? "moderate" : "minor";
+      const deduction = Math.max(0, Math.min(60, Math.round(Number(d.deduction) || 5)));
+      const evidence = String(d.evidence || "").slice(0, 200);
+      return { type, severity, evidence, deduction };
+    })
+    .slice(0, 10);
+}
+
+/**
  * Use GPT-4o Vision to analyze video frames with calibrated multi-dimensional scoring
  */
 async function scoreVideoWithVLM(
@@ -201,7 +254,7 @@ async function scoreVideoWithVLM(
   const providerCriteria = getProviderCriteria(provider);
   const isSpritesheetLikely = imageUrl.includes("spritesheet");
 
-  const systemPrompt = `You are an expert AI video quality analyst with STRICT calibration standards. You evaluate ${isSpritesheetLikely ? "spritesheets showing multiple frames from" : "thumbnail frames from"} AI-generated videos.
+  const systemPrompt = `You are an expert AI video quality analyst with STRICT calibration standards. You evaluate ${isSpritesheetLikely ? "spritesheets showing multiple frames from" : "a single thumbnail frame from"} AI-generated videos.
 
 ═══════════════════════════════════════════════════════════════════
 CALIBRATION STANDARDS (CRITICAL - READ CAREFULLY)
@@ -225,7 +278,7 @@ EVALUATION DIMENSIONS (0-100 each, apply deductions strictly)
    - Subject accuracy, action/motion match, camera work, lighting/mood, setting
    - Start at 80, deduct for each mismatch
 
-2. TEMPORAL CONSISTENCY: Frame-to-frame stability ${isSpritesheetLikely ? "(analyze visible frames)" : "(infer from single frame cues)"}
+2. TEMPORAL CONSISTENCY: Frame-to-frame stability ${isSpritesheetLikely ? "(analyze visible frames)" : "(infer from single frame cues - be conservative)"}
    - Object stability, lighting consistency, no flickering/warping
    - Start at 75, deduct for each detected issue
 
@@ -247,11 +300,18 @@ ${providerCriteria}
 HIGH SCORE JUSTIFICATION REQUIREMENT
 ═══════════════════════════════════════════════════════════════════
 
-CRITICAL: If you give any dimension a score ≥90, you MUST provide at least 2 specific, concrete evidence points in the reasons array explaining what makes it exceptional. 
+CRITICAL: If you give any dimension a score ≥90, you MUST provide at least 2 detailed reasons (each ≥70 characters) that include:
+- A specific visual element (e.g., "skin texture", "shadow edges", "motion blur")
+- A dimension reference (e.g., "temporal consistency", "prompt adherence")
+- A quality descriptor (e.g., "seamlessly consistent", "precisely accurate")
 
-Generic statements like "matches the prompt well" or "good quality" are NOT sufficient. You must cite specific visual elements.
+Example of VALID high-score evidence:
+"The subject's skin texture maintains seamlessly consistent detail across all visible frames with no temporal shimmer or crawl artifacts."
 
-If you cannot provide this evidence, CAP that dimension at 89.
+Example of INVALID evidence (too generic):
+"The video looks great and matches the prompt well."
+
+If you cannot provide 2 such detailed evidence points, you MUST cap that dimension at 89.
 
 ═══════════════════════════════════════════════════════════════════
 OUTPUT FORMAT (JSON only, no markdown)
@@ -265,21 +325,21 @@ OUTPUT FORMAT (JSON only, no markdown)
   "cinematic_quality": <0-100>,
   "confidence": <0.0-1.0>,
   "defects": [
-    {"type": "flicker|morphing|identity_drift|physics_violation|limb_anomaly|text_corruption|edge_bleeding|uncanny_face|unnatural_motion|inconsistent_lighting|over_smoothing|blur_artifact|texture_crawl|missing_element", "severity": "minor|moderate|severe", "evidence": "specific description", "deduction": <points deducted>}
+    {"type": "flicker|morphing|identity_drift|physics_violation|limb_anomaly|text_corruption|edge_bleeding|uncanny_face|unnatural_motion|inconsistent_lighting|over_smoothing|blur_artifact|texture_crawl|missing_element|wrong_subject|floaty_motion|jitter", "severity": "minor|moderate|severe", "evidence": "specific description (max 200 chars)", "deduction": <points deducted 0-60>}
   ],
-  "routing_tags": ["low_light", "fast_motion", "character_closeup", "establishing_shot", "text_heavy", "action_sequence", "dialogue", "atmospheric", "product_shot", "nature", "urban", "fantasy", "realistic"],
+  "routing_tags": ["low_light", "fast_motion", "character_closeup", "establishing_shot", "text_heavy", "action_sequence", "dialogue", "atmospheric", "product_shot", "nature", "urban", "fantasy", "realistic", "slow_motion", "aerial", "handheld", "static_camera", "portrait"],
   "hard_fail": <true if overall would be <55 or severe critical defects>,
   "regen_recommended": <true if overall <68 or moderate+ defects in key areas>,
   "best_use": "final|usable_social|draft_only|reject",
-  "reasons": ["evidence-backed strength/weakness 1", "evidence-backed strength/weakness 2", ...]
+  "reasons": ["detailed evidence-backed observation 1 (≥70 chars)", "detailed evidence-backed observation 2", ...]
 }
 
-ROUTING TAGS: Include 2-5 tags that describe this video's characteristics for provider routing intelligence.
+Include 2-5 routing_tags that describe this video's characteristics. Include ALL detected defects with severity and point deductions.
 
 CONFIDENCE (0.0-1.0):
 - 0.9-1.0: Very clear assessment, multiple frames visible, high certainty
 - 0.7-0.89: Good assessment with some ambiguity
-- 0.5-0.69: Moderate uncertainty
+- 0.5-0.69: Moderate uncertainty${!isSpritesheetLikely ? " (single frame limits temporal assessment)" : ""}
 - <0.5: Low confidence, human review strongly recommended`;
 
   const userMessage = `Analyze this ${provider.toUpperCase()} AI-generated video with STRICT calibration:
@@ -287,7 +347,7 @@ CONFIDENCE (0.0-1.0):
 GENERATION PROMPT: ${prompt}
 ${styleHints ? `STYLE DIRECTION: ${styleHints}` : ""}
 PROVIDER: ${provider}
-IMAGE TYPE: ${isSpritesheetLikely ? "Spritesheet (multiple frames - analyze temporal consistency)" : "Single thumbnail (infer motion quality)"}
+IMAGE TYPE: ${isSpritesheetLikely ? "Spritesheet (multiple frames - analyze temporal consistency)" : "Single thumbnail (be CONSERVATIVE on temporal scoring - you cannot see motion)"}
 
 Apply the calibration standards strictly. Most videos should score 65-85. Reserve 90+ for truly exceptional outputs with clear evidence. Detect and list ALL defects with specific deductions.`;
 
@@ -316,8 +376,8 @@ Apply the calibration standards strictly. Most videos should score 65-85. Reserv
             ],
           },
         ],
-        max_tokens: 1200,
-        temperature: 0.5, // Increased for more varied scoring
+        max_tokens: 1500,
+        temperature: 0.5,
       }),
     });
 
@@ -345,31 +405,31 @@ Apply the calibration standards strictly. Most videos should score 65-85. Reserv
     let motionRealism = Math.max(0, Math.min(100, Math.round(parsed.motion_realism || 70)));
     let visualFidelity = Math.max(0, Math.min(100, Math.round(parsed.visual_fidelity || 70)));
     let cinematicQuality = Math.max(0, Math.min(100, Math.round(parsed.cinematic_quality || 65)));
-    const confidence = Math.max(0, Math.min(1, parsed.confidence || 0.5));
+    let confidence = Math.max(0, Math.min(1, parsed.confidence || 0.5));
     
-    // Parse defects
-    const defects: Defect[] = Array.isArray(parsed.defects) 
-      ? parsed.defects.map((d: Partial<Defect>) => ({
-          type: d.type || "unnatural_motion",
-          severity: d.severity || "minor",
-          evidence: d.evidence || "",
-          deduction: Math.round(d.deduction || 5),
-        }))
-      : [];
-    
-    const routingTags = Array.isArray(parsed.routing_tags) ? parsed.routing_tags : [];
-    const reasons = Array.isArray(parsed.reasons) ? parsed.reasons.slice(0, 6) : [];
+    // Sanitize defects and routing tags against allowlists
+    const defects = sanitizeDefects(parsed.defects || []);
+    const routingTags = sanitizeRoutingTags(parsed.routing_tags || []);
+    const reasons = Array.isArray(parsed.reasons) ? parsed.reasons.slice(0, 8).map((r: unknown) => String(r).slice(0, 300)) : [];
     
     // ═══════════════════════════════════════════════════════════
-    // POST-PROCESSING CAPS (prevent model from talking itself up)
+    // POST-PROCESSING CAPS (prevent model from inflating scores)
     // ═══════════════════════════════════════════════════════════
     
-    // Cap for high scores without justification
-    const hasHighScoreEvidence = reasons.some(r => 
-      r.length > 50 && (r.includes("exceptional") || r.includes("flawless") || r.includes("perfect"))
-    );
+    // 1. Single thumbnail → cap temporal consistency (can't verify motion)
+    if (!isSpritesheetLikely) {
+      temporalConsistency = Math.min(temporalConsistency, 82);
+      // Also reduce confidence for temporal assessment
+      if (confidence > 0.75) {
+        confidence = Math.min(confidence, 0.75);
+      }
+    }
     
-    if (!hasHighScoreEvidence) {
+    // 2. Check for proper high-score evidence
+    const hasEvidence = hasProperHighScoreEvidence(reasons);
+    
+    if (!hasEvidence) {
+      // Cap all dimensions at 89 if no proper evidence
       if (promptAdherence >= 90) promptAdherence = 89;
       if (temporalConsistency >= 90) temporalConsistency = 89;
       if (motionRealism >= 90) motionRealism = 89;
@@ -377,7 +437,7 @@ Apply the calibration standards strictly. Most videos should score 65-85. Reserv
       if (cinematicQuality >= 90) cinematicQuality = 89;
     }
     
-    // Hard caps based on defects
+    // 3. Hard caps based on defects
     const severeDefects = defects.filter(d => d.severity === "severe");
     const moderateDefects = defects.filter(d => d.severity === "moderate");
     
@@ -386,12 +446,24 @@ Apply the calibration standards strictly. Most videos should score 65-85. Reserv
       temporalConsistency = Math.min(temporalConsistency, 70);
     }
     
-    // Missing required element → cap adherence at 60
-    if (defects.some(d => d.type === "missing_element" && d.severity !== "minor")) {
-      promptAdherence = Math.min(promptAdherence, 60);
+    // Moderate flicker/drift → cap temporal at 78
+    if (moderateDefects.some(d => d.type === "flicker" || d.type === "identity_drift")) {
+      temporalConsistency = Math.min(temporalConsistency, 78);
     }
     
-    // Multiple moderate+ defects → cap overall dimensions
+    // Missing required element or wrong subject → cap adherence
+    if (defects.some(d => (d.type === "missing_element" || d.type === "wrong_subject") && d.severity === "severe")) {
+      promptAdherence = Math.min(promptAdherence, 55);
+    } else if (defects.some(d => (d.type === "missing_element" || d.type === "wrong_subject") && d.severity === "moderate")) {
+      promptAdherence = Math.min(promptAdherence, 70);
+    }
+    
+    // Physics/motion defects → cap motion realism
+    if (severeDefects.some(d => d.type === "physics_violation" || d.type === "floaty_motion" || d.type === "jitter")) {
+      motionRealism = Math.min(motionRealism, 65);
+    }
+    
+    // Multiple moderate+ defects → cap fidelity and motion
     if (moderateDefects.length >= 2 || severeDefects.length >= 1) {
       visualFidelity = Math.min(visualFidelity, 78);
       motionRealism = Math.min(motionRealism, 78);
@@ -407,9 +479,14 @@ Apply the calibration standards strictly. Most videos should score 65-85. Reserv
       0.10 * cinematicQuality
     );
     
+    // 4. Low confidence → cap overall (prevents fake precision)
+    if (confidence < 0.6) {
+      overallScore = Math.min(overallScore, 78);
+    }
+    
     // Determine hard_fail and regen_recommended
     let hardFail = parsed.hard_fail === true || overallScore < 55 || severeDefects.length >= 2;
-    let regenRecommended = parsed.regen_recommended === true || overallScore < 68 || moderateDefects.length >= 2;
+    let regenRecommended = parsed.regen_recommended === true || overallScore < 68 || moderateDefects.length >= 2 || severeDefects.length >= 1;
     
     // Force hard_fail overall cap
     if (hardFail) {
@@ -420,19 +497,18 @@ Apply the calibration standards strictly. Most videos should score 65-85. Reserv
     let bestUse: "final" | "usable_social" | "draft_only" | "reject" = "usable_social";
     if (hardFail) {
       bestUse = "reject";
-    } else if (overallScore < 68) {
+    } else if (overallScore < 68 || regenRecommended) {
       bestUse = "draft_only";
-    } else if (overallScore >= 88) {
+    } else if (overallScore >= 88 && severeDefects.length === 0 && moderateDefects.length === 0) {
       bestUse = "final";
     }
     
     // Extract artifact flags for legacy compatibility
-    const artifactFlags = defects.map(d => d.type);
+    const artifactFlags = [...new Set(defects.map(d => d.type))];
     
-    console.log(`VLM v2 scores: adhere=${promptAdherence}, temporal=${temporalConsistency}, motion=${motionRealism}, fidelity=${visualFidelity}, cinematic=${cinematicQuality}, overall=${overallScore}, defects=${defects.length}, hard_fail=${hardFail}`);
+    console.log(`VLM v2.1 scores: adhere=${promptAdherence}, temporal=${temporalConsistency}, motion=${motionRealism}, fidelity=${visualFidelity}, cinematic=${cinematicQuality}, overall=${overallScore}, defects=${defects.length}, hard_fail=${hardFail}, spritesheet=${isSpritesheetLikely}`);
 
     return {
-      // New structured scores
       prompt_adherence: promptAdherence,
       temporal_consistency: temporalConsistency,
       motion_realism: motionRealism,
@@ -455,7 +531,6 @@ Apply the calibration standards strictly. Most videos should score 65-85. Reserv
     };
   } catch (error) {
     console.error("VLM scoring failed:", error);
-    // Return conservative mid-scores on failure
     return {
       prompt_adherence: 50,
       temporal_consistency: 50,
@@ -494,7 +569,6 @@ async function maybeLearn(
   }
 
   // Convert calibrated 0-100 scores to 1-5 ratings for dual-axis learning
-  // Recalibrated for stricter scoring distribution
   const scoreToRating = (score: number): number => {
     if (score >= 85) return 5;  // Exceptional
     if (score >= 75) return 4;  // Strong
@@ -504,20 +578,27 @@ async function maybeLearn(
   };
 
   const matchRating = scoreToRating(rating.prompt_adherence);
-  const preferenceRating = scoreToRating(rating.visual_fidelity);
+  
+  // Preference is a weighted composite (not just visual_fidelity)
+  // This better reflects "do I like it" vs "is it technically good"
+  const preferenceProxy = Math.round(
+    0.45 * rating.visual_fidelity +
+    0.35 * rating.cinematic_quality +
+    0.20 * rating.motion_realism
+  );
+  const preferenceRating = scoreToRating(preferenceProxy);
 
   // Only learn from clear extremes (both high or both low)
   const bothHigh = matchRating >= 4 && preferenceRating >= 4;
   const bothLow = matchRating <= 2 && preferenceRating <= 2;
 
   if (!bothHigh && !bothLow) {
-    console.log(`Skipping learning: ratings not aligned (match=${matchRating}, pref=${preferenceRating})`);
+    console.log(`Skipping learning: ratings not aligned (match=${matchRating}, pref=${preferenceRating} from proxy=${preferenceProxy})`);
     return false;
   }
 
   console.log(`Auto-learning: match=${matchRating}, pref=${preferenceRating}, source=auto, routing_tags=${rating.routing_tags.join(",")}`);
 
-  // Invoke analyze-prompt-success with dual-axis ratings
   const { error } = await supabase.functions.invoke("analyze-prompt-success", {
     body: {
       jobId: job.id,
@@ -537,6 +618,42 @@ async function maybeLearn(
   }
 
   return true;
+}
+
+/**
+ * Persist rating to database with full schema
+ */
+async function persistRating(
+  supabase: ReturnType<typeof createClient>,
+  jobId: string,
+  rating: AutoRatingResult
+): Promise<void> {
+  const { error } = await supabase
+    .from("video_jobs")
+    .update({
+      // Legacy fields (mapped)
+      auto_match_score: rating.prompt_adherence,
+      auto_quality_score: rating.visual_fidelity,
+      auto_motion_score: rating.motion_realism,
+      auto_cinematic_score: rating.cinematic_quality,
+      auto_overall_score: rating.overall_score,
+      auto_confidence: rating.confidence,
+      auto_rated_at: new Date().toISOString(),
+      auto_rater_version: RATER_VERSION,
+      auto_reasons: rating.reasons,
+      auto_artifact_flags: rating.artifact_flags,
+      // New routing-grade fields
+      auto_defects: rating.defects,
+      auto_routing_tags: rating.routing_tags,
+      auto_hard_fail: rating.hard_fail,
+      auto_regen_recommended: rating.regen_recommended,
+      auto_best_use: rating.best_use,
+    })
+    .eq("id", jobId);
+
+  if (error) {
+    throw new Error(`Failed to persist rating for job ${jobId}: ${error.message}`);
+  }
 }
 
 Deno.serve(async (req) => {
@@ -573,10 +690,8 @@ Deno.serve(async (req) => {
         const prompt = job.enriched_prompt || job.original_prompt;
         if (!prompt || !job.output_url) continue;
 
-        // Use spritesheet or thumbnail for VLM analysis
         let imageUrl = job.spritesheet_url || job.thumbnail_url;
         
-        // Extract on-demand if missing
         if (!imageUrl && job.output_url) {
           console.log(`Job ${job.id} has no thumbnail, extracting on-demand...`);
           const extracted = await extractThumbnailOnDemand(
@@ -602,29 +717,7 @@ Deno.serve(async (req) => {
 
         const rating = await scoreVideoWithVLM(imageUrl, prompt, job.style_hints, openaiKey, job.provider);
         
-        // Update the job with new schema
-        const { error: updateError } = await supabase
-          .from("video_jobs")
-          .update({
-            auto_match_score: rating.prompt_adherence,
-            auto_quality_score: rating.visual_fidelity,
-            auto_motion_score: rating.motion_realism,
-            auto_cinematic_score: rating.cinematic_quality,
-            auto_overall_score: rating.overall_score,
-            auto_confidence: rating.confidence,
-            auto_rated_at: new Date().toISOString(),
-            auto_rater_version: RATER_VERSION,
-            auto_reasons: rating.reasons,
-            auto_artifact_flags: rating.artifact_flags,
-          })
-          .eq("id", job.id);
-
-        if (updateError) {
-          console.error(`Failed to update job ${job.id}:`, updateError);
-          continue;
-        }
-
-        // Maybe trigger learning
+        await persistRating(supabase, job.id, rating);
         await maybeLearn(supabase, job, rating);
 
         results.push({
@@ -660,10 +753,8 @@ Deno.serve(async (req) => {
       throw new Error("Job has no output URL");
     }
 
-    // Use spritesheet or thumbnail for VLM analysis
     let imageUrl = job.spritesheet_url || job.thumbnail_url;
     
-    // Extract on-demand if missing
     if (!imageUrl && job.output_url) {
       console.log(`Job ${jobId} has no thumbnail, extracting on-demand...`);
       const extracted = await extractThumbnailOnDemand(
@@ -684,7 +775,6 @@ Deno.serve(async (req) => {
     
     if (!imageUrl) {
       const ffmpegConfigured = !!Deno.env.get("FFMPEG_SERVICE_URL");
-      console.log(`Job ${jobId} has no thumbnail/spritesheet for VLM analysis`);
       return new Response(JSON.stringify({
         error: `No thumbnail available for ${job.provider} video. Auto-rating requires a thumbnail image.`,
         provider: job.provider,
@@ -699,7 +789,6 @@ Deno.serve(async (req) => {
 
     const prompt = job.enriched_prompt || job.original_prompt;
     if (!prompt) {
-      console.log(`Job ${jobId} has no prompt, cannot auto-rate`);
       return new Response(JSON.stringify({
         error: "This video has no prompt stored. Auto-rating requires a prompt to evaluate against.",
         suggestion: "This may be an older video created before prompt tracking was enabled. Use human rating instead.",
@@ -709,29 +798,9 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Score the video with calibrated VLM
     const rating = await scoreVideoWithVLM(imageUrl, prompt, job.style_hints, openaiKey, job.provider);
-
-    // Update the job with new schema
-    const { error: updateError } = await supabase
-      .from("video_jobs")
-      .update({
-        auto_match_score: rating.prompt_adherence,
-        auto_quality_score: rating.visual_fidelity,
-        auto_motion_score: rating.motion_realism,
-        auto_cinematic_score: rating.cinematic_quality,
-        auto_overall_score: rating.overall_score,
-        auto_confidence: rating.confidence,
-        auto_rated_at: new Date().toISOString(),
-        auto_rater_version: RATER_VERSION,
-        auto_reasons: rating.reasons,
-        auto_artifact_flags: rating.artifact_flags,
-      })
-      .eq("id", jobId);
-
-    if (updateError) throw updateError;
-
-    // Maybe trigger learning
+    
+    await persistRating(supabase, job.id, rating);
     const learned = await maybeLearn(supabase, job, rating);
 
     return new Response(JSON.stringify({
