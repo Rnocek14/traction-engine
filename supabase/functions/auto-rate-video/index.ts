@@ -45,26 +45,27 @@ function getFrameTimestamps(durationSeconds: number, frameCount = 8): number[] {
 
 /**
  * Use GPT-4o Vision to analyze video frames and score
+ * GPT-4o doesn't support video URLs directly, so we use thumbnail/spritesheet images
  */
 async function scoreVideoWithVLM(
-  videoUrl: string,
+  imageUrl: string, // Must be an image URL (thumbnail or spritesheet), NOT video
   prompt: string,
   styleHints: string | null,
   openaiKey: string
 ): Promise<AutoRatingResult> {
   // Build the analysis prompt
-  const systemPrompt = `You are a video quality analyst. You will receive a video URL and the prompt used to generate it.
+  const systemPrompt = `You are a video quality analyst. You will receive a frame/thumbnail from an AI-generated video and the prompt used to generate it.
 
 Score the video on two dimensions:
-1. PROMPT MATCH (0-100): How well does the video match the described scene, objects, actions, camera movement, lighting, and mood?
-2. VISUAL QUALITY (0-100): How realistic, sharp, stable, and artifact-free is the video?
+1. PROMPT MATCH (0-100): How well does the visible content match the described scene, objects, camera angle, lighting, and mood?
+2. VISUAL QUALITY (0-100): How realistic, sharp, and artifact-free does it look?
 
 Be objective and critical. Consider:
 - Are all requested elements present?
-- Does the motion look natural?
-- Are there any warping, flickering, or morphing artifacts?
+- Does the composition match the prompt?
+- Are there any warping, morphing, or distortion artifacts?
 - Does the lighting match the prompt?
-- Is the composition professional?
+- Is the overall quality professional?
 
 Respond ONLY with valid JSON:
 {
@@ -74,9 +75,7 @@ Respond ONLY with valid JSON:
   "reasons": ["reason1", "reason2", "reason3"]
 }`;
 
-  const userMessage = `Analyze this AI-generated video:
-
-VIDEO URL: ${videoUrl}
+  const userMessage = `Analyze this AI-generated video frame:
 
 GENERATION PROMPT: ${prompt}
 ${styleHints ? `\nSTYLE HINTS: ${styleHints}` : ""}
@@ -101,8 +100,8 @@ Score the video's prompt match and visual quality. Be specific about what works 
               {
                 type: "image_url",
                 image_url: {
-                  url: videoUrl,
-                  detail: "low", // Use low detail for video URLs (it will sample frames)
+                  url: imageUrl,
+                  detail: "high", // Use high detail for better analysis
                 },
               },
             ],
@@ -240,7 +239,7 @@ Deno.serve(async (req) => {
     if (batchMode) {
       const { data: unratedJobs, error: fetchError } = await supabase
         .from("video_jobs")
-        .select("id, output_url, enriched_prompt, original_prompt, provider, style_hints, settings")
+        .select("id, output_url, thumbnail_url, spritesheet_url, enriched_prompt, original_prompt, provider, style_hints, settings")
         .eq("status", "done")
         .is("auto_rated_at", null)
         .not("output_url", "is", null)
@@ -253,7 +252,14 @@ Deno.serve(async (req) => {
         const prompt = job.enriched_prompt || job.original_prompt;
         if (!prompt || !job.output_url) continue;
 
-        const rating = await scoreVideoWithVLM(job.output_url, prompt, job.style_hints, openaiKey);
+        // Use spritesheet or thumbnail for VLM analysis (GPT-4o doesn't support video URLs)
+        const imageUrl = job.spritesheet_url || job.thumbnail_url;
+        if (!imageUrl) {
+          console.log(`Job ${job.id} has no thumbnail/spritesheet, skipping auto-rate`);
+          continue;
+        }
+
+        const rating = await scoreVideoWithVLM(imageUrl, prompt, job.style_hints, openaiKey);
         
         // Update the job
         const { error: updateError } = await supabase
@@ -298,7 +304,7 @@ Deno.serve(async (req) => {
 
     const { data: job, error: jobError } = await supabase
       .from("video_jobs")
-      .select("id, output_url, enriched_prompt, original_prompt, provider, style_hints, settings")
+      .select("id, output_url, thumbnail_url, spritesheet_url, enriched_prompt, original_prompt, provider, style_hints, settings")
       .eq("id", jobId)
       .single();
 
@@ -310,13 +316,19 @@ Deno.serve(async (req) => {
       throw new Error("Job has no output URL");
     }
 
+    // Use spritesheet or thumbnail for VLM analysis (GPT-4o doesn't support video URLs)
+    const imageUrl = job.spritesheet_url || job.thumbnail_url;
+    if (!imageUrl) {
+      throw new Error("Job has no thumbnail or spritesheet for VLM analysis");
+    }
+
     const prompt = job.enriched_prompt || job.original_prompt;
     if (!prompt) {
       throw new Error("Job has no prompt");
     }
 
-    // Score the video
-    const rating = await scoreVideoWithVLM(job.output_url, prompt, job.style_hints, openaiKey);
+    // Score the video using the thumbnail/spritesheet
+    const rating = await scoreVideoWithVLM(imageUrl, prompt, job.style_hints, openaiKey);
 
     // Update the job
     const { error: updateError } = await supabase
