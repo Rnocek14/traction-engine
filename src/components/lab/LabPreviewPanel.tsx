@@ -254,9 +254,12 @@ export function LabPreviewPanel({
                       isSerendipity={jobDetails?.is_serendipity}
                       autoMatchScore={jobDetails?.auto_match_score}
                       autoQualityScore={jobDetails?.auto_quality_score}
+                      autoMotionScore={jobDetails?.auto_motion_score}
+                      autoCinematicScore={jobDetails?.auto_cinematic_score}
                       autoOverallScore={jobDetails?.auto_overall_score}
                       autoConfidence={jobDetails?.auto_confidence}
                       autoReasons={jobDetails?.auto_reasons}
+                      autoArtifactFlags={jobDetails?.auto_artifact_flags}
                       onRated={() => {
                         refetchJobDetails();
                         setShowRatingPanel(false);

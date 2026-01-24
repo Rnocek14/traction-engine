@@ -19,6 +19,10 @@ interface AutoRatingResult {
   overall_score: number;
   confidence: number;
   reasons: string[];
+  // Enhanced dimensions
+  motion_score?: number;
+  cinematic_score?: number;
+  artifact_flags?: string[];
 }
 
 interface VideoJob {
@@ -91,43 +95,120 @@ async function extractThumbnailOnDemand(
 }
 
 /**
- * Use GPT-4o Vision to analyze video frames and score
- * GPT-4o doesn't support video URLs directly, so we use thumbnail/spritesheet images
+ * Provider-specific scoring criteria
+ */
+function getProviderCriteria(provider: string): string {
+  const commonArtifacts = `
+COMMON AI VIDEO ARTIFACTS TO DETECT:
+- Morphing/melting: Objects or faces that warp unnaturally
+- Temporal flickering: Inconsistent lighting or textures between frames
+- Physics violations: Unrealistic motion, floating objects, impossible movements
+- Limb/digit anomalies: Extra fingers, bent limbs, disconnected body parts
+- Text corruption: Garbled or impossible text/signage
+- Edge bleeding: Objects bleeding into backgrounds`;
+
+  const criteria: Record<string, string> = {
+    runway: `${commonArtifacts}
+RUNWAY-SPECIFIC ISSUES:
+- Gen-3 tends toward over-smoothing and plastic skin textures
+- Watch for unnatural camera stabilization that feels "floaty"
+- Motion can be choppy at scene transitions
+- Faces may have uncanny valley quality at close range`,
+    
+    sora: `${commonArtifacts}
+SORA-SPECIFIC ISSUES:
+- Generally high quality but watch for temporal inconsistency
+- Complex physics simulations may break (water, cloth, fire)
+- Multiple subjects can merge or swap identities
+- Camera movements may not match prompt exactly`,
+    
+    luma: `${commonArtifacts}
+LUMA-SPECIFIC ISSUES:
+- Ray-2 excels at cinematic quality but can over-stylize
+- Watch for inconsistent lighting direction across frames
+- Fast motion can cause blur artifacts
+- Background elements may shift unexpectedly`,
+  };
+
+  return criteria[provider] || commonArtifacts;
+}
+
+/**
+ * Use GPT-4o Vision to analyze video frames with comprehensive multi-dimensional scoring
+ * Uses spritesheet for motion analysis when available, falls back to thumbnail
  */
 async function scoreVideoWithVLM(
-  imageUrl: string, // Must be an image URL (thumbnail or spritesheet), NOT video
+  imageUrl: string,
   prompt: string,
   styleHints: string | null,
-  openaiKey: string
+  openaiKey: string,
+  provider: string = "sora"
 ): Promise<AutoRatingResult> {
-  // Build the analysis prompt
-  const systemPrompt = `You are a video quality analyst. You will receive a frame/thumbnail from an AI-generated video and the prompt used to generate it.
+  const providerCriteria = getProviderCriteria(provider);
+  const isSpritesheetLikely = imageUrl.includes("spritesheet");
 
-Score the video on two dimensions:
-1. PROMPT MATCH (0-100): How well does the visible content match the described scene, objects, camera angle, lighting, and mood?
-2. VISUAL QUALITY (0-100): How realistic, sharp, and artifact-free does it look?
+  const systemPrompt = `You are an expert AI video quality analyst specializing in generative video evaluation. You will receive ${isSpritesheetLikely ? "a spritesheet showing multiple frames from" : "a thumbnail frame from"} an AI-generated video.
 
-Be objective and critical. Consider:
-- Are all requested elements present?
-- Does the composition match the prompt?
-- Are there any warping, morphing, or distortion artifacts?
-- Does the lighting match the prompt?
-- Is the overall quality professional?
+EVALUATION FRAMEWORK:
 
-Respond ONLY with valid JSON:
+1. PROMPT MATCH (0-100): Semantic alignment with the generation prompt
+   - Subject accuracy: Are all described subjects present and correct?
+   - Action/motion: Does the depicted action match the prompt?
+   - Camera work: Is the camera angle/movement as specified?
+   - Lighting/mood: Does atmosphere match the description?
+   - Setting/environment: Is the scene/location correct?
+   - Scoring: 90+ = Perfect match, 70-89 = Minor deviations, 50-69 = Partial match, <50 = Major mismatch
+
+2. VISUAL QUALITY (0-100): Technical excellence and realism
+   - Sharpness: Is the image crisp and well-defined?
+   - Color grading: Natural, consistent color reproduction?
+   - Detail fidelity: Fine details rendered accurately?
+   - Professional polish: Broadcast/cinema quality?
+   - Scoring: 90+ = Studio quality, 70-89 = Good quality, 50-69 = Acceptable, <50 = Poor
+
+3. MOTION QUALITY (0-100): ${isSpritesheetLikely ? "Analyze frame-to-frame consistency" : "Infer from single frame cues"}
+   - Temporal consistency: Do elements remain stable across frames?
+   - Motion smoothness: Natural acceleration/deceleration?
+   - Physics realism: Do movements obey physics?
+   - Scoring: 90+ = Flawless, 70-89 = Minor issues, 50-69 = Noticeable problems, <50 = Broken
+
+4. CINEMATIC FIDELITY (0-100): Artistic and compositional quality
+   - Composition: Rule of thirds, leading lines, visual balance?
+   - Depth: Foreground/background separation, depth of field?
+   - Lighting artistry: Dramatic, motivated lighting?
+   - Mood conveyance: Does it evoke the intended emotion?
+   - Scoring: 90+ = Award-worthy, 70-89 = Professional, 50-69 = Amateur, <50 = Poor
+
+${providerCriteria}
+
+CONFIDENCE SCORING (0.0-1.0):
+- 0.9-1.0: Very clear assessment, high certainty
+- 0.7-0.89: Good assessment with minor ambiguity
+- 0.5-0.69: Some uncertainty in evaluation
+- <0.5: Low confidence, human review recommended
+
+Respond ONLY with valid JSON (no markdown):
 {
   "match_score": <0-100>,
   "quality_score": <0-100>,
+  "motion_score": <0-100>,
+  "cinematic_score": <0-100>,
   "confidence": <0.0-1.0>,
-  "reasons": ["reason1", "reason2", "reason3"]
-}`;
+  "artifact_flags": ["flag1", "flag2"],
+  "reasons": ["strength/weakness 1", "strength/weakness 2", "strength/weakness 3", "strength/weakness 4"]
+}
 
-  const userMessage = `Analyze this AI-generated video frame:
+ARTIFACT FLAGS (include any detected):
+morphing, flickering, physics_violation, limb_anomaly, text_corruption, edge_bleeding, uncanny_face, unnatural_motion, inconsistent_lighting, over_smoothing`;
+
+  const userMessage = `Analyze this ${provider.toUpperCase()} AI-generated video:
 
 GENERATION PROMPT: ${prompt}
-${styleHints ? `\nSTYLE HINTS: ${styleHints}` : ""}
+${styleHints ? `STYLE DIRECTION: ${styleHints}` : ""}
+PROVIDER: ${provider}
+IMAGE TYPE: ${isSpritesheetLikely ? "Spritesheet (multiple frames)" : "Single thumbnail frame"}
 
-Score the video's prompt match and visual quality. Be specific about what works and what doesn't.`;
+Perform comprehensive multi-dimensional analysis. Be critical but fair - look for both strengths and weaknesses.`;
 
   try {
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -154,7 +235,7 @@ Score the video's prompt match and visual quality. Be specific about what works 
             ],
           },
         ],
-        max_tokens: 500,
+        max_tokens: 800,
         temperature: 0.3,
       }),
     });
@@ -177,21 +258,35 @@ Score the video's prompt match and visual quality. Be specific about what works 
     
     const parsed = JSON.parse(jsonStr);
     
-    // Validate and clamp scores
+    // Validate and clamp all scores
     const matchScore = Math.max(0, Math.min(100, Math.round(parsed.match_score || 50)));
     const qualityScore = Math.max(0, Math.min(100, Math.round(parsed.quality_score || 50)));
+    const motionScore = Math.max(0, Math.min(100, Math.round(parsed.motion_score || qualityScore)));
+    const cinematicScore = Math.max(0, Math.min(100, Math.round(parsed.cinematic_score || qualityScore)));
     const confidence = Math.max(0, Math.min(1, parsed.confidence || 0.5));
-    const reasons = Array.isArray(parsed.reasons) ? parsed.reasons.slice(0, 5) : [];
+    const reasons = Array.isArray(parsed.reasons) ? parsed.reasons.slice(0, 6) : [];
+    const artifactFlags = Array.isArray(parsed.artifact_flags) ? parsed.artifact_flags : [];
 
-    // Calculate overall score (weighted)
-    const overallScore = Math.round(0.6 * matchScore + 0.4 * qualityScore);
+    // Calculate overall score with 4-dimension weighting
+    // Match: 35%, Quality: 25%, Motion: 25%, Cinematic: 15%
+    const overallScore = Math.round(
+      0.35 * matchScore + 
+      0.25 * qualityScore + 
+      0.25 * motionScore + 
+      0.15 * cinematicScore
+    );
+
+    console.log(`VLM scores: match=${matchScore}, quality=${qualityScore}, motion=${motionScore}, cinematic=${cinematicScore}, overall=${overallScore}`);
 
     return {
       match_score: matchScore,
       quality_score: qualityScore,
+      motion_score: motionScore,
+      cinematic_score: cinematicScore,
       overall_score: overallScore,
       confidence,
       reasons,
+      artifact_flags: artifactFlags,
     };
   } catch (error) {
     console.error("VLM scoring failed:", error);
@@ -199,9 +294,12 @@ Score the video's prompt match and visual quality. Be specific about what works 
     return {
       match_score: 50,
       quality_score: 50,
+      motion_score: 50,
+      cinematic_score: 50,
       overall_score: 50,
       confidence: 0.1,
       reasons: ["Auto-rating failed, requires human review"],
+      artifact_flags: [],
     };
   }
 }
@@ -327,7 +425,7 @@ Deno.serve(async (req) => {
           continue;
         }
 
-        const rating = await scoreVideoWithVLM(imageUrl, prompt, job.style_hints, openaiKey);
+        const rating = await scoreVideoWithVLM(imageUrl, prompt, job.style_hints, openaiKey, job.provider);
         
         // Update the job
         const { error: updateError } = await supabase
@@ -335,11 +433,14 @@ Deno.serve(async (req) => {
           .update({
             auto_match_score: rating.match_score,
             auto_quality_score: rating.quality_score,
+            auto_motion_score: rating.motion_score,
+            auto_cinematic_score: rating.cinematic_score,
             auto_overall_score: rating.overall_score,
             auto_confidence: rating.confidence,
             auto_rated_at: new Date().toISOString(),
             auto_rater_version: RATER_VERSION,
             auto_reasons: rating.reasons,
+            auto_artifact_flags: rating.artifact_flags,
           })
           .eq("id", job.id);
 
@@ -429,7 +530,7 @@ Deno.serve(async (req) => {
     }
 
     // Score the video using the thumbnail/spritesheet
-    const rating = await scoreVideoWithVLM(imageUrl, prompt, job.style_hints, openaiKey);
+    const rating = await scoreVideoWithVLM(imageUrl, prompt, job.style_hints, openaiKey, job.provider);
 
     // Update the job
     const { error: updateError } = await supabase
@@ -437,11 +538,14 @@ Deno.serve(async (req) => {
       .update({
         auto_match_score: rating.match_score,
         auto_quality_score: rating.quality_score,
+        auto_motion_score: rating.motion_score,
+        auto_cinematic_score: rating.cinematic_score,
         auto_overall_score: rating.overall_score,
         auto_confidence: rating.confidence,
         auto_rated_at: new Date().toISOString(),
         auto_rater_version: RATER_VERSION,
         auto_reasons: rating.reasons,
+        auto_artifact_flags: rating.artifact_flags,
       })
       .eq("id", jobId);
 

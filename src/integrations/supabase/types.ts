@@ -971,8 +971,11 @@ export type Database = {
         Row: {
           accuracy_notes: string | null
           accuracy_rating: number | null
+          auto_artifact_flags: string[] | null
+          auto_cinematic_score: number | null
           auto_confidence: number | null
           auto_match_score: number | null
+          auto_motion_score: number | null
           auto_overall_score: number | null
           auto_quality_score: number | null
           auto_rated_at: string | null
@@ -1006,8 +1009,11 @@ export type Database = {
         Insert: {
           accuracy_notes?: string | null
           accuracy_rating?: number | null
+          auto_artifact_flags?: string[] | null
+          auto_cinematic_score?: number | null
           auto_confidence?: number | null
           auto_match_score?: number | null
+          auto_motion_score?: number | null
           auto_overall_score?: number | null
           auto_quality_score?: number | null
           auto_rated_at?: string | null
@@ -1041,8 +1047,11 @@ export type Database = {
         Update: {
           accuracy_notes?: string | null
           accuracy_rating?: number | null
+          auto_artifact_flags?: string[] | null
+          auto_cinematic_score?: number | null
           auto_confidence?: number | null
           auto_match_score?: number | null
+          auto_motion_score?: number | null
           auto_overall_score?: number | null
           auto_quality_score?: number | null
           auto_rated_at?: string | null
