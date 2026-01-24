@@ -261,9 +261,11 @@ export function VideoRatingPanel({
           preferenceRating={preferenceRating}
           onMatchChange={setMatchRating}
           onPreferenceChange={setPreferenceRating}
+          onSave={hasRatings ? () => ratingMutation.mutate() : undefined}
           autoMatchScore={autoMatchScore}
           autoQualityScore={autoQualityScore}
           compact
+          enableKeyboard
         />
       </div>
 

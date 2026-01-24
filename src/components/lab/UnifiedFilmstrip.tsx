@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Film, Star, Loader2, X, Clock, Filter } from "lucide-react";
+import { Film, Star, Loader2, X, Clock, Filter, Sparkles, Target, Heart } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,10 @@ interface VideoJob {
   accuracy_rating: number | null;
   original_prompt: string | null;
   enriched_prompt: string | null;
+  is_serendipity: boolean | null;
+  human_match_rating: number | null;
+  human_preference_rating: number | null;
+  rated_at: string | null;
 }
 
 interface UnifiedFilmstripProps {
@@ -36,7 +40,7 @@ interface UnifiedFilmstripProps {
   className?: string;
 }
 
-type FilterView = "session" | "all" | "rated" | "unrated";
+type FilterView = "session" | "all" | "rated" | "unrated" | "discoveries";
 type ProviderFilter = "all" | "sora" | "runway" | "luma";
 
 export function UnifiedFilmstrip({
@@ -51,16 +55,22 @@ export function UnifiedFilmstrip({
 
   // Fetch library videos
   const { data: libraryVideos } = useQuery({
-    queryKey: ["video-library-filmstrip"],
+    queryKey: ["video-library-filmstrip", filterView],
     queryFn: async () => {
-      const { data, error } = await supabase
+      let query = supabase
         .from("video_jobs")
-        .select("id, provider, status, output_url, thumbnail_url, created_at, accuracy_rating, original_prompt, enriched_prompt")
+        .select("id, provider, status, output_url, thumbnail_url, created_at, accuracy_rating, original_prompt, enriched_prompt, is_serendipity, human_match_rating, human_preference_rating, rated_at")
         .eq("status", "done")
-        .not("output_url", "is", null)
-        .order("created_at", { ascending: false })
-        .limit(50);
+        .not("output_url", "is", null);
+      
+      // Discoveries filter: only serendipity videos
+      if (filterView === "discoveries") {
+        query = query.eq("is_serendipity", true);
+      }
+      
+      query = query.order("created_at", { ascending: false }).limit(50);
 
+      const { data, error } = await query;
       if (error) throw error;
       return data as VideoJob[];
     },
@@ -96,10 +106,11 @@ export function UnifiedFilmstrip({
     }
     
     if (filterView === "rated") {
-      filtered = filtered.filter(v => v.accuracy_rating !== null);
+      filtered = filtered.filter(v => v.accuracy_rating !== null || v.human_match_rating !== null);
     } else if (filterView === "unrated") {
-      filtered = filtered.filter(v => v.accuracy_rating === null);
+      filtered = filtered.filter(v => v.accuracy_rating === null && v.human_match_rating === null);
     }
+    // "discoveries" already filtered at query level
 
     return filtered.map(v => ({
       type: "library" as const,
@@ -113,6 +124,9 @@ export function UnifiedFilmstrip({
       originalPrompt: v.original_prompt,
       enrichedPrompt: v.enriched_prompt,
       createdAt: v.created_at,
+      isSerendipity: v.is_serendipity,
+      humanMatchRating: v.human_match_rating,
+      humanPreferenceRating: v.human_preference_rating,
     }));
   }, [filterView, providerFilter, sessionResults, libraryVideos]);
 
@@ -171,15 +185,19 @@ export function UnifiedFilmstrip({
 
         {/* Filter tabs */}
         <div className="flex gap-1">
-          {(["session", "all", "rated", "unrated"] as const).map((view) => (
+          {(["session", "all", "discoveries", "rated", "unrated"] as const).map((view) => (
             <Button
               key={view}
               size="sm"
               variant={filterView === view ? "secondary" : "ghost"}
-              className="h-6 px-2 text-[10px]"
+              className={cn(
+                "h-6 px-2 text-[10px] gap-1",
+                view === "discoveries" && filterView === view && "bg-warning/20 text-warning"
+              )}
               onClick={() => setFilterView(view)}
             >
-              {view === "session" ? "Session" : view === "all" ? "All" : view === "rated" ? "★ Rated" : "Unrated"}
+              {view === "discoveries" && <Sparkles className="h-3 w-3" />}
+              {view === "session" ? "Session" : view === "all" ? "All" : view === "rated" ? "★ Rated" : view === "unrated" ? "Unrated" : "Discoveries"}
             </Button>
           ))}
         </div>
@@ -280,16 +298,34 @@ export function UnifiedFilmstrip({
                         {item.provider.slice(0, 3)}
                       </span>
 
-                      {/* Rating badge */}
-                      {item.rating && (
+                      {/* Rating badge - show dual-axis if available */}
+                      {(item as any).humanMatchRating || item.rating ? (
                         <div className="absolute top-0.5 right-0.5 flex items-center gap-0.5 bg-black/60 rounded px-0.5">
-                          <Star className="h-2 w-2 fill-yellow-400 text-yellow-400" />
-                          <span className="text-[7px] text-white">{item.rating}</span>
+                          {(item as any).humanMatchRating ? (
+                            <>
+                              <Target className="h-2 w-2 text-primary" />
+                              <span className="text-[7px] text-white">{(item as any).humanMatchRating}</span>
+                              <Heart className="h-2 w-2 text-destructive ml-0.5" />
+                              <span className="text-[7px] text-white">{(item as any).humanPreferenceRating}</span>
+                            </>
+                          ) : (
+                            <>
+                              <Star className="h-2 w-2 fill-warning text-warning" />
+                              <span className="text-[7px] text-white">{item.rating}</span>
+                            </>
+                          )}
+                        </div>
+                      ) : null}
+
+                      {/* Serendipity badge */}
+                      {(item as any).isSerendipity && (
+                        <div className="absolute bottom-0.5 right-0.5">
+                          <Sparkles className="h-2.5 w-2.5 text-warning" />
                         </div>
                       )}
 
                       {/* Done indicator */}
-                      {item.status === "done" && !item.rating && (
+                      {item.status === "done" && !item.rating && !(item as any).humanMatchRating && (
                         <div className="absolute top-0.5 right-0.5">
                           <div className="w-1.5 h-1.5 rounded-full bg-success" />
                         </div>
@@ -313,17 +349,39 @@ export function UnifiedFilmstrip({
                       {item.originalPrompt && (
                         <p className="text-xs line-clamp-3">{item.originalPrompt}</p>
                       )}
-                      {item.rating && (
-                        <div className="flex items-center gap-1">
-                          {[1, 2, 3, 4, 5].map((s) => (
-                            <Star
-                              key={s}
-                              className={cn(
-                                "h-2.5 w-2.5",
-                                s <= item.rating! ? "fill-yellow-400 text-yellow-400" : "text-muted-foreground/30"
+                      {/* Dual-axis ratings in hover */}
+                      {((item as any).humanMatchRating || item.rating) && (
+                        <div className="flex items-center gap-2 pt-1 border-t border-border">
+                          {(item as any).humanMatchRating ? (
+                            <>
+                              <div className="flex items-center gap-0.5">
+                                <Target className="h-3 w-3 text-primary" />
+                                <span className="text-[10px]">{(item as any).humanMatchRating}/5</span>
+                              </div>
+                              <div className="flex items-center gap-0.5">
+                                <Heart className="h-3 w-3 text-destructive" />
+                                <span className="text-[10px]">{(item as any).humanPreferenceRating}/5</span>
+                              </div>
+                              {(item as any).isSerendipity && (
+                                <Badge variant="outline" className="text-[9px] h-4 bg-warning/20 text-warning border-warning/30">
+                                  <Sparkles className="h-2 w-2 mr-0.5" />
+                                  Discovery
+                                </Badge>
                               )}
-                            />
-                          ))}
+                            </>
+                          ) : (
+                            <div className="flex items-center gap-1">
+                              {[1, 2, 3, 4, 5].map((s) => (
+                                <Star
+                                  key={s}
+                                  className={cn(
+                                    "h-2.5 w-2.5",
+                                    s <= item.rating! ? "fill-warning text-warning" : "text-muted-foreground/30"
+                                  )}
+                                />
+                              ))}
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>

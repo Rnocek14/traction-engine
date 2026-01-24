@@ -16,6 +16,7 @@ export interface PatternLearning {
   last_success_at: string | null;
   last_failure_at: string | null;
   example_prompts: string[] | null;
+  learning_source: string | null; // "human", "auto", or "mixed"
 }
 
 export interface ProviderStats {
