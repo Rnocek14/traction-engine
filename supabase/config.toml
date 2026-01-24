@@ -41,3 +41,6 @@ verify_jwt = false
 
 [functions.lab-queue-video]
 verify_jwt = false
+
+[functions.enrich-video-prompt]
+verify_jwt = false

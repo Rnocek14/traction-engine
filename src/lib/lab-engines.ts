@@ -209,6 +209,36 @@ export async function assemblePreview(
   };
 }
 
+// ============ PROMPT ENRICHMENT ============
+
+/**
+ * Enrich a simple prompt using GPT-4o cinematography expertise
+ */
+export async function enrichPrompt(
+  prompt: string,
+  provider?: VideoEngine,
+  styleHints?: string
+): Promise<{ original: string; enriched: string; error?: string }> {
+  const { data, error } = await supabase.functions.invoke("enrich-video-prompt", {
+    body: { 
+      prompt, 
+      provider, 
+      style_hints: styleHints 
+    },
+  });
+
+  if (error) {
+    console.error("Prompt enrichment failed:", error);
+    return { original: prompt, enriched: prompt, error: error.message };
+  }
+
+  return {
+    original: data?.original || prompt,
+    enriched: data?.enriched || prompt,
+    error: data?.error,
+  };
+}
+
 // ============ ENGINE METADATA ============
 
 export const VIDEO_ENGINES: { id: VideoEngine; name: string; description: string }[] = [
