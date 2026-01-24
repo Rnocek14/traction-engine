@@ -536,6 +536,48 @@ export type Database = {
         }
         Relationships: []
       }
+      provider_cluster_stats: {
+        Row: {
+          avg_confidence: number | null
+          avg_win_delta: number | null
+          cluster_key: string
+          created_at: string
+          id: string
+          last_updated_at: string
+          losses: number
+          provider: string
+          ties: number
+          total_comparisons: number
+          wins: number
+        }
+        Insert: {
+          avg_confidence?: number | null
+          avg_win_delta?: number | null
+          cluster_key: string
+          created_at?: string
+          id?: string
+          last_updated_at?: string
+          losses?: number
+          provider: string
+          ties?: number
+          total_comparisons?: number
+          wins?: number
+        }
+        Update: {
+          avg_confidence?: number | null
+          avg_win_delta?: number | null
+          cluster_key?: string
+          created_at?: string
+          id?: string
+          last_updated_at?: string
+          losses?: number
+          provider?: string
+          ties?: number
+          total_comparisons?: number
+          wins?: number
+        }
+        Relationships: []
+      }
       resume_exports: {
         Row: {
           export_format: Database["public"]["Enums"]["export_format"] | null
@@ -967,6 +1009,66 @@ export type Database = {
         }
         Relationships: []
       }
+      video_compare_queue: {
+        Row: {
+          cluster_key: string
+          completed_at: string | null
+          created_at: string
+          error: string | null
+          id: string
+          job_a: string
+          job_b: string
+          priority: number
+          prompt_hash: string | null
+          reason: string | null
+          started_at: string | null
+          status: string
+        }
+        Insert: {
+          cluster_key: string
+          completed_at?: string | null
+          created_at?: string
+          error?: string | null
+          id?: string
+          job_a: string
+          job_b: string
+          priority?: number
+          prompt_hash?: string | null
+          reason?: string | null
+          started_at?: string | null
+          status?: string
+        }
+        Update: {
+          cluster_key?: string
+          completed_at?: string | null
+          created_at?: string
+          error?: string | null
+          id?: string
+          job_a?: string
+          job_b?: string
+          priority?: number
+          prompt_hash?: string | null
+          reason?: string | null
+          started_at?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "video_compare_queue_job_a_fkey"
+            columns: ["job_a"]
+            isOneToOne: false
+            referencedRelation: "video_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "video_compare_queue_job_b_fkey"
+            columns: ["job_b"]
+            isOneToOne: false
+            referencedRelation: "video_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       video_comparisons: {
         Row: {
           confidence: number
@@ -1223,6 +1325,17 @@ export type Database = {
           isOneToOne: false
           isSetofReturn: true
         }
+      }
+      update_provider_stats: {
+        Args: {
+          p_cluster_key: string
+          p_confidence: number
+          p_delta?: number
+          p_provider_a: string
+          p_provider_b: string
+          p_winner: string
+        }
+        Returns: undefined
       }
     }
     Enums: {
