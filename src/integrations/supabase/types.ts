@@ -967,6 +967,69 @@ export type Database = {
         }
         Relationships: []
       }
+      video_comparisons: {
+        Row: {
+          confidence: number
+          created_at: string
+          deltas: Json
+          id: string
+          job_a: string
+          job_b: string
+          key_defects_a: string[] | null
+          key_defects_b: string[] | null
+          prompt_hash: string | null
+          provider_a: string
+          provider_b: string
+          reasons: string[]
+          winner: string
+        }
+        Insert: {
+          confidence: number
+          created_at?: string
+          deltas?: Json
+          id?: string
+          job_a: string
+          job_b: string
+          key_defects_a?: string[] | null
+          key_defects_b?: string[] | null
+          prompt_hash?: string | null
+          provider_a: string
+          provider_b: string
+          reasons?: string[]
+          winner: string
+        }
+        Update: {
+          confidence?: number
+          created_at?: string
+          deltas?: Json
+          id?: string
+          job_a?: string
+          job_b?: string
+          key_defects_a?: string[] | null
+          key_defects_b?: string[] | null
+          prompt_hash?: string | null
+          provider_a?: string
+          provider_b?: string
+          reasons?: string[]
+          winner?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "video_comparisons_job_a_fkey"
+            columns: ["job_a"]
+            isOneToOne: false
+            referencedRelation: "video_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "video_comparisons_job_b_fkey"
+            columns: ["job_b"]
+            isOneToOne: false
+            referencedRelation: "video_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       video_jobs: {
         Row: {
           accuracy_notes: string | null
