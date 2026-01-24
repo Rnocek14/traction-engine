@@ -12,6 +12,7 @@ import {
 import { LabGeneratePanel, LabResult } from "@/components/lab/LabGeneratePanel";
 import { LabPreviewPanel } from "@/components/lab/LabPreviewPanel";
 import { LearningInspector } from "@/components/lab/LearningInspector";
+import { VideoLibrary } from "@/components/lab/VideoLibrary";
 import { getVideoJobStatus } from "@/lib/lab-engines";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -259,15 +260,37 @@ export default function Lab() {
 
             <ResizableHandle withHandle className="bg-border/50 hover:bg-primary/20 transition-colors" />
 
-            {/* Right: Preview Panel */}
+            {/* Right: Preview + Library */}
             <ResizablePanel defaultSize={65} minSize={40}>
-              <div className="h-full overflow-hidden">
-                <LabPreviewPanel
-                  results={results}
-                  activeResultId={activeResultId}
-                  onSelectResult={handleSelectResult}
-                  onExtendVideo={extendHandler || undefined}
-                />
+              <div className="h-full flex flex-col overflow-hidden">
+                {/* Main Preview */}
+                <div className="flex-1 min-h-0 overflow-hidden">
+                  <LabPreviewPanel
+                    results={results}
+                    activeResultId={activeResultId}
+                    onSelectResult={handleSelectResult}
+                    onExtendVideo={extendHandler || undefined}
+                  />
+                </div>
+                
+                {/* Video Library - collapsible at bottom */}
+                <div className="border-t border-border bg-card/30">
+                  <VideoLibrary
+                    onSelectVideo={(url, provider) => {
+                      // Create a temporary result for playback
+                      const tempResult: LabResult = {
+                        id: `library-${Date.now()}`,
+                        type: "video",
+                        engine: provider as "sora" | "runway" | "luma",
+                        status: "done",
+                        progress: 100,
+                        outputUrl: url,
+                        startTime: Date.now(),
+                      };
+                      handleResultCreated(tempResult);
+                    }}
+                  />
+                </div>
               </div>
             </ResizablePanel>
           </ResizablePanelGroup>
