@@ -2,8 +2,10 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { 
   ArrowLeft, BarChart3, Loader2, TrendingUp, AlertTriangle, 
-  Target, Zap, Trophy, ChevronDown, Film, Layers, Crown, Database
+  Target, Zap, Trophy, ChevronDown, Film, Layers, Crown, Database,
+  Activity
 } from "lucide-react";
+import { CronMonitorPanel } from "@/components/studio/CronMonitorPanel";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -365,6 +367,10 @@ export default function RoutingAnalytics() {
                   <Layers className="h-3.5 w-3.5" />
                   Clusters
                 </TabsTrigger>
+                <TabsTrigger value="system" className="gap-1.5 text-xs">
+                  <Activity className="h-3.5 w-3.5" />
+                  System
+                </TabsTrigger>
               </TabsList>
 
               {/* Quality Distribution Tab */}
@@ -632,6 +638,11 @@ export default function RoutingAnalytics() {
                     )}
                   </CardContent>
                 </Card>
+              </TabsContent>
+
+              {/* System Tab */}
+              <TabsContent value="system" className="space-y-4">
+                <CronMonitorPanel />
               </TabsContent>
             </Tabs>
           )}
