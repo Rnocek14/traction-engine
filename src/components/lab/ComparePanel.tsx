@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { 
   Scale, Loader2, AlertCircle, Trophy, Target, 
-  Film, ArrowRight, ChevronDown, RefreshCw, X
+  Film, ArrowRight, ChevronDown, RefreshCw, X, Zap
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -48,6 +48,8 @@ interface ComparisonResult {
   key_defects_a: string[];
   key_defects_b: string[];
   stored: boolean;
+  providerA?: string;
+  providerB?: string;
 }
 
 const DELTA_LABELS: Record<keyof ComparisonDeltas, string> = {
@@ -445,6 +447,34 @@ export function ComparePanel({
                     {result.stored ? "Saved to database" : "Not stored"}
                   </Badge>
                 </div>
+
+                {/* Provider Recommendation */}
+                {result.confidence >= 0.7 && result.winner !== "tie" && result.providerA && result.providerB && (
+                  <div className="p-3 rounded-lg bg-success/10 border border-success/30 mt-3">
+                    <div className="flex items-center gap-2">
+                      <Zap className="h-4 w-4 text-success" />
+                      <p className="text-xs font-medium text-success">
+                        Recommendation: Prefer{" "}
+                        <span className="font-bold uppercase">
+                          {result.winner === "A" ? result.providerA : result.providerB}
+                        </span>{" "}
+                        for similar prompts
+                      </p>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground mt-1 ml-6">
+                      Based on {Math.round(result.confidence * 100)}% confidence analysis
+                    </p>
+                  </div>
+                )}
+                {(result.confidence < 0.7 || result.winner === "tie") && (
+                  <div className="p-3 rounded-lg bg-muted/50 border border-border mt-3">
+                    <p className="text-xs text-muted-foreground">
+                      {result.winner === "tie" 
+                        ? "No clear winner — both providers performed similarly" 
+                        : "Confidence too low for a strong recommendation — run more comparisons"}
+                    </p>
+                  </div>
+                )}
               </CardContent>
             </Card>
           )}
