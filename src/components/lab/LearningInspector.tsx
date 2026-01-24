@@ -18,7 +18,10 @@ import {
   Cloud,
   Heart,
   Tag,
-  Clock
+  Clock,
+  User,
+  Bot,
+  Users
 } from "lucide-react";
 import { 
   usePromptLearnings, 
@@ -46,6 +49,12 @@ const PROVIDER_COLORS: Record<string, string> = {
   luma: "bg-amber-500/20 text-amber-300 border-amber-500/30",
 };
 
+const SOURCE_CONFIG: Record<string, { icon: React.ReactNode; label: string; className: string }> = {
+  human: { icon: <User className="h-3 w-3" />, label: "Human", className: "bg-primary/20 text-primary border-primary/30" },
+  auto: { icon: <Bot className="h-3 w-3" />, label: "Auto", className: "bg-chart-4/20 text-chart-4 border-chart-4/30" },
+  mixed: { icon: <Users className="h-3 w-3" />, label: "Mixed", className: "bg-secondary text-secondary-foreground border-border" },
+};
+
 function PatternRow({ pattern }: { pattern: PatternLearning & { effectiveScore: number } }) {
   const successRate = pattern.total_uses > 0 
     ? (pattern.successful_uses / pattern.total_uses) * 100 
@@ -54,6 +63,10 @@ function PatternRow({ pattern }: { pattern: PatternLearning & { effectiveScore: 
   const daysSinceSuccess = pattern.last_success_at 
     ? Math.floor((Date.now() - new Date(pattern.last_success_at).getTime()) / (1000 * 60 * 60 * 24))
     : null;
+
+  // Determine source badge
+  const source = pattern.learning_source || "human";
+  const sourceConfig = SOURCE_CONFIG[source] || SOURCE_CONFIG.human;
 
   return (
     <div className={cn(
@@ -83,6 +96,11 @@ function PatternRow({ pattern }: { pattern: PatternLearning & { effectiveScore: 
           <span className={PROVIDER_COLORS[pattern.provider]}>
             {pattern.provider}
           </span>
+          {/* Source badge */}
+          <Badge variant="outline" className={cn("text-[9px] h-4 px-1 gap-0.5", sourceConfig.className)}>
+            {sourceConfig.icon}
+            {sourceConfig.label}
+          </Badge>
         </div>
       </div>
 

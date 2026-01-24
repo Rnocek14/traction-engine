@@ -1,22 +1,25 @@
 /**
  * Dual-Axis Rating Component
  * Captures both Match (prompt accuracy) and Preference (subjective taste) ratings
+ * Supports keyboard shortcuts: 1-5 for match, Shift+1-5 for preference, Enter to save
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
-import { Sparkles, Target, Heart, Zap } from "lucide-react";
+import { Sparkles, Target, Heart, Zap, Keyboard } from "lucide-react";
 
 interface DualAxisRatingProps {
   matchRating: number;
   preferenceRating: number;
   onMatchChange: (rating: number) => void;
   onPreferenceChange: (rating: number) => void;
+  onSave?: () => void; // Callback for Enter key
   autoMatchScore?: number | null; // 0-100 from auto-rater
   autoQualityScore?: number | null; // 0-100 from auto-rater
   disabled?: boolean;
   compact?: boolean;
+  enableKeyboard?: boolean; // Enable keyboard shortcuts
 }
 
 const MATCH_LABELS = ["Missed", "Partial", "Okay", "Good", "Perfect"];
@@ -40,13 +43,50 @@ export function DualAxisRating({
   preferenceRating,
   onMatchChange,
   onPreferenceChange,
+  onSave,
   autoMatchScore,
   autoQualityScore,
   disabled = false,
   compact = false,
+  enableKeyboard = false,
 }: DualAxisRatingProps) {
   const [hoveredMatch, setHoveredMatch] = useState(0);
   const [hoveredPref, setHoveredPref] = useState(0);
+  const [showKeyHint, setShowKeyHint] = useState(false);
+
+  // Keyboard shortcut handler
+  useEffect(() => {
+    if (!enableKeyboard || disabled) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore if typing in an input
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+      const key = e.key;
+      
+      // 1-5 keys for rating
+      if (/^[1-5]$/.test(key)) {
+        const rating = parseInt(key, 10);
+        if (e.shiftKey) {
+          // Shift + 1-5 = Preference
+          onPreferenceChange(rating);
+        } else {
+          // 1-5 = Match
+          onMatchChange(rating);
+        }
+        e.preventDefault();
+      }
+      
+      // Enter to save
+      if (key === "Enter" && onSave) {
+        onSave();
+        e.preventDefault();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [enableKeyboard, disabled, onMatchChange, onPreferenceChange, onSave]);
 
   // Suggest ratings from auto-scores if no human rating yet
   const suggestedMatch = autoScoreToRating(autoMatchScore);
@@ -155,6 +195,16 @@ export function DualAxisRating({
         <div className="flex items-center gap-1.5 text-xs text-primary bg-primary/10 px-2 py-1 rounded">
           <Zap className="w-3.5 h-3.5" />
           <span>Accurate but not your vibe — noted for taste learning.</span>
+        </div>
+      )}
+
+      {/* Keyboard shortcut hints */}
+      {enableKeyboard && !disabled && (
+        <div className="flex items-center gap-2 text-[10px] text-muted-foreground pt-1 border-t border-border/50">
+          <Keyboard className="w-3 h-3" />
+          <span><kbd className="px-1 py-0.5 rounded bg-muted font-mono text-[9px]">1-5</kbd> match</span>
+          <span><kbd className="px-1 py-0.5 rounded bg-muted font-mono text-[9px]">⇧1-5</kbd> preference</span>
+          {onSave && <span><kbd className="px-1 py-0.5 rounded bg-muted font-mono text-[9px]">↵</kbd> save</span>}
         </div>
       )}
     </div>
