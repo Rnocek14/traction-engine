@@ -84,6 +84,35 @@ async function updateClusterStats(
 }
 
 /**
+ * Stale runner reaper: Reset items stuck in "running" for > 15 minutes
+ */
+async function reapStaleRunners(supabase: SupabaseClient): Promise<number> {
+  const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+  
+  const { data, error } = await supabase
+    .from("video_compare_queue")
+    .update({ 
+      status: "pending", 
+      started_at: null,
+      error: "Stale runner timeout - reset to pending"
+    })
+    .eq("status", "running")
+    .lt("started_at", fifteenMinutesAgo)
+    .select("id");
+  
+  if (error) {
+    console.error("Error reaping stale runners:", error);
+    return 0;
+  }
+  
+  const count = data?.length || 0;
+  if (count > 0) {
+    console.log(`Reaped ${count} stale running items`);
+  }
+  return count;
+}
+
+/**
  * Main handler: Process pending comparisons from the queue
  */
 Deno.serve(async (req) => {
@@ -95,6 +124,9 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // First, reap any stale runners (stuck for > 15 min)
+    const reapedCount = await reapStaleRunners(supabase);
 
     // Fetch pending items from queue (ordered by priority)
     const { data: queueItems, error: fetchError } = await supabase
@@ -109,6 +141,7 @@ Deno.serve(async (req) => {
     if (!queueItems || queueItems.length === 0) {
       return new Response(JSON.stringify({ 
         processed: 0, 
+        reaped: reapedCount,
         message: "No pending comparisons in queue" 
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -226,6 +259,7 @@ Deno.serve(async (req) => {
       done: results.filter(r => r.status === "done").length,
       failed: results.filter(r => r.status === "failed").length,
       skipped: results.filter(r => r.status === "skipped").length,
+      reaped: reapedCount,
       results,
     };
 

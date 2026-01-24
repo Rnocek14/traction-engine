@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { 
   ArrowLeft, BarChart3, Loader2, TrendingUp, AlertTriangle, 
-  Target, Zap, Trophy, ChevronDown, Film
+  Target, Zap, Trophy, ChevronDown, Film, Layers, Crown, Database
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -38,6 +38,35 @@ interface ComparisonWinRate {
   wins: number;
   total: number;
   win_rate: number;
+}
+
+interface ClusterStat {
+  cluster_key: string;
+  provider: string;
+  wins: number;
+  losses: number;
+  ties: number;
+  total_comparisons: number;
+  avg_confidence: number | null;
+  avg_win_delta: number | null;
+  last_updated_at: string;
+}
+
+interface ClusterSummary {
+  cluster_key: string;
+  comparisons: number;
+  last_updated: string;
+  providers: Array<{
+    provider: string;
+    wins: number;
+    losses: number;
+    ties: number;
+    winRate: number;
+    avgConfidence: number | null;
+    avgDelta: number | null;
+  }>;
+  topProvider: string | null;
+  dataSufficient: boolean;
 }
 
 export default function RoutingAnalytics() {
@@ -205,6 +234,66 @@ export default function RoutingAnalytics() {
     },
   });
 
+  // Cluster stats from provider_cluster_stats
+  const { data: clusterStats, isLoading: loadingClusters } = useQuery({
+    queryKey: ["routing-cluster-stats"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("provider_cluster_stats")
+        .select("*")
+        .order("last_updated_at", { ascending: false })
+        .limit(300);
+
+      if (error) throw error;
+
+      // Group by cluster_key
+      const clusterMap = new Map<string, ClusterStat[]>();
+      for (const row of data || []) {
+        const stats = clusterMap.get(row.cluster_key) || [];
+        stats.push(row as ClusterStat);
+        clusterMap.set(row.cluster_key, stats);
+      }
+
+      // Build summaries
+      const MIN_COMPARISONS = 5;
+      const summaries: ClusterSummary[] = [];
+      
+      for (const [cluster_key, stats] of clusterMap.entries()) {
+        const comparisons = Math.max(...stats.map(s => s.total_comparisons || 0));
+        const last_updated = stats.reduce((max, s) => 
+          s.last_updated_at > max ? s.last_updated_at : max, 
+          ""
+        );
+        
+        const providers = stats.map(s => ({
+          provider: s.provider,
+          wins: s.wins,
+          losses: s.losses,
+          ties: s.ties,
+          winRate: s.total_comparisons > 0 
+            ? Math.round((s.wins / s.total_comparisons) * 100) 
+            : 0,
+          avgConfidence: s.avg_confidence,
+          avgDelta: s.avg_win_delta,
+        })).sort((a, b) => b.winRate - a.winRate);
+        
+        // Find top provider (highest winRate with enough data)
+        const topProvider = providers.length > 0 ? providers[0].provider : null;
+        
+        summaries.push({
+          cluster_key,
+          comparisons,
+          last_updated,
+          providers,
+          topProvider,
+          dataSufficient: comparisons >= MIN_COMPARISONS,
+        });
+      }
+
+      return summaries.sort((a, b) => b.comparisons - a.comparisons);
+    },
+  });
+
   const getProviderColor = (provider: string) => {
     const colors: Record<string, string> = {
       sora: "bg-primary/20 text-primary border-primary/30",
@@ -224,7 +313,7 @@ export default function RoutingAnalytics() {
     return colors[use || ""] || "bg-muted text-muted-foreground";
   };
 
-  const isLoading = loadingQuality || loadingDefects || loadingTags || loadingWins;
+  const isLoading = loadingQuality || loadingDefects || loadingTags || loadingWins || loadingClusters;
 
   return (
     <div className="h-screen flex flex-col bg-background">
@@ -271,6 +360,10 @@ export default function RoutingAnalytics() {
                 <TabsTrigger value="comparisons" className="gap-1.5 text-xs">
                   <Trophy className="h-3.5 w-3.5" />
                   Win Rates
+                </TabsTrigger>
+                <TabsTrigger value="clusters" className="gap-1.5 text-xs">
+                  <Layers className="h-3.5 w-3.5" />
+                  Clusters
                 </TabsTrigger>
               </TabsList>
 
@@ -437,6 +530,104 @@ export default function RoutingAnalytics() {
                         <Button variant="secondary" size="sm" className="mt-4" asChild>
                           <Link to="/studio/lab">Go to Lab</Link>
                         </Button>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              {/* Clusters Tab */}
+              <TabsContent value="clusters" className="space-y-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-sm flex items-center gap-2">
+                      Per-Cluster Provider Performance
+                      <Badge variant="outline" className="text-[10px]">
+                        <Database className="h-3 w-3 mr-1" />
+                        {clusterStats?.length || 0} clusters
+                      </Badge>
+                    </CardTitle>
+                    <CardDescription>
+                      Win rates per routing tag cluster (derived from top 3 tags)
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {clusterStats && clusterStats.length > 0 ? (
+                      <div className="space-y-4">
+                        {clusterStats.map((cluster, i) => (
+                          <div
+                            key={i}
+                            className="p-3 rounded-lg bg-muted/30 border border-border/50"
+                          >
+                            {/* Cluster Header */}
+                            <div className="flex items-center justify-between mb-3">
+                              <div className="flex items-center gap-2">
+                                <code className="text-xs bg-muted px-2 py-1 rounded font-mono">
+                                  {cluster.cluster_key}
+                                </code>
+                                {cluster.dataSufficient ? (
+                                  <Badge variant="secondary" className="text-[10px] bg-success/20 text-success">
+                                    ✓ Data sufficient
+                                  </Badge>
+                                ) : (
+                                  <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                                    &lt; 5 comparisons
+                                  </Badge>
+                                )}
+                              </div>
+                              <div className="text-right">
+                                <p className="text-xs text-muted-foreground">
+                                  {cluster.comparisons} comparisons
+                                </p>
+                              </div>
+                            </div>
+
+                            {/* Provider Cards */}
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                              {cluster.providers.map((p, j) => (
+                                <div
+                                  key={j}
+                                  className={cn(
+                                    "p-2 rounded border",
+                                    p.provider === cluster.topProvider && cluster.dataSufficient
+                                      ? "border-success/50 bg-success/5"
+                                      : "border-border/30 bg-background/50"
+                                  )}
+                                >
+                                  <div className="flex items-center justify-between mb-1">
+                                    <Badge className={cn("text-[10px]", getProviderColor(p.provider))}>
+                                      {p.provider}
+                                    </Badge>
+                                    {p.provider === cluster.topProvider && cluster.dataSufficient && (
+                                      <Crown className="h-3 w-3 text-success" />
+                                    )}
+                                  </div>
+                                  <div className="space-y-1">
+                                    <div className="flex justify-between text-[10px]">
+                                      <span className="text-muted-foreground">Win rate</span>
+                                      <span className="font-bold">{p.winRate}%</span>
+                                    </div>
+                                    <Progress value={p.winRate} className="h-1.5" />
+                                    <div className="flex justify-between text-[10px] text-muted-foreground">
+                                      <span>{p.wins}W / {p.losses}L / {p.ties}T</span>
+                                      {p.avgConfidence && (
+                                        <span>conf: {Math.round(p.avgConfidence * 100)}%</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-center py-8">
+                        <Layers className="h-12 w-12 mx-auto mb-3 text-muted-foreground/30" />
+                        <p className="text-sm text-muted-foreground">No cluster data yet</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Cluster stats are populated from automated comparisons
+                        </p>
                       </div>
                     )}
                   </CardContent>

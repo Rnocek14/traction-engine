@@ -4,9 +4,14 @@
  * Routes video generation requests to the best available provider
  * with automatic fallback on rate limits or quota errors.
  * 
+ * Now integrates with comparison-based routing intelligence:
+ * 1. Checks cluster stats for historical provider performance
+ * 2. Falls back to static routing if insufficient data
+ * 3. Supports explicit provider override
+ * 
  * Supports: Sora 2, Runway Gen-3/Gen-4, Luma Ray2
  */
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -33,6 +38,8 @@ interface SmartVideoRequest {
     prefer_fast?: boolean;
     /** CRITICAL: When true, prioritize providers with best image-to-video continuity */
     is_chained?: boolean;
+    /** Optional: routing tags to use for recommendation lookup */
+    routing_tags?: string[];
   };
 }
 
@@ -41,6 +48,16 @@ interface ProviderResult {
   provider: "sora" | "runway" | "luma";
   job?: Record<string, unknown>;
   error?: string;
+}
+
+interface RecommendationResponse {
+  recommendation: "sora" | "runway" | "luma" | null;
+  confidence: number | null;
+  dataSource: "comparison_history" | "static_capabilities";
+  totalComparisons: number;
+  clusterKey: string;
+  winRates: Record<string, number>;
+  strengths?: string[];
 }
 
 const RATE_LIMIT_INDICATORS = [
@@ -301,6 +318,75 @@ function getFallbackOrder(primary: "sora" | "runway" | "luma"): Array<"sora" | "
   }
 }
 
+/**
+ * Get provider recommendation from comparison history
+ * Only applies if confidence threshold is met
+ */
+async function getComparisonBasedRecommendation(
+  supabase: SupabaseClient,
+  routingTags?: string[]
+): Promise<{ provider: "sora" | "runway" | "luma" | null; source: string; confidence: number | null; clusterKey: string | null }> {
+  if (!routingTags || routingTags.length === 0) {
+    return { provider: null, source: "no_tags", confidence: null, clusterKey: null };
+  }
+
+  // Derive cluster key from routing tags (same logic as queue-comparisons)
+  const clusterKey = routingTags.slice(0, 3).sort().join("|");
+  
+  try {
+    // Fetch cluster stats directly
+    const { data: clusterStats, error } = await supabase
+      .from("provider_cluster_stats")
+      .select("provider, wins, losses, ties, total_comparisons, avg_confidence")
+      .eq("cluster_key", clusterKey);
+
+    if (error) throw error;
+
+    if (!clusterStats || clusterStats.length === 0) {
+      return { provider: null, source: "no_cluster_data", confidence: null, clusterKey };
+    }
+
+    // Check minimum comparisons threshold
+    const MIN_COMPARISONS = 5;
+    const totalComparisons = Math.max(...clusterStats.map(s => s.total_comparisons || 0));
+    
+    if (totalComparisons < MIN_COMPARISONS) {
+      return { provider: null, source: "insufficient_data", confidence: null, clusterKey };
+    }
+
+    // Calculate win rates and find best provider
+    let bestProvider: "sora" | "runway" | "luma" | null = null;
+    let bestScore = 0;
+    let bestConfidence: number | null = null;
+
+    for (const stat of clusterStats) {
+      if (stat.total_comparisons === 0) continue;
+      
+      // Score = win_rate * confidence
+      const winRate = stat.wins / stat.total_comparisons;
+      const confidence = stat.avg_confidence || 0.5;
+      const score = winRate * confidence;
+      
+      if (score > bestScore) {
+        bestScore = score;
+        bestProvider = stat.provider as "sora" | "runway" | "luma";
+        bestConfidence = confidence;
+      }
+    }
+
+    // Only recommend if confidence threshold is met
+    const MIN_CONFIDENCE = 0.65;
+    if (bestConfidence && bestConfidence >= MIN_CONFIDENCE && bestProvider) {
+      return { provider: bestProvider, source: "comparison_history", confidence: bestConfidence, clusterKey };
+    }
+
+    return { provider: null, source: "low_confidence", confidence: bestConfidence, clusterKey };
+  } catch (err) {
+    console.error("Error fetching comparison recommendation:", err);
+    return { provider: null, source: "error", confidence: null, clusterKey };
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -359,14 +445,44 @@ Deno.serve(async (req) => {
         }
       }
     } else {
-      // Smart mode: determine best provider
-      const hintedProvider = routeByHints(routing_hint);
-      const primaryProvider = hintedProvider || "sora"; // Default to Sora
+      // Smart mode: determine best provider using layered routing
+      // Priority: 1) Comparison history, 2) Static hints, 3) Default (Sora)
       
-      console.log(`Smart mode: routing to ${primaryProvider}`, {
-        hintedProvider,
-        routing_hint,
-      });
+      let primaryProvider: "sora" | "runway" | "luma" = "sora";
+      let routingSource = "default";
+      let routingConfidence: number | null = null;
+      let routingClusterKey: string | null = null;
+      
+      // First: Try comparison-based routing (if we have routing_tags)
+      const comparisonRec = await getComparisonBasedRecommendation(
+        supabase, 
+        routing_hint?.routing_tags
+      );
+      
+      if (comparisonRec.provider) {
+        primaryProvider = comparisonRec.provider;
+        routingSource = comparisonRec.source;
+        routingConfidence = comparisonRec.confidence;
+        routingClusterKey = comparisonRec.clusterKey;
+        console.log(`Smart mode: comparison history recommends ${primaryProvider}`, {
+          clusterKey: routingClusterKey,
+          confidence: routingConfidence,
+        });
+      } else {
+        // Second: Fall back to static hint routing
+        const hintedProvider = routeByHints(routing_hint);
+        if (hintedProvider) {
+          primaryProvider = hintedProvider;
+          routingSource = "static_hints";
+          console.log(`Smart mode: static hints recommend ${primaryProvider}`, {
+            shot_type: routing_hint?.shot_type,
+            genre: routing_hint?.genre,
+            is_chained: routing_hint?.is_chained,
+          });
+        } else {
+          console.log("Smart mode: no routing signal, defaulting to sora");
+        }
+      }
       
       result = await tryProvider(primaryProvider);
 
@@ -384,6 +500,23 @@ Deno.serve(async (req) => {
             }
           }
         }
+      }
+      
+      // Include routing metadata in successful response
+      if (result.success) {
+        return new Response(
+          JSON.stringify({
+            success: true,
+            provider: result.provider,
+            job: result.job,
+            fallback_used: result.provider !== primaryProvider,
+            routing_hint_used: routing_hint !== undefined,
+            routing_source: routingSource,
+            routing_confidence: routingConfidence,
+            routing_cluster_key: routingClusterKey,
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
       }
     }
 
