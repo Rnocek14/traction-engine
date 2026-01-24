@@ -1,23 +1,26 @@
 import { useRef, useEffect, useState, useCallback } from "react";
-import { Copy, ExternalLink, Download, Play, Pause, Video, Mic, Loader2, AlertCircle, X } from "lucide-react";
+import { Copy, ExternalLink, Download, Play, Pause, Video, Mic, Loader2, AlertCircle, X, FastForward } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import type { LabResult } from "./LabGeneratePanel";
+import type { VideoEngine } from "@/lib/lab-engines";
 
 interface LabPreviewPanelProps {
   className?: string;
   results: LabResult[];
   activeResultId: string | null;
   onSelectResult: (id: string) => void;
+  onExtendVideo?: (sourceUrl: string, engine: VideoEngine) => void;
 }
 
 export function LabPreviewPanel({ 
   className, 
   results, 
   activeResultId, 
-  onSelectResult 
+  onSelectResult,
+  onExtendVideo,
 }: LabPreviewPanelProps) {
   const { toast } = useToast();
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -144,6 +147,18 @@ export function LabPreviewPanel({
               
               {activeResult.status === "done" && activeResult.outputUrl && (
                 <div className="flex gap-1">
+                  {/* Extend button - only for Luma videos */}
+                  {activeResult.type === "video" && activeResult.engine === "luma" && onExtendVideo && (
+                    <Button 
+                      size="sm" 
+                      variant="secondary"
+                      className="h-7 text-xs gap-1"
+                      onClick={() => onExtendVideo(activeResult.outputUrl!, activeResult.engine as VideoEngine)}
+                    >
+                      <FastForward className="h-3 w-3" />
+                      Extend
+                    </Button>
+                  )}
                   <Button 
                     size="sm" 
                     variant="ghost" 

@@ -24,6 +24,7 @@ export interface VideoInput {
   aspectRatio: "9:16" | "16:9" | "1:1";
   style?: string;
   cameraDirection?: string;
+  startingFrameUrl?: string; // For extend/chain mode (Luma, Runway)
 }
 
 export interface VideoOutput {
@@ -88,6 +89,7 @@ export async function generateVideo(
         duration: input.duration,
         style: input.style,
       },
+      starting_frame_url: input.startingFrameUrl, // For extend/chain mode
     },
   });
 
