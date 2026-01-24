@@ -71,6 +71,7 @@ export function VideoRatingPanel({
       const isSerendipity = matchRating <= 2 && preferenceRating >= 4;
       
       // Save dual-axis ratings to video_jobs table
+      // accuracy_rating syncs with matchRating to preserve semantic meaning
       const { error: updateError } = await supabase
         .from("video_jobs")
         .update({
@@ -80,8 +81,8 @@ export function VideoRatingPanel({
           accuracy_notes: notes || null,
           rated_at: new Date().toISOString(),
           human_rating_override: true,
-          // Keep legacy field in sync with preference (for backwards compat)
-          accuracy_rating: preferenceRating,
+          // Legacy field syncs with match (accuracy = prompt match)
+          accuracy_rating: matchRating,
         })
         .eq("id", jobId);
 

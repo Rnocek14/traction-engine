@@ -317,13 +317,16 @@ Deno.serve(async (req) => {
       console.log(`Legacy rating: ${legacyRating} → ${isSuccess ? "positive" : isFailure ? "negative" : "neutral"}`);
     }
 
-    // Serendipity: flag job but don't learn patterns
-    if (isSerendipity && job_id) {
+    // Update serendipity flag on the job (set false if not serendipity to allow re-rating)
+    if (job_id) {
       await supabase
         .from("video_jobs")
-        .update({ is_serendipity: true })
+        .update({ is_serendipity: isSerendipity })
         .eq("id", job_id);
-      
+    }
+
+    // Serendipity: don't learn patterns, just return
+    if (isSerendipity) {
       return new Response(
         JSON.stringify({ 
           learned: false, 
