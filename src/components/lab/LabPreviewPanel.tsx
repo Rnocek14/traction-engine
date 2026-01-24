@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useState, useCallback } from "react";
 import { Copy, ExternalLink, Download, Play, Pause, Video, Mic, Loader2, AlertCircle, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,7 @@ export function LabPreviewPanel({
   const [previewFailed, setPreviewFailed] = useState(false);
 
   const activeResult = results.find(r => r.id === activeResultId);
+  const activeIndex = results.findIndex(r => r.id === activeResultId);
 
   // Reset error state when active result changes
   useEffect(() => {
@@ -58,7 +59,7 @@ export function LabPreviewPanel({
     a.click();
   };
 
-  const togglePlayback = () => {
+  const togglePlayback = useCallback(() => {
     const element = activeResult?.type === "video" ? videoRef.current : audioRef.current;
     if (!element) return;
     
@@ -67,7 +68,33 @@ export function LabPreviewPanel({
     } else {
       element.play().catch(() => {});
     }
-  };
+  }, [activeResult?.type, isPlaying]);
+
+  // Keyboard navigation
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if (results.length === 0) return;
+    
+    // Don't interfere with inputs
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      const newIndex = activeIndex <= 0 ? results.length - 1 : activeIndex - 1;
+      onSelectResult(results[newIndex].id);
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      const newIndex = activeIndex >= results.length - 1 ? 0 : activeIndex + 1;
+      onSelectResult(results[newIndex].id);
+    } else if (e.key === " " && activeResult?.status === "done") {
+      e.preventDefault();
+      togglePlayback();
+    }
+  }, [results, activeIndex, activeResult, onSelectResult, togglePlayback]);
+
+  useEffect(() => {
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleKeyDown]);
 
   const getStatusColor = (status: LabResult["status"]) => {
     switch (status) {
@@ -235,9 +262,17 @@ export function LabPreviewPanel({
               Results ({results.length})
             </span>
             <div className="flex-1" />
-            <span className="text-[10px] text-muted-foreground">
-              Click to preview
-            </span>
+            <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+              <span className="flex items-center gap-1">
+                <kbd className="px-1 py-0.5 rounded bg-muted text-[9px] font-mono">←</kbd>
+                <kbd className="px-1 py-0.5 rounded bg-muted text-[9px] font-mono">→</kbd>
+                navigate
+              </span>
+              <span className="flex items-center gap-1">
+                <kbd className="px-1.5 py-0.5 rounded bg-muted text-[9px] font-mono">Space</kbd>
+                play/pause
+              </span>
+            </div>
           </div>
           <div className="p-3">
             <div className="flex gap-3 overflow-x-auto pb-2">
