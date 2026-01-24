@@ -170,6 +170,14 @@ export function VideoRatingPanel({
         });
       }
     },
+    onError: (error: Error) => {
+      // Handle network/unexpected errors
+      toast({
+        title: "Auto-rating failed",
+        description: error.message || "An unexpected error occurred",
+        variant: "destructive",
+      });
+    },
   });
 
   const getScoreColor = (score: number) => {
