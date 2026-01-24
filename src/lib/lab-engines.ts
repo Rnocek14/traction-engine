@@ -133,8 +133,8 @@ export async function generateVoice(
 ): Promise<VoiceOutput & { error?: string }> {
   const { data, error } = await supabase.functions.invoke("generate-voiceover", {
     body: {
-      script_run_id: "lab-test", // Lab marker
-      text: input.text,
+      lab_mode: true, // Skip DB lookups
+      text: input.text, // Direct text input
       voice: input.voice,
       provider: input.provider,
       instructions: input.instructions,

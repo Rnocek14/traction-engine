@@ -6,7 +6,9 @@ const corsHeaders = {
 };
 
 interface RequestBody {
-  script_run_id: string;
+  script_run_id?: string;
+  lab_mode?: boolean;
+  text?: string; // Direct text for lab mode
   voice?: string;
   instructions?: string;
   provider?: "elevenlabs" | "openai";
@@ -115,32 +117,42 @@ Deno.serve(async (req) => {
     const body: RequestBody = await req.json();
     const { 
       script_run_id, 
+      lab_mode = false,
+      text: directText,
       voice = "roger", 
       instructions, 
       provider = "elevenlabs",
       response_format = "mp3" 
     } = body;
 
-    if (!script_run_id) {
-      throw new Error("script_run_id is required");
+    let voiceoverText: string;
+
+    if (lab_mode && directText) {
+      // Lab mode: use provided text directly, skip DB fetch
+      voiceoverText = directText;
+      console.log("Lab mode: using direct text input");
+    } else {
+      // Production mode: fetch from script_runs
+      if (!script_run_id) {
+        throw new Error("script_run_id is required");
+      }
+
+      const { data: scriptRun, error: fetchError } = await supabase
+        .from("script_runs")
+        .select("script_content")
+        .eq("id", script_run_id)
+        .single();
+
+      if (fetchError || !scriptRun) {
+        throw new Error(`Failed to fetch script run: ${fetchError?.message || "Not found"}`);
+      }
+
+      const scriptContent = scriptRun.script_content as Record<string, unknown>;
+      voiceoverText = scriptContent?.voiceover as string;
     }
-
-    // Fetch the script run to get voiceover text
-    const { data: scriptRun, error: fetchError } = await supabase
-      .from("script_runs")
-      .select("script_content")
-      .eq("id", script_run_id)
-      .single();
-
-    if (fetchError || !scriptRun) {
-      throw new Error(`Failed to fetch script run: ${fetchError?.message || "Not found"}`);
-    }
-
-    const scriptContent = scriptRun.script_content as Record<string, unknown>;
-    const voiceoverText = scriptContent?.voiceover as string;
 
     if (!voiceoverText || voiceoverText.trim().length === 0) {
-      throw new Error("Script has no voiceover text to generate audio from");
+      throw new Error("No voiceover text provided");
     }
 
     let audioBuf: ArrayBuffer;
@@ -207,22 +219,24 @@ Deno.serve(async (req) => {
 
     const audioUrl = publicUrlData.publicUrl;
 
-    // Update script_runs with audio metadata
-    const { error: updateError } = await supabase
-      .from("script_runs")
-      .update({
-        voiceover_audio_url: audioUrl,
-        voiceover_audio_format: "mp3",
-        voiceover_voice: usedVoice,
-        voiceover_provider: usedProvider,
-        voiceover_instructions: instructions || null,
-        voiceover_generated_at: new Date().toISOString(),
-      })
-      .eq("id", script_run_id);
+    // Update script_runs with audio metadata (skip in lab mode)
+    if (!lab_mode && script_run_id) {
+      const { error: updateError } = await supabase
+        .from("script_runs")
+        .update({
+          voiceover_audio_url: audioUrl,
+          voiceover_audio_format: "mp3",
+          voiceover_voice: usedVoice,
+          voiceover_provider: usedProvider,
+          voiceover_instructions: instructions || null,
+          voiceover_generated_at: new Date().toISOString(),
+        })
+        .eq("id", script_run_id);
 
-    if (updateError) {
-      console.error("Failed to update script_runs:", updateError);
-      // Don't throw - audio was generated successfully
+      if (updateError) {
+        console.error("Failed to update script_runs:", updateError);
+        // Don't throw - audio was generated successfully
+      }
     }
 
     console.log(`TTS generated successfully with ${usedProvider}: ${audioUrl}`);
