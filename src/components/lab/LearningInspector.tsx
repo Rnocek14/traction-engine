@@ -137,10 +137,10 @@ function PatternRow({ pattern }: { pattern: PatternLearning & { effectiveScore: 
 
         {/* Average Rating */}
         <div className="text-center">
-          <div className="font-mono">
-            {pattern.average_rating?.toFixed(1) || "-"}
+          <div className="font-mono font-bold text-chart-2">
+            {pattern.average_rating?.toFixed(1) || "-"}/5
           </div>
-          <div className="text-muted-foreground">avg ★</div>
+          <div className="text-muted-foreground">rating</div>
         </div>
 
         {/* Days since success */}
