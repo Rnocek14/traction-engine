@@ -209,11 +209,12 @@ export const VOICE_ENGINES: { id: VoiceEngine; name: string }[] = [
   { id: "openai", name: "OpenAI TTS" },
 ];
 
-// Duration options per engine
+// Duration options per engine (must match edge function constraints)
+// These are the valid API buckets - UI shows these, edge function enforces them
 export const ENGINE_DURATIONS: Record<VideoEngine, number[]> = {
-  sora: [4, 8, 12],
-  runway: [5, 10],
-  luma: [5, 10],
+  sora: [4, 8, 12],      // Sora-2: 4/8/12 second buckets
+  runway: [4, 6, 8],      // Veo3.1_fast: 4/6/8 second buckets  
+  luma: [5],              // Ray-2: Fixed ~5s output (no duration param)
 };
 
 // Get valid duration for engine
