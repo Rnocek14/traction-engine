@@ -6,6 +6,10 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// ═══════════════════════════════════════════════════════════════════
+// TYPE DEFINITIONS
+// ═══════════════════════════════════════════════════════════════════
+
 interface ComparisonResult {
   winner: "A" | "B" | "tie";
   confidence: number;
@@ -29,19 +33,22 @@ interface VideoJob {
   enriched_prompt: string | null;
   original_prompt: string | null;
   provider: string;
+  status: string;
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// HELPER FUNCTIONS
+// ═══════════════════════════════════════════════════════════════════
+
 /**
- * Simple hash for prompt comparison
+ * Async SHA-256 hash for prompt deduplication
  */
-function hashPrompt(prompt: string): string {
-  let hash = 0;
-  for (let i = 0; i < prompt.length; i++) {
-    const char = prompt.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash;
-  }
-  return hash.toString(16);
+async function hashPrompt(prompt: string): Promise<string> {
+  const data = new TextEncoder().encode(prompt.trim().toLowerCase());
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(digest))
+    .map(b => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 /**
@@ -95,55 +102,66 @@ async function compareVideosWithVLM(
   prompt: string,
   providerA: string,
   providerB: string,
-  openaiKey: string
+  openaiKey: string,
+  isSpritesheetA: boolean,
+  isSpritesheetB: boolean
 ): Promise<ComparisonResult> {
-  const systemPrompt = `You are an expert AI video quality analyst. You will compare two AI-generated videos (A and B) created from the same prompt.
+  // Confidence adjustment for image type mismatch
+  const bothSpritesheets = isSpritesheetA && isSpritesheetB;
+  const imageTypeNote = bothSpritesheets 
+    ? "Both are spritesheets showing multiple frames."
+    : `Image types differ: A=${isSpritesheetA ? "spritesheet" : "thumbnail"}, B=${isSpritesheetB ? "spritesheet" : "thumbnail"}. Be conservative on temporal comparison.`;
+
+  const systemPrompt = `You are an expert AI video quality analyst. Compare two AI-generated videos (A and B) from the same prompt.
 
 COMPARISON TASK:
-- Both videos were generated from the same prompt
-- Video A is from ${providerA.toUpperCase()}
-- Video B is from ${providerB.toUpperCase()}
-- Compare them across 5 dimensions
+- Video A: ${providerA.toUpperCase()}
+- Video B: ${providerB.toUpperCase()}
+- ${imageTypeNote}
 
 DIMENSIONS TO COMPARE:
-1. PROMPT ADHERENCE: Which better matches the prompt intent?
-2. TEMPORAL CONSISTENCY: Which has more stable, flicker-free frames?
-3. MOTION REALISM: Which has more natural, physics-correct motion?
-4. VISUAL FIDELITY: Which has better sharpness, detail, fewer artifacts?
-5. CINEMATIC QUALITY: Which has better composition, lighting, artistic merit?
+1. PROMPT ADHERENCE: Which better matches the prompt?
+2. TEMPORAL CONSISTENCY: Which has more stable frames? (${bothSpritesheets ? "compare visible frames" : "be conservative if image types differ"})
+3. MOTION REALISM: Which has more natural physics/motion?
+4. VISUAL FIDELITY: Which has better detail, fewer artifacts?
+5. CINEMATIC QUALITY: Which has better composition/lighting?
+
+CONSISTENCY RULES:
+- If winner = A, at least 3/5 deltas should be positive OR sum of deltas > 0
+- If winner = B, at least 3/5 deltas should be negative OR sum of deltas < 0
+- If winner = tie, sum of deltas should be near 0 and confidence 0.5-0.65
 
 OUTPUT (JSON only, no markdown):
 {
   "winner": "A|B|tie",
   "confidence": <0.5-1.0>,
   "deltas": {
-    "prompt_adherence": <-20 to 20, positive means A is better>,
+    "prompt_adherence": <-20 to 20, positive = A better>,
     "temporal_consistency": <-20 to 20>,
     "motion_realism": <-20 to 20>,
     "visual_fidelity": <-20 to 20>,
     "cinematic_quality": <-20 to 20>
   },
-  "reasons": ["Why winner is better (3-6 bullets)", "..."],
-  "key_defects_a": ["Main issues with A if any"],
-  "key_defects_b": ["Main issues with B if any"]
+  "reasons": ["Why winner is better (exactly 3-6 bullets)", "...", "..."],
+  "key_defects_a": ["Main issues with A (0-3 items)"],
+  "key_defects_b": ["Main issues with B (0-3 items)"]
 }
 
-GUIDELINES:
-- winner = the overall better video considering all dimensions
-- confidence: 0.5-0.65 = very close, 0.65-0.8 = clear difference, 0.8-1.0 = obvious winner
-- deltas: positive = A is better, negative = B is better, 0 = equal
-- A delta of ±5 = slight edge, ±10 = notable difference, ±15-20 = significant gap
-- Be objective. Provider names should not influence your judgment.
-- If truly equal, use "tie" with confidence ~0.5`;
+DELTA GUIDE:
+- ±1-5 = slight edge
+- ±6-10 = notable difference  
+- ±11-20 = significant gap
 
-  const userMessage = `Compare these two videos generated from the same prompt:
+Be objective. Provider names should not influence judgment.`;
+
+  const userMessage = `Compare these videos from the same prompt:
 
 PROMPT: ${prompt}
 
 Video A (${providerA}): First image
 Video B (${providerB}): Second image
 
-Which is the better generation? Analyze all 5 dimensions.`;
+Which is better? Analyze all 5 dimensions.`;
 
   try {
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -185,9 +203,17 @@ Which is the better generation? Analyze all 5 dimensions.`;
     
     const parsed = JSON.parse(jsonStr);
     
-    // Validate and clamp values
-    const winner = parsed.winner === "A" ? "A" : parsed.winner === "B" ? "B" : "tie";
-    const confidence = Math.max(0.5, Math.min(1, parsed.confidence || 0.6));
+    // Validate winner
+    const winner: "A" | "B" | "tie" = 
+      parsed.winner === "A" ? "A" : 
+      parsed.winner === "B" ? "B" : "tie";
+    
+    let confidence = Math.max(0.5, Math.min(1, parsed.confidence || 0.6));
+    
+    // Reduce confidence if image types differ
+    if (!bothSpritesheets) {
+      confidence = Math.min(confidence, 0.75);
+    }
     
     const clampDelta = (v: unknown): number => Math.max(-20, Math.min(20, Math.round(Number(v) || 0)));
     
@@ -199,16 +225,35 @@ Which is the better generation? Analyze all 5 dimensions.`;
       cinematic_quality: clampDelta(parsed.deltas?.cinematic_quality),
     };
     
-    const reasons = Array.isArray(parsed.reasons) 
+    // Validate delta consistency with winner
+    const deltaSum = Object.values(deltas).reduce((a, b) => a + b, 0);
+    const positiveDeltas = Object.values(deltas).filter(d => d > 0).length;
+    const negativeDeltas = Object.values(deltas).filter(d => d < 0).length;
+    
+    // Enforce consistency
+    if (winner === "A" && (deltaSum <= 0 || positiveDeltas < 2)) {
+      confidence = Math.min(confidence, 0.6);
+    }
+    if (winner === "B" && (deltaSum >= 0 || negativeDeltas < 2)) {
+      confidence = Math.min(confidence, 0.6);
+    }
+    
+    let reasons = Array.isArray(parsed.reasons) 
       ? parsed.reasons.slice(0, 6).map((r: unknown) => String(r).slice(0, 300))
       : [];
     
+    // Ensure minimum 3 reasons
+    if (reasons.length < 3) {
+      reasons.push("Insufficient justification provided by model");
+      confidence = Math.min(confidence, 0.6);
+    }
+    
     const key_defects_a = Array.isArray(parsed.key_defects_a)
-      ? parsed.key_defects_a.slice(0, 5).map((d: unknown) => String(d).slice(0, 100))
+      ? parsed.key_defects_a.slice(0, 3).map((d: unknown) => String(d).slice(0, 100))
       : [];
     
     const key_defects_b = Array.isArray(parsed.key_defects_b)
-      ? parsed.key_defects_b.slice(0, 5).map((d: unknown) => String(d).slice(0, 100))
+      ? parsed.key_defects_b.slice(0, 3).map((d: unknown) => String(d).slice(0, 100))
       : [];
 
     return {
@@ -238,46 +283,57 @@ Deno.serve(async (req) => {
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, serviceKey);
 
-    const { jobIdA, jobIdB, promptOverride } = await req.json();
+    const body = await req.json();
+    const { jobIdA, jobIdB, promptOverride } = body;
 
+    // Validate inputs
     if (!jobIdA || !jobIdB) {
       throw new Error("jobIdA and jobIdB are required");
     }
-
     if (jobIdA === jobIdB) {
       throw new Error("Cannot compare a video with itself");
     }
+    if (promptOverride && promptOverride.length > 2000) {
+      throw new Error("promptOverride too long (max 2000 chars)");
+    }
 
-    // Fetch both jobs
+    // Fetch both jobs with status check
     const { data: jobs, error: fetchError } = await supabase
       .from("video_jobs")
-      .select("id, output_url, thumbnail_url, spritesheet_url, enriched_prompt, original_prompt, provider")
+      .select("id, output_url, thumbnail_url, spritesheet_url, enriched_prompt, original_prompt, provider, status")
       .in("id", [jobIdA, jobIdB]);
 
     if (fetchError) throw fetchError;
     if (!jobs || jobs.length !== 2) throw new Error("Could not find both video jobs");
 
-    const jobA = jobs.find(j => j.id === jobIdA) as VideoJob;
-    const jobB = jobs.find(j => j.id === jobIdB) as VideoJob;
+    const jobA = jobs.find(j => j.id === jobIdA) as VideoJob | undefined;
+    const jobB = jobs.find(j => j.id === jobIdB) as VideoJob | undefined;
 
     if (!jobA || !jobB) throw new Error("Could not find both video jobs");
+
+    // Verify both jobs are complete
+    if (jobA.status !== "done" || jobB.status !== "done") {
+      throw new Error("Both videos must be completed (status=done) for comparison");
+    }
 
     // Get prompts
     const promptA = jobA.enriched_prompt || jobA.original_prompt;
     const promptB = jobB.enriched_prompt || jobB.original_prompt;
+    const comparePrompt = promptOverride || promptA || promptB;
     
-    // Use override or check prompts are similar enough
-    const comparePrompt = promptOverride || promptA;
     if (!comparePrompt) throw new Error("No prompt available for comparison");
 
-    // Warn if prompts differ significantly (but allow comparison)
-    let promptHashA = promptA ? hashPrompt(promptA) : "";
-    let promptHashB = promptB ? hashPrompt(promptB) : "";
-    const promptsMatch = promptHashA === promptHashB;
+    // Hash prompts for comparison and storage
+    const promptHashA = promptA ? await hashPrompt(promptA) : "";
+    const promptHashB = promptB ? await hashPrompt(promptB) : "";
+    const promptsMatch = promptHashA && promptHashB && promptHashA === promptHashB;
+    const comparePromptHash = await hashPrompt(comparePrompt);
 
     // Get images (prefer spritesheets)
     let imageUrlA = jobA.spritesheet_url || jobA.thumbnail_url;
     let imageUrlB = jobB.spritesheet_url || jobB.thumbnail_url;
+    const isSpritesheetA = !!jobA.spritesheet_url;
+    const isSpritesheetB = !!jobB.spritesheet_url;
 
     // Extract on demand if needed
     if (!imageUrlA && jobA.output_url) {
@@ -313,29 +369,43 @@ Deno.serve(async (req) => {
       comparePrompt,
       jobA.provider,
       jobB.provider,
-      openaiKey
+      openaiKey,
+      isSpritesheetA || imageUrlA.includes("spritesheet"),
+      isSpritesheetB || imageUrlB.includes("spritesheet")
     );
 
-    // Store comparison result
-    const { error: insertError } = await supabase
+    // Compute canonical pair for deduplication
+    const jobMin = jobIdA < jobIdB ? jobIdA : jobIdB;
+    const jobMax = jobIdA < jobIdB ? jobIdB : jobIdA;
+    
+    // Determine winner_job UUID
+    const winnerJob = result.winner === "A" ? jobIdA : 
+                      result.winner === "B" ? jobIdB : null;
+
+    // Upsert comparison result (idempotent)
+    const { error: upsertError } = await supabase
       .from("video_comparisons")
-      .insert({
+      .upsert({
         job_a: jobIdA,
         job_b: jobIdB,
-        prompt_hash: hashPrompt(comparePrompt),
+        job_min: jobMin,
+        job_max: jobMax,
+        prompt_hash: comparePromptHash,
         provider_a: jobA.provider,
         provider_b: jobB.provider,
         winner: result.winner,
+        winner_job: winnerJob,
         confidence: result.confidence,
         deltas: result.deltas,
         reasons: result.reasons,
         key_defects_a: result.key_defects_a,
         key_defects_b: result.key_defects_b,
+      }, {
+        onConflict: "job_min,job_max,prompt_hash",
       });
 
-    if (insertError) {
-      console.error("Failed to store comparison:", insertError);
-      // Don't throw - still return the result
+    if (upsertError) {
+      console.error("Failed to store comparison:", upsertError);
     }
 
     return new Response(JSON.stringify({
@@ -345,7 +415,8 @@ Deno.serve(async (req) => {
       providerB: jobB.provider,
       promptsMatch,
       ...result,
-      stored: !insertError,
+      winner_job: winnerJob,
+      stored: !upsertError,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

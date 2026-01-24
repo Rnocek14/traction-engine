@@ -6,7 +6,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const RATER_VERSION = "vlm-v2.2-calibrated";
+const RATER_VERSION = "vlm-v2.3-calibrated";
 
 // Thresholds for auto-learning
 const LEARN_HIGH_THRESHOLD = 78;
@@ -14,50 +14,16 @@ const LEARN_LOW_THRESHOLD = 55;
 const CONFIDENCE_THRESHOLD = 0.75;
 
 // ═══════════════════════════════════════════════════════════════════
-// ALLOWLISTS FOR HYGIENE
+// TYPE DEFINITIONS
 // ═══════════════════════════════════════════════════════════════════
 
-const ROUTING_TAG_ALLOWLIST = new Set<string>([
-  "low_light", "fast_motion", "character_closeup", "establishing_shot",
-  "text_heavy", "action_sequence", "dialogue", "atmospheric",
-  "product_shot", "nature", "urban", "fantasy", "realistic",
-  "slow_motion", "aerial", "handheld", "static_camera", "portrait"
-]);
-
-const DEFECT_TYPE_ALLOWLIST = new Set<string>([
-  "flicker", "morphing", "identity_drift", "physics_violation", "limb_anomaly",
-  "text_corruption", "edge_bleeding", "uncanny_face", "unnatural_motion",
-  "inconsistent_lighting", "over_smoothing", "blur_artifact", "texture_crawl",
-  "missing_element", "wrong_subject", "floaty_motion", "jitter"
-]);
-
-// Defect → dimension mapping for mechanical deductions
-const DEFECT_DIMENSION_MAP: Record<string, { dimensions: string[]; weight: number }> = {
-  flicker: { dimensions: ["temporal"], weight: 1.0 },
-  identity_drift: { dimensions: ["temporal"], weight: 1.0 },
-  morphing: { dimensions: ["temporal", "fidelity"], weight: 0.6 },
-  physics_violation: { dimensions: ["motion"], weight: 1.0 },
-  floaty_motion: { dimensions: ["motion"], weight: 1.0 },
-  jitter: { dimensions: ["motion"], weight: 1.0 },
-  unnatural_motion: { dimensions: ["motion"], weight: 0.8 },
-  blur_artifact: { dimensions: ["fidelity"], weight: 1.0 },
-  texture_crawl: { dimensions: ["fidelity"], weight: 1.0 },
-  edge_bleeding: { dimensions: ["fidelity"], weight: 0.8 },
-  over_smoothing: { dimensions: ["fidelity"], weight: 0.7 },
-  uncanny_face: { dimensions: ["fidelity", "motion"], weight: 0.5 },
-  limb_anomaly: { dimensions: ["fidelity", "motion"], weight: 0.5 },
-  missing_element: { dimensions: ["adherence"], weight: 1.0 },
-  wrong_subject: { dimensions: ["adherence"], weight: 1.0 },
-  text_corruption: { dimensions: ["fidelity", "adherence"], weight: 0.5 },
-  inconsistent_lighting: { dimensions: ["cinematic", "fidelity"], weight: 0.5 },
-};
-
-// Evidence heuristic keywords
-const DIM_KWS = ["prompt", "adherence", "temporal", "flicker", "motion", "physics", "fidelity", "sharp", "lighting", "composition", "depth", "consistency", "realism"];
-const VISUAL_KWS = ["edges", "skin", "texture", "lighting", "shadows", "reflections", "motion blur", "camera", "background", "subject", "hands", "face", "eyes", "hair", "clothing", "environment", "sky", "ground", "water"];
-const QUAL_KWS = ["consistent", "stable", "clean", "natural", "crisp", "artifact", "warping", "banding", "noise", "shimmer", "crawl", "smooth", "seamless", "accurate", "precise", "detailed"];
-
+type AnyObj = Record<string, unknown>;
 type DefectSeverity = "minor" | "moderate" | "severe";
+
+interface DefectDimensionMapping {
+  dimensions: string[];
+  weights: Record<string, number>; // per-dimension weights
+}
 
 interface Defect {
   type: string;
@@ -89,7 +55,7 @@ interface AutoRatingResult {
 
 interface VideoJob {
   id: string;
-  output_url: string;
+  output_url: string | null;
   thumbnail_url: string | null;
   spritesheet_url: string | null;
   enriched_prompt: string | null;
@@ -98,6 +64,54 @@ interface VideoJob {
   style_hints: string | null;
   settings: Record<string, unknown> | null;
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// ALLOWLISTS FOR HYGIENE
+// ═══════════════════════════════════════════════════════════════════
+
+const ROUTING_TAG_ALLOWLIST = new Set<string>([
+  "low_light", "fast_motion", "character_closeup", "establishing_shot",
+  "text_heavy", "action_sequence", "dialogue", "atmospheric",
+  "product_shot", "nature", "urban", "fantasy", "realistic",
+  "slow_motion", "aerial", "handheld", "static_camera", "portrait"
+]);
+
+const DEFECT_TYPE_ALLOWLIST = new Set<string>([
+  "flicker", "morphing", "identity_drift", "physics_violation", "limb_anomaly",
+  "text_corruption", "edge_bleeding", "uncanny_face", "unnatural_motion",
+  "inconsistent_lighting", "over_smoothing", "blur_artifact", "texture_crawl",
+  "missing_element", "wrong_subject", "floaty_motion", "jitter"
+]);
+
+// Defect → dimension mapping with per-dimension weights (sum to ~1.0 per defect)
+const DEFECT_DIMENSION_MAP: Record<string, DefectDimensionMapping> = {
+  flicker: { dimensions: ["temporal"], weights: { temporal: 1.0 } },
+  identity_drift: { dimensions: ["temporal"], weights: { temporal: 1.0 } },
+  morphing: { dimensions: ["temporal", "fidelity"], weights: { temporal: 0.6, fidelity: 0.4 } },
+  physics_violation: { dimensions: ["motion"], weights: { motion: 1.0 } },
+  floaty_motion: { dimensions: ["motion"], weights: { motion: 1.0 } },
+  jitter: { dimensions: ["motion"], weights: { motion: 1.0 } },
+  unnatural_motion: { dimensions: ["motion"], weights: { motion: 0.8 } },
+  blur_artifact: { dimensions: ["fidelity"], weights: { fidelity: 1.0 } },
+  texture_crawl: { dimensions: ["fidelity"], weights: { fidelity: 1.0 } },
+  edge_bleeding: { dimensions: ["fidelity"], weights: { fidelity: 0.8 } },
+  over_smoothing: { dimensions: ["fidelity"], weights: { fidelity: 0.7 } },
+  uncanny_face: { dimensions: ["fidelity", "motion"], weights: { fidelity: 0.6, motion: 0.4 } },
+  limb_anomaly: { dimensions: ["fidelity", "motion"], weights: { fidelity: 0.6, motion: 0.4 } },
+  missing_element: { dimensions: ["adherence"], weights: { adherence: 1.0 } },
+  wrong_subject: { dimensions: ["adherence"], weights: { adherence: 1.0 } },
+  text_corruption: { dimensions: ["fidelity", "adherence"], weights: { fidelity: 0.5, adherence: 0.5 } },
+  inconsistent_lighting: { dimensions: ["cinematic", "fidelity"], weights: { cinematic: 0.6, fidelity: 0.4 } },
+};
+
+// Evidence heuristic keywords
+const DIM_KWS = ["prompt", "adherence", "temporal", "flicker", "motion", "physics", "fidelity", "sharp", "lighting", "composition", "depth", "consistency", "realism"];
+const VISUAL_KWS = ["edges", "skin", "texture", "lighting", "shadows", "reflections", "motion blur", "camera", "background", "subject", "hands", "face", "eyes", "hair", "clothing", "environment", "sky", "ground", "water"];
+const QUAL_KWS = ["consistent", "stable", "clean", "natural", "crisp", "artifact", "warping", "banding", "noise", "shimmer", "crawl", "smooth", "seamless", "accurate", "precise", "detailed"];
+
+// ═══════════════════════════════════════════════════════════════════
+// HELPER FUNCTIONS
+// ═══════════════════════════════════════════════════════════════════
 
 /**
  * Extract thumbnail from video using FFmpeg service
@@ -212,8 +226,6 @@ LUMA-SPECIFIC (Ray-2):
 
 /**
  * Check if reasons contain proper high-score evidence
- * Requires: 2+ reasons with (dimension + visual + qualifier keywords, ≥70 chars) 
- * covering 2+ distinct dimensions
  */
 function hasProperHighScoreEvidence(reasons: string[]): boolean {
   const evidenceReasons = reasons.filter(r => {
@@ -226,7 +238,6 @@ function hasProperHighScoreEvidence(reasons: string[]): boolean {
 
   if (evidenceReasons.length < 2) return false;
 
-  // Require 2+ distinct dimensions among evidence
   const dimsHit = new Set<string>();
   for (const r of evidenceReasons) {
     const t = r.toLowerCase();
@@ -241,7 +252,7 @@ function hasProperHighScoreEvidence(reasons: string[]): boolean {
 }
 
 /**
- * Sanitize routing tags (accepts unknown, returns validated string[])
+ * Sanitize routing tags
  */
 function sanitizeRoutingTags(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
@@ -252,12 +263,12 @@ function sanitizeRoutingTags(raw: unknown): string[] {
 }
 
 /**
- * Sanitize defects (accepts unknown, returns validated Defect[])
+ * Sanitize defects
  */
 function sanitizeDefects(raw: unknown): Defect[] {
   if (!Array.isArray(raw)) return [];
   return raw
-    .filter((d): d is Record<string, unknown> => typeof d === "object" && d !== null)
+    .filter((d): d is AnyObj => typeof d === "object" && d !== null)
     .map((d) => {
       const rawType = String(d.type || "unnatural_motion").toLowerCase().trim();
       const type = DEFECT_TYPE_ALLOWLIST.has(rawType) ? rawType : "unnatural_motion";
@@ -273,14 +284,14 @@ function sanitizeDefects(raw: unknown): Defect[] {
 }
 
 /**
- * Apply defect deductions mechanically to dimension scores
+ * Apply defect deductions mechanically using per-dimension weights
  */
 function applyDefectDeductions(
   scores: { temporal: number; motion: number; fidelity: number; adherence: number; cinematic: number },
   defects: Defect[]
 ): { temporal: number; motion: number; fidelity: number; adherence: number; cinematic: number } {
   const deductions = { temporal: 0, motion: 0, fidelity: 0, adherence: 0, cinematic: 0 };
-  const maxDeductionPerDim = 35; // Cap total deduction per dimension
+  const maxDeductionPerDim = 35;
 
   for (const defect of defects) {
     const mapping = DEFECT_DIMENSION_MAP[defect.type];
@@ -289,7 +300,8 @@ function applyDefectDeductions(
     for (const dim of mapping.dimensions) {
       const dimKey = dim as keyof typeof deductions;
       if (dimKey in deductions) {
-        deductions[dimKey] += defect.deduction * mapping.weight;
+        const weight = mapping.weights[dim] ?? 0.5;
+        deductions[dimKey] += defect.deduction * weight;
       }
     }
   }
@@ -352,9 +364,6 @@ If any dimension ≥90, you MUST provide 2+ detailed reasons (≥70 chars each) 
 - Specific visual element (texture, lighting, edges, etc.)
 - Dimension reference (temporal, motion, fidelity, etc.)
 - Quality descriptor (seamless, precise, crisp, etc.)
-
-INVALID: "The video looks great" 
-VALID: "The subject's skin texture maintains seamlessly consistent detail across frames with no temporal shimmer artifacts."
 
 Cap at 89 if you cannot provide this evidence.
 
@@ -443,10 +452,7 @@ Apply strict calibration. Most videos score 65-85. Detect ALL defects.`;
       ? parsed.reasons.slice(0, 8).map((r: unknown) => String(r).slice(0, 300)) 
       : [];
     
-    // ═══════════════════════════════════════════════════════════
-    // MECHANICAL DEDUCTIONS (apply defect penalties to dimensions)
-    // ═══════════════════════════════════════════════════════════
-    
+    // Apply mechanical deductions
     const adjusted = applyDefectDeductions(
       {
         temporal: temporalConsistency,
@@ -464,10 +470,6 @@ Apply strict calibration. Most videos score 65-85. Detect ALL defects.`;
     promptAdherence = adjusted.adherence;
     cinematicQuality = adjusted.cinematic;
     
-    // ═══════════════════════════════════════════════════════════
-    // POST-PROCESSING CAPS
-    // ═══════════════════════════════════════════════════════════
-    
     // Single thumbnail → cap temporal and reduce confidence
     if (!isSpritesheetLikely) {
       temporalConsistency = Math.min(temporalConsistency, 82);
@@ -484,7 +486,7 @@ Apply strict calibration. Most videos score 65-85. Detect ALL defects.`;
       if (cinematicQuality >= 90) cinematicQuality = 89;
     }
     
-    // Defect-based hard caps (in addition to mechanical deductions)
+    // Defect-based hard caps
     const severeDefects = defects.filter(d => d.severity === "severe");
     const moderateDefects = defects.filter(d => d.severity === "moderate");
     
@@ -533,7 +535,7 @@ Apply strict calibration. Most videos score 65-85. Detect ALL defects.`;
     
     const artifactFlags = [...new Set(defects.map(d => d.type))];
     
-    console.log(`VLM v2.2: adhere=${promptAdherence}, temporal=${temporalConsistency}, motion=${motionRealism}, fidelity=${visualFidelity}, cinematic=${cinematicQuality}, overall=${overallScore}, defects=${defects.length}, hard_fail=${hardFail}`);
+    console.log(`VLM v2.3: adhere=${promptAdherence}, temporal=${temporalConsistency}, motion=${motionRealism}, fidelity=${visualFidelity}, cinematic=${cinematicQuality}, overall=${overallScore}, defects=${defects.length}, hard_fail=${hardFail}`);
 
     return {
       prompt_adherence: promptAdherence,
@@ -617,9 +619,8 @@ async function maybeLearn(
     return false;
   }
 
-  // Quality guards: only learn if we have good signal
+  // Quality guards
   if (bothHigh) {
-    // For positive learning: need at least 1 routing tag and max 3 defects
     if (rating.routing_tags.length < 1) {
       console.log(`Skipping positive learning: no routing tags`);
       return false;
@@ -733,7 +734,7 @@ Deno.serve(async (req) => {
 
         const rating = await scoreVideoWithVLM(imageUrl, prompt, job.style_hints, openaiKey, job.provider);
         await persistRating(supabase, job.id, rating);
-        await maybeLearn(supabase, job, rating);
+        await maybeLearn(supabase, job as VideoJob, rating);
 
         results.push({ jobId: job.id, ...rating });
       }
@@ -784,7 +785,7 @@ Deno.serve(async (req) => {
 
     const rating = await scoreVideoWithVLM(imageUrl, prompt, job.style_hints, openaiKey, job.provider);
     await persistRating(supabase, job.id, rating);
-    const learned = await maybeLearn(supabase, job, rating);
+    const learned = await maybeLearn(supabase, job as VideoJob, rating);
 
     return new Response(JSON.stringify({ jobId, ...rating, learned }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
