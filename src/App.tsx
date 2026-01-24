@@ -10,6 +10,7 @@ import ScriptGenerator from "./pages/ScriptGenerator";
 import QAReviewInbox from "./pages/QAReviewInbox";
 import Studio from "./pages/Studio";
 import Lab from "./pages/Lab";
+import RoutingAnalytics from "./pages/RoutingAnalytics";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
 
@@ -30,6 +31,7 @@ const App = () => (
             <Route path="/studio" element={<Studio />} />
             <Route path="/studio/:scriptRunId" element={<Studio />} />
             <Route path="/studio/lab" element={<Lab />} />
+            <Route path="/studio/analytics" element={<RoutingAnalytics />} />
             <Route path="/login" element={<Login />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />

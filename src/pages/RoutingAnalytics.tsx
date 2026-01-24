@@ -1,0 +1,451 @@
+import { Link } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
+import { 
+  ArrowLeft, BarChart3, Loader2, TrendingUp, AlertTriangle, 
+  Target, Zap, Trophy, ChevronDown, Film
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { supabase } from "@/integrations/supabase/client";
+import { cn } from "@/lib/utils";
+
+interface ProviderQuality {
+  provider: string;
+  auto_best_use: string | null;
+  count: number;
+  avg_score: number | null;
+}
+
+interface DefectStat {
+  defect_type: string;
+  count: number;
+  avg_impact: number | null;
+}
+
+interface RoutingTagStat {
+  routing_tag: string;
+  count: number;
+  avg_score: number | null;
+  pct_final: number;
+}
+
+interface ComparisonWinRate {
+  provider: string;
+  wins: number;
+  total: number;
+  win_rate: number;
+}
+
+export default function RoutingAnalytics() {
+  // Provider quality distribution
+  const { data: providerQuality, isLoading: loadingQuality } = useQuery({
+    queryKey: ["routing-provider-quality"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("video_jobs")
+        .select("provider, auto_best_use, auto_overall_score")
+        .eq("status", "done")
+        .not("auto_rated_at", "is", null);
+      
+      if (error) throw error;
+      
+      // Group by provider + best_use client-side
+      const grouped = new Map<string, ProviderQuality>();
+      for (const job of data || []) {
+        const key = `${job.provider}|${job.auto_best_use || "unknown"}`;
+        const existing = grouped.get(key);
+        if (existing) {
+          existing.count++;
+          if (job.auto_overall_score) {
+            existing.avg_score = ((existing.avg_score || 0) * (existing.count - 1) + job.auto_overall_score) / existing.count;
+          }
+        } else {
+          grouped.set(key, {
+            provider: job.provider,
+            auto_best_use: job.auto_best_use,
+            count: 1,
+            avg_score: job.auto_overall_score,
+          });
+        }
+      }
+      return Array.from(grouped.values()).sort((a, b) => b.count - a.count);
+    },
+  });
+
+  // Top defects
+  const { data: defectStats, isLoading: loadingDefects } = useQuery({
+    queryKey: ["routing-defect-stats"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("video_jobs")
+        .select("auto_defects, auto_overall_score")
+        .eq("status", "done")
+        .not("auto_defects", "is", null);
+
+      if (error) throw error;
+
+      // Count defects client-side
+      const defectCounts = new Map<string, { count: number; totalScore: number; scoredCount: number }>();
+      for (const job of data || []) {
+        const defects = job.auto_defects as Array<{ type: string }> | null;
+        if (!defects) continue;
+        for (const d of defects) {
+          const existing = defectCounts.get(d.type);
+          if (existing) {
+            existing.count++;
+            if (job.auto_overall_score) {
+              existing.totalScore += job.auto_overall_score;
+              existing.scoredCount++;
+            }
+          } else {
+            defectCounts.set(d.type, {
+              count: 1,
+              totalScore: job.auto_overall_score || 0,
+              scoredCount: job.auto_overall_score ? 1 : 0,
+            });
+          }
+        }
+      }
+
+      return Array.from(defectCounts.entries())
+        .map(([type, stats]) => ({
+          defect_type: type,
+          count: stats.count,
+          avg_impact: stats.scoredCount > 0 ? Math.round(stats.totalScore / stats.scoredCount) : null,
+        }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 15);
+    },
+  });
+
+  // Routing tag performance
+  const { data: routingTags, isLoading: loadingTags } = useQuery({
+    queryKey: ["routing-tag-stats"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("video_jobs")
+        .select("auto_routing_tags, auto_overall_score, auto_best_use")
+        .eq("status", "done")
+        .not("auto_routing_tags", "is", null);
+
+      if (error) throw error;
+
+      // Count tags client-side
+      const tagStats = new Map<string, { count: number; totalScore: number; finalCount: number }>();
+      for (const job of data || []) {
+        const tags = job.auto_routing_tags as string[] | null;
+        if (!tags) continue;
+        for (const tag of tags) {
+          const existing = tagStats.get(tag);
+          const isFinal = job.auto_best_use === "final";
+          if (existing) {
+            existing.count++;
+            existing.totalScore += job.auto_overall_score || 0;
+            if (isFinal) existing.finalCount++;
+          } else {
+            tagStats.set(tag, {
+              count: 1,
+              totalScore: job.auto_overall_score || 0,
+              finalCount: isFinal ? 1 : 0,
+            });
+          }
+        }
+      }
+
+      return Array.from(tagStats.entries())
+        .map(([tag, stats]) => ({
+          routing_tag: tag,
+          count: stats.count,
+          avg_score: stats.count > 0 ? Math.round(stats.totalScore / stats.count) : null,
+          pct_final: Math.round((stats.finalCount / stats.count) * 100),
+        }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 20);
+    },
+  });
+
+  // Comparison win rates
+  const { data: winRates, isLoading: loadingWins } = useQuery({
+    queryKey: ["routing-win-rates"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("video_comparisons")
+        .select("provider_a, provider_b, winner, winner_job");
+
+      if (error) throw error;
+
+      // Count wins per provider
+      const providerWins = new Map<string, { wins: number; total: number }>();
+      for (const comp of data || []) {
+        // Count for provider_a
+        const statsA = providerWins.get(comp.provider_a) || { wins: 0, total: 0 };
+        statsA.total++;
+        if (comp.winner === "A") statsA.wins++;
+        providerWins.set(comp.provider_a, statsA);
+
+        // Count for provider_b
+        const statsB = providerWins.get(comp.provider_b) || { wins: 0, total: 0 };
+        statsB.total++;
+        if (comp.winner === "B") statsB.wins++;
+        providerWins.set(comp.provider_b, statsB);
+      }
+
+      return Array.from(providerWins.entries())
+        .map(([provider, stats]) => ({
+          provider,
+          wins: stats.wins,
+          total: stats.total,
+          win_rate: Math.round((stats.wins / stats.total) * 100),
+        }))
+        .sort((a, b) => b.win_rate - a.win_rate);
+    },
+  });
+
+  const getProviderColor = (provider: string) => {
+    const colors: Record<string, string> = {
+      sora: "bg-primary/20 text-primary border-primary/30",
+      runway: "bg-orange-500/20 text-orange-400 border-orange-500/30",
+      luma: "bg-purple-500/20 text-purple-400 border-purple-500/30",
+    };
+    return colors[provider] || "bg-secondary text-secondary-foreground";
+  };
+
+  const getBestUseColor = (use: string | null) => {
+    const colors: Record<string, string> = {
+      final: "bg-success/20 text-success border-success/30",
+      usable_social: "bg-blue-500/20 text-blue-400 border-blue-500/30",
+      draft_only: "bg-warning/20 text-warning border-warning/30",
+      reject: "bg-destructive/20 text-destructive border-destructive/30",
+    };
+    return colors[use || ""] || "bg-muted text-muted-foreground";
+  };
+
+  const isLoading = loadingQuality || loadingDefects || loadingTags || loadingWins;
+
+  return (
+    <div className="h-screen flex flex-col bg-background">
+      {/* Header */}
+      <header className="flex items-center justify-between px-4 py-2 border-b bg-card/50">
+        <div className="flex items-center gap-3">
+          <Button variant="ghost" size="icon" className="h-8 w-8" asChild>
+            <Link to="/studio/lab">
+              <ArrowLeft className="h-4 w-4" />
+            </Link>
+          </Button>
+          <div className="flex items-center gap-2">
+            <BarChart3 className="h-4 w-4 text-primary" />
+            <h1 className="text-sm font-semibold">Routing Analytics</h1>
+          </div>
+          <Badge variant="secondary" className="text-[10px] h-5">
+            Provider Performance
+          </Badge>
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <ScrollArea className="flex-1">
+        <div className="p-4 space-y-6 max-w-7xl mx-auto">
+          {isLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+          ) : (
+            <Tabs defaultValue="quality" className="space-y-4">
+              <TabsList>
+                <TabsTrigger value="quality" className="gap-1.5 text-xs">
+                  <TrendingUp className="h-3.5 w-3.5" />
+                  Quality
+                </TabsTrigger>
+                <TabsTrigger value="defects" className="gap-1.5 text-xs">
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                  Defects
+                </TabsTrigger>
+                <TabsTrigger value="routing" className="gap-1.5 text-xs">
+                  <Target className="h-3.5 w-3.5" />
+                  Routing Tags
+                </TabsTrigger>
+                <TabsTrigger value="comparisons" className="gap-1.5 text-xs">
+                  <Trophy className="h-3.5 w-3.5" />
+                  Win Rates
+                </TabsTrigger>
+              </TabsList>
+
+              {/* Quality Distribution Tab */}
+              <TabsContent value="quality" className="space-y-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-sm">Provider → Best Use Distribution</CardTitle>
+                    <CardDescription>
+                      How each provider's outputs are rated by quality tier
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {providerQuality && providerQuality.length > 0 ? (
+                      <div className="space-y-2">
+                        {providerQuality.map((row, i) => (
+                          <div
+                            key={i}
+                            className="flex items-center gap-3 p-2 rounded-lg bg-muted/30"
+                          >
+                            <Badge className={cn("text-[10px] min-w-[60px] justify-center", getProviderColor(row.provider))}>
+                              {row.provider}
+                            </Badge>
+                            <Badge className={cn("text-[10px] min-w-[90px] justify-center", getBestUseColor(row.auto_best_use))}>
+                              {row.auto_best_use || "unrated"}
+                            </Badge>
+                            <div className="flex-1">
+                              <Progress value={Math.min(row.count * 5, 100)} className="h-2" />
+                            </div>
+                            <span className="text-xs font-mono w-12 text-right">{row.count}</span>
+                            {row.avg_score && (
+                              <span className="text-xs text-muted-foreground w-16 text-right">
+                                avg: {Math.round(row.avg_score)}
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">No rated videos yet</p>
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              {/* Defects Tab */}
+              <TabsContent value="defects" className="space-y-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-sm">Top Defect Types</CardTitle>
+                    <CardDescription>
+                      Most common defects detected and their impact on scores
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {defectStats && defectStats.length > 0 ? (
+                      <div className="space-y-2">
+                        {defectStats.map((defect, i) => (
+                          <div
+                            key={i}
+                            className="flex items-center gap-3 p-2 rounded-lg bg-muted/30"
+                          >
+                            <Badge variant="outline" className="text-[10px] min-w-[120px] justify-center text-destructive border-destructive/30">
+                              {defect.defect_type}
+                            </Badge>
+                            <div className="flex-1">
+                              <Progress value={Math.min(defect.count * 10, 100)} className="h-2" />
+                            </div>
+                            <span className="text-xs font-mono w-12 text-right">{defect.count}×</span>
+                            {defect.avg_impact && (
+                              <span className="text-xs text-muted-foreground w-20 text-right">
+                                avg score: {defect.avg_impact}
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">No defects recorded yet</p>
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              {/* Routing Tags Tab */}
+              <TabsContent value="routing" className="space-y-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-sm">Routing Tag Performance</CardTitle>
+                    <CardDescription>
+                      Average score and "final" rate per routing tag
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {routingTags && routingTags.length > 0 ? (
+                      <div className="space-y-2">
+                        {routingTags.map((tag, i) => (
+                          <div
+                            key={i}
+                            className="flex items-center gap-3 p-2 rounded-lg bg-muted/30"
+                          >
+                            <Badge variant="secondary" className="text-[10px] min-w-[100px] justify-center">
+                              {tag.routing_tag}
+                            </Badge>
+                            <div className="flex-1">
+                              <Progress value={tag.pct_final} className="h-2" />
+                            </div>
+                            <span className="text-xs font-mono w-12 text-right">{tag.count}×</span>
+                            <span className="text-xs text-muted-foreground w-16 text-right">
+                              avg: {tag.avg_score || "-"}
+                            </span>
+                            <span className="text-xs text-success w-16 text-right">
+                              {tag.pct_final}% final
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">No routing tags yet</p>
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              {/* Comparisons Tab */}
+              <TabsContent value="comparisons" className="space-y-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-sm">Provider Win Rates</CardTitle>
+                    <CardDescription>
+                      Head-to-head comparison results from pairwise ranking
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {winRates && winRates.length > 0 ? (
+                      <div className="space-y-3">
+                        {winRates.map((rate, i) => (
+                          <div
+                            key={i}
+                            className="flex items-center gap-3 p-3 rounded-lg bg-muted/30"
+                          >
+                            <Badge className={cn("text-xs min-w-[70px] justify-center", getProviderColor(rate.provider))}>
+                              {rate.provider}
+                            </Badge>
+                            <div className="flex-1 space-y-1">
+                              <Progress value={rate.win_rate} className="h-3" />
+                            </div>
+                            <div className="text-right">
+                              <p className="text-sm font-bold">{rate.win_rate}%</p>
+                              <p className="text-[10px] text-muted-foreground">
+                                {rate.wins}/{rate.total} wins
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-center py-8">
+                        <Film className="h-12 w-12 mx-auto mb-3 text-muted-foreground/30" />
+                        <p className="text-sm text-muted-foreground">No comparisons yet</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Use the Compare tab in the Lab to run head-to-head comparisons
+                        </p>
+                        <Button variant="secondary" size="sm" className="mt-4" asChild>
+                          <Link to="/studio/lab">Go to Lab</Link>
+                        </Button>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            </Tabs>
+          )}
+        </div>
+      </ScrollArea>
+    </div>
+  );
+}

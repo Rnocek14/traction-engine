@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Beaker, Brain } from "lucide-react";
+import { ArrowLeft, Beaker, Brain, Scale, BarChart3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -13,6 +13,7 @@ import {
 import { LabGeneratePanel, LabResult } from "@/components/lab/LabGeneratePanel";
 import { LabPreviewPanel } from "@/components/lab/LabPreviewPanel";
 import { LearningInspector } from "@/components/lab/LearningInspector";
+import { ComparePanel } from "@/components/lab/ComparePanel";
 import { getVideoJobStatus } from "@/lib/lab-engines";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -241,19 +242,30 @@ export default function Lab() {
         </div>
       </header>
 
-      {/* Main Content - Tabs for Generate vs Learning */}
+      {/* Main Content - Tabs for Generate vs Learning vs Compare */}
       <Tabs defaultValue="generate" className="flex-1 min-h-0 flex flex-col">
-        <div className="px-4 py-1.5 border-b bg-card/30">
+        <div className="px-4 py-1.5 border-b bg-card/30 flex items-center justify-between">
           <TabsList className="h-8">
             <TabsTrigger value="generate" className="gap-1.5 text-xs h-7">
               <Beaker className="h-3.5 w-3.5" />
               Generate
+            </TabsTrigger>
+            <TabsTrigger value="compare" className="gap-1.5 text-xs h-7">
+              <Scale className="h-3.5 w-3.5" />
+              Compare
             </TabsTrigger>
             <TabsTrigger value="learning" className="gap-1.5 text-xs h-7">
               <Brain className="h-3.5 w-3.5" />
               Learning
             </TabsTrigger>
           </TabsList>
+          
+          <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5" asChild>
+            <Link to="/studio/analytics">
+              <BarChart3 className="h-3.5 w-3.5" />
+              Analytics
+            </Link>
+          </Button>
         </div>
 
         <TabsContent value="generate" className="flex-1 min-h-0 m-0">
@@ -283,6 +295,10 @@ export default function Lab() {
               />
             </ResizablePanel>
           </ResizablePanelGroup>
+        </TabsContent>
+
+        <TabsContent value="compare" className="flex-1 min-h-0 m-0">
+          <ComparePanel />
         </TabsContent>
 
         <TabsContent value="learning" className="flex-1 min-h-0 m-0">
