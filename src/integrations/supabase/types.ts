@@ -861,6 +861,54 @@ export type Database = {
         }
         Relationships: []
       }
+      story_jobs: {
+        Row: {
+          account_id: string
+          completed_clips: number | null
+          continuity_anchors: Json | null
+          continuity_score: number | null
+          created_at: string
+          id: string
+          status: string
+          story_type: string
+          storyboard_json: Json | null
+          title: string | null
+          total_clips: number | null
+          updated_at: string
+          weakest_clip_id: string | null
+        }
+        Insert: {
+          account_id: string
+          completed_clips?: number | null
+          continuity_anchors?: Json | null
+          continuity_score?: number | null
+          created_at?: string
+          id?: string
+          status?: string
+          story_type?: string
+          storyboard_json?: Json | null
+          title?: string | null
+          total_clips?: number | null
+          updated_at?: string
+          weakest_clip_id?: string | null
+        }
+        Update: {
+          account_id?: string
+          completed_clips?: number | null
+          continuity_anchors?: Json | null
+          continuity_score?: number | null
+          created_at?: string
+          id?: string
+          status?: string
+          story_type?: string
+          storyboard_json?: Json | null
+          title?: string | null
+          total_clips?: number | null
+          updated_at?: string
+          weakest_clip_id?: string | null
+        }
+        Relationships: []
+      }
       studio_timelines: {
         Row: {
           created_at: string
@@ -1208,6 +1256,8 @@ export type Database = {
           auto_reasons: string[] | null
           auto_regen_recommended: boolean | null
           auto_routing_tags: string[] | null
+          continuity_notes: string[] | null
+          continuity_score: number | null
           created_at: string
           enriched_prompt: string | null
           error: string | null
@@ -1232,9 +1282,11 @@ export type Database = {
           routing_reason: string | null
           routing_source: string | null
           script_run_id: string
+          sequence_index: number | null
           settings: Json | null
           spritesheet_url: string | null
           status: string
+          story_job_id: string | null
           style_hints: string | null
           thumbnail_url: string | null
           updated_at: string
@@ -1257,6 +1309,8 @@ export type Database = {
           auto_reasons?: string[] | null
           auto_regen_recommended?: boolean | null
           auto_routing_tags?: string[] | null
+          continuity_notes?: string[] | null
+          continuity_score?: number | null
           created_at?: string
           enriched_prompt?: string | null
           error?: string | null
@@ -1281,9 +1335,11 @@ export type Database = {
           routing_reason?: string | null
           routing_source?: string | null
           script_run_id: string
+          sequence_index?: number | null
           settings?: Json | null
           spritesheet_url?: string | null
           status?: string
+          story_job_id?: string | null
           style_hints?: string | null
           thumbnail_url?: string | null
           updated_at?: string
@@ -1306,6 +1362,8 @@ export type Database = {
           auto_reasons?: string[] | null
           auto_regen_recommended?: boolean | null
           auto_routing_tags?: string[] | null
+          continuity_notes?: string[] | null
+          continuity_score?: number | null
           created_at?: string
           enriched_prompt?: string | null
           error?: string | null
@@ -1330,9 +1388,11 @@ export type Database = {
           routing_reason?: string | null
           routing_source?: string | null
           script_run_id?: string
+          sequence_index?: number | null
           settings?: Json | null
           spritesheet_url?: string | null
           status?: string
+          story_job_id?: string | null
           style_hints?: string | null
           thumbnail_url?: string | null
           updated_at?: string
@@ -1343,6 +1403,13 @@ export type Database = {
             columns: ["script_run_id"]
             isOneToOne: false
             referencedRelation: "script_runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "video_jobs_story_job_id_fkey"
+            columns: ["story_job_id"]
+            isOneToOne: false
+            referencedRelation: "story_jobs"
             referencedColumns: ["id"]
           },
         ]
