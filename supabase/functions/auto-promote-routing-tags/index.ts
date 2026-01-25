@@ -67,11 +67,13 @@ Deno.serve(async (req) => {
 
     console.log(`[auto-promote] Running with days=${days}, minCount=${minCount}, minProviders=${minProviders}`);
 
-    // Query top x_ tags meeting criteria
-    const { data: candidates, error: queryError } = await supabase.rpc("get_auto_promote_candidates", {
+    // Query candidates from raw_routing_tags using the new RPC
+    const { data: candidates, error: queryError } = await supabase.rpc("get_auto_promote_candidates_from_raw", {
       p_days: days,
       p_min_count: minCount,
       p_min_providers: minProviders,
+      p_max_candidates: 50,
+      p_max_rows: 20000,
     });
 
     if (queryError) {
