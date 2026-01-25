@@ -15,6 +15,7 @@ import { LabPreviewPanel } from "@/components/lab/LabPreviewPanel";
 import { LearningInspector } from "@/components/lab/LearningInspector";
 import { ComparePanel } from "@/components/lab/ComparePanel";
 import { StoryBuilderPanel } from "@/components/lab/StoryBuilderPanel";
+import { StoryLibrary } from "@/components/lab/StoryLibrary";
 import { getVideoJobStatus } from "@/lib/lab-engines";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -314,11 +315,22 @@ export default function Lab() {
           </ResizablePanelGroup>
         </TabsContent>
 
-        <TabsContent value="story" className="flex-1 min-h-0 m-0">
-          <StoryBuilderPanel
-            storyId={storyId}
-            onStoryCreated={(newStoryId) => navigate(`/studio/lab/story/${newStoryId}`)}
-          />
+        <TabsContent value="story" className="flex-1 min-h-0 m-0 flex">
+          {/* Story Library sidebar */}
+          <div className="w-72 border-r border-border/50 overflow-y-auto p-2">
+            <StoryLibrary
+              activeStoryId={storyId}
+              onSelectStory={(id) => navigate(`/studio/lab/story/${id}`)}
+            />
+          </div>
+          
+          {/* Story Builder main panel */}
+          <div className="flex-1 overflow-y-auto">
+            <StoryBuilderPanel
+              storyId={storyId}
+              onStoryCreated={(newStoryId) => navigate(`/studio/lab/story/${newStoryId}`)}
+            />
+          </div>
         </TabsContent>
 
         <TabsContent value="compare" className="flex-1 min-h-0 m-0">
