@@ -1395,6 +1395,7 @@ export type Database = {
           schedule: string
         }[]
       }
+      get_routing_allowlist_health: { Args: never; Returns: Json }
       get_routing_tag_coverage: {
         Args: { p_days?: number; p_max_rows?: number }
         Returns: Json
