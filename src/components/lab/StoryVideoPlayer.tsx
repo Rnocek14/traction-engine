@@ -15,6 +15,8 @@ import {
   Loader2,
   Film,
   CheckCircle2,
+  Maximize,
+  Minimize,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -40,9 +42,12 @@ export function StoryVideoPlayer({
   assembledUrl,
 }: StoryVideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const shouldAutoPlayRef = useRef(false);
 
   // Get only completed clips sorted by sequence
   const completedClips = clips
@@ -55,20 +60,54 @@ export function StoryVideoPlayer({
   // Handle video end - advance to next clip
   const handleEnded = useCallback(() => {
     if (currentIndex < completedClips.length - 1) {
+      shouldAutoPlayRef.current = true;
       setCurrentIndex(prev => prev + 1);
     } else {
       setIsPlaying(false);
+      shouldAutoPlayRef.current = false;
       setCurrentIndex(0);
     }
   }, [currentIndex, completedClips.length]);
 
   // Auto-play next clip when index changes
   useEffect(() => {
-    if (videoRef.current && isPlaying && currentClip?.output_url) {
-      videoRef.current.src = currentClip.output_url;
-      videoRef.current.play().catch(() => setIsPlaying(false));
+    const video = videoRef.current;
+    if (!video || !currentClip?.output_url) return;
+    
+    video.src = currentClip.output_url;
+    video.load();
+    
+    // Play if we should auto-play (from handleEnded) or if already playing
+    if (shouldAutoPlayRef.current || isPlaying) {
+      video.play()
+        .then(() => {
+          setIsPlaying(true);
+          shouldAutoPlayRef.current = false;
+        })
+        .catch(() => {
+          setIsPlaying(false);
+          shouldAutoPlayRef.current = false;
+        });
     }
-  }, [currentIndex, currentClip?.output_url, isPlaying]);
+  }, [currentIndex, currentClip?.output_url]);
+
+  // Fullscreen handling
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
+
+  const toggleFullscreen = useCallback(() => {
+    if (!containerRef.current) return;
+    if (document.fullscreenElement) {
+      document.exitFullscreen();
+    } else {
+      containerRef.current.requestFullscreen();
+    }
+  }, []);
 
   // Update progress
   useEffect(() => {
@@ -126,35 +165,47 @@ export function StoryVideoPlayer({
   // If we have an assembled video, show that instead
   if (assembledUrl) {
     return (
-      <div className={cn("relative bg-black rounded-lg overflow-hidden", className)}>
+      <div 
+        ref={containerRef}
+        className={cn("relative bg-black rounded-lg overflow-hidden", className)}
+      >
         <video
           src={assembledUrl}
           controls
           className="w-full h-full object-contain"
           poster={completedClips[0]?.thumbnail_url || undefined}
         />
-        <div className="absolute top-2 right-2">
+        <div className="absolute top-2 right-2 flex gap-1">
           <Badge variant="secondary" className="text-[10px] gap-1">
             <CheckCircle2 className="h-3 w-3" />
             Assembled
           </Badge>
         </div>
-        <a
-          href={assembledUrl}
-          download={`story-${Date.now()}.mp4`}
-          className="absolute bottom-2 right-2"
-        >
-          <Button size="sm" variant="secondary" className="h-7 text-xs gap-1">
-            <Download className="h-3 w-3" />
-            Download
+        <div className="absolute bottom-2 right-2 flex gap-1">
+          <a href={assembledUrl} download={`story-${Date.now()}.mp4`}>
+            <Button size="sm" variant="secondary" className="h-7 text-xs gap-1">
+              <Download className="h-3 w-3" />
+              Download
+            </Button>
+          </a>
+          <Button 
+            size="sm" 
+            variant="secondary" 
+            className="h-7 text-xs gap-1"
+            onClick={toggleFullscreen}
+          >
+            {isFullscreen ? <Minimize className="h-3 w-3" /> : <Maximize className="h-3 w-3" />}
           </Button>
-        </a>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className={cn("relative bg-black rounded-lg overflow-hidden", className)}>
+    <div 
+      ref={containerRef}
+      className={cn("relative bg-black rounded-lg overflow-hidden", className)}
+    >
       {/* Video element */}
       <video
         ref={videoRef}
@@ -216,23 +267,34 @@ export function StoryVideoPlayer({
             </Button>
           </div>
 
-          {/* Assemble button */}
-          {onAssemble && (
+          <div className="flex items-center gap-1">
+            {/* Assemble button */}
+            {onAssemble && (
+              <Button
+                size="sm"
+                variant="secondary"
+                className="h-7 text-xs gap-1"
+                onClick={onAssemble}
+                disabled={isAssembling}
+              >
+                {isAssembling ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Download className="h-3 w-3" />
+                )}
+                {isAssembling ? "Assembling..." : "Export"}
+              </Button>
+            )}
+            {/* Fullscreen button */}
             <Button
-              size="sm"
-              variant="secondary"
-              className="h-7 text-xs gap-1"
-              onClick={onAssemble}
-              disabled={isAssembling}
+              size="icon"
+              variant="ghost"
+              className="h-7 w-7 text-white hover:bg-white/20"
+              onClick={toggleFullscreen}
             >
-              {isAssembling ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
-              ) : (
-                <Download className="h-3 w-3" />
-              )}
-              {isAssembling ? "Assembling..." : "Export"}
+              {isFullscreen ? <Minimize className="h-3 w-3" /> : <Maximize className="h-3 w-3" />}
             </Button>
-          )}
+          </div>
         </div>
       </div>
 
