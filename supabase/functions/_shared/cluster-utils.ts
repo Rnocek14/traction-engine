@@ -1,28 +1,43 @@
 /**
  * Shared cluster key utilities - MUST be identical across all functions
- * Used by: queue-comparisons, get-provider-recommendation, queue-video-smart
+ * Used by: queue-comparisons, get-provider-recommendation, queue-video-smart, auto-rate-video
  * 
- * IMPORTANT: This utility expects ALREADY SANITIZED tags from auto_routing_tags.
- * The sanitization (normalization, allowlist filtering) happens in auto-rate-video.
- * This function only handles clustering logic (sort, dedupe, top-3, join).
+ * This module provides the SINGLE SOURCE OF TRUTH for tag normalization and clustering.
+ * All functions MUST use these utilities to prevent drift.
  */
 
 /**
+ * Normalizes a tag: strips junk, collapses underscores, trims edges.
+ * This is the canonical normalization used everywhere.
+ * NOTE: Does NOT apply synonym mapping (that's done in auto-rate-video before storage)
+ */
+export function normalizeTag(tag: string): string {
+  return tag
+    .toLowerCase()
+    .trim()
+    .replace(/[\s-]+/g, "_")        // spaces/hyphens → underscore
+    .replace(/[^a-z0-9_]/g, "")     // strip punctuation/junk
+    .replace(/_+/g, "_")            // collapse multiple underscores
+    .replace(/^_+|_+$/g, "");       // trim leading/trailing underscores
+}
+
+/**
  * Derives a canonical cluster key from routing tags
- * @param tags - Array of already-sanitized routing tags (from auto_routing_tags column)
+ * @param tags - Array of routing tags (can be raw or pre-sanitized)
  * @returns Normalized cluster key string
  * 
- * Expected input: ["cinematic", "human_focus", "x_dragon"] (already normalized)
- * Output: "cinematic|human_focus|x_dragon"
+ * This function is DEFENSIVE: it re-normalizes tags even if they should
+ * already be clean. This prevents drift if a future caller passes raw tags.
+ * 
+ * Expected output: "cinematic|human_focus|x_dragon"
  */
 export function deriveClusterKey(tags: string[] | null | undefined): string {
-  if (!tags || tags.length === 0) return "general";
+  if (!tags?.length) return "general";
   
-  // Tags should already be sanitized by auto-rate-video
-  // We just need to: dedupe, sort, take top 3, join
+  // Defensive: re-normalize even though tags should already be clean
   const normalized = [...new Set(
     tags
-      .map(t => t.toLowerCase().trim())
+      .map(normalizeTag)
       .filter(t => t.length > 0)
   )]
     .sort()

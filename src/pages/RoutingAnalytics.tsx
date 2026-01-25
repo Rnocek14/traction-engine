@@ -312,11 +312,31 @@ export default function RoutingAnalytics() {
   const { data: coverageStats, isLoading: loadingCoverage } = useQuery({
     queryKey: ["routing-tag-coverage"],
     queryFn: async (): Promise<TagCoverageStats> => {
+      // Client-side deriveClusterKey - matches backend logic exactly
+      const deriveClusterKey = (tags: string[] | null | undefined): string => {
+        if (!tags?.length) return "general";
+        const normalizeTag = (tag: string): string => tag
+          .toLowerCase()
+          .trim()
+          .replace(/[\s-]+/g, "_")
+          .replace(/[^a-z0-9_]/g, "")
+          .replace(/_+/g, "_")
+          .replace(/^_+|_+$/g, "");
+        const normalized = [...new Set(tags.map(normalizeTag).filter(t => t.length > 0))]
+          .sort()
+          .slice(0, 3);
+        return normalized.length > 0 ? normalized.join("|") : "general";
+      };
+
+      // Bounded query: last 7 days, max 1000 rows
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
       const { data, error } = await supabase
         .from("video_jobs")
-        .select("auto_routing_tags, routing_cluster_key")
+        .select("auto_routing_tags")
         .eq("status", "done")
-        .not("auto_rated_at", "is", null);
+        .not("auto_rated_at", "is", null)
+        .gte("auto_rated_at", sevenDaysAgo)
+        .limit(1000);
 
       if (error) throw error;
 
@@ -326,12 +346,11 @@ export default function RoutingAnalytics() {
       const withoutTags = totalRated - withTags;
       const pctWithTags = totalRated > 0 ? Math.round((withTags / totalRated) * 100) : 0;
 
-      // Count general cluster jobs (either explicit or empty tags)
-      const generalJobs = jobs.filter(j => 
-        !j.auto_routing_tags || 
-        j.auto_routing_tags.length === 0 ||
-        j.routing_cluster_key === "general"
-      ).length;
+      // Compute cluster key client-side and count general clusters
+      const generalJobs = jobs.filter(j => {
+        const clusterKey = deriveClusterKey(j.auto_routing_tags as string[] | null);
+        return clusterKey === "general";
+      }).length;
       const generalClusterPct = totalRated > 0 ? Math.round((generalJobs / totalRated) * 100) : 0;
 
       // Count tags by type (kept vs x_ free tags)
