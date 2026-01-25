@@ -208,10 +208,14 @@ async function queueClipSmart(
       return { error: data.error || `HTTP ${response.status}` };
     }
 
+    // Extract job ID from response (handle both formats)
+    const jobId = data.jobId || data.job?.id;
+    const provider = data.provider || data.job?.provider;
+
     // Update the job with story-specific metadata
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-    if (data.jobId) {
-      await supabase
+    if (jobId) {
+      const supabase = createClient(supabaseUrl, supabaseServiceKey);
+      const { error: updateError } = await supabase
         .from("video_jobs")
         .update({
           story_job_id: params.storyJobId,
@@ -219,13 +223,16 @@ async function queueClipSmart(
           original_prompt: params.originalPrompt,
           style_hints: JSON.stringify(params.anchors),
         })
-        .eq("id", data.jobId);
+        .eq("id", jobId);
+      
+      if (updateError) {
+        console.error(`[chained] Failed to link job ${jobId} to story:`, updateError.message);
+      } else {
+        console.log(`[chained] Linked job ${jobId} to story ${params.storyJobId} at index ${params.sequenceIndex}`);
+      }
     }
 
-    return { 
-      jobId: data.jobId || data.job?.id, 
-      provider: data.provider || data.job?.provider,
-    };
+    return { jobId, provider };
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
