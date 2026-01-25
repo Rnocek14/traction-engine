@@ -5,7 +5,7 @@
  * and continuity anchor controls.
  */
 
-import { useState, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { nanoid } from "nanoid";
 import { Button } from "@/components/ui/button";
@@ -132,14 +132,13 @@ export function StoryBuilderPanel({
   });
 
   // Hydrate from existing story
-  useMemo(() => {
-    if (existingStory) {
-      setTitle(existingStory.title || "");
-      setStoryType((existingStory.story_type as StoryType) || "short_story");
-      setAnchors((existingStory.continuity_anchors as unknown as ContinuityAnchors) || {});
-      const storyboard = existingStory.storyboard_json as unknown as Storyboard | null;
-      setScenes(storyboard?.scenes || []);
-    }
+  useEffect(() => {
+    if (!existingStory) return;
+    setTitle(existingStory.title || "");
+    setStoryType((existingStory.story_type as StoryType) || "short_story");
+    setAnchors((existingStory.continuity_anchors as unknown as ContinuityAnchors) || {});
+    const storyboard = existingStory.storyboard_json as unknown as Storyboard | null;
+    setScenes(storyboard?.scenes || []);
   }, [existingStory]);
 
   // Create story mutation
@@ -190,10 +189,12 @@ export function StoryBuilderPanel({
         scenes.map(async (scene, index) => {
           const { data, error } = await supabase.functions.invoke("lab-queue-video", {
             body: {
-              engine: "sora",
+              provider: "auto", // Let backend decide based on routing
               prompt: scene.prompt,
-              duration: scene.duration_target,
-              aspectRatio: "16:9",
+              settings: {
+                size: "16:9",
+                duration: scene.duration_target,
+              },
               story_job_id: targetStoryId,
               sequence_index: index,
               camera_direction: scene.camera_direction,
@@ -202,7 +203,7 @@ export function StoryBuilderPanel({
           });
           
           if (error) return { error, scene };
-          return { jobId: data.jobId, scene };
+          return { jobId: data?.job?.id, scene };
         })
       );
 
