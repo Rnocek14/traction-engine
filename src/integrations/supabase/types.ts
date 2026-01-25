@@ -1224,6 +1224,7 @@ export type Database = {
           provider: string
           rated_at: string | null
           rated_by: string | null
+          raw_routing_tags: string[] | null
           request_id: string | null
           routed_provider: string | null
           routing_cluster_key: string | null
@@ -1272,6 +1273,7 @@ export type Database = {
           provider?: string
           rated_at?: string | null
           rated_by?: string | null
+          raw_routing_tags?: string[] | null
           request_id?: string | null
           routed_provider?: string | null
           routing_cluster_key?: string | null
@@ -1320,6 +1322,7 @@ export type Database = {
           provider?: string
           rated_at?: string | null
           rated_by?: string | null
+          raw_routing_tags?: string[] | null
           request_id?: string | null
           routed_provider?: string | null
           routing_cluster_key?: string | null
