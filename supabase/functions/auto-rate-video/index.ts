@@ -342,6 +342,13 @@ function sanitizeRoutingTags(raw: unknown): string[] {
   
   const MIN_TAGS = 2;
   
+  // Blocklist for ultra-generic garbage tags that would create noisy clusters
+  const FREE_TAG_BLOCKLIST = new Set([
+    "video", "scene", "shot", "camera", "person", "people", "man", "woman",
+    "the", "a", "an", "this", "that", "it", "clip", "footage", "frame",
+    "image", "picture", "movie", "film", "content", "media", "visual"
+  ]);
+  
   // Extract and normalize all tags
   const normalized = raw
     .filter((t): t is string => typeof t === "string" && t.trim().length > 0)
@@ -358,12 +365,13 @@ function sanitizeRoutingTags(raw: unknown): string[] {
   }
   
   // Free-tag fallback: if we have < MIN_TAGS allowlisted, add 1-2 unknown tags with x_ prefix
-  // This prevents cluster collapse while we tune the allowlist
+  // Filter out blocklisted garbage to prevent noisy clusters
   const uniqueKept = [...new Set(kept)];
   let final = uniqueKept;
   
   if (uniqueKept.length < MIN_TAGS && dropped.length > 0) {
     const freeTags = dropped
+      .filter(t => !FREE_TAG_BLOCKLIST.has(t))
       .slice(0, MIN_TAGS - uniqueKept.length)
       .map(t => `x_${t}`);
     final = [...uniqueKept, ...freeTags];
