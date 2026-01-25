@@ -94,15 +94,120 @@ function safeJsonParse<T>(raw: string): T | null {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// ALLOWLISTS
+// ALLOWLISTS & TAG NORMALIZATION
 // ═══════════════════════════════════════════════════════════════════
 
 const ROUTING_TAG_ALLOWLIST = new Set<string>([
-  "low_light", "fast_motion", "character_closeup", "establishing_shot",
-  "text_heavy", "action_sequence", "dialogue", "atmospheric",
-  "product_shot", "nature", "urban", "fantasy", "realistic",
-  "slow_motion", "aerial", "handheld", "static_camera", "portrait"
+  // Core shot types
+  "talking_head", "product_shot", "text_overlay", "character_closeup", 
+  "establishing_shot", "action_sequence", "dialogue",
+  
+  // Environment
+  "nature", "urban", "indoor", "outdoor", "underwater",
+  
+  // Motion characteristics
+  "fast_motion", "slow_motion", "static_camera", "pan", "zoom", 
+  "tracking_shot", "aerial", "handheld",
+  
+  // Lighting & atmosphere
+  "low_light", "high_contrast", "golden_hour", "night_scene", "neon",
+  "dramatic_lighting", "soft_lighting", "atmospheric",
+  
+  // Subject focus
+  "human_focus", "object_focus", "landscape", "portrait", "macro",
+  "animal", "vehicle", "food", "architecture",
+  
+  // Content style
+  "cinematic", "documentary", "commercial", "abstract",
+  "fantasy", "realistic", "futuristic", "vintage", "minimalist",
+  "vibrant", "moody", "surreal",
+  
+  // Special content
+  "vfx", "animation", "timelapse", "fire", "water", "smoke", 
+  "explosion", "technology", "text_heavy"
 ]);
+
+// Synonym mapping to normalize VLM output variations
+const TAG_SYNONYMS: Record<string, string> = {
+  // Camera/shot variations
+  "closeup": "macro",
+  "close_up": "macro",
+  "close-up": "macro",
+  "wide_shot": "establishing_shot",
+  "wide": "establishing_shot",
+  "overhead": "aerial",
+  "drone": "aerial",
+  "birds_eye": "aerial",
+  "dolly": "tracking_shot",
+  "follow": "tracking_shot",
+  
+  // Time of day / lighting
+  "nighttime": "night_scene",
+  "night": "night_scene",
+  "dark": "low_light",
+  "dim": "low_light",
+  "sunset": "golden_hour",
+  "sunrise": "golden_hour",
+  "bright": "high_contrast",
+  
+  // Subject variations
+  "person": "human_focus",
+  "people": "human_focus",
+  "face": "human_focus",
+  "faces": "human_focus",
+  "character": "human_focus",
+  "man": "human_focus",
+  "woman": "human_focus",
+  "car": "vehicle",
+  "automobile": "vehicle",
+  "truck": "vehicle",
+  "motorcycle": "vehicle",
+  "building": "architecture",
+  "buildings": "architecture",
+  "city": "urban",
+  "cityscape": "urban",
+  "street": "urban",
+  "forest": "nature",
+  "trees": "nature",
+  "mountain": "nature",
+  "mountains": "nature",
+  "ocean": "water",
+  "sea": "water",
+  "river": "water",
+  "lake": "water",
+  "rain": "water",
+  
+  // VFX / fantasy variations
+  "dragon": "vfx",
+  "creature": "vfx",
+  "monster": "vfx",
+  "magic": "vfx",
+  "magical": "vfx",
+  "fire_effect": "fire",
+  "flames": "fire",
+  "burning": "fire",
+  "sci-fi": "futuristic",
+  "scifi": "futuristic",
+  "retro": "vintage",
+  
+  // Style variations
+  "dark_mood": "moody",
+  "gloomy": "moody",
+  "colorful": "vibrant",
+  "saturated": "vibrant",
+  "dreamlike": "surreal",
+  "trippy": "surreal",
+  "simple": "minimalist",
+  "clean": "minimalist"
+};
+
+/**
+ * Normalizes a tag using synonym mapping
+ */
+function normalizeTag(tag: string): string {
+  const cleaned = tag.toLowerCase().trim().replace(/[\s-]+/g, "_");
+  return TAG_SYNONYMS[cleaned] || cleaned;
+}
 
 const DEFECT_TYPE_ALLOWLIST = new Set<string>([
   "flicker", "morphing", "identity_drift", "physics_violation", "limb_anomaly",
@@ -220,10 +325,22 @@ function hasProperHighScoreEvidence(reasons: string[]): boolean {
 
 function sanitizeRoutingTags(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
-  return raw
-    .map((t) => String(t).toLowerCase().trim().replace(/\s+/g, "_"))
-    .filter((t) => ROUTING_TAG_ALLOWLIST.has(t))
-    .slice(0, 5);
+  
+  const originalTags = raw
+    .filter((t): t is string => typeof t === "string" && t.trim().length > 0)
+    .map(t => t.toLowerCase().trim());
+  
+  const normalized = originalTags.map(normalizeTag);
+  const kept = normalized.filter(t => ROUTING_TAG_ALLOWLIST.has(t));
+  const dropped = normalized.filter(t => !ROUTING_TAG_ALLOWLIST.has(t));
+  
+  // Log dropped tags for allowlist expansion diagnostics
+  if (dropped.length > 0) {
+    console.log(`[sanitizeRoutingTags] Dropped tags: ${dropped.join(", ")}`);
+  }
+  
+  // Dedupe and limit to 5
+  return [...new Set(kept)].slice(0, 5);
 }
 
 function sanitizeDefects(raw: unknown): Defect[] {
