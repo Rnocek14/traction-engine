@@ -1,17 +1,17 @@
 /**
  * generate-story-chained
  * 
- * Smart hybrid story generation:
- * 1. Generate first clip immediately (no reference needed)
+ * Smart hybrid story generation with intelligent per-scene provider routing:
+ * 1. Generate first clip immediately using smart provider selection
  * 2. Wait for it to complete
  * 3. Chain remaining clips sequentially, using previous clip's last frame
+ * 4. Each scene uses queue-video-smart for optimal provider selection
  * 
- * This ensures visual continuity across the entire story while being
- * faster than pure sequential (first clip starts immediately).
+ * This ensures visual continuity across the entire story while using
+ * the best provider for each scene type (action, dialogue, establishing).
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { Image, decode as decodeJpeg } from "https://esm.sh/jpeg-js@0.4.4";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -26,19 +26,65 @@ interface ChainedStoryRequest {
     enriched_prompt?: string;
     duration_target: number;
     camera_direction?: string;
+    shot_type?: string; // For smart routing
+    genre?: string;     // For smart routing
   }>;
   anchors: Record<string, unknown>;
   settings?: {
     size?: string;
-    provider?: "sora" | "runway" | "luma";
+    provider?: "sora" | "runway" | "luma" | "smart"; // Default: smart
   };
 }
 
-// Sora only supports 4, 8, 12 seconds
-function getValidSoraDuration(requested: number): number {
-  if (requested <= 4) return 4;
-  if (requested <= 8) return 8;
-  return 12;
+/**
+ * Extract routing tags from prompt for smart provider selection
+ */
+function extractRoutingTags(prompt: string, cameraDirection?: string): string[] {
+  const tags: string[] = [];
+  const lower = prompt.toLowerCase();
+  
+  // Motion tags
+  if (lower.includes("action") || lower.includes("fight") || lower.includes("chase")) tags.push("action");
+  if (lower.includes("slow") || lower.includes("gentle") || lower.includes("peaceful")) tags.push("slow_motion");
+  if (lower.includes("fast") || lower.includes("rapid") || lower.includes("quick")) tags.push("fast_motion");
+  
+  // Shot type tags
+  if (lower.includes("close-up") || lower.includes("closeup") || lower.includes("face")) tags.push("close_up");
+  if (lower.includes("wide shot") || lower.includes("establishing")) tags.push("wide_shot");
+  if (lower.includes("tracking") || lower.includes("follow")) tags.push("tracking");
+  
+  // Subject tags
+  if (lower.includes("character") || lower.includes("person") || lower.includes("human")) tags.push("character");
+  if (lower.includes("landscape") || lower.includes("environment") || lower.includes("scenery")) tags.push("environment");
+  if (lower.includes("dragon") || lower.includes("creature") || lower.includes("monster")) tags.push("creature");
+  
+  // Lighting tags
+  if (lower.includes("dark") || lower.includes("night") || lower.includes("shadow")) tags.push("low_light");
+  if (lower.includes("golden hour") || lower.includes("sunset") || lower.includes("dawn")) tags.push("golden_hour");
+  
+  // Camera direction hints
+  if (cameraDirection) {
+    const camLower = cameraDirection.toLowerCase();
+    if (camLower.includes("dolly") || camLower.includes("track")) tags.push("camera_movement");
+    if (camLower.includes("static") || camLower.includes("locked")) tags.push("static_camera");
+  }
+  
+  return tags.slice(0, 5); // Max 5 tags
+}
+
+/**
+ * Infer shot type from prompt for routing hints
+ */
+function inferShotType(prompt: string): string | undefined {
+  const lower = prompt.toLowerCase();
+  if (lower.includes("close-up") || lower.includes("closeup") || lower.includes("face")) return "close-up";
+  if (lower.includes("extreme close")) return "extreme-close";
+  if (lower.includes("medium shot") || lower.includes("waist")) return "medium";
+  if (lower.includes("wide shot") || lower.includes("full shot")) return "wide";
+  if (lower.includes("extreme wide") || lower.includes("establishing")) return "extreme-wide";
+  if (lower.includes("tracking") || lower.includes("follow")) return "tracking";
+  if (lower.includes("over the shoulder") || lower.includes("over-shoulder")) return "over-shoulder";
+  return undefined;
 }
 
 /**
@@ -110,11 +156,13 @@ async function getLastFrameReference(
 }
 
 /**
- * Queue a single video clip via lab-queue-video
+ * Queue a single video clip via queue-video-smart for intelligent provider selection
  */
-async function queueClip(
-  supabase: ReturnType<typeof createClient>,
+async function queueClipSmart(
+  supabaseUrl: string,
+  supabaseServiceKey: string,
   params: {
+    scriptRunId: string;
     storyJobId: string;
     sequenceIndex: number;
     prompt: string;
@@ -123,36 +171,64 @@ async function queueClip(
     cameraDirection?: string;
     anchors: Record<string, unknown>;
     size: string;
-    provider: string;
+    shotType?: string;
+    genre?: string;
+    routingTags: string[];
     referenceImageUrl?: string;
   }
-): Promise<{ jobId?: string; error?: string }> {
-  const { data, error } = await supabase.functions.invoke("lab-queue-video", {
-    body: {
-      provider: params.provider,
-      prompt: params.prompt,
-      original_prompt: params.originalPrompt,
-      settings: {
-        size: params.size,
-        duration: params.duration,
+): Promise<{ jobId?: string; provider?: string; error?: string }> {
+  try {
+    const response = await fetch(`${supabaseUrl}/functions/v1/queue-video-smart`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${supabaseServiceKey}`,
+        "Content-Type": "application/json",
       },
-      story_job_id: params.storyJobId,
-      sequence_index: params.sequenceIndex,
-      camera_direction: params.cameraDirection,
-      style_hints: JSON.stringify(params.anchors),
-      reference_image_url: params.referenceImageUrl,
-    },
-  });
-  
-  if (error) {
-    return { error: error.message };
+      body: JSON.stringify({
+        script_run_id: params.scriptRunId,
+        prompt: params.prompt,
+        settings: {
+          size: params.size,
+          seconds: params.duration,
+        },
+        starting_frame_url: params.referenceImageUrl,
+        provider: "smart", // Let smart routing decide
+        routing_hint: {
+          shot_type: params.shotType,
+          genre: params.genre,
+          is_chained: params.sequenceIndex > 0, // Enable chained mode for continuity
+          routing_tags: params.routingTags,
+        },
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok || !data.success) {
+      return { error: data.error || `HTTP ${response.status}` };
+    }
+
+    // Update the job with story-specific metadata
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    if (data.jobId) {
+      await supabase
+        .from("video_jobs")
+        .update({
+          story_job_id: params.storyJobId,
+          sequence_index: params.sequenceIndex,
+          original_prompt: params.originalPrompt,
+          style_hints: JSON.stringify(params.anchors),
+        })
+        .eq("id", data.jobId);
+    }
+
+    return { 
+      jobId: data.jobId || data.job?.id, 
+      provider: data.provider || data.job?.provider,
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
   }
-  
-  if (!data?.success) {
-    return { error: data?.error || "Failed to queue clip" };
-  }
-  
-  return { jobId: data.job?.id };
 }
 
 Deno.serve(async (req) => {
@@ -176,9 +252,39 @@ Deno.serve(async (req) => {
     }
 
     const size = settings?.size || "16:9";
-    const provider = settings?.provider || "sora";
+    const useSmartRouting = settings?.provider === "smart" || !settings?.provider;
     
-    console.log(`[chained] Starting story ${story_job_id} with ${scenes.length} scenes`);
+    console.log(`[chained] Starting story ${story_job_id} with ${scenes.length} scenes (smart routing: ${useSmartRouting})`);
+
+    // We need a script_run_id for queue-video-smart, create a placeholder if needed
+    let scriptRunId: string;
+    const { data: existingScript } = await supabase
+      .from("script_runs")
+      .select("id")
+      .eq("account_id", "lab-story")
+      .eq("status", "qa_passed")
+      .limit(1)
+      .maybeSingle();
+    
+    if (existingScript) {
+      scriptRunId = existingScript.id;
+    } else {
+      // Create a placeholder script for lab story generation
+      const { data: newScript, error: scriptError } = await supabase
+        .from("script_runs")
+        .insert({
+          account_id: "lab-story",
+          status: "qa_passed",
+          script_content: { type: "story_chained", story_job_id },
+        })
+        .select("id")
+        .single();
+      
+      if (scriptError || !newScript) {
+        throw new Error(`Failed to create placeholder script: ${scriptError?.message}`);
+      }
+      scriptRunId = newScript.id;
+    }
 
     // Update story status
     await supabase
@@ -189,6 +295,7 @@ Deno.serve(async (req) => {
     const results: Array<{ 
       sceneId: string; 
       jobId?: string; 
+      provider?: string;
       status: "queued" | "done" | "failed"; 
       error?: string;
     }> = [];
@@ -199,9 +306,13 @@ Deno.serve(async (req) => {
     for (let i = 0; i < scenes.length; i++) {
       const scene = scenes[i];
       const prompt = scene.enriched_prompt || scene.prompt;
-      const duration = getValidSoraDuration(scene.duration_target);
+      
+      // Extract routing intelligence from the prompt
+      const routingTags = extractRoutingTags(prompt, scene.camera_direction);
+      const shotType = scene.shot_type || inferShotType(prompt);
       
       console.log(`[chained] Scene ${i + 1}/${scenes.length}: ${prompt.substring(0, 50)}...`);
+      console.log(`[chained] Routing tags: [${routingTags.join(", ")}], shot_type: ${shotType || "unknown"}`);
       
       // For scenes after the first, wait for previous to complete and get reference
       let referenceImageUrl: string | undefined;
@@ -213,13 +324,13 @@ Deno.serve(async (req) => {
         
         if (!waitResult.success) {
           console.warn(`[chained] Previous clip failed: ${waitResult.error}`);
-          // Still continue, but without reference
-          results.push({
-            sceneId: scenes[i - 1].id,
-            jobId: previousJobId,
-            status: "failed",
-            error: waitResult.error,
-          });
+          // Update the failed result
+          const prevResult = results.find(r => r.jobId === previousJobId);
+          if (prevResult) {
+            prevResult.status = "failed";
+            prevResult.error = waitResult.error;
+          }
+          // Continue without reference
         } else {
           // Update previous result to done
           const prevResult = results.find(r => r.jobId === previousJobId);
@@ -229,21 +340,24 @@ Deno.serve(async (req) => {
           
           // Get reference frame for chaining
           referenceImageUrl = await getLastFrameReference(supabase, previousJobId) || undefined;
-          console.log(`[chained] Got reference frame: ${referenceImageUrl?.substring(0, 60)}...`);
+          console.log(`[chained] Got reference frame: ${referenceImageUrl?.substring(0, 60) || "none"}...`);
         }
       }
       
-      // Queue this clip
-      const queueResult = await queueClip(supabase, {
+      // Queue this clip using smart routing
+      const queueResult = await queueClipSmart(supabaseUrl, supabaseServiceKey, {
+        scriptRunId,
         storyJobId: story_job_id,
         sequenceIndex: i,
         prompt,
         originalPrompt: scene.prompt,
-        duration,
+        duration: scene.duration_target, // Smart routing handles duration internally
         cameraDirection: scene.camera_direction,
         anchors,
         size,
-        provider,
+        shotType,
+        genre: scene.genre,
+        routingTags,
         referenceImageUrl,
       });
       
@@ -257,10 +371,11 @@ Deno.serve(async (req) => {
         // Continue to next scene anyway
         previousJobId = null;
       } else {
-        console.log(`[chained] Queued scene ${i + 1} as job ${queueResult.jobId}`);
+        console.log(`[chained] Queued scene ${i + 1} as job ${queueResult.jobId} via ${queueResult.provider || "smart"}`);
         results.push({
           sceneId: scene.id,
           jobId: queueResult.jobId,
+          provider: queueResult.provider,
           status: "queued",
         });
         previousJobId = queueResult.jobId || null;

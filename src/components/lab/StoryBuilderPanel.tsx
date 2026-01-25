@@ -275,11 +275,11 @@ export function StoryBuilderPanel({
         setEnrichmentProgress(50);
       }
 
-      setEnrichmentStatus("Starting chained generation (first clip → chain remaining)...");
+      setEnrichmentStatus("Starting smart chained generation (best provider per scene)...");
       setEnrichmentProgress(60);
       
       // Use smart hybrid chaining: first clip immediate, rest wait for previous
-      // This is handled server-side for reliability
+      // Each scene uses intelligent provider routing based on content type
       const { data, error } = await supabase.functions.invoke("generate-story-chained", {
         body: {
           story_job_id: targetStoryId,
@@ -289,11 +289,12 @@ export function StoryBuilderPanel({
             enriched_prompt: scene.enrichedPrompt,
             duration_target: scene.duration_target,
             camera_direction: scene.camera_direction,
+            // shot_type inferred server-side from prompt content
           })),
           anchors: workingAnchors,
           settings: {
             size: "16:9",
-            provider: "sora",
+            provider: "smart", // Use intelligent per-scene provider selection
           },
         },
       });
