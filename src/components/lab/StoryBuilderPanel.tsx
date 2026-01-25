@@ -136,6 +136,10 @@ export function StoryBuilderPanel({
   const [enrichmentProgress, setEnrichmentProgress] = useState(0);
   const [enrichmentStatus, setEnrichmentStatus] = useState<string | null>(null);
   
+  // AI story generation
+  const [concept, setConcept] = useState("");
+  const [isGeneratingStory, setIsGeneratingStory] = useState(false);
+  
   // Continuity completeness check
   const continuityWarnings = getContinuityWarnings(anchors, scenes);
 
@@ -443,6 +447,52 @@ export function StoryBuilderPanel({
     return enrichedScenes;
   }
 
+  // AI Story Generation
+  const generateStory = useMutation({
+    mutationFn: async () => {
+      if (!concept.trim()) throw new Error("Enter a concept first");
+      
+      setIsGeneratingStory(true);
+      const { data, error } = await supabase.functions.invoke("generate-storyboard", {
+        body: {
+          concept: concept.trim(),
+          story_type: storyType,
+        },
+      });
+      
+      if (error) throw error;
+      if (data.error) throw new Error(data.error);
+      
+      return data;
+    },
+    onSuccess: (data) => {
+      setIsGeneratingStory(false);
+      // Set the generated content
+      if (data.title) setTitle(data.title);
+      if (data.scenes?.length) {
+        setScenes(data.scenes.map((s: StoryScene, i: number) => ({
+          ...s,
+          id: s.id || nanoid(8),
+          sequence_index: i,
+        })));
+      }
+      if (data.anchors) setAnchors(data.anchors);
+      setConcept(""); // Clear input
+      toast({
+        title: "Story generated!",
+        description: `Created ${data.scenes?.length || 0} scenes. Review and generate.`,
+      });
+    },
+    onError: (error) => {
+      setIsGeneratingStory(false);
+      toast({
+        title: "Failed to generate story",
+        description: String(error),
+        variant: "destructive",
+      });
+    },
+  });
+
   // Scene management
   const addScene = () => {
     const config = STORY_TYPE_CONFIGS[storyType];
@@ -522,66 +572,105 @@ export function StoryBuilderPanel({
     <div className={`flex flex-col h-full ${className}`}>
       <ScrollArea className="flex-1">
         <div className="p-4 space-y-4">
-          {/* Header */}
-          <div className="space-y-3">
-            <div className="flex items-center gap-3">
-              <Film className="h-5 w-5 text-primary" />
-              <Input
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="Story title..."
-                className="h-8 text-sm font-medium flex-1"
+          {/* AI Story Generator - Primary Input */}
+          <Card className="border-primary/30 bg-primary/5">
+            <CardContent className="p-3 space-y-2">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-primary" />
+                <Label className="text-sm font-medium">Describe your story</Label>
+              </div>
+              <Textarea
+                value={concept}
+                onChange={(e) => setConcept(e.target.value)}
+                placeholder="E.g., A lonely astronaut discovers a garden growing on Mars..."
+                className="h-20 text-sm resize-none"
               />
-            </div>
+              <div className="flex gap-2">
+                <Select value={storyType} onValueChange={(v) => setStoryType(v as StoryType)}>
+                  <SelectTrigger className="h-8 text-xs flex-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(STORY_TYPE_CONFIGS).map(([key, cfg]) => (
+                      <SelectItem key={key} value={key} className="text-xs">
+                        <span className="font-medium">{cfg.name}</span>
+                        <span className="text-muted-foreground ml-2">
+                          {cfg.typicalClipCount[0]}-{cfg.typicalClipCount[1]} clips
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  onClick={() => generateStory.mutate()}
+                  disabled={!concept.trim() || isGeneratingStory}
+                  className="h-8"
+                >
+                  {isGeneratingStory ? (
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  ) : (
+                    <Wand2 className="h-4 w-4 mr-2" />
+                  )}
+                  {isGeneratingStory ? "Creating..." : "Build Story"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
 
-            <div className="flex gap-2">
-              <Select value={storyType} onValueChange={(v) => setStoryType(v as StoryType)}>
-                <SelectTrigger className="h-8 text-xs flex-1">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {Object.entries(STORY_TYPE_CONFIGS).map(([key, cfg]) => (
-                    <SelectItem key={key} value={key} className="text-xs">
-                      <span className="font-medium">{cfg.name}</span>
-                      <span className="text-muted-foreground ml-2">
-                        {cfg.typicalClipCount[0]}-{cfg.typicalClipCount[1]} clips
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Badge variant="outline" className="text-[10px]">
-                {config.clipPacing} cuts
-              </Badge>
-              <Badge variant="outline" className="text-[10px]">
-                {config.continuityStrictness}
-              </Badge>
+          {/* Generated/Manual Story Details */}
+          {scenes.length > 0 && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-3">
+                <Film className="h-5 w-5 text-primary" />
+                <Input
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="Story title..."
+                  className="h-8 text-sm font-medium flex-1"
+                />
+              </div>
+              <div className="flex gap-2">
+                <Badge variant="outline" className="text-[10px]">
+                  {config.clipPacing} cuts
+                </Badge>
+                <Badge variant="outline" className="text-[10px]">
+                  {config.continuityStrictness}
+                </Badge>
+                <Badge variant="secondary" className="text-[10px]">
+                  {scenes.length} scenes
+                </Badge>
+              </div>
             </div>
-          </div>
+          )}
 
-          {/* Continuity Anchors */}
-          <Collapsible defaultOpen>
-            <Card>
-              <CollapsibleTrigger asChild>
-                <CardHeader className="py-2 px-3 cursor-pointer hover:bg-accent/50 transition-colors">
-                  <CardTitle className="text-xs font-medium flex items-center gap-2">
-                    <Wand2 className="h-3.5 w-3.5" />
-                    Continuity Anchors
-                    <ChevronDown className="h-3 w-3 ml-auto" />
-                  </CardTitle>
-                </CardHeader>
-              </CollapsibleTrigger>
-              <CollapsibleContent>
-                <CardContent className="pt-0 pb-3 px-3">
-                  <ContinuityAnchorsEditor
-                    anchors={anchors}
-                    onChange={setAnchors}
-                    discoveredArtifacts={["flicker", "jitter", "identity_drift"]}
-                  />
-                </CardContent>
-              </CollapsibleContent>
-            </Card>
-          </Collapsible>
+          {/* Continuity Anchors - collapsed by default, AI fills these */}
+          {scenes.length > 0 && (
+            <Collapsible>
+              <Card>
+                <CollapsibleTrigger asChild>
+                  <CardHeader className="py-2 px-3 cursor-pointer hover:bg-accent/50 transition-colors">
+                    <CardTitle className="text-xs font-medium flex items-center gap-2">
+                      <Wand2 className="h-3.5 w-3.5" />
+                      Continuity Anchors
+                      {anchors.character?.description && (
+                        <Badge variant="secondary" className="text-[10px] ml-1">AI-filled</Badge>
+                      )}
+                      <ChevronDown className="h-3 w-3 ml-auto" />
+                    </CardTitle>
+                  </CardHeader>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <CardContent className="pt-0 pb-3 px-3">
+                    <ContinuityAnchorsEditor
+                      anchors={anchors}
+                      onChange={setAnchors}
+                      discoveredArtifacts={["flicker", "jitter", "identity_drift"]}
+                    />
+                  </CardContent>
+                </CollapsibleContent>
+              </Card>
+            </Collapsible>
+          )}
 
           {/* Scenes */}
           <Card>
@@ -619,13 +708,17 @@ export function StoryBuilderPanel({
               </DndContext>
 
               {scenes.length === 0 && (
-                <button
-                  onClick={addScene}
-                  className="w-full py-6 border-2 border-dashed rounded-lg text-center text-sm text-muted-foreground hover:border-primary/50 hover:text-primary transition-colors"
-                >
-                  <Plus className="h-5 w-5 mx-auto mb-1" />
-                  Add your first scene
-                </button>
+                <div className="py-6 border-2 border-dashed rounded-lg text-center text-sm text-muted-foreground">
+                  <Sparkles className="h-5 w-5 mx-auto mb-2 text-primary" />
+                  <p className="font-medium">Describe your story above</p>
+                  <p className="text-xs mt-1">AI will create all scenes for you</p>
+                  <button
+                    onClick={addScene}
+                    className="mt-3 text-xs text-primary hover:underline"
+                  >
+                    or add scenes manually
+                  </button>
+                </div>
               )}
             </CardContent>
           </Card>
