@@ -62,11 +62,13 @@ import {
   Loader2,
   Sparkles,
   AlertTriangle,
+  Download,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { ContinuityAnchorsEditor } from "./ContinuityAnchorsEditor";
 import { ContinuityMonitor } from "./ContinuityMonitor";
+import { StoryVideoPlayer } from "./StoryVideoPlayer";
 import {
   type ContinuityAnchors,
   type StoryType,
@@ -139,6 +141,10 @@ export function StoryBuilderPanel({
   // AI story generation
   const [concept, setConcept] = useState("");
   const [isGeneratingStory, setIsGeneratingStory] = useState(false);
+  
+  // Assembly state
+  const [isAssembling, setIsAssembling] = useState(false);
+  const [assembledUrl, setAssembledUrl] = useState<string | null>(null);
   
   // Continuity completeness check
   const continuityWarnings = getContinuityWarnings(anchors, scenes);
@@ -618,6 +624,91 @@ export function StoryBuilderPanel({
     }
   };
 
+  // Assemble clips into a single video
+  const handleAssemble = async () => {
+    if (!storyId || storyClips.length === 0) return;
+    
+    const completedClips = storyClips.filter(c => c.status === "done" && c.output_url);
+    if (completedClips.length === 0) {
+      toast({ title: "No clips to assemble", description: "Wait for clips to complete", variant: "destructive" });
+      return;
+    }
+    
+    setIsAssembling(true);
+    
+    try {
+      // Get or create a script_run_id for assembly (reuse first clip's)
+      const scriptRunId = completedClips[0].script_run_id;
+      
+      const response = await supabase.functions.invoke("assemble-reel", {
+        body: {
+          script_run_id: scriptRunId,
+          transition_type: "crossfade",
+          transition_duration: 0.3,
+          output_width: 720,
+          output_height: 1280,
+        },
+      });
+      
+      if (response.error) {
+        throw new Error(response.error.message);
+      }
+      
+      if (response.data?.assembled_video_url) {
+        setAssembledUrl(response.data.assembled_video_url);
+        toast({ title: "Video assembled!", description: "Your story is ready to download" });
+      } else if (response.data?.status === "queued" || response.data?.status === "rendering") {
+        toast({ 
+          title: "Assembly started", 
+          description: "Video is being rendered. This may take a minute." 
+        });
+        // Poll for completion
+        pollAssemblyStatus(scriptRunId);
+      }
+    } catch (err) {
+      console.error("Assembly error:", err);
+      toast({ 
+        title: "Assembly failed", 
+        description: err instanceof Error ? err.message : "Unknown error", 
+        variant: "destructive" 
+      });
+    } finally {
+      setIsAssembling(false);
+    }
+  };
+
+  // Poll for assembly completion
+  const pollAssemblyStatus = async (scriptRunId: string) => {
+    const maxAttempts = 60; // 5 minutes max
+    let attempts = 0;
+    
+    const poll = async () => {
+      attempts++;
+      const { data } = await supabase
+        .from("script_runs")
+        .select("assembled_status, assembled_video_url")
+        .eq("id", scriptRunId)
+        .single();
+      
+      if (data?.assembled_status === "succeeded" && data?.assembled_video_url) {
+        setAssembledUrl(data.assembled_video_url);
+        toast({ title: "Video ready!", description: "Your story has been assembled" });
+        return;
+      }
+      
+      if (data?.assembled_status === "failed") {
+        toast({ title: "Assembly failed", variant: "destructive" });
+        return;
+      }
+      
+      if (attempts < maxAttempts) {
+        setTimeout(poll, 5000);
+      }
+    };
+    
+    poll();
+  };
+
   const config = STORY_TYPE_CONFIGS[storyType];
 
   if (storyLoading) {
@@ -797,6 +888,27 @@ export function StoryBuilderPanel({
                 // TODO: Implement actual regeneration
               }}
             />
+          )}
+
+          {/* Video Player - shows when clips are available */}
+          {storyClips.some(c => c.status === "done" && c.output_url) && (
+            <Card>
+              <CardHeader className="py-2 px-3">
+                <CardTitle className="text-xs font-medium flex items-center gap-2">
+                  <Film className="h-3.5 w-3.5" />
+                  Preview Story
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-3 pt-0">
+                <StoryVideoPlayer
+                  clips={storyClips}
+                  onAssemble={handleAssemble}
+                  isAssembling={isAssembling}
+                  assembledUrl={assembledUrl}
+                  className="aspect-[9/16] max-h-[400px]"
+                />
+              </CardContent>
+            </Card>
           )}
         </div>
       </ScrollArea>
