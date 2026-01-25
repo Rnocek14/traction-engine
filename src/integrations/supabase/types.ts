@@ -1389,6 +1389,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      normalize_routing_tag: { Args: { p_tag: string }; Returns: string }
       select_topic: {
         Args: { p_pillar?: string; p_vertical: string }
         Returns: {
