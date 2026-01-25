@@ -56,11 +56,11 @@ function mapDurationToRunway(soraDuration: number): 5 | 10 {
   return 10;
 }
 
-// Default to gen4_turbo (gen3a_turbo is deprecated/unavailable)
+// Valid Runway models as of 2026-01: gen3a_turbo, gen4.5, veo3, veo3.1, veo3.1_fast
 function getRunwayModel(model?: string): string {
-  const validModels = ["gen4_turbo", "gen3a"];
+  const validModels = ["gen3a_turbo", "gen4.5", "veo3", "veo3.1", "veo3.1_fast"];
   if (model && validModels.includes(model)) return model;
-  return "gen4_turbo";
+  return "veo3.1_fast"; // Best balance of speed and quality
 }
 
 Deno.serve(async (req) => {
