@@ -74,7 +74,7 @@ import {
   type Storyboard,
   STORY_TYPE_CONFIGS,
 } from "@/lib/continuity-scoring";
-import { enrichPrompt } from "@/lib/lab-engines";
+import { enrichPrompt, inferAnchorsFromScenes } from "@/lib/lab-engines";
 import type { Tables } from "@/integrations/supabase/types";
 
 type VideoJob = Tables<"video_jobs">;
@@ -93,52 +93,21 @@ interface EnrichedScene extends StoryScene {
 const DEFAULT_ACCOUNT_ID = "lab_sandbox";
 
 /**
- * Get sensible default anchors for new stories
+ * Get minimal default anchors - AI will fill in the rest
  */
 function getDefaultAnchors(): ContinuityAnchors {
   return {
-    character: {
-      description: "",
-      wardrobe: "",
-      identity_lock_tokens: [],
-    },
-    environment: {
-      location: "",
-      time_of_day: "golden_hour",
-      props: [],
-    },
-    camera_language: {
-      lens: "50mm",
-      movement_style: "smooth",
-      framing_rules: "16:9 cinematic framing",
-    },
     negative_list: ["flicker", "jitter", "identity drift", "morph"],
   };
 }
 
 /**
- * Check for missing critical continuity fields
+ * Check for empty prompts only (AI handles the rest)
  */
-function getContinuityWarnings(anchors: ContinuityAnchors, scenes: StoryScene[]): string[] {
+function getContinuityWarnings(_anchors: ContinuityAnchors, scenes: StoryScene[]): string[] {
   const warnings: string[] = [];
   
-  // For multi-scene stories, character is critical
-  if (scenes.length > 1) {
-    if (!anchors.character?.description) {
-      warnings.push("Character description missing - identity may drift between scenes");
-    }
-    if (!anchors.environment?.location) {
-      warnings.push("Location not set - environment may change unexpectedly");
-    }
-  }
-  
-  // Check for scenes without camera direction
-  const scenesWithoutCamera = scenes.filter(s => !s.camera_direction);
-  if (scenesWithoutCamera.length > 0 && scenes.length > 2) {
-    warnings.push(`${scenesWithoutCamera.length} scene(s) missing camera direction`);
-  }
-  
-  // Check for empty prompts
+  // Check for empty prompts - this is the only thing user MUST provide
   const emptyPrompts = scenes.filter(s => !s.prompt.trim());
   if (emptyPrompts.length > 0) {
     warnings.push(`${emptyPrompts.length} scene(s) have empty prompts`);
@@ -264,8 +233,40 @@ export function StoryBuilderPanel({
         .update({ status: "generating" })
         .eq("id", targetStoryId);
 
+      // Check if anchors need auto-inference (mostly empty)
+      let workingAnchors = anchors;
+      const needsInference = !anchors.character?.description && 
+                            !anchors.environment?.location &&
+                            scenes.length > 0;
+      
+      if (needsInference && autoEnhance) {
+        setEnrichmentStatus("Analyzing scenes for continuity...");
+        setEnrichmentProgress(10);
+        
+        const scenePrompts = scenes.map(s => s.prompt).filter(p => p.trim());
+        if (scenePrompts.length > 0) {
+          const inferred = await inferAnchorsFromScenes(scenePrompts);
+          if (!inferred.error) {
+            // Merge inferred anchors with any user-provided values
+            workingAnchors = {
+              character: inferred.character || anchors.character,
+              environment: inferred.environment || anchors.environment,
+              camera_language: inferred.camera_language || anchors.camera_language,
+              negative_list: inferred.negative_list || anchors.negative_list,
+            };
+            // Update local state and DB
+            setAnchors(workingAnchors);
+            await supabase
+              .from("story_jobs")
+              .update({ continuity_anchors: JSON.parse(JSON.stringify(workingAnchors)) })
+              .eq("id", targetStoryId);
+          }
+        }
+        setEnrichmentProgress(25);
+      }
+
       // Build continuity context for enrichment
-      const continuityContext = buildContinuityContext(anchors);
+      const continuityContext = buildContinuityContext(workingAnchors);
       
       // If auto-enhance is enabled, enrich all prompts first
       let enrichedScenes: EnrichedScene[] = scenes.map(s => ({ ...s }));
@@ -666,7 +667,7 @@ export function StoryBuilderPanel({
         
         {autoEnhance && (
           <p className="text-[10px] text-muted-foreground">
-            AI will refine each scene prompt with cinematic details before generation
+            AI will analyze your scenes to infer character, environment &amp; camera settings, then enhance each prompt with cinematic details
           </p>
         )}
 

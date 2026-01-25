@@ -245,6 +245,40 @@ export async function enrichPrompt(
   };
 }
 
+/**
+ * Infer continuity anchors from scene prompts using AI
+ * This analyzes all scenes to extract consistent character, environment, and camera details
+ */
+export async function inferAnchorsFromScenes(
+  scenePrompts: string[]
+): Promise<{ 
+  character?: { description: string; wardrobe: string; identity_lock_tokens: string[] };
+  environment?: { location: string; time_of_day: string; props: string[] };
+  camera_language?: { lens: string; movement_style: string; framing_rules: string };
+  negative_list?: string[];
+  error?: string;
+}> {
+  // Combine all scene prompts for analysis
+  const combinedPrompts = scenePrompts.map((p, i) => `Scene ${i + 1}: ${p}`).join("\n");
+  
+  const { data, error } = await supabase.functions.invoke("infer-story-anchors", {
+    body: { scene_prompts: combinedPrompts },
+  });
+
+  if (error) {
+    console.error("Anchor inference failed:", error);
+    return { error: error.message };
+  }
+
+  return {
+    character: data?.character,
+    environment: data?.environment,
+    camera_language: data?.camera_language,
+    negative_list: data?.negative_list || ["flicker", "jitter", "identity drift", "morph"],
+    error: data?.error,
+  };
+}
+
 // ============ ENGINE METADATA ============
 
 export const VIDEO_ENGINES: { id: VideoEngine; name: string; description: string }[] = [
