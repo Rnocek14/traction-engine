@@ -224,19 +224,14 @@ export function StoryBuilderPanel({
     },
   });
 
-  // Generate all clips mutation
+  // Generate all clips mutation - uses smart hybrid chaining
+  // First clip starts immediately, remaining clips wait for previous and use its last frame
   const generateAllClips = useMutation({
     mutationFn: async (targetStoryId: string) => {
       setIsGenerating(true);
       setEnrichmentProgress(0);
       setEnrichmentStatus(null);
       
-      // Update story status
-      await supabase
-        .from("story_jobs")
-        .update({ status: "generating" })
-        .eq("id", targetStoryId);
-
       // Check if anchors need auto-inference (mostly empty)
       let workingAnchors = anchors;
       const needsInference = !anchors.character?.description && 
@@ -280,57 +275,59 @@ export function StoryBuilderPanel({
         setEnrichmentProgress(50);
       }
 
-      setEnrichmentStatus("Queuing video generation...");
+      setEnrichmentStatus("Starting chained generation (first clip → chain remaining)...");
+      setEnrichmentProgress(60);
       
-      // Queue each scene as a clip with enriched prompts
-      const results = await Promise.all(
-        enrichedScenes.map(async (enrichedScene, index) => {
-          const { data, error } = await supabase.functions.invoke("lab-queue-video", {
-            body: {
-              provider: "auto", // Let backend decide based on routing
-              prompt: enrichedScene.enrichedPrompt || enrichedScene.prompt, // Use enriched if available
-              original_prompt: enrichedScene.prompt, // Always track original for analysis
-              settings: {
-                size: "16:9",
-                duration: enrichedScene.duration_target,
-              },
-              story_job_id: targetStoryId,
-              sequence_index: index,
-              camera_direction: enrichedScene.camera_direction,
-              style_hints: JSON.stringify(anchors),
-            },
-          });
-          
-          // Update progress
-          setEnrichmentProgress(50 + Math.round(((index + 1) / enrichedScenes.length) * 50));
-          
-          if (error) return { error, scene: enrichedScene };
-          return { jobId: data?.job?.id, scene: enrichedScene };
-        })
-      );
-
-      const succeeded = results.filter(r => !r.error).length;
-      const failed = results.filter(r => r.error).length;
+      // Use smart hybrid chaining: first clip immediate, rest wait for previous
+      // This is handled server-side for reliability
+      const { data, error } = await supabase.functions.invoke("generate-story-chained", {
+        body: {
+          story_job_id: targetStoryId,
+          scenes: enrichedScenes.map(scene => ({
+            id: scene.id,
+            prompt: scene.prompt,
+            enriched_prompt: scene.enrichedPrompt,
+            duration_target: scene.duration_target,
+            camera_direction: scene.camera_direction,
+          })),
+          anchors: workingAnchors,
+          settings: {
+            size: "16:9",
+            provider: "sora",
+          },
+        },
+      });
+      
+      if (error) throw error;
       
       setEnrichmentStatus(null);
       setEnrichmentProgress(100);
 
-      return { succeeded, failed, total: scenes.length };
+      return { 
+        succeeded: data?.summary?.succeeded || 0, 
+        failed: data?.summary?.failed || 0, 
+        total: scenes.length,
+        isChained: true,
+      };
     },
     onSuccess: (result) => {
       setIsGenerating(false);
       setEnrichmentProgress(0);
       toast({
-        title: "Generation started",
-        description: `${result.succeeded}/${result.total} clips queued${autoEnhance ? " (AI-enhanced)" : ""}`,
+        title: "Chained generation complete",
+        description: `${result.succeeded}/${result.total} clips completed with frame continuity`,
       });
       queryClient.invalidateQueries({ queryKey: ["story-clips", storyId] });
     },
-    onError: () => {
+    onError: (error) => {
       setIsGenerating(false);
       setEnrichmentProgress(0);
       setEnrichmentStatus(null);
-      toast({ title: "Generation failed", variant: "destructive" });
+      toast({ 
+        title: "Generation failed", 
+        description: String(error),
+        variant: "destructive" 
+      });
     },
   });
 
