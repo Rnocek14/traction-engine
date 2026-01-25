@@ -3,6 +3,11 @@
  * 
  * Multi-clip story creation with storyboard editor, per-scene prompts,
  * and continuity anchor controls.
+ * 
+ * Features:
+ * - AI prompt enrichment before submission (Auto-Enhance toggle)
+ * - Continuity anchors for consistent character/environment
+ * - Drag-and-drop scene reordering
  */
 
 import { useState, useEffect } from "react";
@@ -15,6 +20,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Switch } from "@/components/ui/switch";
+import { Progress } from "@/components/ui/progress";
 import {
   Select,
   SelectContent,
@@ -53,6 +60,7 @@ import {
   Film,
   Wand2,
   Loader2,
+  Sparkles,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
@@ -65,6 +73,7 @@ import {
   type Storyboard,
   STORY_TYPE_CONFIGS,
 } from "@/lib/continuity-scoring";
+import { enrichPrompt } from "@/lib/lab-engines";
 import type { Tables } from "@/integrations/supabase/types";
 
 type VideoJob = Tables<"video_jobs">;
@@ -73,6 +82,11 @@ interface StoryBuilderPanelProps {
   storyId?: string;
   onStoryCreated?: (storyId: string) => void;
   className?: string;
+}
+
+// Extended scene type with enriched prompt
+interface EnrichedScene extends StoryScene {
+  enrichedPrompt?: string;
 }
 
 const DEFAULT_ACCOUNT_ID = "lab_sandbox";
@@ -91,6 +105,11 @@ export function StoryBuilderPanel({
   const [scenes, setScenes] = useState<StoryScene[]>([]);
   const [anchors, setAnchors] = useState<ContinuityAnchors>({});
   const [isGenerating, setIsGenerating] = useState(false);
+  
+  // AI prompt enrichment
+  const [autoEnhance, setAutoEnhance] = useState(true);
+  const [enrichmentProgress, setEnrichmentProgress] = useState(0);
+  const [enrichmentStatus, setEnrichmentStatus] = useState<string | null>(null);
 
   // DnD sensors
   const sensors = useSensors(
@@ -177,6 +196,8 @@ export function StoryBuilderPanel({
   const generateAllClips = useMutation({
     mutationFn: async (targetStoryId: string) => {
       setIsGenerating(true);
+      setEnrichmentProgress(0);
+      setEnrichmentStatus(null);
       
       // Update story status
       await supabase
@@ -184,47 +205,140 @@ export function StoryBuilderPanel({
         .update({ status: "generating" })
         .eq("id", targetStoryId);
 
-      // Queue each scene as a clip
+      // Build continuity context for enrichment
+      const continuityContext = buildContinuityContext(anchors);
+      
+      // If auto-enhance is enabled, enrich all prompts first
+      let enrichedScenes: EnrichedScene[] = scenes.map(s => ({ ...s }));
+      if (autoEnhance) {
+        setEnrichmentStatus("Enhancing prompts with AI...");
+        enrichedScenes = await enrichAllPrompts(scenes, continuityContext);
+        setEnrichmentProgress(50);
+      }
+
+      setEnrichmentStatus("Queuing video generation...");
+      
+      // Queue each scene as a clip with enriched prompts
       const results = await Promise.all(
-        scenes.map(async (scene, index) => {
+        enrichedScenes.map(async (enrichedScene, index) => {
           const { data, error } = await supabase.functions.invoke("lab-queue-video", {
             body: {
               provider: "auto", // Let backend decide based on routing
-              prompt: scene.prompt,
+              prompt: enrichedScene.enrichedPrompt || enrichedScene.prompt, // Use enriched if available
+              original_prompt: enrichedScene.prompt, // Always track original for analysis
               settings: {
                 size: "16:9",
-                duration: scene.duration_target,
+                duration: enrichedScene.duration_target,
               },
               story_job_id: targetStoryId,
               sequence_index: index,
-              camera_direction: scene.camera_direction,
+              camera_direction: enrichedScene.camera_direction,
               style_hints: JSON.stringify(anchors),
             },
           });
           
-          if (error) return { error, scene };
-          return { jobId: data?.job?.id, scene };
+          // Update progress
+          setEnrichmentProgress(50 + Math.round(((index + 1) / enrichedScenes.length) * 50));
+          
+          if (error) return { error, scene: enrichedScene };
+          return { jobId: data?.job?.id, scene: enrichedScene };
         })
       );
 
       const succeeded = results.filter(r => !r.error).length;
       const failed = results.filter(r => r.error).length;
+      
+      setEnrichmentStatus(null);
+      setEnrichmentProgress(100);
 
       return { succeeded, failed, total: scenes.length };
     },
     onSuccess: (result) => {
       setIsGenerating(false);
+      setEnrichmentProgress(0);
       toast({
         title: "Generation started",
-        description: `${result.succeeded}/${result.total} clips queued`,
+        description: `${result.succeeded}/${result.total} clips queued${autoEnhance ? " (AI-enhanced)" : ""}`,
       });
       queryClient.invalidateQueries({ queryKey: ["story-clips", storyId] });
     },
     onError: () => {
       setIsGenerating(false);
+      setEnrichmentProgress(0);
+      setEnrichmentStatus(null);
       toast({ title: "Generation failed", variant: "destructive" });
     },
   });
+
+  /**
+   * Build continuity context from anchors for prompt enrichment
+   */
+  function buildContinuityContext(anchors: ContinuityAnchors): string {
+    const parts: string[] = [];
+    
+    if (anchors.character?.description) {
+      parts.push(`CHARACTER: ${anchors.character.description}`);
+      if (anchors.character.wardrobe) {
+        parts.push(`WARDROBE: ${anchors.character.wardrobe}`);
+      }
+    }
+    if (anchors.environment?.location) {
+      parts.push(`LOCATION: ${anchors.environment.location}`);
+      if (anchors.environment.time_of_day) {
+        parts.push(`TIME: ${anchors.environment.time_of_day}`);
+      }
+    }
+    if (anchors.camera_language?.movement_style) {
+      parts.push(`CAMERA STYLE: ${anchors.camera_language.movement_style}`);
+      if (anchors.camera_language.lens) {
+        parts.push(`LENS: ${anchors.camera_language.lens}`);
+      }
+    }
+    if (anchors.negative_list && anchors.negative_list.length > 0) {
+      parts.push(`AVOID: ${anchors.negative_list.join(", ")}`);
+    }
+    
+    return parts.join("\n");
+  }
+
+  /**
+   * Enrich all scene prompts with AI, maintaining continuity context
+   */
+  async function enrichAllPrompts(
+    scenes: StoryScene[],
+    continuityContext: string
+  ): Promise<EnrichedScene[]> {
+    const enrichedScenes = await Promise.all(
+      scenes.map(async (scene, index) => {
+        try {
+          // Include scene context in style hints
+          const sceneContext = [
+            continuityContext,
+            `SCENE ${index + 1}/${scenes.length}`,
+            scene.camera_direction ? `CAMERA: ${scene.camera_direction}` : "",
+          ].filter(Boolean).join("\n");
+          
+          const { enriched, error } = await enrichPrompt(
+            scene.prompt,
+            "sora", // Default to sora optimization
+            sceneContext
+          );
+          
+          if (error) {
+            console.warn(`Failed to enrich scene ${index + 1}:`, error);
+            return { ...scene, enrichedPrompt: scene.prompt };
+          }
+          
+          return { ...scene, enrichedPrompt: enriched };
+        } catch (err) {
+          console.error(`Enrichment error for scene ${index + 1}:`, err);
+          return { ...scene, enrichedPrompt: scene.prompt };
+        }
+      })
+    );
+    
+    return enrichedScenes;
+  }
 
   // Scene management
   const addScene = () => {
@@ -432,18 +546,56 @@ export function StoryBuilderPanel({
       </ScrollArea>
 
       {/* Actions */}
-      <div className="p-3 border-t bg-card/50 flex gap-2">
+      <div className="p-3 border-t bg-card/50 space-y-3">
+        {/* Auto-Enhance Toggle */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-primary" />
+            <Label htmlFor="auto-enhance" className="text-xs font-medium cursor-pointer">
+              AI Auto-Enhance
+            </Label>
+          </div>
+          <Switch
+            id="auto-enhance"
+            checked={autoEnhance}
+            onCheckedChange={setAutoEnhance}
+          />
+        </div>
+        
+        {autoEnhance && (
+          <p className="text-[10px] text-muted-foreground">
+            AI will refine each scene prompt with cinematic details before generation
+          </p>
+        )}
+
+        {/* Progress indicator during generation */}
+        {isGenerating && enrichmentStatus && (
+          <div className="space-y-1">
+            <div className="flex items-center justify-between text-[10px]">
+              <span className="text-muted-foreground">{enrichmentStatus}</span>
+              <span className="font-mono">{enrichmentProgress}%</span>
+            </div>
+            <Progress value={enrichmentProgress} className="h-1" />
+          </div>
+        )}
+
+        {/* Generate Button */}
         <Button
-          className="flex-1"
+          className="w-full"
           disabled={scenes.length === 0 || isGenerating || createStory.isPending}
           onClick={handleGenerate}
         >
           {isGenerating || createStory.isPending ? (
             <Loader2 className="h-4 w-4 animate-spin mr-2" />
+          ) : autoEnhance ? (
+            <Sparkles className="h-4 w-4 mr-2" />
           ) : (
             <Play className="h-4 w-4 mr-2" />
           )}
-          Generate {scenes.length} Clips
+          {isGenerating 
+            ? enrichmentStatus || "Generating..." 
+            : `Generate ${scenes.length} Clips${autoEnhance ? " (AI Enhanced)" : ""}`
+          }
         </Button>
       </div>
     </div>
