@@ -202,10 +202,17 @@ const TAG_SYNONYMS: Record<string, string> = {
 };
 
 /**
- * Normalizes a tag using synonym mapping
+ * Normalizes a tag: strips junk, collapses underscores, applies synonym mapping
  */
 function normalizeTag(tag: string): string {
-  const cleaned = tag.toLowerCase().trim().replace(/[\s-]+/g, "_");
+  const cleaned = tag
+    .toLowerCase()
+    .trim()
+    .replace(/[\s-]+/g, "_")        // spaces/hyphens → underscore
+    .replace(/[^a-z0-9_]/g, "")     // strip punctuation/junk
+    .replace(/_+/g, "_")            // collapse multiple underscores
+    .replace(/^_+|_+$/g, "");       // trim leading/trailing underscores
+  
   return TAG_SYNONYMS[cleaned] || cleaned;
 }
 
@@ -323,24 +330,46 @@ function hasProperHighScoreEvidence(reasons: string[]): boolean {
   return dimsHit.size >= 2;
 }
 
+/**
+ * Sanitizes and normalizes routing tags with production-safe behavior:
+ * - Applies synonym mapping and normalization
+ * - Filters to allowlist
+ * - Falls back to "free tags" (x_ prefix) if < 2 allowlisted tags to prevent cluster collapse
+ * - Sampled logging (5%) to avoid log spam
+ */
 function sanitizeRoutingTags(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   
-  const originalTags = raw
+  const MIN_TAGS = 2;
+  
+  // Extract and normalize all tags
+  const normalized = raw
     .filter((t): t is string => typeof t === "string" && t.trim().length > 0)
-    .map(t => t.toLowerCase().trim());
+    .map(normalizeTag)
+    .filter(t => t.length > 0);
   
-  const normalized = originalTags.map(normalizeTag);
+  // Split into allowlisted and unknown
   const kept = normalized.filter(t => ROUTING_TAG_ALLOWLIST.has(t));
-  const dropped = normalized.filter(t => !ROUTING_TAG_ALLOWLIST.has(t));
+  const dropped = normalized.filter(t => !ROUTING_TAG_ALLOWLIST.has(t) && !t.startsWith("x_"));
   
-  // Log dropped tags for allowlist expansion diagnostics
-  if (dropped.length > 0) {
-    console.log(`[sanitizeRoutingTags] Dropped tags: ${dropped.join(", ")}`);
+  // Sampled logging (5%) to avoid log explosion
+  if (dropped.length > 0 && Math.random() < 0.05) {
+    console.log(`[sanitizeRoutingTags] Dropped tags sample: ${dropped.slice(0, 10).join(", ")}`);
   }
   
-  // Dedupe and limit to 5
-  return [...new Set(kept)].slice(0, 5);
+  // Free-tag fallback: if we have < MIN_TAGS allowlisted, add 1-2 unknown tags with x_ prefix
+  // This prevents cluster collapse while we tune the allowlist
+  const uniqueKept = [...new Set(kept)];
+  let final = uniqueKept;
+  
+  if (uniqueKept.length < MIN_TAGS && dropped.length > 0) {
+    const freeTags = dropped
+      .slice(0, MIN_TAGS - uniqueKept.length)
+      .map(t => `x_${t}`);
+    final = [...uniqueKept, ...freeTags];
+  }
+  
+  return final.slice(0, 5);
 }
 
 function sanitizeDefects(raw: unknown): Defect[] {
