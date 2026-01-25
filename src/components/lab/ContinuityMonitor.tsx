@@ -185,6 +185,21 @@ function ScoreBadge({ score }: { score: number }) {
   );
 }
 
+function ProviderBadge({ provider }: { provider: string }) {
+  const config: Record<string, { label: string; className: string }> = {
+    sora: { label: "Sora", className: "bg-violet-500/20 text-violet-700 dark:text-violet-300" },
+    runway: { label: "Runway", className: "bg-sky-500/20 text-sky-700 dark:text-sky-300" },
+    luma: { label: "Luma", className: "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300" },
+  };
+  const { label, className } = config[provider] || { label: provider, className: "bg-muted text-muted-foreground" };
+  
+  return (
+    <Badge variant="outline" className={`text-[10px] h-4 px-1.5 ${className}`}>
+      {label}
+    </Badge>
+  );
+}
+
 interface ClipRowProps {
   clip: VideoJob;
   index: number;
@@ -221,8 +236,9 @@ function ClipRow({ clip, index, storyType, isWeakest, clipScore, onRegenerate }:
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="font-medium text-muted-foreground">#{index + 1}</span>
-          <span className="truncate max-w-[120px]">
-            {clip.original_prompt?.slice(0, 30) || "Untitled"}...
+          <ProviderBadge provider={clip.provider} />
+          <span className="truncate max-w-[100px]">
+            {clip.original_prompt?.slice(0, 25) || "Untitled"}...
           </span>
         </div>
         <div className="flex items-center gap-1.5">
