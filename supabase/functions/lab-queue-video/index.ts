@@ -250,12 +250,17 @@ Deno.serve(async (req) => {
         const openaiKey = Deno.env.get("OPENAI_API_KEY");
         if (!openaiKey) throw new Error("OPENAI_API_KEY not configured");
 
+        // Sora only supports 4, 8, or 12 second durations - snap to valid bucket
+        const soraDurations = [4, 8, 12];
+        const soraDuration = soraDurations.find(d => d >= settings.duration) || 12;
+        console.log(`Sora duration: requested=${settings.duration}s, using=${soraDuration}s`);
+
         // Use FormData for Sora API (required format)
         const form = new FormData();
         form.set("prompt", sanitizedPrompt);  // Use sanitized prompt
         form.set("model", "sora-2");
         form.set("size", sizeMap.sora[settings.size] || "720x1280");
-        form.set("seconds", String(settings.duration));
+        form.set("seconds", String(soraDuration));
 
         const response = await fetch("https://api.openai.com/v1/videos", {
           method: "POST",
