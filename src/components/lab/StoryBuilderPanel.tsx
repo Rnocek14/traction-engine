@@ -165,7 +165,7 @@ export function StoryBuilderPanel({
     enabled: !!storyId,
   });
 
-  // Load clips for existing story
+  // Load clips for existing story - deduplicated to show best clip per sequence_index
   const { data: storyClips = [] } = useQuery({
     queryKey: ["story-clips", storyId],
     queryFn: async () => {
@@ -174,9 +174,47 @@ export function StoryBuilderPanel({
         .from("video_jobs")
         .select("*")
         .eq("story_job_id", storyId)
-        .order("sequence_index", { ascending: true });
+        .order("sequence_index", { ascending: true })
+        .order("created_at", { ascending: false });
       if (error) throw error;
-      return data as VideoJob[];
+      
+      // Deduplicate: keep only the best clip per sequence_index
+      // Priority: done > running/queued > failed, then most recent
+      const clipsByIndex = new Map<number, VideoJob>();
+      
+      for (const clip of data as VideoJob[]) {
+        const idx = clip.sequence_index ?? -1;
+        const existing = clipsByIndex.get(idx);
+        
+        if (!existing) {
+          clipsByIndex.set(idx, clip);
+          continue;
+        }
+        
+        // Compare: prefer done status, then running, then failed
+        const statusPriority = (status: string) => {
+          if (status === "done" || status === "rendered") return 3;
+          if (status === "running" || status === "queued") return 2;
+          return 1; // failed or other
+        };
+        
+        const existingPriority = statusPriority(existing.status);
+        const newPriority = statusPriority(clip.status);
+        
+        // Replace if new clip has higher priority, or same priority but newer
+        if (newPriority > existingPriority) {
+          clipsByIndex.set(idx, clip);
+        } else if (newPriority === existingPriority) {
+          // Same priority - keep the newer one
+          if (new Date(clip.created_at) > new Date(existing.created_at)) {
+            clipsByIndex.set(idx, clip);
+          }
+        }
+      }
+      
+      // Return sorted by sequence_index
+      return Array.from(clipsByIndex.values())
+        .sort((a, b) => (a.sequence_index ?? 0) - (b.sequence_index ?? 0));
     },
     enabled: !!storyId,
     refetchInterval: storyId ? 5000 : false,
