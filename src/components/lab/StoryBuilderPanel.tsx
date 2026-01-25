@@ -191,8 +191,9 @@ export function StoryBuilderPanel({
   });
 
   // Load clips for existing story - deduplicated to show best clip per sequence_index
+  // Also filters out clips that don't match current storyboard prompts (from previous versions)
   const { data: storyClips = [] } = useQuery({
-    queryKey: ["story-clips", effectiveStoryId],
+    queryKey: ["story-clips", effectiveStoryId, scenes.map(s => s.prompt.slice(0, 30)).join("|")],
     queryFn: async () => {
       if (!effectiveStoryId) return [];
       const { data, error } = await supabase
@@ -203,11 +204,33 @@ export function StoryBuilderPanel({
         .order("created_at", { ascending: false });
       if (error) throw error;
       
+      // Build a map of expected prompts per scene index for filtering
+      const scenePromptPrefixes = scenes.map(s => 
+        s.prompt.toLowerCase().trim().slice(0, 40)
+      );
+      
+      // Filter clips: only include those whose prompt matches the current scene
+      // This prevents showing clips from previous story versions
+      const relevantClips = (data as VideoJob[]).filter(clip => {
+        const idx = clip.sequence_index ?? -1;
+        if (idx < 0 || idx >= scenePromptPrefixes.length) return true; // Keep if we can't verify
+        
+        const clipPrompt = (clip.original_prompt || "").toLowerCase().trim().slice(0, 40);
+        const expectedPrefix = scenePromptPrefixes[idx];
+        
+        // Allow if prompt is empty (can't verify) or matches the expected scene
+        if (!expectedPrefix || !clipPrompt) return true;
+        
+        // Check if prompts share significant overlap (at least 20 chars matching)
+        const minLen = Math.min(clipPrompt.length, expectedPrefix.length, 20);
+        return clipPrompt.slice(0, minLen) === expectedPrefix.slice(0, minLen);
+      });
+      
       // Deduplicate: keep only the best clip per sequence_index
       // Priority: done > running/queued > failed, then most recent
       const clipsByIndex = new Map<number, VideoJob>();
       
-      for (const clip of data as VideoJob[]) {
+      for (const clip of relevantClips) {
         const idx = clip.sequence_index ?? -1;
         const existing = clipsByIndex.get(idx);
         
