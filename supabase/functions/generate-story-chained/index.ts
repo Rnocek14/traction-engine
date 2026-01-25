@@ -34,6 +34,18 @@ interface ChainedStoryRequest {
     size?: string;
     provider?: "sora" | "runway" | "luma" | "smart"; // Default: smart
   };
+  /**
+   * Resume support: start generating from this scene index (0-based).
+   * Scenes before this index are skipped.
+   * If provided, the function will attempt to get reference frame from the 
+   * last completed clip at index (start_from_index - 1).
+   */
+  start_from_index?: number;
+  /**
+   * Optional: explicit reference image URL to use for the first generated scene.
+   * If not provided but start_from_index > 0, will query the last completed clip.
+   */
+  resume_reference_url?: string;
 }
 
 /**
@@ -249,7 +261,7 @@ Deno.serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     const body: ChainedStoryRequest = await req.json();
-    const { story_job_id, scenes, anchors, settings } = body;
+    const { story_job_id, scenes, anchors, settings, start_from_index, resume_reference_url } = body;
 
     if (!story_job_id || !scenes?.length) {
       return new Response(
@@ -261,7 +273,18 @@ Deno.serve(async (req) => {
     const size = settings?.size || "16:9";
     const useSmartRouting = settings?.provider === "smart" || !settings?.provider;
     
-    console.log(`[chained] Starting story ${story_job_id} with ${scenes.length} scenes (smart routing: ${useSmartRouting})`);
+    // Determine starting index for resume support
+    const startIndex = start_from_index ?? 0;
+    const scenesToProcess = scenes.slice(startIndex);
+    
+    if (scenesToProcess.length === 0) {
+      return new Response(
+        JSON.stringify({ success: true, message: "No scenes to process from given start_from_index" }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+    
+    console.log(`[chained] Starting story ${story_job_id} from index ${startIndex}, processing ${scenesToProcess.length}/${scenes.length} scenes (smart routing: ${useSmartRouting})`);
 
     // We need a script_run_id for queue-video-smart, create a placeholder if needed
     let scriptRunId: string;
@@ -305,26 +328,54 @@ Deno.serve(async (req) => {
       provider?: string;
       status: "queued" | "done" | "failed"; 
       error?: string;
+      sequenceIndex: number;
     }> = [];
     
     let previousJobId: string | null = null;
     
+    // For resume: get initial reference from last completed clip or provided URL
+    let initialReferenceUrl: string | undefined = resume_reference_url;
+    
+    if (!initialReferenceUrl && startIndex > 0) {
+      // Try to get reference from the last completed clip before startIndex
+      const { data: lastCompletedClip } = await supabase
+        .from("video_jobs")
+        .select("id, thumbnail_url, output_url")
+        .eq("story_job_id", story_job_id)
+        .eq("status", "done")
+        .lt("sequence_index", startIndex)
+        .order("sequence_index", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      
+      if (lastCompletedClip) {
+        initialReferenceUrl = lastCompletedClip.thumbnail_url || lastCompletedClip.output_url || undefined;
+        console.log(`[chained] Resume: got reference from clip at index ${startIndex - 1}: ${initialReferenceUrl?.substring(0, 60) || "none"}...`);
+      }
+    }
+    
     // Process scenes sequentially with chaining
-    for (let i = 0; i < scenes.length; i++) {
-      const scene = scenes[i];
+    for (let i = 0; i < scenesToProcess.length; i++) {
+      const scene = scenesToProcess[i];
+      const actualSequenceIndex = startIndex + i; // Correct sequence index
       const prompt = scene.enriched_prompt || scene.prompt;
       
       // Extract routing intelligence from the prompt
       const routingTags = extractRoutingTags(prompt, scene.camera_direction);
       const shotType = scene.shot_type || inferShotType(prompt);
       
-      console.log(`[chained] Scene ${i + 1}/${scenes.length}: ${prompt.substring(0, 50)}...`);
+      console.log(`[chained] Scene ${actualSequenceIndex + 1}/${scenes.length}: ${prompt.substring(0, 50)}...`);
       console.log(`[chained] Routing tags: [${routingTags.join(", ")}], shot_type: ${shotType || "unknown"}`);
       
-      // For scenes after the first, wait for previous to complete and get reference
+      // Determine reference image
       let referenceImageUrl: string | undefined;
       
-      if (i > 0 && previousJobId) {
+      if (i === 0 && initialReferenceUrl) {
+        // First scene in this batch: use initial reference (from resume or provided)
+        referenceImageUrl = initialReferenceUrl;
+        console.log(`[chained] Using initial reference for first scene: ${referenceImageUrl?.substring(0, 60)}...`);
+      } else if (i > 0 && previousJobId) {
+        // Subsequent scenes: wait for previous to complete and get reference
         console.log(`[chained] Waiting for previous clip ${previousJobId} to complete...`);
         
         const waitResult = await waitForJobCompletion(supabase, previousJobId, 300000);
@@ -351,14 +402,14 @@ Deno.serve(async (req) => {
         }
       }
       
-      // Queue this clip using smart routing
+      // Queue this clip using smart routing with correct sequence index
       const queueResult = await queueClipSmart(supabaseUrl, supabaseServiceKey, {
         scriptRunId,
         storyJobId: story_job_id,
-        sequenceIndex: i,
+        sequenceIndex: actualSequenceIndex, // Use correct index for resume
         prompt,
         originalPrompt: scene.prompt,
-        duration: scene.duration_target, // Smart routing handles duration internally
+        duration: scene.duration_target,
         cameraDirection: scene.camera_direction,
         anchors,
         size,
@@ -369,30 +420,38 @@ Deno.serve(async (req) => {
       });
       
       if (queueResult.error) {
-        console.error(`[chained] Failed to queue scene ${i + 1}: ${queueResult.error}`);
+        console.error(`[chained] Failed to queue scene ${actualSequenceIndex + 1}: ${queueResult.error}`);
         results.push({
           sceneId: scene.id,
           status: "failed",
           error: queueResult.error,
+          sequenceIndex: actualSequenceIndex,
         });
         // Continue to next scene anyway
         previousJobId = null;
       } else {
-        console.log(`[chained] Queued scene ${i + 1} as job ${queueResult.jobId} via ${queueResult.provider || "smart"}`);
+        console.log(`[chained] Queued scene ${actualSequenceIndex + 1} as job ${queueResult.jobId} via ${queueResult.provider || "smart"}`);
         results.push({
           sceneId: scene.id,
           jobId: queueResult.jobId,
           provider: queueResult.provider,
           status: "queued",
+          sequenceIndex: actualSequenceIndex,
         });
         previousJobId = queueResult.jobId || null;
       }
       
-      // Update story progress
+      // Update story progress (count all done clips, not just this batch)
+      const { count: totalDone } = await supabase
+        .from("video_jobs")
+        .select("id", { count: "exact", head: true })
+        .eq("story_job_id", story_job_id)
+        .eq("status", "done");
+      
       await supabase
         .from("story_jobs")
         .update({ 
-          completed_clips: results.filter(r => r.status === "done").length,
+          completed_clips: totalDone || 0,
         })
         .eq("id", story_job_id);
     }
@@ -410,30 +469,44 @@ Deno.serve(async (req) => {
       }
     }
     
-    // Calculate final stats
-    const succeeded = results.filter(r => r.status === "done").length;
-    const failed = results.filter(r => r.status === "failed").length;
-    const queued = results.filter(r => r.status === "queued").length;
+    // Calculate final stats for this batch
+    const batchSucceeded = results.filter(r => r.status === "done").length;
+    const batchFailed = results.filter(r => r.status === "failed").length;
+    const batchQueued = results.filter(r => r.status === "queued").length;
     
-    // Update story final status
+    // Get total done count across all clips
+    const { count: totalDone } = await supabase
+      .from("video_jobs")
+      .select("id", { count: "exact", head: true })
+      .eq("story_job_id", story_job_id)
+      .eq("status", "done");
+    
+    // Determine final story status
+    const totalScenes = scenes.length;
+    const allDone = (totalDone || 0) >= totalScenes;
+    const anyFailed = batchFailed > 0;
+    
     await supabase
       .from("story_jobs")
       .update({ 
-        status: failed === scenes.length ? "failed" : succeeded === scenes.length ? "done" : "partial",
-        completed_clips: succeeded,
+        status: allDone ? "done" : anyFailed ? "partial" : "generating",
+        completed_clips: totalDone || 0,
       })
       .eq("id", story_job_id);
     
-    console.log(`[chained] Story complete: ${succeeded} done, ${failed} failed, ${queued} still queued`);
+    console.log(`[chained] Batch complete: ${batchSucceeded} done, ${batchFailed} failed, ${batchQueued} still queued. Total story: ${totalDone}/${totalScenes}`);
 
     return new Response(
       JSON.stringify({
         success: true,
         summary: {
-          total: scenes.length,
-          succeeded,
-          failed,
-          queued,
+          total: totalScenes,
+          batchProcessed: scenesToProcess.length,
+          batchSucceeded,
+          batchFailed,
+          batchQueued,
+          totalDone: totalDone || 0,
+          startedFromIndex: startIndex,
         },
         results,
       }),
