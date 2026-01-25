@@ -739,8 +739,49 @@ export function StoryBuilderPanel({
     );
   }
 
+  // Calculate progress for header bar
+  const totalClips = existingStory?.total_clips || scenes.length;
+  const completedClips = storyClips.filter(c => c.status === "done").length;
+  const runningClips = storyClips.filter(c => c.status === "running" || c.status === "queued").length;
+  const progressPercent = totalClips > 0 ? Math.round((completedClips / totalClips) * 100) : 0;
+  const isStoryGenerating = existingStory?.status === "generating" || runningClips > 0;
+
   return (
     <div className={`flex flex-col h-full ${className}`}>
+      {/* Story Progress Header - shows during/after generation */}
+      {(existingStory || storyClips.length > 0) && totalClips > 0 && (
+        <div className="px-4 py-2 border-b bg-card/50 space-y-1.5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Film className="h-4 w-4 text-primary" />
+              <span className="text-sm font-medium truncate max-w-[200px]">
+                {existingStory?.title || "Story"}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              {isStoryGenerating && (
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+              )}
+              <Badge 
+                variant={completedClips === totalClips ? "default" : "secondary"} 
+                className="text-[10px] h-5"
+              >
+                {completedClips}/{totalClips} clips
+              </Badge>
+            </div>
+          </div>
+          <Progress 
+            value={progressPercent} 
+            className={`h-1.5 ${isStoryGenerating ? "animate-pulse" : ""}`}
+          />
+          {isStoryGenerating && runningClips > 0 && (
+            <p className="text-[10px] text-muted-foreground">
+              {runningClips} clip{runningClips > 1 ? "s" : ""} rendering...
+            </p>
+          )}
+        </div>
+      )}
+
       <ScrollArea className="flex-1">
         <div className="p-4 space-y-4">
           {/* AI Story Generator - Primary Input */}
