@@ -1375,6 +1375,20 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      get_auto_promote_candidates_from_raw: {
+        Args: {
+          p_days?: number
+          p_max_candidates?: number
+          p_max_rows?: number
+          p_min_count?: number
+          p_min_providers?: number
+        }
+        Returns: {
+          n: number
+          providers: number
+          raw_tag: string
+        }[]
+      }
       get_compare_queue_health: {
         Args: never
         Returns: {
@@ -1398,6 +1412,10 @@ export type Database = {
           last_status: string
           schedule: string
         }[]
+      }
+      get_raw_routing_tag_coverage: {
+        Args: { p_days?: number; p_max_rows?: number }
+        Returns: Json
       }
       get_routing_allowlist_health: { Args: never; Returns: Json }
       get_routing_tag_coverage: {

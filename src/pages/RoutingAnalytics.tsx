@@ -87,6 +87,18 @@ interface TagCoverageStats {
   topFree: Array<{ tag: string; count: number }>;
 }
 
+interface RawTagCoverageStats {
+  windowDays: number;
+  maxRows: number;
+  totalRated: number;
+  withRawTags: number;
+  withoutRawTags: number;
+  pctWithRawTags: number;
+  uniqueRawTags: number;
+  topRawTags: Array<{ tag: string; count: number }>;
+  topUnknownRawTags: Array<{ tag: string; count: number }>;
+}
+
 export default function RoutingAnalytics() {
   // Coverage time range state
   const [coverageDays, setCoverageDays] = useState(7);
@@ -315,6 +327,26 @@ export default function RoutingAnalytics() {
     },
   });
 
+  // Raw tag coverage stats - monitors discovery stream
+  const { data: rawCoverageStats, isLoading: loadingRawCoverage } = useQuery({
+    queryKey: ["routing-raw-tag-coverage", coverageDays],
+    queryFn: async (): Promise<RawTagCoverageStats | null> => {
+      const maxRows = Math.min(coverageDays * 1000, 20000);
+      
+      const { data, error } = await supabase.rpc("get_raw_routing_tag_coverage", {
+        p_days: coverageDays,
+        p_max_rows: maxRows,
+      });
+
+      if (error) {
+        console.warn("Raw coverage RPC failed:", error.message);
+        return null;
+      }
+
+      return data as unknown as RawTagCoverageStats;
+    },
+  });
+
   // Tag coverage stats - uses RPC for performance, falls back to client-side
   const { data: coverageStats, isLoading: loadingCoverage } = useQuery({
     queryKey: ["routing-tag-coverage", coverageDays],
@@ -426,7 +458,7 @@ export default function RoutingAnalytics() {
     return colors[use || ""] || "bg-muted text-muted-foreground";
   };
 
-  const isLoading = loadingQuality || loadingDefects || loadingTags || loadingWins || loadingClusters || loadingCoverage;
+  const isLoading = loadingQuality || loadingDefects || loadingTags || loadingWins || loadingClusters || loadingCoverage || loadingRawCoverage;
 
   return (
     <div className="h-screen flex flex-col bg-background">
@@ -829,6 +861,145 @@ export default function RoutingAnalytics() {
                     </CardContent>
                   </Card>
                 </div>
+
+                {/* Raw Tag Discovery Sub-card */}
+                {rawCoverageStats && (
+                  <Card className="border-dashed border-accent/30">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm flex items-center gap-2">
+                        <Database className="h-4 w-4 text-accent" />
+                        Raw Tag Discovery
+                      </CardTitle>
+                      <CardDescription>
+                        Unfiltered VLM tags — shows what could be promoted to expand clustering signal
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {/* Raw coverage KPIs */}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div className="p-3 rounded-lg bg-muted/30">
+                          <div className="text-xs text-muted-foreground">With Raw Tags</div>
+                          <div className={cn(
+                            "text-lg font-bold",
+                            (rawCoverageStats.pctWithRawTags ?? 0) > 80 ? "text-success" : "text-warning"
+                          )}>
+                            {rawCoverageStats.pctWithRawTags ?? 0}%
+                          </div>
+                          <p className="text-[10px] text-muted-foreground">
+                            {rawCoverageStats.withRawTags ?? 0} / {rawCoverageStats.totalRated ?? 0}
+                          </p>
+                        </div>
+                        <div className="p-3 rounded-lg bg-muted/30">
+                          <div className="text-xs text-muted-foreground">Unique Raw Tags</div>
+                          <div className="text-lg font-bold text-accent-foreground">
+                            {rawCoverageStats.uniqueRawTags ?? 0}
+                          </div>
+                        </div>
+                        <div className="p-3 rounded-lg bg-muted/30">
+                          <div className="text-xs text-muted-foreground">Unknown (Promotable)</div>
+                          <div className={cn(
+                            "text-lg font-bold",
+                            (rawCoverageStats.topUnknownRawTags?.length ?? 0) > 0 ? "text-primary" : "text-muted-foreground"
+                          )}>
+                            {rawCoverageStats.topUnknownRawTags?.length ?? 0}
+                          </div>
+                          <p className="text-[10px] text-muted-foreground">candidates</p>
+                        </div>
+                        <div className="p-3 rounded-lg bg-muted/30">
+                          <div className="text-xs text-muted-foreground">Discovery Health</div>
+                          <Badge 
+                            variant="outline" 
+                            className={cn(
+                              "mt-1",
+                              rawCoverageStats.pctWithRawTags > 80 
+                                ? "text-success border-success/30" 
+                                : rawCoverageStats.pctWithRawTags > 50 
+                                  ? "text-warning border-warning/30"
+                                  : "text-destructive border-destructive/30"
+                            )}
+                          >
+                            {rawCoverageStats.pctWithRawTags > 80 ? "Healthy" : rawCoverageStats.pctWithRawTags > 50 ? "Low Signal" : "No Signal"}
+                          </Badge>
+                        </div>
+                      </div>
+
+                      {/* Top Unknown Raw Tags - ready to promote */}
+                      {rawCoverageStats.topUnknownRawTags && rawCoverageStats.topUnknownRawTags.length > 0 && (
+                        <div>
+                          <div className="text-xs text-muted-foreground mb-2 flex items-center gap-1.5">
+                            <Zap className="h-3 w-3 text-primary" />
+                            Top Unknown Tags (ready for promotion)
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {rawCoverageStats.topUnknownRawTags.slice(0, 12).map((tag, i) => (
+                              <div 
+                                key={i}
+                                className="flex items-center gap-1 px-2 py-1 rounded-md bg-primary/10 border border-primary/20"
+                              >
+                                <span className="text-xs text-primary">{tag.tag}</span>
+                                <span className="text-[10px] text-primary/60 font-mono">×{tag.count}</span>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-5 w-5 p-0 text-primary/60 hover:text-success"
+                                  onClick={async () => {
+                                    try {
+                                      const { data: session } = await supabase.auth.getSession();
+                                      if (!session?.session?.access_token) {
+                                        toast({
+                                          title: "Not authenticated",
+                                          description: "Please log in to promote tags",
+                                          variant: "destructive",
+                                        });
+                                        return;
+                                      }
+
+                                      const response = await fetch(
+                                        `https://jrujlpljluvxewjytuab.supabase.co/functions/v1/promote-routing-tag`,
+                                        {
+                                          method: "POST",
+                                          headers: {
+                                            "Content-Type": "application/json",
+                                            Authorization: `Bearer ${session.session.access_token}`,
+                                          },
+                                          body: JSON.stringify({ tag: tag.tag }),
+                                        }
+                                      );
+
+                                      const result = await response.json();
+                                      if (!response.ok) {
+                                        toast({
+                                          title: "Promotion failed",
+                                          description: result.error || "Unknown error",
+                                          variant: "destructive",
+                                        });
+                                        return;
+                                      }
+
+                                      toast({
+                                        title: "Tag promoted!",
+                                        description: `"${result.tag}" added to allowlist`,
+                                      });
+                                    } catch (err) {
+                                      console.error("[Promote] Error:", err);
+                                      toast({
+                                        title: "Promotion failed",
+                                        description: String(err),
+                                        variant: "destructive",
+                                      });
+                                    }
+                                  }}
+                                >
+                                  <Check className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                )}
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <Card>
