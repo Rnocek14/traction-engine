@@ -1383,6 +1383,7 @@ export type Database = {
           stale_running_count: number
         }[]
       }
+      get_cron_auth_failures: { Args: never; Returns: Json }
       get_cron_status: {
         Args: never
         Returns: {
