@@ -50,17 +50,30 @@ function mapSizeToRunway(soraSize: string): string {
   return mapping[soraSize] || "720:1280";
 }
 
-// Map Sora durations to Runway (5 or 10 seconds)
-function mapDurationToRunway(soraDuration: number): 5 | 10 {
-  if (soraDuration <= 5) return 5;
-  return 10;
+// Map Sora durations to Runway text-to-video (accepts 4, 6, or 8 seconds)
+function mapDurationToRunwayTextToVideo(soraDuration: number): 4 | 6 | 8 {
+  if (soraDuration <= 5) return 4;
+  if (soraDuration <= 7) return 6;
+  return 8;
 }
 
-// Valid Runway models as of 2026-01: gen3a_turbo, gen4.5, veo3, veo3.1, veo3.1_fast
-function getRunwayModel(model?: string): string {
-  const validModels = ["gen3a_turbo", "gen4.5", "veo3", "veo3.1", "veo3.1_fast"];
+// Map Sora durations to Runway image-to-video (accepts 2-10 seconds)
+function mapDurationToRunwayImageToVideo(soraDuration: number): number {
+  return Math.max(2, Math.min(10, soraDuration));
+}
+
+// Valid text-to-video models: veo3, veo3.1, veo3.1_fast
+function getTextToVideoModel(model?: string): string {
+  const validModels = ["veo3", "veo3.1", "veo3.1_fast"];
   if (model && validModels.includes(model)) return model;
   return "veo3.1_fast"; // Best balance of speed and quality
+}
+
+// Valid image-to-video models: gen4_turbo, veo3.1, gen3a_turbo, veo3.1_fast, veo3
+function getImageToVideoModel(model?: string): string {
+  const validModels = ["gen4_turbo", "veo3.1", "gen3a_turbo", "veo3.1_fast", "veo3"];
+  if (model && validModels.includes(model)) return model;
+  return "gen4_turbo"; // Best for image-to-video continuity
 }
 
 Deno.serve(async (req) => {
@@ -91,22 +104,21 @@ Deno.serve(async (req) => {
     const requestedSeconds = settings?.requested_seconds;
     const legacySeconds = settings?.seconds;
     
-    // Determine provider duration (Runway uses 5 or 10)
-    let runwayDuration: 5 | 10;
+    // Get the base duration from settings (will be mapped per endpoint type later)
+    let baseDuration: number;
     if (settings?.provider_seconds !== undefined) {
-      runwayDuration = settings.provider_seconds <= 7 ? 5 : 10;
+      baseDuration = settings.provider_seconds;
     } else if (requestedSeconds !== undefined) {
-      runwayDuration = mapDurationToRunway(requestedSeconds);
+      baseDuration = requestedSeconds;
     } else if (legacySeconds !== undefined) {
-      runwayDuration = mapDurationToRunway(legacySeconds);
-      console.log(`Warning: Using legacy seconds=${legacySeconds} for Runway, mapped to ${runwayDuration}s`);
+      baseDuration = legacySeconds;
+      console.log(`Warning: Using legacy seconds=${legacySeconds} for Runway`);
     } else {
-      throw new Error("Duration is required: provide requested_seconds, provider_seconds, or seconds");
+      baseDuration = 6; // Default to 6s
     }
 
     // Map settings to Runway format
     const runwaySize = mapSizeToRunway(settings?.size || "720x1280");
-    const runwayModel = getRunwayModel(settings?.model);
 
     // Fetch the script to get the prompt
     const { data: script, error: scriptError } = await supabase
@@ -177,6 +189,26 @@ Style: Professional short-form video, engaging, smooth transitions.
       clipData?.camera_direction
     );
 
+    // Determine if image-to-video based on reference image availability
+    const isImageToVideo = !!starting_frame_url || !!styleGuide?.reference_image_url;
+    const referenceImageUrl = starting_frame_url || styleGuide?.reference_image_url;
+
+    // Get the correct model and duration based on endpoint type
+    let runwayModel: string;
+    let runwayDuration: number;
+    
+    if (isImageToVideo) {
+      // Image-to-video: accepts gen4_turbo, veo3.1, gen3a_turbo, veo3.1_fast, veo3
+      // Duration: 2-10 seconds
+      runwayModel = getImageToVideoModel(settings?.model);
+      runwayDuration = mapDurationToRunwayImageToVideo(baseDuration);
+    } else {
+      // Text-to-video: only accepts veo3, veo3.1, veo3.1_fast
+      // Duration: exactly 4, 6, or 8
+      runwayModel = getTextToVideoModel(settings?.model);
+      runwayDuration = mapDurationToRunwayTextToVideo(baseDuration);
+    }
+
     // Create job record first - store both timeline and provider durations
     const { data: job, error: jobError } = await supabase
       .from("video_jobs")
@@ -213,9 +245,6 @@ Style: Professional short-form video, engaging, smooth transitions.
     }
 
     // Build Runway API request
-    const isImageToVideo = !!starting_frame_url || !!styleGuide?.reference_image_url;
-    const referenceImageUrl = starting_frame_url || styleGuide?.reference_image_url;
-
     let runwayEndpoint: string;
     let runwayBody: Record<string, unknown>;
 
@@ -230,7 +259,7 @@ Style: Professional short-form video, engaging, smooth transitions.
         ratio: runwaySize,
         seed: settings?.seed,
       };
-      console.log(`Using image-to-video with reference: ${referenceImageUrl}`);
+      console.log(`Using image-to-video with reference: ${referenceImageUrl}, model: ${runwayModel}, duration: ${runwayDuration}`);
     } else {
       // Text-to-video endpoint
       runwayEndpoint = "https://api.dev.runwayml.com/v1/text_to_video";
@@ -241,6 +270,7 @@ Style: Professional short-form video, engaging, smooth transitions.
         ratio: runwaySize,
         seed: settings?.seed,
       };
+      console.log(`Using text-to-video with model: ${runwayModel}, duration: ${runwayDuration}`);
     }
 
     // Call Runway API
