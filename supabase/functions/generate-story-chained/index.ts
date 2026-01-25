@@ -206,34 +206,22 @@ Deno.serve(async (req) => {
     console.log(`[chained] Starting story ${story_job_id}: ${scenesToProcess.length} scenes from index ${startIndex}`);
     console.log(`[chained] VISUAL CONTINUITY MODE: Scene 1=T2V, Scenes 2+= I2V with frame chaining`);
 
-    // Get or create script_run for Runway
-    let scriptRunId: string;
-    const { data: existingScript } = await supabase
+    // Create a dedicated script_run for this story generation
+    const { data: newScript, error: scriptError } = await supabase
       .from("script_runs")
+      .insert({
+        account_id: "lab-story",
+        status: "qa_passed",
+        script_content: { type: "story_chained", story_job_id, scenes: scenes.map(s => s.prompt) },
+      })
       .select("id")
-      .eq("account_id", "lab-story")
-      .eq("status", "qa_passed")
-      .limit(1)
-      .maybeSingle();
+      .single();
     
-    if (existingScript) {
-      scriptRunId = existingScript.id;
-    } else {
-      const { data: newScript, error: scriptError } = await supabase
-        .from("script_runs")
-        .insert({
-          account_id: "lab-story",
-          status: "qa_passed",
-          script_content: { type: "story_chained", story_job_id },
-        })
-        .select("id")
-        .single();
-      
-      if (scriptError || !newScript) {
-        throw new Error(`Failed to create script: ${scriptError?.message}`);
-      }
-      scriptRunId = newScript.id;
+    if (scriptError || !newScript) {
+      throw new Error(`Failed to create script_run: ${scriptError?.message}`);
     }
+    const scriptRunId = newScript.id;
+    console.log(`[chained] Created script_run ${scriptRunId} for story ${story_job_id}`);
 
     // Update story status
     await supabase
