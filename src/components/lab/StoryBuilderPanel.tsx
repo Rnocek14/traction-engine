@@ -155,31 +155,50 @@ export function StoryBuilderPanel({
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
-  // Load existing story if storyId provided
-  const { data: existingStory, isLoading: storyLoading } = useQuery({
-    queryKey: ["story-job", storyId],
+  // Load most recent story if no storyId provided
+  const { data: recentStory } = useQuery({
+    queryKey: ["recent-story"],
     queryFn: async () => {
-      if (!storyId) return null;
       const { data, error } = await supabase
         .from("story_jobs")
         .select("*")
-        .eq("id", storyId)
+        .order("created_at", { ascending: false })
+        .limit(1)
         .maybeSingle();
       if (error) throw error;
       return data;
     },
-    enabled: !!storyId,
+    enabled: !storyId,
+  });
+
+  // Use provided storyId or fall back to most recent story
+  const effectiveStoryId = storyId || recentStory?.id;
+
+  // Load existing story if storyId provided
+  const { data: existingStory, isLoading: storyLoading } = useQuery({
+    queryKey: ["story-job", effectiveStoryId],
+    queryFn: async () => {
+      if (!effectiveStoryId) return null;
+      const { data, error } = await supabase
+        .from("story_jobs")
+        .select("*")
+        .eq("id", effectiveStoryId)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!effectiveStoryId,
   });
 
   // Load clips for existing story - deduplicated to show best clip per sequence_index
   const { data: storyClips = [] } = useQuery({
-    queryKey: ["story-clips", storyId],
+    queryKey: ["story-clips", effectiveStoryId],
     queryFn: async () => {
-      if (!storyId) return [];
+      if (!effectiveStoryId) return [];
       const { data, error } = await supabase
         .from("video_jobs")
         .select("*")
-        .eq("story_job_id", storyId)
+        .eq("story_job_id", effectiveStoryId)
         .order("sequence_index", { ascending: true })
         .order("created_at", { ascending: false });
       if (error) throw error;
@@ -222,8 +241,8 @@ export function StoryBuilderPanel({
       return Array.from(clipsByIndex.values())
         .sort((a, b) => (a.sequence_index ?? 0) - (b.sequence_index ?? 0));
     },
-    enabled: !!storyId,
-    refetchInterval: storyId ? 5000 : false,
+    enabled: !!effectiveStoryId,
+    refetchInterval: effectiveStoryId ? 5000 : false,
   });
 
   // Auto-complete story when all clips are done
@@ -233,10 +252,10 @@ export function StoryBuilderPanel({
     const totalExpected = existingStory.total_clips || scenes.length;
     const doneClips = storyClips.filter(c => c.status === "done" || c.status === "rendered");
     const allDone = doneClips.length >= totalExpected && totalExpected > 0;
-    const isGenerating = existingStory.status === "generating";
+    const isGeneratingStatus = existingStory.status === "generating";
     
     // If story is stuck in "generating" but all clips are done, mark it complete
-    if (isGenerating && allDone) {
+    if (isGeneratingStatus && allDone) {
       supabase
         .from("story_jobs")
         .update({ 
@@ -245,10 +264,11 @@ export function StoryBuilderPanel({
         })
         .eq("id", existingStory.id)
         .then(() => {
-          queryClient.invalidateQueries({ queryKey: ["story-job", storyId] });
+          queryClient.invalidateQueries({ queryKey: ["story-job", effectiveStoryId] });
+          queryClient.invalidateQueries({ queryKey: ["recent-story"] });
         });
     }
-  }, [existingStory, storyClips, scenes.length, storyId, queryClient]);
+  }, [existingStory, storyClips, scenes.length, effectiveStoryId, queryClient]);
 
   // Hydrate from existing story
   useEffect(() => {
