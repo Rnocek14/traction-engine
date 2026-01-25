@@ -1371,6 +1371,10 @@ export type Database = {
           schedule: string
         }[]
       }
+      get_routing_tag_coverage: {
+        Args: { p_days?: number; p_max_rows?: number }
+        Returns: Json
+      }
       has_any_role: {
         Args: {
           _roles: Database["public"]["Enums"]["app_role"][]
