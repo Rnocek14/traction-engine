@@ -220,6 +220,30 @@ export function StoryBuilderPanel({
     refetchInterval: storyId ? 5000 : false,
   });
 
+  // Auto-complete story when all clips are done
+  useEffect(() => {
+    if (!existingStory || !storyClips.length) return;
+    
+    const totalExpected = existingStory.total_clips || scenes.length;
+    const doneClips = storyClips.filter(c => c.status === "done" || c.status === "rendered");
+    const allDone = doneClips.length >= totalExpected && totalExpected > 0;
+    const isGenerating = existingStory.status === "generating";
+    
+    // If story is stuck in "generating" but all clips are done, mark it complete
+    if (isGenerating && allDone) {
+      supabase
+        .from("story_jobs")
+        .update({ 
+          status: "done", 
+          completed_clips: doneClips.length,
+        })
+        .eq("id", existingStory.id)
+        .then(() => {
+          queryClient.invalidateQueries({ queryKey: ["story-job", storyId] });
+        });
+    }
+  }, [existingStory, storyClips, scenes.length, storyId, queryClient]);
+
   // Hydrate from existing story
   useEffect(() => {
     if (!existingStory) return;
