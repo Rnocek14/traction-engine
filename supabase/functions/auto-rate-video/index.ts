@@ -12,6 +12,35 @@ const RATER_VERSION = "vlm-v2.5-hardened";
 const CONFIDENCE_THRESHOLD = 0.75;
 
 // ═══════════════════════════════════════════════════════════════════
+// DYNAMIC ALLOWLIST CACHE
+// ═══════════════════════════════════════════════════════════════════
+
+let dynamicAllowlistCache: Set<string> | null = null;
+let dynamicAllowlistCacheAt = 0;
+const ALLOWLIST_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+async function getDynamicAllowlist(supabase: SupabaseClient): Promise<Set<string>> {
+  const now = Date.now();
+  if (dynamicAllowlistCache && (now - dynamicAllowlistCacheAt) < ALLOWLIST_TTL_MS) {
+    return dynamicAllowlistCache;
+  }
+
+  const { data, error } = await supabase
+    .from("routing_tag_allowlist")
+    .select("tag");
+
+  if (error) {
+    console.warn("[auto-rate-video] allowlist fetch failed, using cached/static only:", error.message);
+    return dynamicAllowlistCache ?? new Set();
+  }
+
+  dynamicAllowlistCache = new Set((data ?? []).map((r: { tag: string }) => String(r.tag)));
+  dynamicAllowlistCacheAt = now;
+  console.log(`[auto-rate-video] Loaded ${dynamicAllowlistCache.size} dynamic allowlist tags`);
+  return dynamicAllowlistCache;
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // TYPE DEFINITIONS
 // ═══════════════════════════════════════════════════════════════════
 
@@ -333,11 +362,11 @@ function hasProperHighScoreEvidence(reasons: string[]): boolean {
 /**
  * Sanitizes and normalizes routing tags with production-safe behavior:
  * - Applies synonym mapping and normalization
- * - Filters to allowlist
+ * - Filters to static allowlist + dynamic allowlist from DB
  * - Falls back to "free tags" (x_ prefix) if < 2 allowlisted tags to prevent cluster collapse
  * - Sampled logging (5%) to avoid log spam
  */
-function sanitizeRoutingTags(raw: unknown): string[] {
+function sanitizeRoutingTags(raw: unknown, dynamicAllowlist?: Set<string>): string[] {
   if (!Array.isArray(raw)) return [];
   
   const MIN_TAGS = 2;
@@ -349,6 +378,10 @@ function sanitizeRoutingTags(raw: unknown): string[] {
     "image", "picture", "movie", "film", "content", "media", "visual"
   ]);
   
+  // Check if tag is allowed (static OR dynamic allowlist)
+  const isAllowed = (t: string): boolean => 
+    ROUTING_TAG_ALLOWLIST.has(t) || (dynamicAllowlist?.has(t) ?? false);
+  
   // Extract and normalize all tags
   const normalized = raw
     .filter((t): t is string => typeof t === "string" && t.trim().length > 0)
@@ -356,8 +389,8 @@ function sanitizeRoutingTags(raw: unknown): string[] {
     .filter(t => t.length > 0);
   
   // Split into allowlisted and unknown
-  const kept = normalized.filter(t => ROUTING_TAG_ALLOWLIST.has(t));
-  const dropped = normalized.filter(t => !ROUTING_TAG_ALLOWLIST.has(t) && !t.startsWith("x_"));
+  const kept = normalized.filter(isAllowed);
+  const dropped = normalized.filter(t => !isAllowed(t) && !t.startsWith("x_"));
   
   // Sampled logging (5%) to avoid log explosion
   if (dropped.length > 0 && Math.random() < 0.05) {
@@ -424,7 +457,8 @@ async function scoreVideoWithVLM(
   prompt: string,
   styleHints: string | null,
   openaiKey: string,
-  provider: string = "sora"
+  provider: string = "sora",
+  dynamicAllowlist?: Set<string>
 ): Promise<AutoRatingResult> {
   const providerCriteria = getProviderCriteria(provider);
   const isSpritesheetLikely = imageUrl.includes("spritesheet");
@@ -476,7 +510,7 @@ OUTPUT (JSON only):
     let confidence = Math.max(0, Math.min(1, parsed.confidence || 0.5));
 
     const defects = sanitizeDefects(parsed.defects);
-    const routingTags = sanitizeRoutingTags(parsed.routing_tags);
+    const routingTags = sanitizeRoutingTags(parsed.routing_tags, dynamicAllowlist);
     let reasons = Array.isArray(parsed.reasons) ? parsed.reasons.slice(0, 8).map((r: unknown) => String(r).slice(0, 300)).filter((r: string) => r.trim().length > 0) : [];
 
     // Apply mechanical deductions
@@ -604,6 +638,9 @@ Deno.serve(async (req) => {
     const { jobId, batchMode } = await req.json();
 
     if (batchMode) {
+      // Load dynamic allowlist once for the batch
+      const dynamicAllowlist = await getDynamicAllowlist(supabase);
+      
       const { data: unratedJobs, error: fetchError } = await supabase.from("video_jobs")
         .select("id, output_url, thumbnail_url, spritesheet_url, enriched_prompt, original_prompt, provider, style_hints, settings")
         .eq("status", "done").is("auto_rated_at", null).not("output_url", "is", null).limit(10);
@@ -624,7 +661,7 @@ Deno.serve(async (req) => {
         }
         if (!imageUrl) continue;
 
-        const rating = await scoreVideoWithVLM(imageUrl, prompt, job.style_hints, openaiKey, job.provider);
+        const rating = await scoreVideoWithVLM(imageUrl, prompt, job.style_hints, openaiKey, job.provider, dynamicAllowlist);
         await persistRating(supabase, job.id, rating);
         await maybeLearn(supabase, job as VideoJob, rating);
         results.push({ jobId: job.id, ...rating });
@@ -652,7 +689,10 @@ Deno.serve(async (req) => {
     const prompt = job.enriched_prompt || job.original_prompt;
     if (!prompt) return new Response(JSON.stringify({ error: "No prompt" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
-    const rating = await scoreVideoWithVLM(imageUrl, prompt, job.style_hints, openaiKey, job.provider);
+    // Load dynamic allowlist for single job
+    const dynamicAllowlist = await getDynamicAllowlist(supabase);
+    
+    const rating = await scoreVideoWithVLM(imageUrl, prompt, job.style_hints, openaiKey, job.provider, dynamicAllowlist);
     await persistRating(supabase, job.id, rating);
     const learned = await maybeLearn(supabase, job as VideoJob, rating);
 
