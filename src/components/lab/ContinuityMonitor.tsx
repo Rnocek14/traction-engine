@@ -23,6 +23,7 @@ import {
   XCircle,
   Sparkles,
   ArrowRight,
+  Loader2,
 } from "lucide-react";
 import type { Tables } from "@/integrations/supabase/types";
 import {
@@ -60,6 +61,15 @@ export function ContinuityMonitor({
     [clips]
   );
 
+  // Calculate generation progress
+  const generationStats = useMemo(() => {
+    const total = clips.length;
+    const running = clips.filter(c => c.status === "running" || c.status === "queued").length;
+    const done = clips.filter(c => c.status === "done" || c.status === "rendered").length;
+    const failed = clips.filter(c => c.status === "failed").length;
+    return { total, running, done, failed, isGenerating: running > 0 };
+  }, [clips]);
+
   if (clips.length === 0) {
     return (
       <Card className={className}>
@@ -81,17 +91,39 @@ export function ContinuityMonitor({
           <ScoreBadge score={storyScore.score} />
         </div>
         
-        {/* Aggregate Progress */}
-        <div className="space-y-1 mt-2">
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>Story Quality</span>
-            <span>{storyScore.score}/100</span>
+        {/* Generation Progress (when clips are generating) */}
+        {generationStats.isGenerating ? (
+          <div className="space-y-1 mt-2">
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span className="flex items-center gap-1.5">
+                <Loader2 className="h-3 w-3 animate-spin text-primary" />
+                Generating videos...
+              </span>
+              <span>{generationStats.done}/{generationStats.total} complete</span>
+            </div>
+            <Progress 
+              value={(generationStats.done / generationStats.total) * 100} 
+              className="h-2"
+            />
+            {generationStats.failed > 0 && (
+              <p className="text-[10px] text-destructive">
+                {generationStats.failed} failed - check clips for errors
+              </p>
+            )}
           </div>
-          <Progress 
-            value={storyScore.score} 
-            className="h-2"
-          />
-        </div>
+        ) : (
+          /* Quality Score (when done generating) */
+          <div className="space-y-1 mt-2">
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>Story Quality</span>
+              <span>{storyScore.score}/100</span>
+            </div>
+            <Progress 
+              value={storyScore.score} 
+              className="h-2"
+            />
+          </div>
+        )}
         
         {storyScore.weakestClipId && storyScore.weakestScore < 70 && (
           <div className="flex items-center gap-2 mt-2 p-2 bg-amber-500/10 rounded text-xs">
@@ -170,12 +202,20 @@ function ClipRow({ clip, index, storyType, isWeakest, clipScore, onRegenerate }:
   // Get defects for display
   const defects = parseDefectsForDisplay(clip.auto_defects);
 
+  // Status-based styling
+  const isRunning = clip.status === "running" || clip.status === "queued";
+  const isFailed = clip.status === "failed";
+  const isDone = clip.status === "done" || clip.status === "rendered";
+
   return (
     <div 
       className={`
         p-2 rounded border text-xs
-        ${isWeakest ? "border-amber-500/50 bg-amber-500/5" : "border-border"}
-        ${gate.isHardBlock ? "border-destructive/50 bg-destructive/5" : ""}
+        ${isRunning ? "border-primary/50 bg-primary/5" : ""}
+        ${isFailed ? "border-destructive/50 bg-destructive/5" : ""}
+        ${isDone && isWeakest ? "border-amber-500/50 bg-amber-500/5" : ""}
+        ${isDone && !isWeakest && !gate.isHardBlock ? "border-border" : ""}
+        ${gate.isHardBlock && isDone ? "border-destructive/50 bg-destructive/5" : ""}
       `}
     >
       <div className="flex items-center justify-between">
@@ -186,8 +226,28 @@ function ClipRow({ clip, index, storyType, isWeakest, clipScore, onRegenerate }:
           </span>
         </div>
         <div className="flex items-center gap-1.5">
-          <ScoreBadge score={score} />
-          {gate.isHardBlock && (
+          {/* Status Badge */}
+          {isRunning && (
+            <Badge variant="secondary" className="text-[10px] h-5 gap-1">
+              <Loader2 className="h-2.5 w-2.5 animate-spin" />
+              Generating
+            </Badge>
+          )}
+          {isFailed && (
+            <Tooltip>
+              <TooltipTrigger>
+                <Badge variant="destructive" className="text-[10px] h-5 gap-1">
+                  <XCircle className="h-2.5 w-2.5" />
+                  Failed
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs">
+                {clip.error?.slice(0, 100) || "Unknown error"}
+              </TooltipContent>
+            </Tooltip>
+          )}
+          {isDone && <ScoreBadge score={score} />}
+          {gate.isHardBlock && isDone && (
             <Tooltip>
               <TooltipTrigger>
                 <Badge variant="destructive" className="text-[10px] h-5">BLOCK</Badge>
@@ -197,6 +257,13 @@ function ClipRow({ clip, index, storyType, isWeakest, clipScore, onRegenerate }:
           )}
         </div>
       </div>
+
+      {/* Error message for failed clips */}
+      {isFailed && clip.error && (
+        <p className="text-[10px] text-destructive mt-1 truncate">
+          {clip.error.slice(0, 80)}...
+        </p>
+      )}
 
       {/* Issues */}
       {clipScore?.issues && clipScore.issues.length > 0 && (
