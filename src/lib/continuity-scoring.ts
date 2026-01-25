@@ -347,7 +347,7 @@ interface Defect {
   severity?: string;
 }
 
-function parseDefects(defects: unknown): Defect[] {
+export function parseDefects(defects: unknown): Defect[] {
   if (!defects) return [];
   if (Array.isArray(defects)) {
     return defects.map(d => {

@@ -13,7 +13,7 @@ const corsHeaders = {
 
 interface LabVideoRequest {
   prompt: string;
-  provider: "sora" | "runway" | "luma";
+  provider: "sora" | "runway" | "luma" | "auto";
   settings: {
     size: string;
     duration: number;
@@ -22,6 +22,10 @@ interface LabVideoRequest {
   // Prompt tracking for analysis
   original_prompt?: string;  // Raw user input before enrichment
   style_hints?: string;      // Style hints used for enrichment
+  // Story mode support
+  story_job_id?: string;     // Parent story for multi-clip stories
+  sequence_index?: number;   // Position in story sequence
+  camera_direction?: string; // Per-scene camera direction
   // For Luma extend modes:
   extend_generation_id?: string; // Luma generation ID for seamless continuation
   reference_image_url?: string;  // Image URL for visual reference
@@ -130,10 +134,13 @@ Deno.serve(async (req) => {
     const body: LabVideoRequest = await req.json();
     const { 
       prompt, 
-      provider, 
+      provider: requestedProvider, 
       settings, 
       original_prompt,
       style_hints,
+      story_job_id,
+      sequence_index,
+      camera_direction,
       extend_generation_id, 
       reference_image_url, 
       starting_frame_url 
@@ -141,6 +148,9 @@ Deno.serve(async (req) => {
     
     // Support legacy parameter name for backwards compatibility
     const effectiveReferenceUrl = reference_image_url || starting_frame_url;
+    
+    // Support "auto" provider - default to sora for now, could be smarter later
+    const provider = requestedProvider === "auto" ? "sora" : requestedProvider;
 
     if (!prompt || !provider) {
       return new Response(
@@ -185,26 +195,37 @@ Deno.serve(async (req) => {
     // If no original_prompt provided, use the final prompt as original (non-enriched flow)
     const effectiveOriginalPrompt = original_prompt || prompt;
     
-    // Create video job with prompt tracking
+    // Create video job with prompt tracking and story support
+    const jobInsert: Record<string, unknown> = {
+      script_run_id: labScriptId,
+      provider,
+      status: "queued",
+      // Prompt tracking columns for analysis - NEVER null for auto-rating
+      original_prompt: effectiveOriginalPrompt.slice(0, 2000),
+      enriched_prompt: prompt.slice(0, 2000), // The final prompt sent to provider
+      style_hints: style_hints || null,
+      settings: {
+        size: providerSize,
+        requested_seconds: settings.duration,
+        provider_seconds: settings.duration,
+        style: settings.style,
+        prompt: prompt.substring(0, 500), // Truncate for legacy storage
+        lab_mode: true,
+        camera_direction: camera_direction || null,
+      },
+    };
+    
+    // Add story fields if provided
+    if (story_job_id) {
+      jobInsert.story_job_id = story_job_id;
+    }
+    if (sequence_index !== undefined) {
+      jobInsert.sequence_index = sequence_index;
+    }
+    
     const { data: job, error: jobError } = await supabase
       .from("video_jobs")
-      .insert({
-        script_run_id: labScriptId,
-        provider,
-        status: "queued",
-        // Prompt tracking columns for analysis - NEVER null for auto-rating
-        original_prompt: effectiveOriginalPrompt.slice(0, 2000),
-        enriched_prompt: prompt.slice(0, 2000), // The final prompt sent to provider
-        style_hints: style_hints || null,
-        settings: {
-          size: providerSize,
-          requested_seconds: settings.duration,
-          provider_seconds: settings.duration,
-          style: settings.style,
-          prompt: prompt.substring(0, 500), // Truncate for legacy storage
-          lab_mode: true,
-        },
-      })
+      .insert(jobInsert)
       .select()
       .single();
 
