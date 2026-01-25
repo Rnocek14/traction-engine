@@ -58,6 +58,21 @@ Deno.serve(async (req) => {
 
     const userId = claims.claims.sub as string;
 
+    // Role check: require admin or qa role
+    const serviceClient = createClient(supabaseUrl, supabaseServiceKey);
+    const { data: hasRole, error: roleError } = await serviceClient.rpc("has_any_role", {
+      _user_id: userId,
+      _roles: ["admin", "qa"],
+    });
+
+    if (roleError || !hasRole) {
+      console.log(`[promote-routing-tag] User ${userId} lacks required role`);
+      return new Response(
+        JSON.stringify({ error: "Forbidden: requires admin or qa role" }),
+        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     // Parse input
     const { tag, note } = await req.json() as { tag?: string; note?: string };
     if (!tag || typeof tag !== "string") {
@@ -85,9 +100,6 @@ Deno.serve(async (req) => {
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
-
-    // Use service role to insert
-    const serviceClient = createClient(supabaseUrl, supabaseServiceKey);
 
     const { error: insertError } = await serviceClient
       .from("routing_tag_allowlist")

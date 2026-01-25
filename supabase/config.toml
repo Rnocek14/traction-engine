@@ -56,3 +56,9 @@ verify_jwt = false
 
 [functions.get-provider-recommendation]
 verify_jwt = false
+
+[functions.promote-routing-tag]
+verify_jwt = false
+
+[functions.auto-promote-routing-tags]
+verify_jwt = false
