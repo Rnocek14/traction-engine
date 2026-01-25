@@ -78,6 +78,7 @@ interface AutoRatingResult {
   defects: Defect[];
   reasons: string[];
   routing_tags: string[];
+  raw_routing_tags: string[];  // Unfiltered normalized tags for discovery
   hard_fail: boolean;
   regen_recommended: boolean;
   best_use: "final" | "usable_social" | "draft_only" | "reject";
@@ -360,6 +361,19 @@ function hasProperHighScoreEvidence(reasons: string[]): boolean {
 }
 
 /**
+ * Normalizes all VLM routing tags without filtering (for discovery/promotion)
+ */
+function normalizeAllRoutingTags(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  
+  return raw
+    .filter((t): t is string => typeof t === "string" && t.trim().length > 0)
+    .map(normalizeTag)
+    .filter(t => t.length > 0)
+    .slice(0, 15);  // Keep more raw tags for discovery
+}
+
+/**
  * Sanitizes and normalizes routing tags with production-safe behavior:
  * - Applies synonym mapping and normalization
  * - Filters to static allowlist + dynamic allowlist from DB
@@ -510,7 +524,8 @@ OUTPUT (JSON only):
     let confidence = Math.max(0, Math.min(1, parsed.confidence || 0.5));
 
     const defects = sanitizeDefects(parsed.defects);
-    const routingTags = sanitizeRoutingTags(parsed.routing_tags, dynamicAllowlist);
+    const rawRoutingTags = normalizeAllRoutingTags(parsed.routing_tags);  // Capture all tags first
+    const routingTags = sanitizeRoutingTags(parsed.routing_tags, dynamicAllowlist);  // Then filter
     let reasons = Array.isArray(parsed.reasons) ? parsed.reasons.slice(0, 8).map((r: unknown) => String(r).slice(0, 300)).filter((r: string) => r.trim().length > 0) : [];
 
     // Apply mechanical deductions
@@ -575,6 +590,7 @@ OUTPUT (JSON only):
       confidence,
       defects,
       routing_tags: routingTags,
+      raw_routing_tags: rawRoutingTags,  // Unfiltered for discovery
       hard_fail: hardFail,
       regen_recommended: regenRecommended,
       best_use: bestUse,
@@ -589,7 +605,7 @@ OUTPUT (JSON only):
     console.error("VLM scoring failed:", error);
     return {
       prompt_adherence: 50, temporal_consistency: 50, motion_realism: 50, visual_fidelity: 50, cinematic_quality: 50,
-      overall_score: 50, confidence: 0.1, defects: [], routing_tags: [], hard_fail: false, regen_recommended: true,
+      overall_score: 50, confidence: 0.1, defects: [], routing_tags: [], raw_routing_tags: [], hard_fail: false, regen_recommended: true,
       best_use: "draft_only", reasons: ["Auto-rating failed"], match_score: 50, quality_score: 50, motion_score: 50, cinematic_score: 50, artifact_flags: [],
     };
   }
@@ -620,6 +636,7 @@ async function persistRating(supabase: SupabaseClient, jobId: string, rating: Au
     auto_match_score: rating.prompt_adherence, auto_quality_score: rating.visual_fidelity, auto_motion_score: rating.motion_realism, auto_cinematic_score: rating.cinematic_quality,
     auto_overall_score: rating.overall_score, auto_confidence: rating.confidence, auto_rated_at: new Date().toISOString(), auto_rater_version: RATER_VERSION,
     auto_reasons: rating.reasons, auto_artifact_flags: rating.artifact_flags, auto_defects: rating.defects, auto_routing_tags: rating.routing_tags,
+    raw_routing_tags: rating.raw_routing_tags,  // Store unfiltered tags for discovery
     auto_hard_fail: rating.hard_fail, auto_regen_recommended: rating.regen_recommended, auto_best_use: rating.best_use,
   }).eq("id", jobId);
   if (error) throw new Error(`Failed to persist: ${error.message}`);

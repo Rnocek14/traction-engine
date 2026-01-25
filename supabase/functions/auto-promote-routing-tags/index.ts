@@ -79,9 +79,11 @@ Deno.serve(async (req) => {
       console.warn("[auto-promote] RPC failed, using fallback query:", queryError.message);
       
       const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+      
+      // Query raw_routing_tags (unfiltered VLM tags) for discovery
       const { data: jobs, error: jobsError } = await supabase
         .from("video_jobs")
-        .select("provider, auto_routing_tags")
+        .select("provider, raw_routing_tags")
         .eq("status", "done")
         .not("auto_rated_at", "is", null)
         .gte("auto_rated_at", cutoff);
@@ -90,18 +92,28 @@ Deno.serve(async (req) => {
         throw new Error(`Failed to fetch jobs: ${jobsError.message}`);
       }
 
-      // Aggregate in memory
+      // Get current allowlist to exclude already-promoted tags
+      const { data: allowlistData } = await supabase
+        .from("routing_tag_allowlist")
+        .select("tag");
+      const existingAllowlist = new Set((allowlistData ?? []).map((r: { tag: string }) => r.tag));
+
+      // Aggregate in memory - use raw_routing_tags for discovery
       const tagStats = new Map<string, { count: number; providers: Set<string> }>();
       for (const job of jobs || []) {
-        const tags = job.auto_routing_tags as string[] | null;
+        const tags = job.raw_routing_tags as string[] | null;
         if (!tags) continue;
         for (const tag of tags) {
-          if (!tag.startsWith("x_")) continue;
-          const rawTag = tag.slice(2);
-          const existing = tagStats.get(rawTag) || { count: 0, providers: new Set() };
+          // Skip tags already in allowlist (static or dynamic)
+          const normalized = normalizeRoutingTag(tag);
+          if (!normalized || normalized.length < 2) continue;
+          if (existingAllowlist.has(normalized)) continue;
+          if (PROMOTION_BLOCKLIST.has(normalized)) continue;
+          
+          const existing = tagStats.get(normalized) || { count: 0, providers: new Set() };
           existing.count++;
           existing.providers.add(job.provider);
-          tagStats.set(rawTag, existing);
+          tagStats.set(normalized, existing);
         }
       }
 
