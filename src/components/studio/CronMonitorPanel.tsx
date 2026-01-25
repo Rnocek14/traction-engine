@@ -12,7 +12,8 @@ import {
   Activity,
   Loader2,
   Tags,
-  Sparkles
+  Sparkles,
+  ShieldAlert
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
@@ -42,6 +43,13 @@ interface AllowlistHealth {
   promotedLast24h: number;
   lastAutoPromoteAt: string | null;
   lastPromoted: Array<{ tag: string; added_at: string; note: string | null }>;
+}
+
+interface AuthFailures {
+  totalFailures24h: number;
+  affectedEndpoints: number;
+  recentFailures: Array<{ url: string; at: string }>;
+  hasFailures: boolean;
 }
 
 function CronJobCard({ job }: { job: CronJob }) {
@@ -236,6 +244,64 @@ function AllowlistHealthCard({ health }: { health: AllowlistHealth }) {
   );
 }
 
+function AuthFailuresCard({ failures }: { failures: AuthFailures }) {
+  return (
+    <Card className={failures.hasFailures ? "bg-destructive/10 border-destructive/30" : "bg-card/50"}>
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm font-medium flex items-center gap-2">
+            <ShieldAlert className="h-4 w-4" />
+            Auth Failures (24h)
+          </CardTitle>
+          {failures.hasFailures ? (
+            <Badge variant="destructive" className="text-xs">
+              <XCircle className="h-3 w-3 mr-1" />
+              {failures.totalFailures24h} failures
+            </Badge>
+          ) : (
+            <Badge variant="outline" className="text-xs bg-green-500/10 text-green-500 border-green-500/20">
+              <CheckCircle2 className="h-3 w-3 mr-1" />
+              All OK
+            </Badge>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-2 gap-4 mb-4">
+          <div className="text-center">
+            <div className={`text-2xl font-bold ${failures.hasFailures ? "text-destructive" : "text-muted-foreground"}`}>
+              {failures.totalFailures24h}
+            </div>
+            <div className="text-xs text-muted-foreground">Total 401s</div>
+          </div>
+          <div className="text-center">
+            <div className={`text-2xl font-bold ${failures.affectedEndpoints > 0 ? "text-destructive" : "text-muted-foreground"}`}>
+              {failures.affectedEndpoints}
+            </div>
+            <div className="text-xs text-muted-foreground">Endpoints</div>
+          </div>
+        </div>
+
+        {failures.recentFailures.length > 0 && (
+          <div className="pt-4 border-t border-border">
+            <div className="text-xs text-muted-foreground mb-2">Recent Failures</div>
+            <div className="space-y-1.5">
+              {failures.recentFailures.slice(0, 5).map((fail, i) => (
+                <div key={i} className="flex justify-between items-center text-xs">
+                  <span className="font-mono text-destructive truncate max-w-[150px]">{fail.url}</span>
+                  <span className="text-muted-foreground">
+                    {formatDistanceToNow(new Date(fail.at), { addSuffix: true })}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export function CronMonitorPanel() {
   const { data: cronJobs, isLoading: cronLoading, error: cronError } = useQuery({
     queryKey: ["cron-status"],
@@ -244,7 +310,7 @@ export function CronMonitorPanel() {
       if (error) throw error;
       return data as CronJob[];
     },
-    refetchInterval: 60000, // Every minute
+    refetchInterval: 60000,
   });
 
   const { data: health, isLoading: healthLoading } = useQuery({
@@ -254,7 +320,7 @@ export function CronMonitorPanel() {
       if (error) throw error;
       return (data as QueueHealth[])?.[0] || null;
     },
-    refetchInterval: 30000, // Every 30 seconds
+    refetchInterval: 30000,
   });
 
   const { data: allowlistHealth, isLoading: allowlistLoading } = useQuery({
@@ -264,10 +330,20 @@ export function CronMonitorPanel() {
       if (error) throw error;
       return data as unknown as AllowlistHealth | null;
     },
-    refetchInterval: 60000, // Every minute
+    refetchInterval: 60000,
   });
 
-  if (cronLoading || healthLoading || allowlistLoading) {
+  const { data: authFailures, isLoading: authLoading } = useQuery({
+    queryKey: ["cron-auth-failures"],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("get_cron_auth_failures");
+      if (error) throw error;
+      return data as unknown as AuthFailures | null;
+    },
+    refetchInterval: 60000,
+  });
+
+  if (cronLoading || healthLoading || allowlistLoading || authLoading) {
     return (
       <div className="space-y-4">
         <Skeleton className="h-32 w-full" />
@@ -296,14 +372,18 @@ export function CronMonitorPanel() {
 
   return (
     <div className="space-y-4">
+      {/* Auth Failures Alert - Top if issues */}
+      {authFailures?.hasFailures && <AuthFailuresCard failures={authFailures} />}
+
       {/* Health Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {health && <QueueHealthCard health={health} />}
         {allowlistHealth && <AllowlistHealthCard health={allowlistHealth} />}
       </div>
 
-      {/* Cron Jobs */}
+      {/* Auth OK Card + Cron Jobs */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {authFailures && !authFailures.hasFailures && <AuthFailuresCard failures={authFailures} />}
         {cronJobs?.map((job) => (
           <CronJobCard key={job.jobname} job={job} />
         ))}
