@@ -61,6 +61,7 @@ import {
   Wand2,
   Loader2,
   Sparkles,
+  AlertTriangle,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
@@ -91,6 +92,61 @@ interface EnrichedScene extends StoryScene {
 
 const DEFAULT_ACCOUNT_ID = "lab_sandbox";
 
+/**
+ * Get sensible default anchors for new stories
+ */
+function getDefaultAnchors(): ContinuityAnchors {
+  return {
+    character: {
+      description: "",
+      wardrobe: "",
+      identity_lock_tokens: [],
+    },
+    environment: {
+      location: "",
+      time_of_day: "golden_hour",
+      props: [],
+    },
+    camera_language: {
+      lens: "50mm",
+      movement_style: "smooth",
+      framing_rules: "16:9 cinematic framing",
+    },
+    negative_list: ["flicker", "jitter", "identity drift", "morph"],
+  };
+}
+
+/**
+ * Check for missing critical continuity fields
+ */
+function getContinuityWarnings(anchors: ContinuityAnchors, scenes: StoryScene[]): string[] {
+  const warnings: string[] = [];
+  
+  // For multi-scene stories, character is critical
+  if (scenes.length > 1) {
+    if (!anchors.character?.description) {
+      warnings.push("Character description missing - identity may drift between scenes");
+    }
+    if (!anchors.environment?.location) {
+      warnings.push("Location not set - environment may change unexpectedly");
+    }
+  }
+  
+  // Check for scenes without camera direction
+  const scenesWithoutCamera = scenes.filter(s => !s.camera_direction);
+  if (scenesWithoutCamera.length > 0 && scenes.length > 2) {
+    warnings.push(`${scenesWithoutCamera.length} scene(s) missing camera direction`);
+  }
+  
+  // Check for empty prompts
+  const emptyPrompts = scenes.filter(s => !s.prompt.trim());
+  if (emptyPrompts.length > 0) {
+    warnings.push(`${emptyPrompts.length} scene(s) have empty prompts`);
+  }
+  
+  return warnings;
+}
+
 export function StoryBuilderPanel({
   storyId,
   onStoryCreated,
@@ -103,13 +159,16 @@ export function StoryBuilderPanel({
   const [title, setTitle] = useState("");
   const [storyType, setStoryType] = useState<StoryType>("short_story");
   const [scenes, setScenes] = useState<StoryScene[]>([]);
-  const [anchors, setAnchors] = useState<ContinuityAnchors>({});
+  const [anchors, setAnchors] = useState<ContinuityAnchors>(getDefaultAnchors());
   const [isGenerating, setIsGenerating] = useState(false);
   
   // AI prompt enrichment
   const [autoEnhance, setAutoEnhance] = useState(true);
   const [enrichmentProgress, setEnrichmentProgress] = useState(0);
   const [enrichmentStatus, setEnrichmentStatus] = useState<string | null>(null);
+  
+  // Continuity completeness check
+  const continuityWarnings = getContinuityWarnings(anchors, scenes);
 
   // DnD sensors
   const sensors = useSensors(
@@ -271,34 +330,69 @@ export function StoryBuilderPanel({
   });
 
   /**
-   * Build continuity context from anchors for prompt enrichment
+   * Build rich continuity context from anchors for prompt enrichment
+   * This creates a comprehensive "show bible" that the AI uses to maintain consistency
    */
   function buildContinuityContext(anchors: ContinuityAnchors): string {
-    const parts: string[] = [];
+    const sections: string[] = [];
     
-    if (anchors.character?.description) {
-      parts.push(`CHARACTER: ${anchors.character.description}`);
+    // Character Bible - critical for identity consistency
+    if (anchors.character) {
+      const charParts: string[] = [];
+      if (anchors.character.description) {
+        charParts.push(`Description: ${anchors.character.description}`);
+      }
       if (anchors.character.wardrobe) {
-        parts.push(`WARDROBE: ${anchors.character.wardrobe}`);
+        charParts.push(`Wardrobe: ${anchors.character.wardrobe}`);
       }
-    }
-    if (anchors.environment?.location) {
-      parts.push(`LOCATION: ${anchors.environment.location}`);
-      if (anchors.environment.time_of_day) {
-        parts.push(`TIME: ${anchors.environment.time_of_day}`);
+      if (anchors.character.identity_lock_tokens?.length) {
+        charParts.push(`Identity tokens (MUST PRESERVE): ${anchors.character.identity_lock_tokens.join(", ")}`);
       }
-    }
-    if (anchors.camera_language?.movement_style) {
-      parts.push(`CAMERA STYLE: ${anchors.camera_language.movement_style}`);
-      if (anchors.camera_language.lens) {
-        parts.push(`LENS: ${anchors.camera_language.lens}`);
+      if (charParts.length > 0) {
+        sections.push(`=== CHARACTER BIBLE ===\n${charParts.join("\n")}`);
       }
-    }
-    if (anchors.negative_list && anchors.negative_list.length > 0) {
-      parts.push(`AVOID: ${anchors.negative_list.join(", ")}`);
     }
     
-    return parts.join("\n");
+    // Environment Bible - for location continuity
+    if (anchors.environment) {
+      const envParts: string[] = [];
+      if (anchors.environment.location) {
+        envParts.push(`Location: ${anchors.environment.location}`);
+      }
+      if (anchors.environment.time_of_day) {
+        envParts.push(`Time of day: ${anchors.environment.time_of_day}`);
+      }
+      if (anchors.environment.props?.length) {
+        envParts.push(`Key props (MUST APPEAR): ${anchors.environment.props.join(", ")}`);
+      }
+      if (envParts.length > 0) {
+        sections.push(`=== ENVIRONMENT BIBLE ===\n${envParts.join("\n")}`);
+      }
+    }
+    
+    // Camera Language - for visual consistency
+    if (anchors.camera_language) {
+      const camParts: string[] = [];
+      if (anchors.camera_language.lens) {
+        camParts.push(`Lens: ${anchors.camera_language.lens}`);
+      }
+      if (anchors.camera_language.movement_style) {
+        camParts.push(`Movement style: ${anchors.camera_language.movement_style}`);
+      }
+      if (anchors.camera_language.framing_rules) {
+        camParts.push(`Framing: ${anchors.camera_language.framing_rules}`);
+      }
+      if (camParts.length > 0) {
+        sections.push(`=== CAMERA LANGUAGE ===\n${camParts.join("\n")}`);
+      }
+    }
+    
+    // Negative constraints - artifacts to avoid
+    if (anchors.negative_list?.length) {
+      sections.push(`=== AVOID (NEGATIVE PROMPTS) ===\n${anchors.negative_list.join(", ")}`);
+    }
+    
+    return sections.join("\n\n");
   }
 
   /**
@@ -311,11 +405,19 @@ export function StoryBuilderPanel({
     const enrichedScenes = await Promise.all(
       scenes.map(async (scene, index) => {
         try {
-          // Include scene context in style hints
+          // Build comprehensive scene context
+          const scenePosition = index === 0 ? "OPENING" : 
+                               index === scenes.length - 1 ? "CLOSING" : 
+                               `MIDDLE (${index + 1}/${scenes.length})`;
+          
           const sceneContext = [
             continuityContext,
-            `SCENE ${index + 1}/${scenes.length}`,
-            scene.camera_direction ? `CAMERA: ${scene.camera_direction}` : "",
+            `=== SCENE POSITION ===`,
+            `Position: ${scenePosition}`,
+            `Duration target: ${scene.duration_target}s`,
+            scene.camera_direction ? `Camera direction: ${scene.camera_direction}` : "",
+            // Add previous scene context for continuity
+            index > 0 ? `Previous scene: ${scenes[index - 1].prompt.substring(0, 100)}...` : "",
           ].filter(Boolean).join("\n");
           
           const { enriched, error } = await enrichPrompt(
@@ -576,6 +678,21 @@ export function StoryBuilderPanel({
               <span className="font-mono">{enrichmentProgress}%</span>
             </div>
             <Progress value={enrichmentProgress} className="h-1" />
+          </div>
+        )}
+
+        {/* Continuity Warnings */}
+        {continuityWarnings.length > 0 && !isGenerating && (
+          <div className="p-2 rounded-md bg-destructive/10 border border-destructive/30 space-y-1">
+            <div className="flex items-center gap-1.5 text-destructive">
+              <AlertTriangle className="h-3.5 w-3.5" />
+              <span className="text-xs font-medium">Continuity Warnings</span>
+            </div>
+            <ul className="text-[10px] text-muted-foreground space-y-0.5 pl-5">
+              {continuityWarnings.map((warning, i) => (
+                <li key={i} className="list-disc">{warning}</li>
+              ))}
+            </ul>
           </div>
         )}
 
