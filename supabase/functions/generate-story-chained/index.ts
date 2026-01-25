@@ -1,14 +1,13 @@
 /**
  * generate-story-chained
  * 
- * Smart hybrid story generation with intelligent per-scene provider routing:
- * 1. Generate first clip immediately using smart provider selection
- * 2. Wait for it to complete
- * 3. Chain remaining clips sequentially, using previous clip's last frame
- * 4. Each scene uses queue-video-smart for optimal provider selection
+ * VISUAL CONTINUITY-FOCUSED story generation:
+ * 1. Scene 1: Text-to-Video (no reference needed)
+ * 2. Scenes 2+: Image-to-Video using previous scene's thumbnail
+ * 3. All scenes wait for previous to complete before starting
+ * 4. Retry logic for transient network failures
  * 
- * This ensures visual continuity across the entire story while using
- * the best provider for each scene type (action, dialogue, establishing).
+ * This ensures a WATCHABLE story with consistent characters and environments.
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -26,151 +25,80 @@ interface ChainedStoryRequest {
     enriched_prompt?: string;
     duration_target: number;
     camera_direction?: string;
-    shot_type?: string; // For smart routing
-    genre?: string;     // For smart routing
   }>;
   anchors: Record<string, unknown>;
   settings?: {
     size?: string;
-    provider?: "sora" | "runway" | "luma" | "smart"; // Default: smart
   };
-  /**
-   * Resume support: start generating from this scene index (0-based).
-   * Scenes before this index are skipped.
-   * If provided, the function will attempt to get reference frame from the 
-   * last completed clip at index (start_from_index - 1).
-   */
   start_from_index?: number;
-  /**
-   * Optional: explicit reference image URL to use for the first generated scene.
-   * If not provided but start_from_index > 0, will query the last completed clip.
-   */
   resume_reference_url?: string;
 }
 
 /**
- * Extract routing tags from prompt for smart provider selection
- */
-function extractRoutingTags(prompt: string, cameraDirection?: string): string[] {
-  const tags: string[] = [];
-  const lower = prompt.toLowerCase();
-  
-  // Motion tags
-  if (lower.includes("action") || lower.includes("fight") || lower.includes("chase")) tags.push("action");
-  if (lower.includes("slow") || lower.includes("gentle") || lower.includes("peaceful")) tags.push("slow_motion");
-  if (lower.includes("fast") || lower.includes("rapid") || lower.includes("quick")) tags.push("fast_motion");
-  
-  // Shot type tags
-  if (lower.includes("close-up") || lower.includes("closeup") || lower.includes("face")) tags.push("close_up");
-  if (lower.includes("wide shot") || lower.includes("establishing")) tags.push("wide_shot");
-  if (lower.includes("tracking") || lower.includes("follow")) tags.push("tracking");
-  
-  // Subject tags
-  if (lower.includes("character") || lower.includes("person") || lower.includes("human")) tags.push("character");
-  if (lower.includes("landscape") || lower.includes("environment") || lower.includes("scenery")) tags.push("environment");
-  if (lower.includes("dragon") || lower.includes("creature") || lower.includes("monster")) tags.push("creature");
-  
-  // Lighting tags
-  if (lower.includes("dark") || lower.includes("night") || lower.includes("shadow")) tags.push("low_light");
-  if (lower.includes("golden hour") || lower.includes("sunset") || lower.includes("dawn")) tags.push("golden_hour");
-  
-  // Camera direction hints
-  if (cameraDirection) {
-    const camLower = cameraDirection.toLowerCase();
-    if (camLower.includes("dolly") || camLower.includes("track")) tags.push("camera_movement");
-    if (camLower.includes("static") || camLower.includes("locked")) tags.push("static_camera");
-  }
-  
-  return tags.slice(0, 5); // Max 5 tags
-}
-
-/**
- * Infer shot type from prompt for routing hints
- */
-function inferShotType(prompt: string): string | undefined {
-  const lower = prompt.toLowerCase();
-  if (lower.includes("close-up") || lower.includes("closeup") || lower.includes("face")) return "close-up";
-  if (lower.includes("extreme close")) return "extreme-close";
-  if (lower.includes("medium shot") || lower.includes("waist")) return "medium";
-  if (lower.includes("wide shot") || lower.includes("full shot")) return "wide";
-  if (lower.includes("extreme wide") || lower.includes("establishing")) return "extreme-wide";
-  if (lower.includes("tracking") || lower.includes("follow")) return "tracking";
-  if (lower.includes("over the shoulder") || lower.includes("over-shoulder")) return "over-shoulder";
-  return undefined;
-}
-
-/**
- * Wait for a video job to complete
+ * Wait for a video job to complete with retry logic
  */
 async function waitForJobCompletion(
   supabase: ReturnType<typeof createClient>,
   jobId: string,
-  maxWaitMs: number = 300000 // 5 minutes
+  maxWaitMs: number = 300000, // 5 minutes
+  maxRetries: number = 3
 ): Promise<{ success: boolean; outputUrl?: string; thumbnailUrl?: string; error?: string }> {
   const pollInterval = 5000; // 5 seconds
   const startTime = Date.now();
+  let consecutiveErrors = 0;
   
   while (Date.now() - startTime < maxWaitMs) {
-    const { data: job, error } = await supabase
-      .from("video_jobs")
-      .select("status, output_url, thumbnail_url, error")
-      .eq("id", jobId)
-      .single();
-    
-    if (error) {
-      return { success: false, error: `Failed to check job status: ${error.message}` };
+    try {
+      const { data: job, error } = await supabase
+        .from("video_jobs")
+        .select("status, output_url, thumbnail_url, error")
+        .eq("id", jobId)
+        .single();
+      
+      if (error) {
+        consecutiveErrors++;
+        console.warn(`[chained] Poll error (${consecutiveErrors}/${maxRetries}): ${error.message}`);
+        if (consecutiveErrors >= maxRetries) {
+          return { success: false, error: `Failed to check job status after ${maxRetries} retries: ${error.message}` };
+        }
+        await new Promise(resolve => setTimeout(resolve, pollInterval));
+        continue;
+      }
+      
+      // Reset error counter on success
+      consecutiveErrors = 0;
+      
+      if (job.status === "done") {
+        return { 
+          success: true, 
+          outputUrl: job.output_url,
+          thumbnailUrl: job.thumbnail_url,
+        };
+      }
+      
+      if (job.status === "failed") {
+        return { success: false, error: job.error || "Job failed" };
+      }
+      
+      // Wait before next poll
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
+    } catch (err) {
+      consecutiveErrors++;
+      console.warn(`[chained] Network error (${consecutiveErrors}/${maxRetries}): ${err}`);
+      if (consecutiveErrors >= maxRetries) {
+        return { success: false, error: `Network failure after ${maxRetries} retries` };
+      }
+      await new Promise(resolve => setTimeout(resolve, pollInterval * 2)); // Longer wait on network error
     }
-    
-    if (job.status === "done") {
-      return { 
-        success: true, 
-        outputUrl: job.output_url,
-        thumbnailUrl: job.thumbnail_url,
-      };
-    }
-    
-    if (job.status === "failed") {
-      return { success: false, error: job.error || "Job failed" };
-    }
-    
-    // Wait before next poll
-    await new Promise(resolve => setTimeout(resolve, pollInterval));
   }
   
   return { success: false, error: "Timeout waiting for job completion" };
 }
 
 /**
- * Extract last frame from completed video as reference for next clip
- * Prefers thumbnail_url for higher quality
+ * Queue a clip directly to Runway with explicit I2V/T2V mode
  */
-async function getLastFrameReference(
-  supabase: ReturnType<typeof createClient>,
-  jobId: string
-): Promise<string | null> {
-  const { data: job } = await supabase
-    .from("video_jobs")
-    .select("thumbnail_url, output_url")
-    .eq("id", jobId)
-    .single();
-  
-  // Prefer thumbnail (high quality single frame)
-  if (job?.thumbnail_url) {
-    return job.thumbnail_url;
-  }
-  
-  // For Runway, can use video URL directly
-  if (job?.output_url) {
-    return job.output_url;
-  }
-  
-  return null;
-}
-
-/**
- * Queue a single video clip via queue-video-smart for intelligent provider selection
- */
-async function queueClipSmart(
+async function queueClipToRunway(
   supabaseUrl: string,
   supabaseServiceKey: string,
   params: {
@@ -180,17 +108,20 @@ async function queueClipSmart(
     prompt: string;
     originalPrompt: string;
     duration: number;
-    cameraDirection?: string;
     anchors: Record<string, unknown>;
     size: string;
-    shotType?: string;
-    genre?: string;
-    routingTags: string[];
-    referenceImageUrl?: string;
+    referenceImageUrl?: string; // If provided, uses Image-to-Video (gen4_turbo)
   }
-): Promise<{ jobId?: string; provider?: string; error?: string }> {
+): Promise<{ jobId?: string; error?: string }> {
+  const supabase = createClient(supabaseUrl, supabaseServiceKey);
+  
+  // Determine if this is I2V or T2V
+  const isImageToVideo = !!params.referenceImageUrl;
+  
+  console.log(`[chained] Queueing scene ${params.sequenceIndex + 1} as ${isImageToVideo ? "Image-to-Video" : "Text-to-Video"}`);
+  
   try {
-    const response = await fetch(`${supabaseUrl}/functions/v1/queue-video-smart`, {
+    const response = await fetch(`${supabaseUrl}/functions/v1/queue-video-runway`, {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${supabaseServiceKey}`,
@@ -201,16 +132,12 @@ async function queueClipSmart(
         prompt: params.prompt,
         settings: {
           size: params.size,
-          seconds: params.duration,
+          requested_seconds: params.duration,
+          // Force gen4_turbo for I2V (best for continuity), veo3.1_fast for T2V
+          model: isImageToVideo ? "gen4_turbo" : "veo3.1_fast",
         },
+        // Critical: pass reference image for I2V
         starting_frame_url: params.referenceImageUrl,
-        provider: "smart", // Let smart routing decide
-        routing_hint: {
-          shot_type: params.shotType,
-          genre: params.genre,
-          is_chained: params.sequenceIndex > 0, // Enable chained mode for continuity
-          routing_tags: params.routingTags,
-        },
       }),
     });
 
@@ -220,13 +147,10 @@ async function queueClipSmart(
       return { error: data.error || `HTTP ${response.status}` };
     }
 
-    // Extract job ID from response (handle both formats)
-    const jobId = data.jobId || data.job?.id;
-    const provider = data.provider || data.job?.provider;
+    const jobId = data.job?.id;
 
-    // Update the job with story-specific metadata
+    // Link job to story
     if (jobId) {
-      const supabase = createClient(supabaseUrl, supabaseServiceKey);
       const { error: updateError } = await supabase
         .from("video_jobs")
         .update({
@@ -238,13 +162,11 @@ async function queueClipSmart(
         .eq("id", jobId);
       
       if (updateError) {
-        console.error(`[chained] Failed to link job ${jobId} to story:`, updateError.message);
-      } else {
-        console.log(`[chained] Linked job ${jobId} to story ${params.storyJobId} at index ${params.sequenceIndex}`);
+        console.error(`[chained] Failed to link job: ${updateError.message}`);
       }
     }
 
-    return { jobId, provider };
+    return { jobId };
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
@@ -270,23 +192,21 @@ Deno.serve(async (req) => {
       );
     }
 
-    const size = settings?.size || "16:9";
-    const useSmartRouting = settings?.provider === "smart" || !settings?.provider;
-    
-    // Determine starting index for resume support
+    const size = settings?.size || "720x1280";
     const startIndex = start_from_index ?? 0;
     const scenesToProcess = scenes.slice(startIndex);
     
     if (scenesToProcess.length === 0) {
       return new Response(
-        JSON.stringify({ success: true, message: "No scenes to process from given start_from_index" }),
+        JSON.stringify({ success: true, message: "No scenes to process" }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
     
-    console.log(`[chained] Starting story ${story_job_id} from index ${startIndex}, processing ${scenesToProcess.length}/${scenes.length} scenes (smart routing: ${useSmartRouting})`);
+    console.log(`[chained] Starting story ${story_job_id}: ${scenesToProcess.length} scenes from index ${startIndex}`);
+    console.log(`[chained] VISUAL CONTINUITY MODE: Scene 1=T2V, Scenes 2+= I2V with frame chaining`);
 
-    // We need a script_run_id for queue-video-smart, create a placeholder if needed
+    // Get or create script_run for Runway
     let scriptRunId: string;
     const { data: existingScript } = await supabase
       .from("script_runs")
@@ -299,7 +219,6 @@ Deno.serve(async (req) => {
     if (existingScript) {
       scriptRunId = existingScript.id;
     } else {
-      // Create a placeholder script for lab story generation
       const { data: newScript, error: scriptError } = await supabase
         .from("script_runs")
         .insert({
@@ -311,7 +230,7 @@ Deno.serve(async (req) => {
         .single();
       
       if (scriptError || !newScript) {
-        throw new Error(`Failed to create placeholder script: ${scriptError?.message}`);
+        throw new Error(`Failed to create script: ${scriptError?.message}`);
       }
       scriptRunId = newScript.id;
     }
@@ -325,22 +244,20 @@ Deno.serve(async (req) => {
     const results: Array<{ 
       sceneId: string; 
       jobId?: string; 
-      provider?: string;
       status: "queued" | "done" | "failed"; 
       error?: string;
       sequenceIndex: number;
+      mode: "T2V" | "I2V";
     }> = [];
     
     let previousJobId: string | null = null;
+    let previousThumbnailUrl: string | null = resume_reference_url || null;
     
-    // For resume: get initial reference from last completed clip or provided URL
-    let initialReferenceUrl: string | undefined = resume_reference_url;
-    
-    if (!initialReferenceUrl && startIndex > 0) {
-      // Try to get reference from the last completed clip before startIndex
-      const { data: lastCompletedClip } = await supabase
+    // If resuming, get reference from last completed clip
+    if (!previousThumbnailUrl && startIndex > 0) {
+      const { data: lastClip } = await supabase
         .from("video_jobs")
-        .select("id, thumbnail_url, output_url")
+        .select("thumbnail_url")
         .eq("story_job_id", story_job_id)
         .eq("status", "done")
         .lt("sequence_index", startIndex)
@@ -348,165 +265,150 @@ Deno.serve(async (req) => {
         .limit(1)
         .maybeSingle();
       
-      if (lastCompletedClip) {
-        initialReferenceUrl = lastCompletedClip.thumbnail_url || lastCompletedClip.output_url || undefined;
-        console.log(`[chained] Resume: got reference from clip at index ${startIndex - 1}: ${initialReferenceUrl?.substring(0, 60) || "none"}...`);
+      if (lastClip?.thumbnail_url) {
+        previousThumbnailUrl = lastClip.thumbnail_url;
+        console.log(`[chained] Resume: using thumbnail from scene ${startIndex - 1}`);
       }
     }
     
-    // Process scenes sequentially with chaining
+    // Process scenes SEQUENTIALLY with proper chaining
     for (let i = 0; i < scenesToProcess.length; i++) {
       const scene = scenesToProcess[i];
-      const actualSequenceIndex = startIndex + i; // Correct sequence index
+      const actualIndex = startIndex + i;
       const prompt = scene.enriched_prompt || scene.prompt;
       
-      // Extract routing intelligence from the prompt
-      const routingTags = extractRoutingTags(prompt, scene.camera_direction);
-      const shotType = scene.shot_type || inferShotType(prompt);
+      // CRITICAL: Determine if this is the first scene overall (T2V) or continuation (I2V)
+      const isFirstScene = actualIndex === 0;
+      const mode = isFirstScene ? "T2V" : "I2V";
       
-      console.log(`[chained] Scene ${actualSequenceIndex + 1}/${scenes.length}: ${prompt.substring(0, 50)}...`);
-      console.log(`[chained] Routing tags: [${routingTags.join(", ")}], shot_type: ${shotType || "unknown"}`);
+      console.log(`[chained] Scene ${actualIndex + 1}/${scenes.length} [${mode}]: ${prompt.substring(0, 50)}...`);
       
-      // Determine reference image
+      // If not first scene, wait for previous to complete and get its thumbnail
       let referenceImageUrl: string | undefined;
       
-      if (i === 0 && initialReferenceUrl) {
-        // First scene in this batch: use initial reference (from resume or provided)
-        referenceImageUrl = initialReferenceUrl;
-        console.log(`[chained] Using initial reference for first scene: ${referenceImageUrl?.substring(0, 60)}...`);
-      } else if (i > 0 && previousJobId) {
-        // Subsequent scenes: wait for previous to complete and get reference
-        console.log(`[chained] Waiting for previous clip ${previousJobId} to complete...`);
-        
-        const waitResult = await waitForJobCompletion(supabase, previousJobId, 300000);
-        
-        if (!waitResult.success) {
-          console.warn(`[chained] Previous clip failed: ${waitResult.error}`);
-          // Update the failed result
-          const prevResult = results.find(r => r.jobId === previousJobId);
-          if (prevResult) {
-            prevResult.status = "failed";
-            prevResult.error = waitResult.error;
-          }
-          // Continue without reference
-        } else {
-          // Update previous result to done
-          const prevResult = results.find(r => r.jobId === previousJobId);
-          if (prevResult) {
-            prevResult.status = "done";
+      if (!isFirstScene) {
+        if (previousJobId) {
+          console.log(`[chained] Waiting for scene ${actualIndex} to complete...`);
+          
+          const waitResult = await waitForJobCompletion(supabase, previousJobId, 360000); // 6 min timeout
+          
+          if (!waitResult.success) {
+            console.error(`[chained] Scene ${actualIndex} failed: ${waitResult.error}`);
+            results.push({
+              sceneId: scene.id,
+              status: "failed",
+              error: `Previous scene failed: ${waitResult.error}`,
+              sequenceIndex: actualIndex,
+              mode,
+            });
+            break; // Stop chain on failure
           }
           
-          // Get reference frame for chaining
-          referenceImageUrl = await getLastFrameReference(supabase, previousJobId) || undefined;
-          console.log(`[chained] Got reference frame: ${referenceImageUrl?.substring(0, 60) || "none"}...`);
+          // Use thumbnail as reference for next scene
+          referenceImageUrl = waitResult.thumbnailUrl || undefined;
+          console.log(`[chained] ✓ Scene ${actualIndex} done. Got reference: ${referenceImageUrl ? "yes" : "no"}`);
+          
+          // Update previous result to done
+          const prevResult = results.find(r => r.jobId === previousJobId);
+          if (prevResult) prevResult.status = "done";
+        } else if (previousThumbnailUrl) {
+          // Use provided/resume reference
+          referenceImageUrl = previousThumbnailUrl;
+          console.log(`[chained] Using resume reference for scene ${actualIndex + 1}`);
+        }
+        
+        // CRITICAL: If no reference available for I2V scene, we have a problem
+        if (!referenceImageUrl) {
+          console.error(`[chained] ❌ No reference image for I2V scene ${actualIndex + 1}. Chain broken.`);
+          results.push({
+            sceneId: scene.id,
+            status: "failed",
+            error: "No reference image available for Image-to-Video",
+            sequenceIndex: actualIndex,
+            mode,
+          });
+          break;
         }
       }
       
-      // Queue this clip using smart routing with correct sequence index
-      const queueResult = await queueClipSmart(supabaseUrl, supabaseServiceKey, {
+      // Queue the clip with correct mode
+      const queueResult = await queueClipToRunway(supabaseUrl, supabaseServiceKey, {
         scriptRunId,
         storyJobId: story_job_id,
-        sequenceIndex: actualSequenceIndex, // Use correct index for resume
+        sequenceIndex: actualIndex,
         prompt,
         originalPrompt: scene.prompt,
         duration: scene.duration_target,
-        cameraDirection: scene.camera_direction,
         anchors,
         size,
-        shotType,
-        genre: scene.genre,
-        routingTags,
-        referenceImageUrl,
+        referenceImageUrl, // undefined for T2V, URL for I2V
       });
       
       if (queueResult.error) {
-        console.error(`[chained] Failed to queue scene ${actualSequenceIndex + 1}: ${queueResult.error}`);
+        console.error(`[chained] Failed to queue scene ${actualIndex + 1}: ${queueResult.error}`);
         results.push({
           sceneId: scene.id,
           status: "failed",
           error: queueResult.error,
-          sequenceIndex: actualSequenceIndex,
+          sequenceIndex: actualIndex,
+          mode,
         });
-        // Continue to next scene anyway
-        previousJobId = null;
-      } else {
-        console.log(`[chained] Queued scene ${actualSequenceIndex + 1} as job ${queueResult.jobId} via ${queueResult.provider || "smart"}`);
-        results.push({
-          sceneId: scene.id,
-          jobId: queueResult.jobId,
-          provider: queueResult.provider,
-          status: "queued",
-          sequenceIndex: actualSequenceIndex,
-        });
-        previousJobId = queueResult.jobId || null;
+        break; // Stop chain on failure
       }
       
-      // Update story progress (count all done clips, not just this batch)
-      const { count: totalDone } = await supabase
-        .from("video_jobs")
-        .select("id", { count: "exact", head: true })
-        .eq("story_job_id", story_job_id)
-        .eq("status", "done");
+      console.log(`[chained] ✓ Queued scene ${actualIndex + 1} as job ${queueResult.jobId} [${mode}]`);
+      results.push({
+        sceneId: scene.id,
+        jobId: queueResult.jobId,
+        status: "queued",
+        sequenceIndex: actualIndex,
+        mode,
+      });
       
+      previousJobId = queueResult.jobId || null;
+      previousThumbnailUrl = null; // Clear resume reference after first use
+      
+      // Update story progress
       await supabase
         .from("story_jobs")
-        .update({ 
-          completed_clips: totalDone || 0,
-        })
+        .update({ completed_clips: actualIndex })
         .eq("id", story_job_id);
     }
     
-    // Wait for last clip to complete
+    // Wait for final clip
     if (previousJobId) {
-      console.log(`[chained] Waiting for final clip ${previousJobId}...`);
-      const finalResult = await waitForJobCompletion(supabase, previousJobId, 300000);
+      console.log(`[chained] Waiting for final scene...`);
+      const finalResult = await waitForJobCompletion(supabase, previousJobId, 360000);
       const lastResult = results.find(r => r.jobId === previousJobId);
       if (lastResult) {
         lastResult.status = finalResult.success ? "done" : "failed";
-        if (!finalResult.success) {
-          lastResult.error = finalResult.error;
-        }
+        if (!finalResult.success) lastResult.error = finalResult.error;
       }
     }
     
-    // Calculate final stats for this batch
-    const batchSucceeded = results.filter(r => r.status === "done").length;
-    const batchFailed = results.filter(r => r.status === "failed").length;
-    const batchQueued = results.filter(r => r.status === "queued").length;
-    
-    // Get total done count across all clips
-    const { count: totalDone } = await supabase
-      .from("video_jobs")
-      .select("id", { count: "exact", head: true })
-      .eq("story_job_id", story_job_id)
-      .eq("status", "done");
-    
-    // Determine final story status
-    const totalScenes = scenes.length;
-    const allDone = (totalDone || 0) >= totalScenes;
-    const anyFailed = batchFailed > 0;
+    // Final status
+    const succeeded = results.filter(r => r.status === "done").length;
+    const failed = results.filter(r => r.status === "failed").length;
+    const allDone = succeeded === scenes.length;
     
     await supabase
       .from("story_jobs")
       .update({ 
-        status: allDone ? "done" : anyFailed ? "partial" : "generating",
-        completed_clips: totalDone || 0,
+        status: allDone ? "done" : failed > 0 ? "partial" : "generating",
+        completed_clips: succeeded,
       })
       .eq("id", story_job_id);
     
-    console.log(`[chained] Batch complete: ${batchSucceeded} done, ${batchFailed} failed, ${batchQueued} still queued. Total story: ${totalDone}/${totalScenes}`);
+    console.log(`[chained] Complete: ${succeeded}/${scenes.length} done, ${failed} failed`);
 
     return new Response(
       JSON.stringify({
         success: true,
         summary: {
-          total: totalScenes,
-          batchProcessed: scenesToProcess.length,
-          batchSucceeded,
-          batchFailed,
-          batchQueued,
-          totalDone: totalDone || 0,
-          startedFromIndex: startIndex,
+          total: scenes.length,
+          succeeded,
+          failed,
+          visualContinuity: failed === 0, // True if chain unbroken
         },
         results,
       }),
