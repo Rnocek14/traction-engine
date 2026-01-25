@@ -69,16 +69,23 @@ export function StoryVideoPlayer({
     }
   }, [currentIndex, completedClips.length]);
 
-  // Auto-play next clip when index changes
+  // Load video source when clip changes - always set src immediately
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !currentClip?.output_url) return;
     
+    // Always set the source so the video element has content to display
     video.src = currentClip.output_url;
     video.load();
+  }, [currentClip?.output_url]);
+
+  // Handle auto-play when transitioning between clips
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !currentClip?.output_url) return;
     
-    // Play if we should auto-play (from handleEnded) or if already playing
-    if (shouldAutoPlayRef.current || isPlaying) {
+    // Play if we should auto-play (from handleEnded)
+    if (shouldAutoPlayRef.current) {
       video.play()
         .then(() => {
           setIsPlaying(true);
