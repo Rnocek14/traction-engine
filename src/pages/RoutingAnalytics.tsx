@@ -1,9 +1,10 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { 
   ArrowLeft, BarChart3, Loader2, TrendingUp, AlertTriangle, 
   Target, Zap, Trophy, ChevronDown, Film, Layers, Crown, Database,
-  Activity, PieChart, Tag
+  Activity, PieChart, Tag, Check
 } from "lucide-react";
 import { CronMonitorPanel } from "@/components/studio/CronMonitorPanel";
 import { Button } from "@/components/ui/button";
@@ -12,9 +13,11 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { deriveClusterKey } from "@/lib/routing/clusterKey";
+import { toast } from "@/hooks/use-toast";
 
 interface ProviderQuality {
   provider: string;
@@ -85,6 +88,9 @@ interface TagCoverageStats {
 }
 
 export default function RoutingAnalytics() {
+  // Coverage time range state
+  const [coverageDays, setCoverageDays] = useState(7);
+
   // Provider quality distribution
   const { data: providerQuality, isLoading: loadingQuality } = useQuery({
     queryKey: ["routing-provider-quality"],
@@ -311,12 +317,15 @@ export default function RoutingAnalytics() {
 
   // Tag coverage stats - uses RPC for performance, falls back to client-side
   const { data: coverageStats, isLoading: loadingCoverage } = useQuery({
-    queryKey: ["routing-tag-coverage"],
+    queryKey: ["routing-tag-coverage", coverageDays],
     queryFn: async (): Promise<TagCoverageStats> => {
+      // Scale max rows with time range (cap at 20k)
+      const maxRows = Math.min(coverageDays * 1000, 20000);
+      
       // Try RPC first (faster, server-side)
       const { data: rpcData, error: rpcError } = await supabase.rpc("get_routing_tag_coverage", {
-        p_days: 7,
-        p_max_rows: 5000,
+        p_days: coverageDays,
+        p_max_rows: maxRows,
       });
 
       if (!rpcError && rpcData) {
@@ -337,14 +346,14 @@ export default function RoutingAnalytics() {
 
       // Fallback: client-side computation with bounded query
       console.warn("RPC failed, falling back to client-side coverage:", rpcError?.message);
-      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      const cutoff = new Date(Date.now() - coverageDays * 24 * 60 * 60 * 1000).toISOString();
       const { data, error } = await supabase
         .from("video_jobs")
         .select("auto_routing_tags")
         .eq("status", "done")
         .not("auto_rated_at", "is", null)
-        .gte("auto_rated_at", sevenDaysAgo)
-        .limit(1000);
+        .gte("auto_rated_at", cutoff)
+        .limit(Math.min(coverageDays * 1000, 5000));
 
       if (error) throw error;
 
@@ -748,6 +757,26 @@ export default function RoutingAnalytics() {
 
               {/* Coverage Tab */}
               <TabsContent value="coverage" className="space-y-4">
+                {/* Time range selector */}
+                <div className="flex items-center justify-between">
+                  <div className="text-sm text-muted-foreground">
+                    Tag coverage over the selected time range
+                  </div>
+                  <Select
+                    value={String(coverageDays)}
+                    onValueChange={(val) => setCoverageDays(Number(val))}
+                  >
+                    <SelectTrigger className="w-32 h-8 text-xs bg-card">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-popover border-border z-50">
+                      <SelectItem value="7">Last 7 days</SelectItem>
+                      <SelectItem value="30">Last 30 days</SelectItem>
+                      <SelectItem value="90">Last 90 days</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                   <Card>
                     <CardHeader className="pb-2">
@@ -791,7 +820,7 @@ export default function RoutingAnalytics() {
                       <CardTitle className="text-xs text-muted-foreground">Free Tags (x_)</CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <div className="text-2xl font-bold text-blue-400">
+                      <div className="text-2xl font-bold text-accent-foreground">
                         {coverageStats?.freeTagCount ?? 0}
                       </div>
                       <p className="text-xs text-muted-foreground">
@@ -842,7 +871,7 @@ export default function RoutingAnalytics() {
                   <Card>
                     <CardHeader>
                       <CardTitle className="text-sm flex items-center gap-2">
-                        <Tag className="h-4 w-4 text-blue-400" />
+                        <Tag className="h-4 w-4 text-primary" />
                         Top Free Tags (x_)
                       </CardTitle>
                       <CardDescription>
@@ -857,7 +886,7 @@ export default function RoutingAnalytics() {
                               key={i}
                               className="flex items-center gap-3 p-2 rounded-lg bg-muted/30"
                             >
-                              <Badge variant="outline" className="text-[10px] min-w-[120px] justify-center text-blue-400 border-blue-400/30">
+                              <Badge variant="outline" className="text-[10px] min-w-[120px] justify-center text-primary border-primary/30">
                                 {tag.tag}
                               </Badge>
                               <div className="flex-1">
@@ -867,6 +896,23 @@ export default function RoutingAnalytics() {
                                 />
                               </div>
                               <span className="text-xs font-mono w-12 text-right">{tag.count}×</span>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 px-2 text-[10px] text-muted-foreground hover:text-success"
+                                onClick={() => {
+                                  // Log for now; could be wired to DB table later
+                                  const cleanTag = tag.tag.replace(/^x_/, "");
+                                  console.log(`[Promote] Tag candidate: ${cleanTag}`);
+                                  toast({
+                                    title: "Tag noted for promotion",
+                                    description: `"${cleanTag}" logged as allowlist candidate`,
+                                  });
+                                }}
+                              >
+                                <Check className="h-3 w-3 mr-1" />
+                                Promote
+                              </Button>
                             </div>
                           ))}
                         </div>
