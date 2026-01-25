@@ -608,6 +608,30 @@ export type Database = {
         }
         Relationships: []
       }
+      routing_tag_allowlist: {
+        Row: {
+          added_at: string
+          added_by: string | null
+          note: string | null
+          source: string
+          tag: string
+        }
+        Insert: {
+          added_at?: string
+          added_by?: string | null
+          note?: string | null
+          source?: string
+          tag: string
+        }
+        Update: {
+          added_at?: string
+          added_by?: string | null
+          note?: string | null
+          source?: string
+          tag?: string
+        }
+        Relationships: []
+      }
       script_fingerprints: {
         Row: {
           account_id: string

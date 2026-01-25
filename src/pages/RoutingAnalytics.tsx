@@ -900,14 +900,52 @@ export default function RoutingAnalytics() {
                                 variant="ghost"
                                 size="sm"
                                 className="h-6 px-2 text-[10px] text-muted-foreground hover:text-success"
-                                onClick={() => {
-                                  // Log for now; could be wired to DB table later
-                                  const cleanTag = tag.tag.replace(/^x_/, "");
-                                  console.log(`[Promote] Tag candidate: ${cleanTag}`);
-                                  toast({
-                                    title: "Tag noted for promotion",
-                                    description: `"${cleanTag}" logged as allowlist candidate`,
-                                  });
+                                onClick={async () => {
+                                  try {
+                                    const { data: session } = await supabase.auth.getSession();
+                                    if (!session?.session?.access_token) {
+                                      toast({
+                                        title: "Not authenticated",
+                                        description: "Please log in to promote tags",
+                                        variant: "destructive",
+                                      });
+                                      return;
+                                    }
+
+                                    const response = await fetch(
+                                      `https://jrujlpljluvxewjytuab.supabase.co/functions/v1/promote-routing-tag`,
+                                      {
+                                        method: "POST",
+                                        headers: {
+                                          "Content-Type": "application/json",
+                                          Authorization: `Bearer ${session.session.access_token}`,
+                                        },
+                                        body: JSON.stringify({ tag: tag.tag }),
+                                      }
+                                    );
+
+                                    const result = await response.json();
+                                    if (!response.ok) {
+                                      toast({
+                                        title: "Promotion failed",
+                                        description: result.error || "Unknown error",
+                                        variant: "destructive",
+                                      });
+                                      return;
+                                    }
+
+                                    toast({
+                                      title: "Tag promoted!",
+                                      description: `"${result.tag}" added to allowlist`,
+                                    });
+                                  } catch (err) {
+                                    console.error("[Promote] Error:", err);
+                                    toast({
+                                      title: "Promotion failed",
+                                      description: String(err),
+                                      variant: "destructive",
+                                    });
+                                  }
                                 }}
                               >
                                 <Check className="h-3 w-3 mr-1" />
