@@ -14,6 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
+import { deriveClusterKey } from "@/lib/routing/clusterKey";
 
 interface ProviderQuality {
   provider: string;
@@ -308,27 +309,34 @@ export default function RoutingAnalytics() {
     },
   });
 
-  // Tag coverage stats
+  // Tag coverage stats - uses RPC for performance, falls back to client-side
   const { data: coverageStats, isLoading: loadingCoverage } = useQuery({
     queryKey: ["routing-tag-coverage"],
     queryFn: async (): Promise<TagCoverageStats> => {
-      // Client-side deriveClusterKey - matches backend logic exactly
-      const deriveClusterKey = (tags: string[] | null | undefined): string => {
-        if (!tags?.length) return "general";
-        const normalizeTag = (tag: string): string => tag
-          .toLowerCase()
-          .trim()
-          .replace(/[\s-]+/g, "_")
-          .replace(/[^a-z0-9_]/g, "")
-          .replace(/_+/g, "_")
-          .replace(/^_+|_+$/g, "");
-        const normalized = [...new Set(tags.map(normalizeTag).filter(t => t.length > 0))]
-          .sort()
-          .slice(0, 3);
-        return normalized.length > 0 ? normalized.join("|") : "general";
-      };
+      // Try RPC first (faster, server-side)
+      const { data: rpcData, error: rpcError } = await supabase.rpc("get_routing_tag_coverage", {
+        p_days: 7,
+        p_max_rows: 5000,
+      });
 
-      // Bounded query: last 7 days, max 1000 rows
+      if (!rpcError && rpcData) {
+        // RPC returns jsonb, parse it
+        const result = rpcData as {
+          totalRated: number;
+          withTags: number;
+          withoutTags: number;
+          pctWithTags: number;
+          generalClusterPct: number;
+          totalGeneral: number;
+          freeTagCount: number;
+          topKept: Array<{ tag: string; count: number }>;
+          topFree: Array<{ tag: string; count: number }>;
+        };
+        return result;
+      }
+
+      // Fallback: client-side computation with bounded query
+      console.warn("RPC failed, falling back to client-side coverage:", rpcError?.message);
       const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
       const { data, error } = await supabase
         .from("video_jobs")
@@ -346,14 +354,13 @@ export default function RoutingAnalytics() {
       const withoutTags = totalRated - withTags;
       const pctWithTags = totalRated > 0 ? Math.round((withTags / totalRated) * 100) : 0;
 
-      // Compute cluster key client-side and count general clusters
+      // Use shared deriveClusterKey
       const generalJobs = jobs.filter(j => {
         const clusterKey = deriveClusterKey(j.auto_routing_tags as string[] | null);
         return clusterKey === "general";
       }).length;
       const generalClusterPct = totalRated > 0 ? Math.round((generalJobs / totalRated) * 100) : 0;
 
-      // Count tags by type (kept vs x_ free tags)
       const keptCounts = new Map<string, number>();
       const freeCounts = new Map<string, number>();
       let freeTagCount = 0;
@@ -364,24 +371,12 @@ export default function RoutingAnalytics() {
         for (const tag of tags) {
           if (tag.startsWith("x_")) {
             freeTagCount++;
-            const existing = freeCounts.get(tag) || 0;
-            freeCounts.set(tag, existing + 1);
+            freeCounts.set(tag, (freeCounts.get(tag) || 0) + 1);
           } else {
-            const existing = keptCounts.get(tag) || 0;
-            keptCounts.set(tag, existing + 1);
+            keptCounts.set(tag, (keptCounts.get(tag) || 0) + 1);
           }
         }
       }
-
-      const topKept = Array.from(keptCounts.entries())
-        .map(([tag, count]) => ({ tag, count }))
-        .sort((a, b) => b.count - a.count)
-        .slice(0, 15);
-
-      const topFree = Array.from(freeCounts.entries())
-        .map(([tag, count]) => ({ tag, count }))
-        .sort((a, b) => b.count - a.count)
-        .slice(0, 15);
 
       return {
         totalRated,
@@ -391,8 +386,14 @@ export default function RoutingAnalytics() {
         generalClusterPct,
         totalGeneral: generalJobs,
         freeTagCount,
-        topKept,
-        topFree,
+        topKept: Array.from(keptCounts.entries())
+          .map(([tag, count]) => ({ tag, count }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 15),
+        topFree: Array.from(freeCounts.entries())
+          .map(([tag, count]) => ({ tag, count }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 15),
       };
     },
   });
