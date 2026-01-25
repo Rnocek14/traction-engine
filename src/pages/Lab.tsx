@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { Link } from "react-router-dom";
+import { Link, useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Beaker, Brain, Scale, BarChart3 } from "lucide-react";
+import { ArrowLeft, Beaker, Brain, Scale, BarChart3, Film } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -14,6 +14,7 @@ import { LabGeneratePanel, LabResult } from "@/components/lab/LabGeneratePanel";
 import { LabPreviewPanel } from "@/components/lab/LabPreviewPanel";
 import { LearningInspector } from "@/components/lab/LearningInspector";
 import { ComparePanel } from "@/components/lab/ComparePanel";
+import { StoryBuilderPanel } from "@/components/lab/StoryBuilderPanel";
 import { getVideoJobStatus } from "@/lib/lab-engines";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -52,6 +53,8 @@ function saveResults(results: LabResult[]) {
  * Right: Preview (always-visible result + strip)
  */
 export default function Lab() {
+  const { storyId } = useParams<{ storyId?: string }>();
+  const navigate = useNavigate();
   // Initialize from sessionStorage to persist across tab switches
   const [results, setResults] = useState<LabResult[]>(() => loadStoredResults());
   const [activeResultId, setActiveResultId] = useState<string | null>(() => {
@@ -63,7 +66,7 @@ export default function Lab() {
   // Quick-compare state
   const [compareJobIdA, setCompareJobIdA] = useState<string | null>(null);
   const [compareJobIdB, setCompareJobIdB] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<string>("generate");
+  const [activeTab, setActiveTab] = useState<string>(() => storyId ? "story" : "generate");
   
   // Track if we've done initial hydration
   const isHydrated = useRef(false);
@@ -255,6 +258,10 @@ export default function Lab() {
               <Beaker className="h-3.5 w-3.5" />
               Generate
             </TabsTrigger>
+            <TabsTrigger value="story" className="gap-1.5 text-xs h-7">
+              <Film className="h-3.5 w-3.5" />
+              Story
+            </TabsTrigger>
             <TabsTrigger value="compare" className="gap-1.5 text-xs h-7">
               <Scale className="h-3.5 w-3.5" />
               Compare
@@ -305,6 +312,13 @@ export default function Lab() {
               />
             </ResizablePanel>
           </ResizablePanelGroup>
+        </TabsContent>
+
+        <TabsContent value="story" className="flex-1 min-h-0 m-0">
+          <StoryBuilderPanel
+            storyId={storyId}
+            onStoryCreated={(newStoryId) => navigate(`/studio/lab/story/${newStoryId}`)}
+          />
         </TabsContent>
 
         <TabsContent value="compare" className="flex-1 min-h-0 m-0">
