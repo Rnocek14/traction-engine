@@ -10,7 +10,9 @@ import {
   AlertTriangle, 
   Timer,
   Activity,
-  Loader2
+  Loader2,
+  Tags,
+  Sparkles
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
@@ -31,6 +33,15 @@ interface QueueHealth {
   done_count: number;
   oldest_pending_age_seconds: number;
   stale_running_count: number;
+}
+
+interface AllowlistHealth {
+  allowlistTotal: number;
+  allowlistAutoTotal: number;
+  allowlistManualTotal: number;
+  promotedLast24h: number;
+  lastAutoPromoteAt: string | null;
+  lastPromoted: Array<{ tag: string; added_at: string; note: string | null }>;
 }
 
 function CronJobCard({ job }: { job: CronJob }) {
@@ -158,6 +169,73 @@ function QueueHealthCard({ health }: { health: QueueHealth }) {
   );
 }
 
+function AllowlistHealthCard({ health }: { health: AllowlistHealth }) {
+  const hasRecentActivity = health.promotedLast24h > 0;
+
+  return (
+    <Card className="bg-card/50">
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm font-medium flex items-center gap-2">
+            <Tags className="h-4 w-4" />
+            Routing Allowlist
+          </CardTitle>
+          {hasRecentActivity && (
+            <Badge variant="default" className="text-xs bg-green-500/20 text-green-400 border-green-500/30">
+              <Sparkles className="h-3 w-3 mr-1" />
+              +{health.promotedLast24h} today
+            </Badge>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-3 gap-4 mb-4">
+          <div className="text-center">
+            <div className="text-2xl font-bold text-primary">{health.allowlistTotal}</div>
+            <div className="text-xs text-muted-foreground">Total</div>
+          </div>
+          <div className="text-center">
+            <div className="text-2xl font-bold text-blue-500">{health.allowlistAutoTotal}</div>
+            <div className="text-xs text-muted-foreground">Auto</div>
+          </div>
+          <div className="text-center">
+            <div className="text-2xl font-bold text-purple-500">{health.allowlistManualTotal}</div>
+            <div className="text-xs text-muted-foreground">Manual</div>
+          </div>
+        </div>
+
+        <div className="pt-4 border-t border-border space-y-2">
+          <div className="flex justify-between items-center text-sm">
+            <span className="text-muted-foreground">Last Auto-Promote</span>
+            <span className="text-xs">
+              {health.lastAutoPromoteAt 
+                ? formatDistanceToNow(new Date(health.lastAutoPromoteAt), { addSuffix: true })
+                : "Never"}
+            </span>
+          </div>
+
+          {health.lastPromoted.length > 0 && (
+            <div className="mt-3">
+              <div className="text-xs text-muted-foreground mb-2">Recently Promoted</div>
+              <div className="flex flex-wrap gap-1.5">
+                {health.lastPromoted.slice(0, 10).map((item) => (
+                  <Badge 
+                    key={item.tag} 
+                    variant="outline" 
+                    className="text-xs font-mono bg-muted/50"
+                  >
+                    {item.tag}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export function CronMonitorPanel() {
   const { data: cronJobs, isLoading: cronLoading, error: cronError } = useQuery({
     queryKey: ["cron-status"],
@@ -179,7 +257,17 @@ export function CronMonitorPanel() {
     refetchInterval: 30000, // Every 30 seconds
   });
 
-  if (cronLoading || healthLoading) {
+  const { data: allowlistHealth, isLoading: allowlistLoading } = useQuery({
+    queryKey: ["routing-allowlist-health"],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("get_routing_allowlist_health");
+      if (error) throw error;
+      return data as unknown as AllowlistHealth | null;
+    },
+    refetchInterval: 60000, // Every minute
+  });
+
+  if (cronLoading || healthLoading || allowlistLoading) {
     return (
       <div className="space-y-4">
         <Skeleton className="h-32 w-full" />
@@ -208,8 +296,11 @@ export function CronMonitorPanel() {
 
   return (
     <div className="space-y-4">
-      {/* Queue Health */}
-      {health && <QueueHealthCard health={health} />}
+      {/* Health Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {health && <QueueHealthCard health={health} />}
+        {allowlistHealth && <AllowlistHealthCard health={allowlistHealth} />}
+      </div>
 
       {/* Cron Jobs */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
