@@ -878,6 +878,30 @@ export type Database = {
           },
         ]
       }
+      system_task_runs: {
+        Row: {
+          created_at: string
+          detail: Json | null
+          id: string
+          status: string
+          task: string
+        }
+        Insert: {
+          created_at?: string
+          detail?: Json | null
+          id?: string
+          status: string
+          task: string
+        }
+        Update: {
+          created_at?: string
+          detail?: Json | null
+          id?: string
+          status?: string
+          task?: string
+        }
+        Relationships: []
+      }
       topic_bank: {
         Row: {
           claim_sensitivity: number
