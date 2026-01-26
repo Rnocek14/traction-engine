@@ -273,6 +273,7 @@ Focus on WHERE the chain breaks, not just that it did.`;
       prompt_execution: Math.max(0, Math.min(100, parsed.prompt_execution || 50)),
       weak_scenes: Array.isArray(parsed.weak_scenes) ? parsed.weak_scenes.filter(n => typeof n === "number") : [],
       failure_patterns: Array.isArray(parsed.failure_patterns) ? parsed.failure_patterns.map(String).slice(0, 10) : [],
+      recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations.map(String).slice(0, 5) : [],
       scene_scores: Array.isArray(parsed.scene_scores) 
         ? parsed.scene_scores.map(s => ({
             index: s.index ?? 0,
