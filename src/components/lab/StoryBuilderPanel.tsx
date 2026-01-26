@@ -777,6 +777,9 @@ export function StoryBuilderPanel({
         story_spine: newSpine,
         scene_count: newScenes.length,
         scene_1_action_summary: newScenes[0]?.action_summary,
+        scene_0_cut_type: newScenes[0]?.cut_type,
+        scene_1_cut_type: newScenes[1]?.cut_type,
+        scene_2_cut_type: newScenes[2]?.cut_type,
       });
       
       // AUTO-SAVE: Create story in DB immediately (don't wait for Generate Clips click)

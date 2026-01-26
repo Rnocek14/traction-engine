@@ -346,6 +346,8 @@ Generate a complete, filmable storyboard with vivid, specific visual prompts for
       }
       // Note: Provider switch check happens in continue-story-chain (we don't know provider here)
       
+      console.log(`[generate-storyboard] Scene ${i}: role=${effectiveRole} cut_type=${computedCutType}`);
+      
       // Compute zone: use GPT-provided zone, or derive from role
       // Final CTA uses "button" zone for clean hold
       // Early "info" resets use hook speed (pattern interrupt)
