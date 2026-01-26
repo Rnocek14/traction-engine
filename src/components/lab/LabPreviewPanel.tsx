@@ -162,7 +162,7 @@ export function LabPreviewPanel({
       {/* Main Preview Area - takes majority of space */}
       <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
         {activeResult ? (
-          <div className="h-full flex flex-col">
+          <>
             {/* Minimal header - just status */}
             <div className="flex items-center gap-2 p-2 border-b bg-card/30 shrink-0">
               {activeResult.type === "video" ? (
@@ -186,8 +186,8 @@ export function LabPreviewPanel({
               )}
             </div>
 
-            {/* Preview Content - expand to fill available space */}
-            <div className="flex-1 flex items-center justify-center bg-black/50 relative overflow-hidden p-4">
+            {/* Preview Content - expand to fill available space, min-h-0 allows shrinking */}
+            <div className="flex-1 min-h-0 flex items-center justify-center bg-black/50 relative overflow-hidden p-4">
               {activeResult.status === "done" && activeResult.outputUrl ? (
                 previewFailed ? (
                   <div className="flex flex-col items-center gap-3 text-muted-foreground">
@@ -291,7 +291,7 @@ export function LabPreviewPanel({
                 onOpenRating={() => setShowRatingPanel(true)}
               />
             )}
-          </div>
+          </>
         ) : (
           <div className="flex-1 flex items-center justify-center bg-black/30">
             <div className="text-center text-muted-foreground">
