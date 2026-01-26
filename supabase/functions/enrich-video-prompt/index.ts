@@ -1,14 +1,27 @@
 /**
- * Enrich video prompts using GPT-4o + learned patterns
+ * Enrich Video Prompts v2.0
+ * 
+ * Provider-specific prompt compilation:
+ * - Runway: Ultra-concise, camera-first, motion verbs required
+ * - Luma: Physics-focused, environment interactions, moderate length
+ * - Sora: Director's Brief style, detailed cinematography
+ * 
  * Features:
- * - Provider-specific optimization
+ * - Provider-specific GPT instructions
+ * - Hard length caps with intelligent compression
  * - Time-decayed pattern learning
- * - Negative pattern avoidance
- * - Capped learned influence (max 25% of system prompt)
+ * - Non-truncation guarantee
  */
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { 
+  getProviderSystemPrompt, 
+  compileForProvider,
+  PROVIDER_LIMITS,
+  type VideoProvider,
+  type CompiledPrompt 
+} from "../_shared/prompt-compiler.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -17,8 +30,19 @@ const corsHeaders = {
 
 interface EnrichRequest {
   prompt: string;
-  provider?: "sora" | "runway" | "luma";
+  provider?: VideoProvider;
   style_hints?: string;
+}
+
+interface EnrichResponse {
+  original: string;
+  enriched: string;           // The final provider-optimized prompt
+  full_enrichment?: string;   // Full GPT output before compression (for debugging)
+  provider: VideoProvider | null;
+  schema_version: string;
+  char_count: number;
+  max_chars: number;
+  was_compressed: boolean;
 }
 
 interface PatternLearning {
@@ -35,53 +59,23 @@ interface AvoidPattern {
   failed_uses: number;
 }
 
-const SYSTEM_PROMPT = `You are a cinematographer writing video generation prompts for AI video models.
-
-Given a concept, create a rich, photorealistic video prompt that includes:
-1. SUBJECT: Who/what is the main focus? Be specific (person, vehicle, animal, object).
-2. ACTION: What motion is happening? Describe the movement dynamically.
-3. ENVIRONMENT: Where is this? Time of day, weather, setting details.
-4. CAMERA: Shot type (close-up, wide, tracking, aerial), movement (pan, dolly, static, handheld).
-5. LIGHTING: Natural light, golden hour, dramatic shadows, neon, etc.
-6. MOOD: The emotional feel of the scene.
-
-CRITICAL RULES:
-- Always describe REAL, PHOTOREALISTIC content only
-- NEVER use words like "animated", "3D render", "cartoon", "illustration", "CGI", "digital art"
-- Focus on ONE continuous 5-10 second moment
-- Keep under 100 words total
-- Make it visually specific and filmable
-- Describe what the CAMERA SEES, not abstract concepts
-- Include motion verbs: glides, rushes, sweeps, drifts, accelerates
-- Avoid UI elements, text overlays, or screen recordings
-
-Output ONLY the enriched prompt, nothing else.`;
-
-const PROVIDER_HINTS: Record<string, string> = {
-  sora: "\n\nOptimize for Sora: Use detailed 'Director's Brief' style with specific lens choices, color grading hints, and cinematic terminology.",
-  runway: "\n\nOptimize for Runway: Focus on motion and action. Be concise but motion-rich. Emphasize what MOVES and HOW.",
-  luma: "\n\nOptimize for Luma: Emphasize physics-based motion, environmental interactions, and natural movement. Describe how elements flow and interact.",
-};
-
 // Time decay function: patterns from 30+ days ago get 50% weight
 function calculateTimeDecay(lastSuccessAt: string | null): number {
   if (!lastSuccessAt) return 0.5;
   
   const daysSince = (Date.now() - new Date(lastSuccessAt).getTime()) / (1000 * 60 * 60 * 24);
   
-  if (daysSince <= 7) return 1.0;      // Full weight for first week
-  if (daysSince <= 14) return 0.9;     // 90% for second week
-  if (daysSince <= 30) return 0.75;    // 75% for first month
-  if (daysSince <= 60) return 0.5;     // 50% for second month
-  return 0.25;                          // 25% for older patterns
+  if (daysSince <= 7) return 1.0;
+  if (daysSince <= 14) return 0.9;
+  if (daysSince <= 30) return 0.75;
+  if (daysSince <= 60) return 0.5;
+  return 0.25;
 }
 
-// Calculate effective score with time decay
 function calculateEffectiveScore(pattern: PatternLearning): number {
   const baseScore = pattern.average_rating;
   const usageBoost = Math.log(pattern.successful_uses + 1);
   const timeDecay = calculateTimeDecay(pattern.last_success_at);
-  
   return baseScore * usageBoost * timeDecay;
 }
 
@@ -99,7 +93,7 @@ async function getLearnedPatterns(
     .eq("avoid_pattern", false)
     .gte("successful_uses", 2)
     .gte("average_rating", 4)
-    .limit(30); // Fetch more, then filter by score
+    .limit(30);
 
   if (error) {
     console.error("Failed to fetch learned patterns:", error);
@@ -108,16 +102,13 @@ async function getLearnedPatterns(
 
   if (!data || data.length === 0) return [];
 
-  // Sort by effective score (includes time decay)
   const scored = data.map(p => ({
     ...p,
     effectiveScore: calculateEffectiveScore(p as PatternLearning)
   }));
   
   scored.sort((a, b) => b.effectiveScore - a.effectiveScore);
-  
-  // Return top 15 by effective score
-  return scored.slice(0, 15) as PatternLearning[];
+  return scored.slice(0, 10) as PatternLearning[]; // Reduced from 15 to keep prompts shorter
 }
 
 async function getAvoidPatterns(
@@ -133,7 +124,7 @@ async function getAvoidPatterns(
     .eq("provider", provider)
     .eq("avoid_pattern", true)
     .order("failed_uses", { ascending: false })
-    .limit(10);
+    .limit(5); // Reduced from 10
 
   if (error) {
     console.error("Failed to fetch avoid patterns:", error);
@@ -145,56 +136,67 @@ async function getAvoidPatterns(
 
 function buildLearningsHint(
   positivePatterns: PatternLearning[], 
-  avoidPatterns: AvoidPattern[]
+  avoidPatterns: AvoidPattern[],
+  provider: VideoProvider
 ): string {
+  // For Runway, keep learnings very minimal
+  if (provider === "runway" && positivePatterns.length > 3) {
+    positivePatterns = positivePatterns.slice(0, 3);
+  }
+
   const hints: string[] = [];
   
-  // Positive patterns (preferred)
   if (positivePatterns.length > 0) {
     const grouped: Record<string, string[]> = {};
     for (const p of positivePatterns) {
       if (!grouped[p.pattern_type]) grouped[p.pattern_type] = [];
-      if (grouped[p.pattern_type].length < 3) { // Cap at 3 per type
+      if (grouped[p.pattern_type].length < 2) { // Reduced cap
         grouped[p.pattern_type].push(p.pattern_value);
       }
     }
 
     const positiveHints: string[] = [];
     if (grouped.camera) positiveHints.push(`Camera: ${grouped.camera.join(", ")}`);
-    if (grouped.lighting) positiveHints.push(`Lighting: ${grouped.lighting.join(", ")}`);
     if (grouped.motion) positiveHints.push(`Motion: ${grouped.motion.join(", ")}`);
-    if (grouped.mood) positiveHints.push(`Mood: ${grouped.mood.join(", ")}`);
-    if (grouped.semantic_trait) positiveHints.push(`Traits: ${grouped.semantic_trait.join(", ")}`);
-    if (grouped.style_hint) positiveHints.push(`Styles: ${grouped.style_hint.join(", ")}`);
+    if (grouped.lighting && provider !== "runway") { // Skip lighting for Runway
+      positiveHints.push(`Lighting: ${grouped.lighting.join(", ")}`);
+    }
 
     if (positiveHints.length > 0) {
-      hints.push("LEARNED PREFERENCES (use when appropriate):");
+      hints.push("LEARNED (use if relevant):");
       hints.push(...positiveHints);
     }
   }
 
-  // Negative patterns (avoid)
   if (avoidPatterns.length > 0) {
-    const avoidList = avoidPatterns
-      .slice(0, 5) // Cap at 5 avoid patterns
-      .map(p => p.pattern_value);
-    
-    hints.push("");
-    hints.push("AVOID FOR THIS PROVIDER:");
-    hints.push(`- ${avoidList.join(", ")}`);
+    const avoidList = avoidPatterns.slice(0, 3).map(p => p.pattern_value);
+    hints.push(`AVOID: ${avoidList.join(", ")}`);
   }
 
   if (hints.length === 0) return "";
 
-  // Cap total hint length (roughly 25% of base system prompt)
+  // Much stricter length cap for learnings
+  const maxLength = provider === "runway" ? 150 : 250;
   const hintText = hints.join("\n");
-  const maxLength = 400; // ~25% of base prompt tokens
   
   if (hintText.length > maxLength) {
-    return "\n\n" + hintText.substring(0, maxLength) + "...";
+    return "\n\n" + hintText.substring(0, maxLength);
   }
 
   return "\n\n" + hintText;
+}
+
+/**
+ * Get max tokens based on provider (Runway needs fewer)
+ */
+function getMaxTokens(provider: VideoProvider | undefined): number {
+  if (!provider) return 150;
+  switch (provider) {
+    case "runway": return 60;  // Very short
+    case "luma": return 120;
+    case "sora": return 250;
+    default: return 150;
+  }
 }
 
 Deno.serve(async (req) => {
@@ -223,33 +225,37 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-    // Build system prompt with provider hints + learned patterns
-    let systemPrompt = SYSTEM_PROMPT;
-    if (provider && PROVIDER_HINTS[provider]) {
-      systemPrompt += PROVIDER_HINTS[provider];
-    }
+    // Get provider-specific system prompt
+    const effectiveProvider = provider || "luma"; // Default to Luma if not specified
+    let systemPrompt = getProviderSystemPrompt(effectiveProvider);
 
-    // Fetch learned patterns (both positive and negative)
+    // Add learned patterns (but keep them brief)
     if (provider) {
       const [positivePatterns, avoidPatterns] = await Promise.all([
         getLearnedPatterns(supabaseUrl, supabaseServiceKey, provider),
         getAvoidPatterns(supabaseUrl, supabaseServiceKey, provider),
       ]);
       
-      const learningsHint = buildLearningsHint(positivePatterns, avoidPatterns);
+      const learningsHint = buildLearningsHint(positivePatterns, avoidPatterns, provider);
       if (learningsHint) {
         systemPrompt += learningsHint;
-        console.log(`Applied ${positivePatterns.length} positive, ${avoidPatterns.length} avoid patterns for ${provider}`);
+        console.log(`[v2] Applied ${positivePatterns.length} positive, ${avoidPatterns.length} avoid patterns for ${provider}`);
       }
     }
 
-    // Build user message
+    // Build user message - keep it simple
     let userMessage = `Concept: "${prompt}"`;
     if (style_hints) {
-      userMessage += `\n\nStyle hints to incorporate: ${style_hints}`;
+      // For Runway, only add most critical style hint
+      if (provider === "runway") {
+        const firstHint = style_hints.split(",")[0].trim();
+        userMessage += `\nStyle: ${firstHint}`;
+      } else {
+        userMessage += `\nStyle hints: ${style_hints}`;
+      }
     }
 
-    console.log(`Enriching prompt for ${provider || "general"}: "${prompt.substring(0, 50)}..."`);
+    console.log(`[v2] Enriching for ${provider || "general"}: "${prompt.substring(0, 40)}..."`);
 
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -263,8 +269,8 @@ Deno.serve(async (req) => {
           { role: "system", content: systemPrompt },
           { role: "user", content: userMessage },
         ],
-        temperature: 0.8,
-        max_tokens: 200,
+        temperature: 0.7, // Slightly lower for more consistent output
+        max_tokens: getMaxTokens(provider),
       }),
     });
 
@@ -278,24 +284,48 @@ Deno.serve(async (req) => {
     }
 
     const data = await response.json();
-    const enrichedPrompt = data.choices?.[0]?.message?.content?.trim();
+    const gptOutput = data.choices?.[0]?.message?.content?.trim();
 
-    if (!enrichedPrompt) {
+    if (!gptOutput) {
       console.error("No content in OpenAI response:", data);
       return new Response(
-        JSON.stringify({ error: "No enriched prompt generated", original: prompt, enriched: prompt }),
+        JSON.stringify({ 
+          error: "No enriched prompt generated", 
+          original: prompt, 
+          enriched: prompt,
+          provider: provider || null,
+          schema_version: "v2.0",
+          char_count: prompt.length,
+          max_chars: PROVIDER_LIMITS[effectiveProvider].maxChars,
+          was_compressed: false,
+        } as EnrichResponse),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    console.log(`Enriched: "${enrichedPrompt.substring(0, 80)}..."`);
+    // Compile the GPT output for the specific provider
+    const compiled: CompiledPrompt = compileForProvider(
+      effectiveProvider,
+      gptOutput,
+      prompt
+    );
+
+    console.log(`[v2] Result: ${compiled.charCount}/${compiled.maxChars} chars, compressed=${compiled.wasCompressed}`);
+    console.log(`[v2] Final: "${compiled.providerPrompt.substring(0, 60)}..."`);
+
+    const result: EnrichResponse = {
+      original: prompt,
+      enriched: compiled.providerPrompt,      // Provider-optimized final prompt
+      full_enrichment: gptOutput,             // Full GPT output for debugging
+      provider: provider || null,
+      schema_version: compiled.schemaVersion,
+      char_count: compiled.charCount,
+      max_chars: compiled.maxChars,
+      was_compressed: compiled.wasCompressed,
+    };
 
     return new Response(
-      JSON.stringify({
-        original: prompt,
-        enriched: enrichedPrompt,
-        provider: provider || null,
-      }),
+      JSON.stringify(result),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
 

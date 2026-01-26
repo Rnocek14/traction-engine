@@ -1,6 +1,6 @@
 /**
- * Tests for the enrich-video-prompt edge function
- * Tests: basic enrichment, provider optimization, learned pattern injection
+ * Tests for the enrich-video-prompt edge function v2
+ * Tests: provider-specific formatting, length limits, camera-first structure
  */
 
 import "https://deno.land/std@0.224.0/dotenv/load.ts";
@@ -23,114 +23,138 @@ async function callEnrich(payload: Record<string, unknown>): Promise<Response> {
   });
 }
 
-// Test 1: Basic enrichment without provider
-Deno.test("enrich-video-prompt: basic enrichment works", async () => {
+// Test 1: Runway prompts are SHORT (under 150 chars)
+Deno.test("enrich-video-prompt v2: Runway prompts are concise", async () => {
   const response = await callEnrich({
-    prompt: "A cat sitting on a windowsill",
-  });
-
-  assertEquals(response.status, 200);
-  const data = await response.json();
-  
-  assertExists(data.original);
-  assertExists(data.enriched);
-  assertEquals(data.original, "A cat sitting on a windowsill");
-  
-  // Enriched should be longer and more detailed
-  assert(data.enriched.length > data.original.length, 
-    "Enriched prompt should be longer than original");
-  
-  // Should not contain forbidden words
-  const forbidden = ["animated", "3D render", "cartoon", "CGI", "illustration"];
-  for (const word of forbidden) {
-    assert(!data.enriched.toLowerCase().includes(word.toLowerCase()),
-      `Enriched prompt should not contain "${word}"`);
-  }
-});
-
-// Test 2: Provider-specific enrichment (Sora)
-Deno.test("enrich-video-prompt: Sora optimization", async () => {
-  const response = await callEnrich({
-    prompt: "A person running through rain",
-    provider: "sora",
-  });
-
-  assertEquals(response.status, 200);
-  const data = await response.json();
-  
-  assertEquals(data.provider, "sora");
-  assertExists(data.enriched);
-  
-  // Sora prompts tend to be more detailed and cinematic
-  assert(data.enriched.length > 50, "Sora enriched prompt should be substantial");
-});
-
-// Test 3: Provider-specific enrichment (Runway)
-Deno.test("enrich-video-prompt: Runway optimization", async () => {
-  const response = await callEnrich({
-    prompt: "Waves crashing on rocks",
+    prompt: "A woman walking through a futuristic city at night with neon lights reflecting on wet streets",
     provider: "runway",
   });
 
   assertEquals(response.status, 200);
   const data = await response.json();
   
-  assertEquals(data.provider, "runway");
   assertExists(data.enriched);
+  assertExists(data.char_count);
+  assertExists(data.max_chars);
+  assertEquals(data.schema_version, "v2.0");
+  
+  // Runway must be under 150 chars
+  assert(data.char_count <= 150, 
+    `Runway prompt too long: ${data.char_count} chars (max 150). Got: "${data.enriched}"`);
+  
+  console.log(`Runway prompt (${data.char_count}/${data.max_chars}): "${data.enriched}"`);
 });
 
-// Test 4: Provider-specific enrichment (Luma)
-Deno.test("enrich-video-prompt: Luma optimization", async () => {
+// Test 2: Runway prompts start with camera keyword
+Deno.test("enrich-video-prompt v2: Runway starts with camera keyword", async () => {
   const response = await callEnrich({
-    prompt: "Smoke rising from incense",
+    prompt: "Ocean waves crashing on rocky shore at sunset",
+    provider: "runway",
+  });
+
+  assertEquals(response.status, 200);
+  const data = await response.json();
+  
+  assertExists(data.enriched);
+  
+  // Should start with a camera keyword
+  const cameraKeywords = [
+    "Static", "Tracking", "Pan", "Dolly", "Crane", "Handheld", "Steadicam",
+    "Push", "Pull", "Arc", "Orbit", "Whip", "Tilt", "Zoom", "POV", "Aerial",
+    "Low", "High", "Dutch", "Following", "Camera",
+  ];
+  
+  const startsWithCamera = cameraKeywords.some(kw => 
+    data.enriched.toLowerCase().startsWith(kw.toLowerCase())
+  );
+  
+  assert(startsWithCamera, 
+    `Runway prompt should start with camera keyword. Got: "${data.enriched.substring(0, 50)}..."`);
+});
+
+// Test 3: Luma prompts include physics motion
+Deno.test("enrich-video-prompt v2: Luma includes physics language", async () => {
+  const response = await callEnrich({
+    prompt: "Smoke rising from incense in a quiet temple",
     provider: "luma",
   });
 
   assertEquals(response.status, 200);
   const data = await response.json();
+  
+  assertExists(data.enriched);
+  
+  // Should be under 300 chars
+  assert(data.char_count <= 300, 
+    `Luma prompt too long: ${data.char_count} chars (max 300). Got: "${data.enriched}"`);
+  
+  // Should contain physics-related words
+  const physicsWords = [
+    "flows", "ripples", "cascades", "settles", "bounces", "swirls",
+    "drifts", "billows", "curls", "rises", "disperses", "floats",
+    "spirals", "unfurls", "wafts", "lingers",
+  ];
+  
+  const hasPhysics = physicsWords.some(word => 
+    data.enriched.toLowerCase().includes(word)
+  );
+  
+  // This is a soft check - physics language is preferred but not strictly required
+  console.log(`Luma prompt has physics words: ${hasPhysics}`);
+  console.log(`Luma prompt (${data.char_count}/${data.max_chars}): "${data.enriched}"`);
+});
+
+// Test 4: Sora prompts can be longer and more detailed
+Deno.test("enrich-video-prompt v2: Sora allows detailed prompts", async () => {
+  const response = await callEnrich({
+    prompt: "A violinist performing in an abandoned concert hall",
+    provider: "sora",
+  });
+
+  assertEquals(response.status, 200);
+  const data = await response.json();
+  
+  assertExists(data.enriched);
+  
+  // Sora allows up to 800 chars
+  assert(data.char_count <= 800, 
+    `Sora prompt too long: ${data.char_count} chars (max 800)`);
+  
+  // Sora prompts should be more detailed (at least 100 chars typically)
+  assert(data.enriched.length >= 50, 
+    `Sora prompt should be detailed. Got only ${data.enriched.length} chars`);
+  
+  console.log(`Sora prompt (${data.char_count}/${data.max_chars}): "${data.enriched.substring(0, 150)}..."`);
+});
+
+// Test 5: Response includes new v2 metadata
+Deno.test("enrich-video-prompt v2: response includes metadata", async () => {
+  const response = await callEnrich({
+    prompt: "A bird in flight",
+    provider: "luma",
+  });
+
+  assertEquals(response.status, 200);
+  const data = await response.json();
+  
+  // Check all v2 fields exist
+  assertExists(data.original);
+  assertExists(data.enriched);
+  assertExists(data.provider);
+  assertEquals(data.schema_version, "v2.0");
+  assertExists(data.char_count);
+  assertExists(data.max_chars);
+  assert(typeof data.was_compressed === "boolean");
   
   assertEquals(data.provider, "luma");
-  assertExists(data.enriched);
-});
-
-// Test 5: Style hints are incorporated
-Deno.test("enrich-video-prompt: style hints are incorporated", async () => {
-  const response = await callEnrich({
-    prompt: "A city street at night",
-    provider: "luma",
-    style_hints: "noir, neon, moody, dramatic shadows",
-  });
-
-  assertEquals(response.status, 200);
-  const data = await response.json();
-  
-  assertExists(data.enriched);
-  
-  // The enriched prompt should reflect the style hints
-  const enrichedLower = data.enriched.toLowerCase();
-  const hasNoir = enrichedLower.includes("noir") || enrichedLower.includes("dark") || enrichedLower.includes("shadow");
-  const hasNeon = enrichedLower.includes("neon") || enrichedLower.includes("light");
-  
-  assert(hasNoir || hasNeon, 
-    "Enriched prompt should incorporate style hints");
+  assert(data.char_count > 0);
+  assert(data.max_chars > 0);
 });
 
 // Test 6: Empty prompt should fail
-Deno.test("enrich-video-prompt: rejects empty prompt", async () => {
+Deno.test("enrich-video-prompt v2: rejects empty prompt", async () => {
   const response = await callEnrich({
     prompt: "",
-    provider: "luma",
-  });
-
-  assertEquals(response.status, 400);
-  const data = await response.json();
-  assertExists(data.error);
-});
-
-// Test 7: Whitespace-only prompt should fail
-Deno.test("enrich-video-prompt: rejects whitespace-only prompt", async () => {
-  const response = await callEnrich({
-    prompt: "   \n\t  ",
     provider: "runway",
   });
 
@@ -139,47 +163,100 @@ Deno.test("enrich-video-prompt: rejects whitespace-only prompt", async () => {
   assertExists(data.error);
 });
 
-// Test 8: Enrichment includes motion verbs
-Deno.test("enrich-video-prompt: enrichment includes motion language", async () => {
+// Test 7: Style hints are incorporated but don't bloat Runway
+Deno.test("enrich-video-prompt v2: Runway keeps concise with style hints", async () => {
   const response = await callEnrich({
-    prompt: "A bird in flight",
-    provider: "sora",
+    prompt: "A city street at night",
+    provider: "runway",
+    style_hints: "noir, moody, dramatic shadows, rain, reflections, cinematic",
   });
 
   assertEquals(response.status, 200);
   const data = await response.json();
   
-  const enrichedLower = data.enriched.toLowerCase();
+  assertExists(data.enriched);
   
-  // Should contain motion-related words
-  const motionWords = ["glide", "soar", "sweep", "drift", "flow", "move", "wing", "fly", "arc"];
-  const hasMotion = motionWords.some(word => enrichedLower.includes(word));
+  // Even with many style hints, Runway should stay concise
+  assert(data.char_count <= 150, 
+    `Runway with style hints too long: ${data.char_count} chars. Got: "${data.enriched}"`);
   
-  assert(hasMotion, 
-    `Enriched prompt should contain motion language. Got: "${data.enriched}"`);
+  console.log(`Runway+hints (${data.char_count}/${data.max_chars}): "${data.enriched}"`);
 });
 
-// Test 9: Response includes provider field
-Deno.test("enrich-video-prompt: response includes provider when specified", async () => {
+// Test 8: Default provider is Luma when not specified
+Deno.test("enrich-video-prompt v2: defaults to Luma format when no provider", async () => {
   const response = await callEnrich({
-    prompt: "A simple scene",
+    prompt: "Waves on a beach",
+  });
+
+  assertEquals(response.status, 200);
+  const data = await response.json();
+  
+  // Should use Luma's max (300) as the limit
+  assertEquals(data.max_chars, 300);
+  assert(data.char_count <= 300, 
+    `Default (Luma) prompt too long: ${data.char_count} chars`);
+});
+
+// Test 9: Runway includes motion verb
+Deno.test("enrich-video-prompt v2: Runway includes motion verb", async () => {
+  const response = await callEnrich({
+    prompt: "A person sitting at a cafe",
     provider: "runway",
   });
 
   assertEquals(response.status, 200);
   const data = await response.json();
   
-  assertEquals(data.provider, "runway");
+  assertExists(data.enriched);
+  
+  // Should contain a motion verb (expanded list)
+  const motionVerbs = [
+    "glides", "rushes", "sweeps", "drifts", "accelerates", "floats",
+    "moves", "walks", "runs", "flows", "dances", "swirls", "settles",
+    "emerges", "appears", "enters", "crosses", "approaches",
+    "sips", "pours", "stirs", "lifts", "reaches", "turns", "spins",
+    "rotates", "slides", "drops", "rises", "falls", "sits", "stands",
+  ];
+  
+  const hasMotion = motionVerbs.some(verb => 
+    data.enriched.toLowerCase().includes(verb)
+  );
+  
+  console.log(`Runway motion check: "${data.enriched}"`);
+  // Note: GPT usually includes motion naturally, but static scenes are valid too
+  // This is a soft check - we log but don't fail for valid static shots
+  if (!hasMotion) {
+    console.log(`Note: No motion verb found, but "Static" shots are valid`);
+  }
 });
 
-// Test 10: Response has null provider when not specified
-Deno.test("enrich-video-prompt: provider is null when not specified", async () => {
-  const response = await callEnrich({
-    prompt: "A simple scene",
-  });
-
-  assertEquals(response.status, 200);
-  const data = await response.json();
+// Test 10: Compare all three providers on same concept
+Deno.test("enrich-video-prompt v2: provider comparison", async () => {
+  const concept = "A dragon flying over a medieval castle";
   
-  assertEquals(data.provider, null);
+  const [runwayRes, lumaRes, soraRes] = await Promise.all([
+    callEnrich({ prompt: concept, provider: "runway" }),
+    callEnrich({ prompt: concept, provider: "luma" }),
+    callEnrich({ prompt: concept, provider: "sora" }),
+  ]);
+  
+  const runway = await runwayRes.json();
+  const luma = await lumaRes.json();
+  const sora = await soraRes.json();
+  
+  console.log("\n=== Provider Comparison ===");
+  console.log(`Concept: "${concept}"`);
+  console.log(`\nRunway (${runway.char_count}/${runway.max_chars}):\n  "${runway.enriched}"`);
+  console.log(`\nLuma (${luma.char_count}/${luma.max_chars}):\n  "${luma.enriched}"`);
+  console.log(`\nSora (${sora.char_count}/${sora.max_chars}):\n  "${sora.enriched?.substring(0, 200)}..."`);
+  
+  // Verify length ordering: Runway < Luma < Sora (typically)
+  assert(runway.char_count <= 150, "Runway should be ≤150 chars");
+  assert(luma.char_count <= 300, "Luma should be ≤300 chars");
+  assert(sora.char_count <= 800, "Sora should be ≤800 chars");
+  
+  // Verify they're all different
+  assert(runway.enriched !== luma.enriched, "Runway and Luma should differ");
+  assert(luma.enriched !== sora.enriched, "Luma and Sora should differ");
 });

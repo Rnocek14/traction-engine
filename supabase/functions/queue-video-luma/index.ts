@@ -138,15 +138,16 @@ Deno.serve(async (req) => {
     );
 
     // Create video job record - store provider_job_id in settings, not openai_video_id
+    // IMPORTANT: No truncation - text columns are unlimited
     const { data: job, error: jobError } = await supabase
       .from("video_jobs")
       .insert({
         script_run_id: body.script_run_id,
         provider: "luma",
         status: "queued",
-        // Store prompts in correct columns for auto-rating
-        original_prompt: scenePrompt.slice(0, 2000),
-        enriched_prompt: videoPrompt.slice(0, 2000),
+        // Store prompts in correct columns for auto-rating - NO TRUNCATION
+        original_prompt: scenePrompt,
+        enriched_prompt: videoPrompt,
         settings: {
           size: body.settings.size,
           aspect_ratio: mapSizeToLumaAspect(body.settings.size),

@@ -196,20 +196,23 @@ Deno.serve(async (req) => {
     const effectiveOriginalPrompt = original_prompt || prompt;
     
     // Create video job with prompt tracking and story support
+    // IMPORTANT: Never truncate prompts - text columns are unlimited
     const jobInsert: Record<string, unknown> = {
       script_run_id: labScriptId,
       provider,
       status: "queued",
       // Prompt tracking columns for analysis - NEVER null for auto-rating
-      original_prompt: effectiveOriginalPrompt.slice(0, 2000),
-      enriched_prompt: prompt.slice(0, 2000), // The final prompt sent to provider
+      // NO TRUNCATION - store full prompts for proper analysis
+      original_prompt: effectiveOriginalPrompt,
+      enriched_prompt: prompt, // The final prompt sent to provider (full)
       style_hints: style_hints || null,
       settings: {
         size: providerSize,
         requested_seconds: settings.duration,
         provider_seconds: settings.duration,
         style: settings.style,
-        prompt: prompt.substring(0, 500), // Truncate for legacy storage
+        // Legacy prompt field kept for backwards compat, but use enriched_prompt
+        prompt: prompt,
         lab_mode: true,
         camera_direction: camera_direction || null,
       },
