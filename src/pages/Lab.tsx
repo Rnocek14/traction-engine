@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { Link, useParams, useNavigate } from "react-router-dom";
+import { Link, useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Beaker, Brain, Scale, BarChart3, Film } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -55,7 +55,12 @@ function saveResults(results: LabResult[]) {
  */
 export default function Lab() {
   const { storyId } = useParams<{ storyId?: string }>();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  
+  // Check if we're in "new story" mode (navigated to /studio/lab/story?new=true)
+  const forceNewStory = searchParams.get("new") === "true";
+  
   // Initialize from sessionStorage to persist across tab switches
   const [results, setResults] = useState<LabResult[]>(() => loadStoredResults());
   const [activeResultId, setActiveResultId] = useState<string | null>(() => {
@@ -67,7 +72,7 @@ export default function Lab() {
   // Quick-compare state
   const [compareJobIdA, setCompareJobIdA] = useState<string | null>(null);
   const [compareJobIdB, setCompareJobIdB] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<string>(() => storyId ? "story" : "generate");
+  const [activeTab, setActiveTab] = useState<string>(() => (storyId || forceNewStory) ? "story" : "generate");
   
   // Track if we've done initial hydration
   const isHydrated = useRef(false);
@@ -328,6 +333,7 @@ export default function Lab() {
           <div className="flex-1 overflow-y-auto">
             <StoryBuilderPanel
               storyId={storyId}
+              forceNew={forceNewStory && !storyId}
               onStoryCreated={(newStoryId) => navigate(`/studio/lab/story/${newStoryId}`)}
             />
           </div>

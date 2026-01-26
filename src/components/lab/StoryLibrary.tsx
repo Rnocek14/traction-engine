@@ -294,10 +294,10 @@ export function StoryLibrary({
             size="sm"
             className="h-7 px-2 gap-1"
             onClick={(e) => {
-            e.stopPropagation();
-            navigate("/studio/lab/story");
-          }}
-        >
+              e.stopPropagation();
+              navigate("/studio/lab/story?new=true");
+            }}
+          >
             <Plus className="h-3 w-3" />
             <span className="text-xs">New</span>
           </Button>
