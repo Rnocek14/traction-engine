@@ -1,115 +1,277 @@
-# Scene-Role Based Provider Routing V2 - IMPLEMENTED
 
-## Summary
+# Director Brain Layer Implementation Plan
 
-Transformed the story generation system from "pick a provider" to **"assign roles to scenes, route each role to the optimal model."**
+## Executive Summary
 
-**Philosophy:**
-- **Sora** = Story backbone (coherent, cinematic hero moments)
-- **Runway** = Attention mechanics (hooks, brainrot resets, punchy motion)
-- **Luma** = Atmosphere/physics (smoke, water, particles, mood glue)
+This plan adds a **story-first "Director Brain"** layer on top of your existing infrastructure. The goal is to make outputs feel "directed" rather than "random clips" by adding structured metadata about narrative intent, visual motifs, and beat-level change tracking.
+
+**Current State:** 60-65% complete - solid routing, tier logic, continuity anchors, and provider-specific prompt compilers exist.
+
+**Gap:** Missing story-level intelligence (spine, motifs, change labels) and edit grammar (cut cadence zones).
 
 ---
 
-## Architecture
+## Phase 1: Expand Storyboard Schema (Safe, Fast Win)
+
+Add new fields to the storyboard output without breaking existing generation.
+
+### 1.1 Update `generate-storyboard` System Prompt
+
+**File:** `supabase/functions/generate-storyboard/index.ts`
+
+Add these fields to the GPT-4o output schema:
 
 ```text
+Root Level (new):
+- story_spine: string (1 sentence: "Person discovers X → tries Y → realizes Z")
+- motif_anchors: string[] (2-3 recurring visual metaphors)
+- palette_keywords: string[] (consistent color terms)
+
+Per Scene (new):
+- change_type: "info" | "emotion" | "goal" | "stakes" | "location"
+- narration_line: string (optional TTS line)
+- onscreen_text: string (optional text overlay)
+```
+
+### 1.2 Update TypeScript Interfaces
+
+**Files to update:**
+- `src/lib/continuity-scoring.ts` - Update `StoryScene` and `Storyboard` interfaces
+- `supabase/functions/generate-storyboard/index.ts` - Update `GeneratedScene` and `GeneratedStoryboard`
+
+### 1.3 Backward Compatibility
+
+All new fields are **optional with sensible defaults**:
+- `story_spine` defaults to empty string
+- `motif_anchors` defaults to empty array
+- `change_type` defaults to "info"
+- `narration_line` and `onscreen_text` default to undefined
+
+**Risk Level:** Low - additive only, existing stories continue to work.
+
+---
+
+## Phase 2: Cut Cadence Zones (Logic Only)
+
+Introduce zone-based duration suggestions that reflect attention science.
+
+### 2.1 Define Zone Configuration
+
+**New file:** `src/lib/cut-cadence.ts`
+
+```text
+Zones:
 ┌─────────────────────────────────────────────────────────────────┐
-│                    STORY TEMPLATE                               │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │  Scene 1: HOOK         │ role: "hook"      │ → Runway   │   │
-│  │  Scene 2: PROBLEM      │ role: "problem"   │ → Luma     │   │
-│  │  Scene 3: STORY_A      │ role: "story_a"   │ → Sora     │   │
-│  │  Scene 4: RESET        │ role: "reset"     │ → Runway   │   │
-│  │  Scene 5: STORY_B      │ role: "story_b"   │ → Sora     │   │
-│  │  Scene 6: CTA          │ role: "cta"       │ → Luma     │   │
-│  └─────────────────────────────────────────────────────────┘   │
+│  Zone        │ Duration Range │ Cut Speed  │ Typical Roles     │
+├─────────────────────────────────────────────────────────────────┤
+│  hook        │ 0.4s - 0.9s    │ Very Fast  │ hook              │
+│  setup       │ 1.2s - 2.0s    │ Medium     │ problem, story_a  │
+│  escalation  │ 1.0s - 1.8s    │ Fast       │ reset, story_b    │
+│  payoff      │ 1.8s - 3.5s    │ Slow       │ cta, atmosphere   │
+│  button      │ 1.0s - 2.0s    │ Clean Hold │ cta (final)       │
 └─────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────┐
-│                  SCENE ROLE ROUTER                              │
-│  role → { provider, prompt_style, fallback_chain }              │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────┐
-│             PROVIDER-SPECIFIC PROMPT COMPILER                   │
-│  (Prompting V2: Runway ~100 chars, Luma ~200, Sora ~600)        │
-└─────────────────────────────────────────────────────────────────┘
+```
+
+### 2.2 Zone-Aware Duration Suggestion
+
+Add function `suggestDurationForZone(role, sceneIndex, totalScenes)` that:
+1. Determines which zone the scene falls into
+2. Returns recommended duration range
+3. Can be used in UI to show guidance
+
+### 2.3 Integration with Story Templates
+
+**File:** `src/lib/story-templates.ts`
+
+Add `zone` field to `StoryTemplateScene`:
+```
+zone: "hook" | "setup" | "escalation" | "payoff" | "button"
+```
+
+**Risk Level:** Low - logic only, doesn't change generation behavior yet.
+
+---
+
+## Phase 3: One-Hero-Shot Rule (Contained)
+
+Designate exactly one beat per video for `sora-2-pro` quality (the "poster frame").
+
+### 3.1 Add Hero Flag to Scene Schema
+
+**Per-scene field:**
+```
+is_hero_shot: boolean (default: false)
+```
+
+### 3.2 Auto-Selection Logic
+
+**In `generate-storyboard`:**
+- Volume tier: Auto-mark `story_b` as hero shot (if exists), else `story_a`
+- Hero tier: Allow multiple hero shots (story_a, story_b, establish)
+
+### 3.3 Provider Selection Enhancement
+
+**In routing logic:**
+- When `is_hero_shot: true` → use `sora-2-pro` (when available)
+- Otherwise → use `sora-2` for Sora-routed scenes
+
+### 3.4 UI Indicator
+
+**In `StoryBuilderPanel`:**
+- Show star icon on hero shot scene
+- Allow manual toggle to override auto-selection
+
+**Risk Level:** Low - enhances existing routing, doesn't change fallback logic.
+
+---
+
+## Phase 4: Template-First CTA (Cost + Consistency Win)
+
+Route CTA role to check for template assets before falling back to generation.
+
+### 4.1 CTA Template Asset Storage
+
+**New Supabase table (optional):** `cta_templates`
+```
+id: uuid
+account_id: text
+template_url: text (static image/video)
+overlay_config: jsonb (text positions, brand colors)
+created_at: timestamp
+```
+
+### 4.2 CTA Routing Logic
+
+**In `generate-story-chained` and `continue-story-chain`:**
+
+```text
+if (role === "cta") {
+  const template = await fetchCtaTemplate(account_id);
+  if (template) {
+    // Use template asset + overlay text
+    return { type: "template", asset: template };
+  } else {
+    // Fall back to Luma generation
+    return routeBySceneRole("cta", options);
+  }
+}
+```
+
+### 4.3 Fallback Behavior
+
+- If no template exists: Generate with Luma (current behavior)
+- Template + generation hybrid: Use Luma for background, overlay branded text
+
+**Risk Level:** Medium - requires new table and template management UI (can defer).
+
+---
+
+## Implementation Order
+
+### Immediate (This Session)
+
+| Step | Description | Effort |
+|------|-------------|--------|
+| 1.1 | Update `generate-storyboard` system prompt to output new fields | 30 min |
+| 1.2 | Update TypeScript interfaces in `continuity-scoring.ts` | 15 min |
+| 1.3 | Test backward compatibility with existing stories | 10 min |
+
+### Next Session
+
+| Step | Description | Effort |
+|------|-------------|--------|
+| 2.1-2.3 | Cut cadence zone logic and template integration | 45 min |
+| 3.1-3.4 | Hero shot flag and UI indicator | 30 min |
+
+### Future (When Needed)
+
+| Step | Description | Effort |
+|------|-------------|--------|
+| 4.1-4.3 | CTA template system with DB table | 2-3 hours |
+
+---
+
+## Technical Details
+
+### Updated `GeneratedStoryboard` Interface
+
+```typescript
+interface GeneratedStoryboard {
+  title: string;
+  // NEW: Story-level intelligence
+  story_spine: string;           // "Person discovers X → tries Y → realizes Z"
+  motif_anchors: string[];       // ["floating data strings", "shadow figure"]
+  palette_keywords: string[];    // ["cool blues", "warm highlights"]
+  
+  scenes: GeneratedScene[];
+  anchors: ContinuityAnchors;
+}
+
+interface GeneratedScene {
+  prompt: string;
+  duration_target: number;
+  camera_direction: string;
+  role: SceneRole;
+  // NEW: Beat-level intelligence
+  change_type: "info" | "emotion" | "goal" | "stakes" | "location";
+  narration_line?: string;       // TTS line for this beat
+  onscreen_text?: string;        // Text overlay
+  is_hero_shot?: boolean;        // sora-2-pro flag
+}
+```
+
+### Updated System Prompt Addition
+
+```text
+NARRATIVE STRUCTURE (required):
+- story_spine: One sentence capturing desire → tension → turn → payoff
+- motif_anchors: 2-3 recurring visual metaphors that appear across scenes
+- palette_keywords: 3-5 color terms for consistency
+
+PER-SCENE REQUIREMENTS:
+- change_type: What changes from the previous beat? 
+  Options: "info" (new learning), "emotion" (feeling shift), 
+  "goal" (what character wants), "stakes" (why it matters), 
+  "location" (physical move)
+- Every cut MUST change something meaningful (no montage drift)
 ```
 
 ---
 
-## Scene Roles
+## Validation Criteria
 
-| Role | Purpose | Default Provider | Fallbacks | Duration |
-|------|---------|------------------|-----------|----------|
-| `hook` | Pattern interrupt | Runway | Luma → Sora | 2-4s |
-| `problem` | Show pain point | Luma | Runway → Sora | 4-6s |
-| `story_a` | First narrative beat | Sora | Luma → Runway | 6-8s |
-| `reset` | Attention micro-cut | Runway | Luma → Sora | 2-3s |
-| `story_b` | Payoff/reveal | Sora | Luma → Runway | 6-10s |
-| `cta` | Call to action | Luma | Runway → Sora | 4-6s |
-| `atmosphere` | Texture glue | Luma | Runway → Sora | 3-5s |
-| `establish` | Wide environment | Sora | Luma → Runway | 4-6s |
+### After Phase 1 Implementation
 
----
+Generate 3 test storyboards and verify:
+- [ ] Every storyboard has a non-empty `story_spine`
+- [ ] At least 2 `motif_anchors` per story
+- [ ] Every scene has a `change_type` (no nulls)
+- [ ] Backward compatibility: old stories load without errors
 
-## Files Created/Modified
+### After Phase 3 Implementation
 
-### New Files
-- `src/types/scene-roles.ts` - Scene role type system with configs
-- `src/lib/story-templates.ts` - Pre-defined story templates
-- `supabase/functions/_shared/scene-role-router.ts` - Role-to-provider routing
-
-### Modified Files
-- `src/lib/continuity-scoring.ts` - Added `SceneRole` type and `role` field to `StoryScene`
-- `supabase/functions/generate-storyboard/index.ts` - GPT now assigns roles to scenes
-- `supabase/functions/continue-story-chain/index.ts` - Uses role-based routing
-- `supabase/functions/generate-story-chained/index.ts` - Uses role-based routing
-- `src/components/lab/StoryBuilderPanel.tsx` - Role badges and selector in UI
+- [ ] Volume tier stories have exactly 1 hero shot flagged
+- [ ] Hero tier allows multiple hero shots
+- [ ] UI shows star indicator on hero shots
 
 ---
 
-## Tier System
+## Files to Modify
 
-**Volume Tier** (default):
-- Sora limited to 1 scene (story_b only)
-- Fast iteration, lower cost
-- Other story roles fall back to Luma
-
-**Hero Tier** (opt-in):
-- Unlimited Sora usage
-- Full cinematic treatment
-- Used for high-performing concepts
-
----
-
-## Fallback Ladder
-
-Each role has a fallback chain for reliability:
-
-```
-hook/reset: Runway → Luma → Sora
-story_*:    Sora → Luma → Runway  
-problem:    Luma → Runway → Sora
-```
+| File | Changes |
+|------|---------|
+| `supabase/functions/generate-storyboard/index.ts` | Add new fields to schema, update system prompt |
+| `src/lib/continuity-scoring.ts` | Update `StoryScene` and `Storyboard` interfaces |
+| `src/lib/cut-cadence.ts` | New file - zone definitions and duration logic |
+| `src/lib/story-templates.ts` | Add `zone` field to templates |
+| `src/components/lab/StoryBuilderPanel.tsx` | Display story_spine, motifs, hero indicator |
+| `src/types/scene-roles.ts` | Add `ChangeType` type export |
 
 ---
 
-## UI Features
+## Risk Mitigation
 
-- **Role Badge**: Shows role + provider emoji per scene
-- **Role Selector**: Dropdown to override auto-assigned role
-- **Provider Indicator**: Visual showing which provider will render each scene
-
----
-
-## Acceptance Checklist
-
-- [x] Storyboard output includes `role` for every scene
-- [x] Router chooses provider deterministically from role + tier
-- [x] Prompting V2 compiler applied based on provider
-- [x] UI shows role badge + provider per scene
-- [x] Volume tier enforces Sora scene limit (1)
-- [x] Fallback chain defined per role
-- [ ] Analytics can report performance by role/provider (future)
+1. **All new fields are optional** - existing stories continue to work
+2. **Phase-gated implementation** - each phase is independently useful
+3. **No changes to prompt compilation** - existing provider logic unchanged
+4. **No changes to video_jobs schema** - new metadata stays in storyboard_json
