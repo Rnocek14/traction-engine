@@ -632,12 +632,24 @@ async function maybeLearn(supabase: SupabaseClient, job: VideoJob, rating: AutoR
 }
 
 async function persistRating(supabase: SupabaseClient, jobId: string, rating: AutoRatingResult): Promise<void> {
+  // Round all scores to integers - VLM may return floats after defect deductions
   const { error } = await supabase.from("video_jobs").update({
-    auto_match_score: rating.prompt_adherence, auto_quality_score: rating.visual_fidelity, auto_motion_score: rating.motion_realism, auto_cinematic_score: rating.cinematic_quality,
-    auto_overall_score: rating.overall_score, auto_confidence: rating.confidence, auto_rated_at: new Date().toISOString(), auto_rater_version: RATER_VERSION,
-    auto_reasons: rating.reasons, auto_artifact_flags: rating.artifact_flags, auto_defects: rating.defects, auto_routing_tags: rating.routing_tags,
+    auto_match_score: Math.round(rating.prompt_adherence),
+    auto_quality_score: Math.round(rating.visual_fidelity),
+    auto_motion_score: Math.round(rating.motion_realism),
+    auto_cinematic_score: Math.round(rating.cinematic_quality),
+    auto_overall_score: Math.round(rating.overall_score),
+    auto_confidence: rating.confidence,
+    auto_rated_at: new Date().toISOString(),
+    auto_rater_version: RATER_VERSION,
+    auto_reasons: rating.reasons,
+    auto_artifact_flags: rating.artifact_flags,
+    auto_defects: rating.defects,
+    auto_routing_tags: rating.routing_tags,
     raw_routing_tags: rating.raw_routing_tags,  // Store unfiltered tags for discovery
-    auto_hard_fail: rating.hard_fail, auto_regen_recommended: rating.regen_recommended, auto_best_use: rating.best_use,
+    auto_hard_fail: rating.hard_fail,
+    auto_regen_recommended: rating.regen_recommended,
+    auto_best_use: rating.best_use,
   }).eq("id", jobId);
   if (error) throw new Error(`Failed to persist: ${error.message}`);
 }
