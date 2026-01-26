@@ -158,14 +158,18 @@ export function applyMotifInjection(
   provider: "sora" | "runway" | "luma"
 ): string {
   // Safety valve: no motifs if array is empty
-  if (!motifs.length) return basePrompt;
+  if (!motifs.length) {
+    console.log(`[motif] scene=${scene.id} role=${scene.role} skipped=no_motifs`);
+    return basePrompt;
+  }
   
   // Only inject if this scene was selected
-  if (!motifScenes.has(scene.id)) return basePrompt;
+  const selected = motifScenes.has(scene.id);
+  const motif = selected ? pickMotif(motifs, sceneIndex) : null;
   
-  // Pick which motif (rotates through array)
-  const motif = pickMotif(motifs, sceneIndex);
-  if (!motif) return basePrompt;
+  console.log(`[motif] scene=${scene.id} role=${scene.role} selected=${selected} motif="${motif || 'none'}" provider=${provider}`);
+  
+  if (!selected || !motif) return basePrompt;
   
   // Inject in provider-specific style
   return injectMotifForProvider(basePrompt, motif, provider, scene.role);
