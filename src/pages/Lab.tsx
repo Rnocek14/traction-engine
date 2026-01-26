@@ -286,8 +286,8 @@ export default function Lab() {
           </Button>
         </div>
 
-        <TabsContent value="generate" className="flex-1 min-h-0 m-0 h-full">
-          <ResizablePanelGroup direction="horizontal" className="h-full w-full">
+        <TabsContent value="generate" className="flex-1 min-h-0 m-0">
+          <ResizablePanelGroup direction="horizontal" className="flex-1 min-h-0 w-full">
             {/* Left: Generate Panel - narrower */}
             <ResizablePanel defaultSize={30} minSize={22} maxSize={45}>
               <div className="h-full overflow-y-auto overflow-x-hidden p-3 border-r border-border">
@@ -303,7 +303,7 @@ export default function Lab() {
             <ResizableHandle withHandle className="bg-border/50 hover:bg-primary/20 transition-colors" />
 
             {/* Right: Preview with integrated filmstrip */}
-            <ResizablePanel defaultSize={70} minSize={45} className="h-full">
+            <ResizablePanel defaultSize={70} minSize={45}>
               <LabPreviewPanel
                 results={results}
                 activeResultId={activeResultId}
@@ -339,7 +339,7 @@ export default function Lab() {
           </div>
         </TabsContent>
 
-        <TabsContent value="compare" className="flex-1 min-h-0 m-0">
+        <TabsContent value="compare" className="flex-1 min-h-0 m-0 flex flex-col">
           <ComparePanel
             initialJobIdA={compareJobIdA}
             initialJobIdB={compareJobIdB}
@@ -350,7 +350,7 @@ export default function Lab() {
           />
         </TabsContent>
 
-        <TabsContent value="learning" className="flex-1 min-h-0 m-0">
+        <TabsContent value="learning" className="flex-1 min-h-0 m-0 flex flex-col">
           <LearningInspector />
         </TabsContent>
       </Tabs>
