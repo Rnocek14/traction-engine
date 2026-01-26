@@ -5,7 +5,8 @@
  * Each template defines the narrative arc and duration targets.
  */
 
-import type { SceneRole } from "@/types/scene-roles";
+import type { SceneRole, ChangeType } from "@/types/scene-roles";
+import type { CutZone } from "@/lib/cut-cadence";
 
 export type StoryTier = "volume" | "hero";
 
@@ -13,6 +14,10 @@ export interface StoryTemplateScene {
   role: SceneRole;
   durationTarget: number;
   promptGuidance: string;
+  /** Cut cadence zone for attention pacing */
+  zone: CutZone;
+  /** What typically changes at this beat */
+  defaultChangeType: ChangeType;
 }
 
 export interface StoryTemplate {
@@ -69,31 +74,43 @@ export const STORY_TEMPLATES: StoryTemplate[] = [
         role: "hook",
         durationTarget: 3,
         promptGuidance: "Pattern interrupt - curiosity spike, fast motion",
+        zone: "hook",
+        defaultChangeType: "info",
       },
       {
         role: "problem",
         durationTarget: 5,
         promptGuidance: "Show the pain point with atmospheric mood",
+        zone: "setup",
+        defaultChangeType: "emotion",
       },
       {
         role: "story_a",
         durationTarget: 7,
         promptGuidance: "First narrative beat - establish the situation",
+        zone: "setup",
+        defaultChangeType: "info",
       },
       {
         role: "reset",
         durationTarget: 2,
         promptGuidance: "Quick attention reset - micro-cut, whip pan",
+        zone: "escalation",
+        defaultChangeType: "stakes",
       },
       {
         role: "story_b",
         durationTarget: 8,
         promptGuidance: "Payoff, reveal, transformation - the hero moment",
+        zone: "escalation",
+        defaultChangeType: "goal",
       },
       {
         role: "cta",
         durationTarget: 5,
         promptGuidance: "Call to action, proof, result",
+        zone: "payoff",
+        defaultChangeType: "stakes",
       },
     ],
   },
@@ -108,16 +125,22 @@ export const STORY_TEMPLATES: StoryTemplate[] = [
         role: "hook",
         durationTarget: 3,
         promptGuidance: "Immediate attention grab",
+        zone: "hook",
+        defaultChangeType: "info",
       },
       {
         role: "story_a",
         durationTarget: 8,
         promptGuidance: "Combined problem and solution",
+        zone: "setup",
+        defaultChangeType: "goal",
       },
       {
         role: "cta",
         durationTarget: 5,
         promptGuidance: "Direct call to action",
+        zone: "button",
+        defaultChangeType: "stakes",
       },
     ],
   },
@@ -132,36 +155,50 @@ export const STORY_TEMPLATES: StoryTemplate[] = [
         role: "hook",
         durationTarget: 3,
         promptGuidance: "Cinematic pattern interrupt",
+        zone: "hook",
+        defaultChangeType: "info",
       },
       {
         role: "problem",
         durationTarget: 5,
         promptGuidance: "Immersive problem visualization",
+        zone: "setup",
+        defaultChangeType: "emotion",
       },
       {
         role: "story_a",
         durationTarget: 8,
         promptGuidance: "Establish the world and stakes",
+        zone: "setup",
+        defaultChangeType: "info",
       },
       {
         role: "atmosphere",
         durationTarget: 4,
         promptGuidance: "Transition beat - physics/texture glue",
+        zone: "escalation",
+        defaultChangeType: "emotion",
       },
       {
         role: "story_b",
         durationTarget: 10,
         promptGuidance: "The hero moment - full payoff",
+        zone: "escalation",
+        defaultChangeType: "goal",
       },
       {
         role: "reset",
         durationTarget: 2,
         promptGuidance: "Quick pattern break before CTA",
+        zone: "escalation",
+        defaultChangeType: "stakes",
       },
       {
         role: "cta",
         durationTarget: 6,
         promptGuidance: "Compelling call to action",
+        zone: "payoff",
+        defaultChangeType: "stakes",
       },
     ],
   },
@@ -176,21 +213,29 @@ export const STORY_TEMPLATES: StoryTemplate[] = [
         role: "hook",
         durationTarget: 2,
         promptGuidance: "Immediate visual shock",
+        zone: "hook",
+        defaultChangeType: "info",
       },
       {
         role: "reset",
         durationTarget: 2,
         promptGuidance: "Whip pan or jump cut",
+        zone: "escalation",
+        defaultChangeType: "stakes",
       },
       {
         role: "story_b",
         durationTarget: 4,
         promptGuidance: "The payoff moment",
+        zone: "escalation",
+        defaultChangeType: "goal",
       },
       {
         role: "cta",
         durationTarget: 3,
         promptGuidance: "Quick direct action",
+        zone: "button",
+        defaultChangeType: "stakes",
       },
     ],
   },
@@ -205,26 +250,36 @@ export const STORY_TEMPLATES: StoryTemplate[] = [
         role: "establish",
         durationTarget: 5,
         promptGuidance: "Wide establishing shot of the world",
+        zone: "setup",
+        defaultChangeType: "location",
       },
       {
         role: "atmosphere",
         durationTarget: 4,
         promptGuidance: "Mood-setting transition",
+        zone: "setup",
+        defaultChangeType: "emotion",
       },
       {
         role: "story_a",
         durationTarget: 8,
         promptGuidance: "Introduce the subject/product",
+        zone: "setup",
+        defaultChangeType: "info",
       },
       {
         role: "story_b",
         durationTarget: 10,
         promptGuidance: "Reveal the value/transformation",
+        zone: "payoff",
+        defaultChangeType: "goal",
       },
       {
         role: "cta",
         durationTarget: 6,
         promptGuidance: "Elegant call to action",
+        zone: "button",
+        defaultChangeType: "stakes",
       },
     ],
   },

@@ -48,6 +48,10 @@ export type StoryType = "short_story" | "brainrot" | "info" | "hybrid";
 
 export type SceneRole = "hook" | "problem" | "story_a" | "reset" | "story_b" | "cta" | "atmosphere" | "establish";
 
+export type ChangeType = "info" | "emotion" | "goal" | "stakes" | "location";
+
+export type CutZone = "hook" | "setup" | "escalation" | "payoff" | "button";
+
 export interface StoryScene {
   id: string;
   prompt: string;
@@ -56,10 +60,20 @@ export interface StoryScene {
   camera_direction?: string;
   role?: SceneRole;
   enrichedPrompt?: string;
+  // Director Brain fields (Phase 1)
+  change_type?: ChangeType;
+  narration_line?: string;
+  onscreen_text?: string;
+  is_hero_shot?: boolean;
+  zone?: CutZone;
 }
 
 export interface Storyboard {
   scenes: StoryScene[];
+  // Director Brain fields (Phase 1)
+  story_spine?: string;
+  motif_anchors?: string[];
+  palette_keywords?: string[];
 }
 
 // ============================================================================

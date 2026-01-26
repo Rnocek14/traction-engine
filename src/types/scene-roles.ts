@@ -10,7 +10,26 @@
  * - Luma = Atmosphere/physics (smoke, water, particles, mood glue)
  */
 
-export type SceneRole = 
+// ============================================================================
+// Change Type - What changes from beat to beat
+// ============================================================================
+
+/**
+ * Every cut must change something meaningful (no montage drift).
+ * This type tracks what changes at each beat.
+ */
+export type ChangeType = 
+  | "info"      // New information revealed
+  | "emotion"   // Feeling/tone shift
+  | "goal"      // What character wants changes
+  | "stakes"    // Why it matters increases
+  | "location"; // Physical move with meaning
+
+// ============================================================================
+// Scene Roles
+// ============================================================================
+
+export type SceneRole =
   | "hook"        // Pattern interrupt, curiosity spike (0-3s)
   | "problem"     // "Here's what's happening to you" (3-8s)
   | "story_a"     // First narrative beat - establish (8-15s)
