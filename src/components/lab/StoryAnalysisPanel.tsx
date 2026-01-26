@@ -112,8 +112,10 @@ function SceneHeatmap({
     <div className="flex gap-1 flex-wrap">
       {clips.map((clip, idx) => {
         const score = clip.continuity_score;
-        const isWeak = weakSet.has(idx);
-        const bgColor = isWeak 
+        // Use sequence_index if available, otherwise fall back to array index
+        const sceneIndex = clip.sequence_index ?? idx;
+        const isWeak = weakSet.has(sceneIndex);
+        const bgColor = isWeak
           ? "bg-destructive" 
           : getScoreBgColor(score);
         const textColor = isWeak 
@@ -131,14 +133,14 @@ function SceneHeatmap({
                     textColor,
                     isWeak && "ring-2 ring-destructive ring-offset-1 ring-offset-background"
                   )}
-                >
-                  {idx + 1}
-                </div>
-              </TooltipTrigger>
-              <TooltipContent side="top" className="max-w-xs">
-                <div className="space-y-1">
-                  <div className="font-medium">Scene {idx + 1}</div>
-                  {score !== null && (
+                  >
+                    {sceneIndex + 1}
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-xs">
+                  <div className="space-y-1">
+                    <div className="font-medium">Scene {sceneIndex + 1}</div>
+                    {score !== null && (
                     <div className="text-sm">
                       Continuity: <span className={textColor}>{score}</span>
                     </div>

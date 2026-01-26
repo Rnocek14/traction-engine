@@ -218,35 +218,75 @@ Focus on WHERE the chain breaks, not just that it did.`;
     ...imageContents
   ];
 
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${openaiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "gpt-4o",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userContent },
-      ],
-      max_tokens: 2000,
-      temperature: 0.3,
-    }),
-  });
+  // Add timeout for API call
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout
 
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`OpenAI API failed: ${response.status} - ${error}`);
-  }
+  try {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${openaiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "gpt-4o",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userContent },
+        ],
+        max_tokens: 2000,
+        temperature: 0.3,
+      }),
+      signal: controller.signal,
+    });
 
-  const data = await response.json();
-  const content = data.choices?.[0]?.message?.content || "";
-  const parsed = safeJsonParse<StoryAnalysisResult>(content);
-  
-  if (!parsed) {
-    console.error("[auto-rate-story] Failed to parse VLM response:", content);
-    throw new Error("VLM did not return valid JSON");
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      console.error("[auto-rate-story] OpenAI error body:", errorBody);
+      throw new Error(`OpenAI API failed: ${response.status} - ${errorBody.slice(0, 200)}`);
+    }
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content;
+    
+    if (!content || content.trim() === "") {
+      console.error("[auto-rate-story] Empty VLM response");
+      throw new Error("VLM returned empty response");
+    }
+    
+    const parsed = safeJsonParse<StoryAnalysisResult>(content);
+    
+    if (!parsed) {
+      console.error("[auto-rate-story] Failed to parse VLM response:", content.slice(0, 500));
+      throw new Error("VLM did not return valid JSON");
+    }
+
+    // Normalize and validate scores
+    return {
+      overall_flow_score: Math.max(0, Math.min(100, parsed.overall_flow_score || 50)),
+      character_continuity: Math.max(0, Math.min(100, parsed.character_continuity || 50)),
+      environment_consistency: Math.max(0, Math.min(100, parsed.environment_consistency || 50)),
+      motion_logic: Math.max(0, Math.min(100, parsed.motion_logic || 50)),
+      prompt_execution: Math.max(0, Math.min(100, parsed.prompt_execution || 50)),
+      weak_scenes: Array.isArray(parsed.weak_scenes) ? parsed.weak_scenes.filter(n => typeof n === "number") : [],
+      failure_patterns: Array.isArray(parsed.failure_patterns) ? parsed.failure_patterns.map(String).slice(0, 10) : [],
+      scene_scores: Array.isArray(parsed.scene_scores) 
+        ? parsed.scene_scores.map(s => ({
+            index: s.index ?? 0,
+            continuity_score: Math.max(0, Math.min(100, s.continuity_score || 50)),
+            continuity_notes: Array.isArray(s.continuity_notes) ? s.continuity_notes.map(String) : [],
+          }))
+        : [],
+    };
+  } catch (err) {
+    clearTimeout(timeoutId);
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error("OpenAI API request timed out after 60s");
+    }
+    throw err;
   }
 
   // Normalize and validate scores
