@@ -160,7 +160,7 @@ export function LabPreviewPanel({
   return (
     <div className={cn("flex flex-col h-full overflow-hidden", className)}>
       {/* Main Preview Area - takes majority of space */}
-      <div className="flex-[3] min-h-0 flex flex-col">
+      <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
         {activeResult ? (
           <div className="h-full flex flex-col">
             {/* Minimal header - just status */}
@@ -187,7 +187,7 @@ export function LabPreviewPanel({
             </div>
 
             {/* Preview Content - expand to fill available space */}
-            <div className="flex-1 min-h-[300px] flex items-center justify-center bg-black/50 relative overflow-hidden">
+            <div className="flex-1 flex items-center justify-center bg-black/50 relative overflow-hidden p-4">
               {activeResult.status === "done" && activeResult.outputUrl ? (
                 previewFailed ? (
                   <div className="flex flex-col items-center gap-3 text-muted-foreground">
@@ -209,8 +209,7 @@ export function LabPreviewPanel({
                     autoPlay
                     muted
                     playsInline
-                    className="max-w-full max-h-full w-auto h-auto object-contain"
-                    style={{ maxHeight: "100%" }}
+                    className="w-full h-full object-contain"
                     onPlay={() => setIsPlaying(true)}
                     onPause={() => setIsPlaying(false)}
                     onEnded={() => setIsPlaying(false)}
