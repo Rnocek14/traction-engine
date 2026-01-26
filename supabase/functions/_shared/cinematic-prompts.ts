@@ -579,3 +579,79 @@ export function buildLumaContinuityPrompt(
   
   return `${basePrompt}, continue seamlessly from the starting frame, maintain visual consistency, smooth transition`;
 }
+
+// =============================================================================
+// MOTIF-AWARE PROMPT BUILDING (for story generation)
+// =============================================================================
+
+import { 
+  selectMotifScenes, 
+  applyMotifInjection,
+  type MotifScene,
+} from "./motif-injection.ts";
+
+export interface StoryPromptContext {
+  sceneId: string;
+  sceneIndex: number;
+  role: import("./scene-role-router.ts").SceneRole;
+  isHeroShot?: boolean;
+  changeType?: string;
+  motifs?: string[];
+  allScenes?: MotifScene[];
+}
+
+/**
+ * Build a provider-aware prompt WITH motif injection for story generation.
+ * This is the preferred entry point for storyboard/story-chained flows.
+ * 
+ * @param provider - Target video provider
+ * @param styleGuide - Visual style parameters
+ * @param scenePrompt - The scene's action prompt
+ * @param isFirstClip - Whether this is the first clip (affects continuity)
+ * @param clipCameraDirection - Camera direction override
+ * @param storyContext - Story-specific context including motifs
+ * @returns Compiled prompt with optional motif injection
+ */
+export function buildProviderPromptWithMotif(
+  provider: "sora" | "runway" | "luma",
+  styleGuide: StyleGuideData | null,
+  scenePrompt: string,
+  isFirstClip: boolean,
+  clipCameraDirection?: string,
+  storyContext?: StoryPromptContext
+): string {
+  // Build base prompt using existing provider-specific logic
+  const basePrompt = buildProviderPrompt(
+    provider, 
+    styleGuide, 
+    scenePrompt, 
+    isFirstClip, 
+    clipCameraDirection
+  );
+  
+  // If no story context or no motifs, return base prompt
+  if (!storyContext?.motifs?.length || !storyContext.allScenes?.length) {
+    return basePrompt;
+  }
+  
+  // Compute motif-eligible scenes (memoize this in calling code for perf)
+  const motifScenes = selectMotifScenes(storyContext.allScenes);
+  
+  // Build the scene metadata for injection
+  const scene: MotifScene = {
+    id: storyContext.sceneId,
+    role: storyContext.role,
+    is_hero_shot: storyContext.isHeroShot,
+    change_type: storyContext.changeType,
+  };
+  
+  // Apply motif injection (respects selection, provider, and role)
+  return applyMotifInjection(
+    basePrompt,
+    scene,
+    storyContext.sceneIndex,
+    storyContext.motifs,
+    motifScenes,
+    provider
+  );
+}

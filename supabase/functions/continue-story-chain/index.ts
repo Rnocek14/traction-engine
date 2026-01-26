@@ -16,16 +16,16 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { 
   routeBySceneRole, 
   inferRoleFromPosition,
+  clampDurationToRole,
   type SceneRole,
   type VideoProvider,
 } from "../_shared/scene-role-router.ts";
+import { type MotifScene } from "../_shared/motif-injection.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
-
-import { clampDurationToRole, getDurationRangeForRole } from "../_shared/scene-role-router.ts";
 
 /**
  * Snap duration to valid values per provider
@@ -92,11 +92,21 @@ Deno.serve(async (req) => {
 
     for (const story of activeStories) {
       const storyboardData = story.storyboard_json as { 
-        scenes?: Array<{ id: string; prompt: string; enriched_prompt?: string; duration_target: number; role?: SceneRole }>;
+        scenes?: Array<{ 
+          id: string; 
+          prompt: string; 
+          enriched_prompt?: string; 
+          duration_target: number; 
+          role?: SceneRole;
+          is_hero_shot?: boolean;
+          change_type?: string;
+        }>;
         tier?: "volume" | "hero";
+        motif_anchors?: string[];
       };
       const scenes = storyboardData?.scenes || [];
       const storyTier = storyboardData?.tier || "volume"; // Read tier from storyboard
+      const motifAnchors = storyboardData?.motif_anchors || []; // Read motifs for injection
       const totalScenes = scenes.length;
 
       if (totalScenes === 0) {
@@ -256,6 +266,24 @@ Deno.serve(async (req) => {
         luma: "queue-video-luma",
       }[selectedProvider];
       
+      // Build motif context for injection
+      const allMotifScenes: MotifScene[] = scenes.map((s, i) => ({
+        id: s.id,
+        role: (s.role as SceneRole) || inferRoleFromPosition(i, totalScenes),
+        is_hero_shot: s.is_hero_shot,
+        change_type: s.change_type,
+      }));
+      
+      const motifContext = motifAnchors.length > 0 ? {
+        sceneId: nextScene.id,
+        sceneIndex: nextSceneIndex,
+        role: sceneRole,
+        isHeroShot: nextScene.is_hero_shot,
+        changeType: nextScene.change_type,
+        motifs: motifAnchors,
+        allScenes: allMotifScenes,
+      } : undefined;
+      
       const response = await fetch(`${supabaseUrl}/functions/v1/${providerEndpoint}`, {
         method: "POST",
         headers: {
@@ -270,6 +298,7 @@ Deno.serve(async (req) => {
             seconds: processedDuration,
           },
           starting_frame_url: isFirstScene ? undefined : latestThumbnail,
+          motif_context: motifContext,
         }),
       });
 

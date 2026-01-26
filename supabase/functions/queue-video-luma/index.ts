@@ -5,12 +5,30 @@
  * Supports text-to-video and image-to-video for frame chaining.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { buildProviderPrompt, type StyleGuideData } from "../_shared/cinematic-prompts.ts";
+import { 
+  buildProviderPrompt, 
+  buildProviderPromptWithMotif,
+  type StyleGuideData,
+  type StoryPromptContext,
+} from "../_shared/cinematic-prompts.ts";
+import { type MotifScene } from "../_shared/motif-injection.ts";
+import { type SceneRole } from "../_shared/scene-role-router.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
+
+// Motif context for story generation (optional)
+interface MotifContext {
+  sceneId: string;
+  sceneIndex: number;
+  role: SceneRole;
+  isHeroShot?: boolean;
+  changeType?: string;
+  motifs: string[];
+  allScenes: MotifScene[];
+}
 
 interface VideoRequest {
   script_run_id: string;
@@ -25,6 +43,8 @@ interface VideoRequest {
     seed?: number;
   };
   starting_frame_url?: string;
+  /** Optional motif context for story generation */
+  motif_context?: MotifContext;
 }
 
 interface ClipData {
@@ -124,18 +144,39 @@ Deno.serve(async (req) => {
       ) || null;
     }
 
-    // Build prompt using provider-aware prompt builder
+    // Build prompt using provider-aware prompt builder (with optional motif injection)
     const scenePrompt = body.prompt || clipData?.prompt || 
       (script.scene_prompts && script.scene_prompts[0]) || 
       "A cinematic scene";
 
-    const videoPrompt = buildProviderPrompt(
-      "luma", // Use Luma-optimized prompts
-      styleGuide,
-      scenePrompt,
-      true, // isFirstClip - handled differently for Luma
-      clipData?.camera_direction
-    );
+    let videoPrompt: string;
+    if (body.motif_context) {
+      const storyContext: StoryPromptContext = {
+        sceneId: body.motif_context.sceneId,
+        sceneIndex: body.motif_context.sceneIndex,
+        role: body.motif_context.role,
+        isHeroShot: body.motif_context.isHeroShot,
+        changeType: body.motif_context.changeType,
+        motifs: body.motif_context.motifs,
+        allScenes: body.motif_context.allScenes,
+      };
+      videoPrompt = buildProviderPromptWithMotif(
+        "luma",
+        styleGuide,
+        scenePrompt,
+        true,
+        clipData?.camera_direction,
+        storyContext
+      );
+    } else {
+      videoPrompt = buildProviderPrompt(
+        "luma", // Use Luma-optimized prompts
+        styleGuide,
+        scenePrompt,
+        true, // isFirstClip - handled differently for Luma
+        clipData?.camera_direction
+      );
+    }
 
     // Create video job record - store provider_job_id in settings, not openai_video_id
     // IMPORTANT: No truncation - text columns are unlimited

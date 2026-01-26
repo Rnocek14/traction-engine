@@ -13,9 +13,11 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { 
   routeBySceneRole, 
   inferRoleFromPosition,
+  clampDurationToRole,
   type SceneRole,
   type VideoProvider,
 } from "../_shared/scene-role-router.ts";
+import { type MotifScene } from "../_shared/motif-injection.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -31,6 +33,8 @@ interface ChainedStoryRequest {
     duration_target: number;
     camera_direction?: string;
     role?: SceneRole;
+    is_hero_shot?: boolean;
+    change_type?: string;
   }>;
   anchors: Record<string, unknown>;
   settings?: {
@@ -38,6 +42,8 @@ interface ChainedStoryRequest {
     tier?: "volume" | "hero";
     template_id?: string;
   };
+  /** Optional motif anchors for visual continuity */
+  motif_anchors?: string[];
 }
 
 /**
@@ -55,8 +61,6 @@ function normalizeSize(input?: string): string {
   if (validSizes.includes(input || "")) return input!;
   return sizeMap[input || ""] || "720x1280";
 }
-
-import { clampDurationToRole } from "../_shared/scene-role-router.ts";
 
 /**
  * Snap duration to valid values per provider
@@ -134,7 +138,10 @@ Deno.serve(async (req) => {
     const scriptRunId = newScript.id;
     console.log(`[chained] Created script_run ${scriptRunId}`);
     
-    // Update story status and store storyboard WITH TIER + TEMPLATE_ID for cron to use
+    // Extract motif anchors for injection
+    const motifAnchors = body.motif_anchors || [];
+    
+    // Update story status and store storyboard WITH TIER + TEMPLATE_ID + MOTIFS for cron to use
     await supabase
       .from("story_jobs")
       .update({ 
@@ -145,6 +152,7 @@ Deno.serve(async (req) => {
           scenes,
           tier, // Persist tier so continue-story-chain can read it
           template_id: settings?.template_id || null, // For analytics/debugging
+          motif_anchors: motifAnchors, // Persist motifs for chain continuation
         },
         continuity_anchors: anchors,
       })
@@ -178,6 +186,24 @@ Deno.serve(async (req) => {
       luma: "queue-video-luma",
     }[selectedProvider];
     
+    // Build motif context for first scene
+    const allMotifScenes: MotifScene[] = scenes.map((s, i) => ({
+      id: s.id,
+      role: (s.role as SceneRole) || inferRoleFromPosition(i, scenes.length),
+      is_hero_shot: s.is_hero_shot,
+      change_type: s.change_type,
+    }));
+    
+    const motifContext = motifAnchors.length > 0 ? {
+      sceneId: firstScene.id,
+      sceneIndex: 0,
+      role: sceneRole,
+      isHeroShot: firstScene.is_hero_shot,
+      changeType: firstScene.change_type,
+      motifs: motifAnchors,
+      allScenes: allMotifScenes,
+    } : undefined;
+    
     const response = await fetch(`${supabaseUrl}/functions/v1/${providerEndpoint}`, {
       method: "POST",
       headers: {
@@ -191,6 +217,7 @@ Deno.serve(async (req) => {
           size: size,
           seconds: processedDuration,
         },
+        motif_context: motifContext,
       }),
     });
 
