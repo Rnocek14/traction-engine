@@ -404,13 +404,10 @@ Deno.serve(async (req) => {
       
       // THE KEY CONDITIONAL: Only use I2V for continuity cuts
       if (cutType === "continuity" && !isFirstScene && latestThumbnail) {
-        // Check if Sora and dimensions mismatch - Sora requires exact match
-        const needsResize = selectedProvider === "sora" && 
-          latestThumbnailWidth && latestThumbnailHeight &&
-          (latestThumbnailWidth !== targetSize.width || latestThumbnailHeight !== targetSize.height);
-        
-        if (needsResize) {
-          console.log(`[chain-continue] Thumbnail ${latestThumbnailWidth}x${latestThumbnailHeight} doesn't match target ${targetSize.width}x${targetSize.height} - resizing for Sora`);
+        // ALWAYS RESIZE for Sora I2V - eliminates 100% of dimension uncertainty
+        // This is cheap and guarantees the starting frame matches Sora's expected dimensions
+        if (selectedProvider === "sora") {
+          console.log(`[chain-continue] Sora I2V: always-resize for guaranteed ${targetSize.width}x${targetSize.height}`);
           
           const resizedUrl = await resizeStartingFrame(
             latestThumbnail,
@@ -422,14 +419,16 @@ Deno.serve(async (req) => {
           
           if (resizedUrl) {
             startingFrameUrl = resizedUrl;
+            console.log(`[chain-continue] ✓ Resized frame ready: ${resizedUrl}`);
           } else {
             // Resize failed - fall back to T2V for this scene to avoid blocking chain
             console.warn(`[chain-continue] Resize failed, falling back to T2V for scene ${nextSceneIndex + 1}`);
             startingFrameUrl = undefined;
           }
         } else {
-          // Dimensions match or unknown - use original
+          // Runway/Luma: use original thumbnail (they handle dimension mismatches)
           startingFrameUrl = latestThumbnail;
+          console.log(`[chain-continue] ${selectedProvider} I2V: using original thumbnail`);
         }
       }
       // For hard cuts: startingFrameUrl stays undefined (T2V) - no resize calls needed
