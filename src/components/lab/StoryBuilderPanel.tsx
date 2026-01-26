@@ -216,6 +216,11 @@ export function StoryBuilderPanel({
   const [anchors, setAnchors] = useState<ContinuityAnchors>(getDefaultAnchors());
   const [isGenerating, setIsGenerating] = useState(false);
   
+  // Story Spine (narrative structure from Director Brain)
+  const [storySpine, setStorySpine] = useState<string>("");
+  const [motifAnchors, setMotifAnchors] = useState<string[]>([]);
+  const [paletteKeywords, setPaletteKeywords] = useState<string[]>([]);
+  
   // AI prompt enrichment
   const [autoEnhance, setAutoEnhance] = useState(true);
   const [enrichmentProgress, setEnrichmentProgress] = useState(0);
@@ -385,24 +390,44 @@ export function StoryBuilderPanel({
       setScenes([]);
       setConcept("");
       setAssembledUrl(null);
+      // Reset Story Spine
+      setStorySpine("");
+      setMotifAnchors([]);
+      setPaletteKeywords([]);
     }
   }, [forceNew]);
 
-  // Hydrate from existing story
+  // Hydrate from existing story (including Story Spine)
   useEffect(() => {
     if (forceNew || !existingStory) return;
     setTitle(existingStory.title || "");
     setStoryType((existingStory.story_type as StoryType) || "short_story");
     setAnchors((existingStory.continuity_anchors as unknown as ContinuityAnchors) || {});
-    const storyboard = existingStory.storyboard_json as unknown as (Storyboard & { tier?: "volume" | "hero" }) | null;
+    const storyboard = existingStory.storyboard_json as unknown as (Storyboard & { 
+      tier?: "volume" | "hero";
+      story_spine?: string;
+      motif_anchors?: string[];
+      palette_keywords?: string[];
+    }) | null;
     setScenes(storyboard?.scenes || []);
     setTier(storyboard?.tier || "volume");
+    // Restore Story Spine if present
+    setStorySpine(storyboard?.story_spine || "");
+    setMotifAnchors(storyboard?.motif_anchors || []);
+    setPaletteKeywords(storyboard?.palette_keywords || []);
   }, [existingStory, forceNew]);
 
-  // Create story mutation
+  // Create story mutation (preserves full Story Spine)
   const createStory = useMutation({
     mutationFn: async () => {
-      const storyboard: Storyboard = { scenes };
+      // Persist full narrative structure including Story Spine
+      const fullStoryboard = { 
+        scenes,
+        tier,
+        story_spine: storySpine,
+        motif_anchors: motifAnchors,
+        palette_keywords: paletteKeywords,
+      };
       
       const { data, error } = await supabase
         .from("story_jobs")
@@ -410,7 +435,7 @@ export function StoryBuilderPanel({
           account_id: DEFAULT_ACCOUNT_ID,
           title: title || `Story ${new Date().toLocaleDateString()}`,
           story_type: storyType,
-          storyboard_json: JSON.parse(JSON.stringify(storyboard)),
+          storyboard_json: JSON.parse(JSON.stringify(fullStoryboard)),
           continuity_anchors: JSON.parse(JSON.stringify(anchors)),
           total_clips: scenes.length,
           status: "draft",
@@ -496,9 +521,16 @@ export function StoryBuilderPanel({
             enriched_prompt: scene.enrichedPrompt,
             duration_target: scene.duration_target,
             camera_direction: scene.camera_direction,
-            // shot_type inferred server-side from prompt content
+            // Preserve Director Brain fields for progression injection
+            role: (scene as StoryScene & { role?: SceneRole }).role,
+            change_type: (scene as StoryScene & { change_type?: string }).change_type,
+            narration_line: (scene as StoryScene & { narration_line?: string }).narration_line,
+            is_hero_shot: (scene as StoryScene & { is_hero_shot?: boolean }).is_hero_shot,
           })),
           anchors: workingAnchors,
+          // Pass Story Spine for narrative context
+          story_spine: storySpine,
+          motif_anchors: motifAnchors,
           settings: {
             size: "1280x720", // 16:9 in pixels - must be valid dimension, not aspect ratio
             provider: "smart", // Use intelligent per-scene provider selection
@@ -608,11 +640,32 @@ export function StoryBuilderPanel({
 
   /**
    * Enrich all scene prompts with AI, maintaining continuity context
+   * 
+   * Phase 4: When story_spine exists (AI-generated storyboard), 
+   * use minimal enrichment - GPT already crafted rich prompts.
+   * Only add continuity context, don't over-engineer.
    */
   async function enrichAllPrompts(
     scenes: StoryScene[],
     continuityContext: string
   ): Promise<EnrichedScene[]> {
+    // Phase 4: Check if we have a story spine (AI-generated storyboard)
+    const hasNarrativeStructure = !!storySpine;
+    
+    if (hasNarrativeStructure) {
+      // AI already generated rich, poetic prompts with narrative intent
+      // Just append minimal continuity context - don't over-engineer
+      console.log(`[enrichment] Story has narrative spine - using minimal enrichment`);
+      return scenes.map(scene => ({
+        ...scene,
+        enrichedPrompt: continuityContext 
+          ? `${scene.prompt}\n\n${continuityContext}`
+          : scene.prompt,
+      }));
+    }
+    
+    // Full enrichment for manually-written scenes (no story spine)
+    console.log(`[enrichment] No story spine - using full AI enrichment`);
     const enrichedScenes = await Promise.all(
       scenes.map(async (scene, index) => {
         try {
@@ -675,18 +728,32 @@ export function StoryBuilderPanel({
       setIsGeneratingStory(false);
       // Set the generated content
       if (data.title) setTitle(data.title);
+      // Capture Story Spine (Director Brain output)
+      if (data.story_spine) setStorySpine(data.story_spine);
+      if (data.motif_anchors) setMotifAnchors(data.motif_anchors);
+      if (data.palette_keywords) setPaletteKeywords(data.palette_keywords);
       if (data.scenes?.length) {
-        setScenes(data.scenes.map((s: StoryScene, i: number) => ({
+        // Preserve per-scene Director Brain fields (change_type, narration_line, role)
+        setScenes(data.scenes.map((s: StoryScene & { 
+          change_type?: string; 
+          narration_line?: string; 
+          is_hero_shot?: boolean;
+        }, i: number) => ({
           ...s,
           id: s.id || nanoid(8),
           sequence_index: i,
+          // Preserve Director Brain fields
+          change_type: s.change_type,
+          narration_line: s.narration_line,
+          role: s.role,
+          is_hero_shot: s.is_hero_shot,
         })));
       }
       if (data.anchors) setAnchors(data.anchors);
       setConcept(""); // Clear input
       toast({
         title: "Story generated!",
-        description: `Created ${data.scenes?.length || 0} scenes. Review and generate.`,
+        description: `Created ${data.scenes?.length || 0} scenes with narrative spine. Review and generate.`,
       });
     },
     onError: (error) => {
@@ -742,12 +809,21 @@ export function StoryBuilderPanel({
       return;
     }
 
+    // Build full storyboard with Story Spine preserved
+    const fullStoryboard = {
+      scenes,
+      tier,
+      story_spine: storySpine,
+      motif_anchors: motifAnchors,
+      palette_keywords: paletteKeywords,
+    };
+
     if (storyId) {
-      // Update existing story then generate
+      // Update existing story then generate (preserve full narrative structure)
       await supabase
         .from("story_jobs")
         .update({
-          storyboard_json: JSON.parse(JSON.stringify({ scenes })),
+          storyboard_json: JSON.parse(JSON.stringify(fullStoryboard)),
           continuity_anchors: JSON.parse(JSON.stringify(anchors)),
           total_clips: scenes.length,
         })

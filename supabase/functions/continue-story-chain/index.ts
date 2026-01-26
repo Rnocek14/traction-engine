@@ -170,18 +170,28 @@ Deno.serve(async (req) => {
           role?: SceneRole;
           is_hero_shot?: boolean;
           change_type?: string;
+          // Phase 2: Explicit action summary
+          action_summary?: string;
         }>;
         tier?: "volume" | "hero";
         motif_anchors?: string[];
+        // Phase 1: Story Spine from Director Brain
+        story_spine?: string;
       };
       const scenes = storyboardData?.scenes || [];
       const storyTier = storyboardData?.tier || "volume"; // Read tier from storyboard
       const motifAnchors = storyboardData?.motif_anchors || []; // Read motifs for injection
+      const storySpine = storyboardData?.story_spine || ""; // Phase 1: Read story spine
       const totalScenes = scenes.length;
 
       if (totalScenes === 0) {
         console.log(`[chain-continue] Story ${story.id} has no scenes, skipping`);
         continue;
+      }
+      
+      // Phase 3: Log story spine for debugging narrative flow (once per story)
+      if (storySpine) {
+        console.log(`[chain-continue] Story ${story.id} spine: "${storySpine.slice(0, 100)}..."`);
       }
 
       // Get all clips for this story (include thumbnail dimensions for resize logic)
@@ -401,20 +411,30 @@ Deno.serve(async (req) => {
       }
       
       // Apply progression injection for I2V scenes (prevents repeated actions)
-      // Use RAW prompts for action extraction (cleaner verb phrases)
+      // Phase 2: Prefer action_summary over heuristic extraction
       const changeType = nextScene.change_type || "info"; // Default to "info" not "action"
       let finalPrompt = basePrompt;
       
-      if (nextSceneIndex > 0 && prevRawPrompt) {
-        // Build context from RAW prompts for better action extraction
-        const progressionCtx = buildProgressionContext(prevRawPrompt, nextRawPrompt, changeType);
+      if (nextSceneIndex > 0 && prevScene) {
+        // Phase 2: Use action_summary if available, else fall back to extraction
+        const prevAction = prevScene.action_summary || null;
+        const nextAction = nextScene.action_summary || null;
         
-        // Diagnostic logging - makes debugging effortless
-        console.log(`[progression] scene=${nextSceneIndex + 1} prev_action="${progressionCtx.prev_action}" next_action="${progressionCtx.next_action}" change_type="${progressionCtx.change_type}"`);
-        
-        // Check for potential repeat (flag but don't block)
-        if (progressionCtx.prev_action === progressionCtx.next_action) {
-          console.warn(`[progression] ⚠️ prev_action == next_action - may cause repeated motion`);
+        if (prevAction && nextAction) {
+          // Use explicit action summaries (much more reliable)
+          console.log(`[progression] scene=${nextSceneIndex + 1} action_summary: prev="${prevAction}" next="${nextAction}" change_type="${changeType}"`);
+          
+          if (prevAction.toLowerCase() === nextAction.toLowerCase()) {
+            console.warn(`[progression] ⚠️ action_summary identical - may cause repeated motion`);
+          }
+        } else {
+          // Fall back to heuristic extraction from RAW prompts
+          const progressionCtx = buildProgressionContext(prevRawPrompt || "", nextRawPrompt, changeType);
+          console.log(`[progression] scene=${nextSceneIndex + 1} prev_action="${progressionCtx.prev_action}" next_action="${progressionCtx.next_action}" change_type="${progressionCtx.change_type}"`);
+          
+          if (progressionCtx.prev_action === progressionCtx.next_action) {
+            console.warn(`[progression] ⚠️ prev_action == next_action - may cause repeated motion`);
+          }
         }
         
         // Inject progression directive into the compiled prompt

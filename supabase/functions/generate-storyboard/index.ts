@@ -42,6 +42,8 @@ interface GeneratedScene {
   narration_line?: string;
   onscreen_text?: string;
   is_hero_shot?: boolean;
+  // Phase 2: Explicit action summary for progression injection
+  action_summary?: string;
 }
 
 interface GeneratedStoryboard {
@@ -119,12 +121,17 @@ hook → problem → story_a → reset → story_b → cta
 
 For each scene, provide:
 1. A detailed visual prompt (what's happening, composition, lighting, mood)
-2. Suggested duration (match the role's recommended range)
-3. Camera direction (movement, framing, lens suggestion)
-4. Role assignment from the list above
-5. change_type: What changes at this beat
-6. narration_line (optional): TTS voiceover line for this beat
-7. onscreen_text (optional): Text overlay if needed
+2. action_summary: 1 sentence: WHO does WHAT (e.g., "Man pushes through brutal training")
+3. Suggested duration (match the role's recommended range)
+4. Camera direction (movement, framing, lens suggestion)
+5. Role assignment from the list above
+6. change_type: What changes at this beat
+7. narration_line (optional): TTS voiceover line for this beat
+8. onscreen_text (optional): Text overlay if needed
+
+CRITICAL: action_summary must describe CHARACTER ACTION, not camera motion.
+- Good: "Woman discovers her data has been stolen"
+- Bad: "Camera pans across room"
 
 Also extract continuity anchors:
 - Character details (if any characters appear)
@@ -152,6 +159,7 @@ Respond ONLY with valid JSON in this exact format:
   "scenes": [
     {
       "prompt": "Detailed visual description for video generation",
+      "action_summary": "Character performs specific action",
       "duration_target": 5,
       "camera_direction": "Camera movement and framing notes",
       "role": "story_a",

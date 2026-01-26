@@ -35,15 +35,19 @@ interface ChainedStoryRequest {
     role?: SceneRole;
     is_hero_shot?: boolean;
     change_type?: string;
+    // Phase 2: Explicit action summary for progression injection
+    action_summary?: string;
+    narration_line?: string;
   }>;
   anchors: Record<string, unknown>;
+  // Phase 1: Story Spine from Director Brain
+  story_spine?: string;
+  motif_anchors?: string[];
   settings?: {
     size?: string;
     tier?: "volume" | "hero";
     template_id?: string;
   };
-  /** Optional motif anchors for visual continuity */
-  motif_anchors?: string[];
 }
 
 /**
@@ -102,7 +106,7 @@ Deno.serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     const body: ChainedStoryRequest = await req.json();
-    const { story_job_id, scenes, anchors, settings } = body;
+    const { story_job_id, scenes, anchors, settings, story_spine, motif_anchors: requestMotifs } = body;
 
     if (!story_job_id || !scenes?.length) {
       return new Response(
@@ -116,6 +120,10 @@ Deno.serve(async (req) => {
     const prompt = firstScene.enriched_prompt || firstScene.prompt;
     
     console.log(`[chained] Starting story ${story_job_id}: ${scenes.length} scenes`);
+    // Phase 3: Log story_spine for debugging narrative flow
+    if (story_spine) {
+      console.log(`[chained] Story Spine: "${story_spine}"`);
+    }
     console.log(`[chained] Queueing scene 1 (T2V), scenes 2-${scenes.length} will be handled by cron`);
 
     // Determine tier from settings (will be persisted in storyboard_json for chain continuation)
@@ -138,10 +146,10 @@ Deno.serve(async (req) => {
     const scriptRunId = newScript.id;
     console.log(`[chained] Created script_run ${scriptRunId}`);
     
-    // Extract motif anchors for injection
-    const motifAnchors = body.motif_anchors || [];
+    // Extract motif anchors for injection (from request or settings)
+    const motifAnchors = requestMotifs || [];
     
-    // Update story status and store storyboard WITH TIER + TEMPLATE_ID + MOTIFS for cron to use
+    // Update story status and store storyboard WITH full narrative context for cron
     await supabase
       .from("story_jobs")
       .update({ 
@@ -153,6 +161,7 @@ Deno.serve(async (req) => {
           tier, // Persist tier so continue-story-chain can read it
           template_id: settings?.template_id || null, // For analytics/debugging
           motif_anchors: motifAnchors, // Persist motifs for chain continuation
+          story_spine: story_spine || null, // Phase 1: Persist story spine
         },
         continuity_anchors: anchors,
       })
