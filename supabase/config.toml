@@ -62,3 +62,6 @@ verify_jwt = false
 
 [functions.auto-promote-routing-tags]
 verify_jwt = false
+
+[functions.auto-rate-story]
+verify_jwt = false

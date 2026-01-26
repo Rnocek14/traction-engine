@@ -69,6 +69,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { ContinuityAnchorsEditor } from "./ContinuityAnchorsEditor";
 import { ContinuityMonitor } from "./ContinuityMonitor";
 import { StoryVideoPlayer } from "./StoryVideoPlayer";
+import { StoryAnalysisPanel } from "./StoryAnalysisPanel";
 import {
   type ContinuityAnchors,
   type StoryType,
