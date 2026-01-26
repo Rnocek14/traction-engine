@@ -289,23 +289,6 @@ Focus on WHERE the chain breaks, not just that it did.`;
     throw err;
   }
 
-  // Normalize and validate scores
-  return {
-    overall_flow_score: Math.max(0, Math.min(100, parsed.overall_flow_score || 50)),
-    character_continuity: Math.max(0, Math.min(100, parsed.character_continuity || 50)),
-    environment_consistency: Math.max(0, Math.min(100, parsed.environment_consistency || 50)),
-    motion_logic: Math.max(0, Math.min(100, parsed.motion_logic || 50)),
-    prompt_execution: Math.max(0, Math.min(100, parsed.prompt_execution || 50)),
-    weak_scenes: Array.isArray(parsed.weak_scenes) ? parsed.weak_scenes.filter(n => typeof n === "number") : [],
-    failure_patterns: Array.isArray(parsed.failure_patterns) ? parsed.failure_patterns.map(String).slice(0, 10) : [],
-    scene_scores: Array.isArray(parsed.scene_scores) 
-      ? parsed.scene_scores.map(s => ({
-          index: s.index ?? 0,
-          continuity_score: Math.max(0, Math.min(100, s.continuity_score || 50)),
-          continuity_notes: Array.isArray(s.continuity_notes) ? s.continuity_notes.map(String) : [],
-        }))
-      : [],
-  };
 }
 
 // ═══════════════════════════════════════════════════════════════════
