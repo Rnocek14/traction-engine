@@ -5,12 +5,30 @@
  * Accepts same interface as queue-video for seamless provider switching.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { buildRunwayPrompt, type StyleGuideData } from "../_shared/cinematic-prompts.ts";
+import { 
+  buildRunwayPrompt, 
+  buildProviderPromptWithMotif,
+  type StyleGuideData,
+  type StoryPromptContext,
+} from "../_shared/cinematic-prompts.ts";
+import { type MotifScene } from "../_shared/motif-injection.ts";
+import { type SceneRole } from "../_shared/scene-role-router.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
+
+// Motif context for story generation (optional)
+interface MotifContext {
+  sceneId: string;
+  sceneIndex: number;
+  role: SceneRole;
+  isHeroShot?: boolean;
+  changeType?: string;
+  motifs: string[];
+  allScenes: MotifScene[];
+}
 
 interface VideoRequest {
   script_run_id: string;
@@ -28,6 +46,8 @@ interface VideoRequest {
     seed?: number;
   };
   starting_frame_url?: string;
+  /** Optional motif context for story generation */
+  motif_context?: MotifContext;
 }
 
 interface ClipData {
@@ -182,12 +202,33 @@ Style: Professional short-form video, engaging, smooth transitions.
       `.trim();
     }
 
-    // Build Runway-optimized prompt
-    const videoPrompt = buildRunwayPrompt(
-      styleGuide,
-      scenePrompt,
-      clipData?.camera_direction
-    );
+    // Build Runway-optimized prompt (with optional motif injection)
+    let videoPrompt: string;
+    if (body.motif_context) {
+      const storyContext: StoryPromptContext = {
+        sceneId: body.motif_context.sceneId,
+        sceneIndex: body.motif_context.sceneIndex,
+        role: body.motif_context.role,
+        isHeroShot: body.motif_context.isHeroShot,
+        changeType: body.motif_context.changeType,
+        motifs: body.motif_context.motifs,
+        allScenes: body.motif_context.allScenes,
+      };
+      videoPrompt = buildProviderPromptWithMotif(
+        "runway",
+        styleGuide,
+        scenePrompt,
+        !starting_frame_url,
+        clipData?.camera_direction,
+        storyContext
+      );
+    } else {
+      videoPrompt = buildRunwayPrompt(
+        styleGuide,
+        scenePrompt,
+        clipData?.camera_direction
+      );
+    }
 
     // Determine if image-to-video based on reference image availability
     const isImageToVideo = !!starting_frame_url || !!styleGuide?.reference_image_url;

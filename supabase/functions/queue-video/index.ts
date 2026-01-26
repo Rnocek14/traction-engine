@@ -1,10 +1,28 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { buildCinematicPrompt, type StyleGuideData } from "../_shared/cinematic-prompts.ts";
+import { 
+  buildCinematicPrompt, 
+  buildProviderPromptWithMotif,
+  type StyleGuideData,
+  type StoryPromptContext,
+} from "../_shared/cinematic-prompts.ts";
+import { type MotifScene } from "../_shared/motif-injection.ts";
+import { type SceneRole } from "../_shared/scene-role-router.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
+
+// Motif context for story generation (optional)
+interface MotifContext {
+  sceneId: string;
+  sceneIndex: number;
+  role: SceneRole;
+  isHeroShot?: boolean;
+  changeType?: string;
+  motifs: string[];
+  allScenes: MotifScene[];
+}
 
 interface VideoRequest {
   script_run_id: string;
@@ -23,6 +41,8 @@ interface VideoRequest {
     seed?: number;
   };
   starting_frame_url?: string;
+  /** Optional motif context for story generation */
+  motif_context?: MotifContext;
 }
 
 interface ClipData {
@@ -161,13 +181,34 @@ Style: Professional, engaging, suitable for TikTok/Reels. Smooth transitions bet
       `.trim();
     }
 
-    // Use full cinematic prompt builder for professional quality
-    videoPrompt = buildCinematicPrompt(
-      styleGuide,
-      scenePrompt,
-      !starting_frame_url, // isFirstClip - true if no starting frame
-      clipData?.camera_direction // Per-clip shot direction
-    );
+    // Use motif-aware prompt builder if context provided, otherwise standard cinematic
+    if (body.motif_context) {
+      const storyContext: StoryPromptContext = {
+        sceneId: body.motif_context.sceneId,
+        sceneIndex: body.motif_context.sceneIndex,
+        role: body.motif_context.role,
+        isHeroShot: body.motif_context.isHeroShot,
+        changeType: body.motif_context.changeType,
+        motifs: body.motif_context.motifs,
+        allScenes: body.motif_context.allScenes,
+      };
+      videoPrompt = buildProviderPromptWithMotif(
+        "sora",
+        styleGuide,
+        scenePrompt,
+        !starting_frame_url,
+        clipData?.camera_direction,
+        storyContext
+      );
+    } else {
+      // Use full cinematic prompt builder for professional quality
+      videoPrompt = buildCinematicPrompt(
+        styleGuide,
+        scenePrompt,
+        !starting_frame_url, // isFirstClip - true if no starting frame
+        clipData?.camera_direction // Per-clip shot direction
+      );
+    }
 
     // Create the video job in database first
     const { data: job, error: jobError } = await supabase
