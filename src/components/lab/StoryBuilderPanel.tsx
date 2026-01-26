@@ -185,8 +185,34 @@ function getDefaultAnchors(): ContinuityAnchors {
 }
 
 /**
- * Check for empty prompts only (AI handles the rest)
+ * Compute cut_type for scenes if missing (deterministic based on roles)
+ * Mirrors logic in generate-storyboard and continue-story-chain
  */
+function ensureCutTypes(scenes: StoryScene[]): StoryScene[] {
+  const CONTINUITY_SOURCE_ROLES = ["problem", "story_a", "story_b"];
+  return scenes.map((scene, i) => {
+    if (scene.cut_type) return scene; // Already has cut_type
+    
+    const role = scene.role || "story_a";
+    const prevRole = i > 0 ? (scenes[i - 1].role || "story_a") : null;
+    
+    let computedCutType: "hard" | "continuity" = "hard";
+    if (i === 0) {
+      computedCutType = "hard"; // First scene always hard
+    } else if (role === "hook" || role === "cta" || role === "reset") {
+      computedCutType = "hard"; // These roles always hard
+    } else if (role === "story_a" || role === "story_b") {
+      // Continuity only if previous role is eligible
+      computedCutType = prevRole && CONTINUITY_SOURCE_ROLES.includes(prevRole) 
+        ? "continuity" 
+        : "hard";
+    }
+    
+    return { ...scene, cut_type: computedCutType };
+  });
+}
+
+
 function getContinuityWarnings(_anchors: ContinuityAnchors, scenes: StoryScene[]): string[] {
   const warnings: string[] = [];
   
@@ -409,7 +435,8 @@ export function StoryBuilderPanel({
       motif_anchors?: string[];
       palette_keywords?: string[];
     }) | null;
-    setScenes(storyboard?.scenes || []);
+    // Ensure cut_type is computed for legacy stories without it
+    setScenes(ensureCutTypes(storyboard?.scenes || []));
     setTier(storyboard?.tier || "volume");
     // Restore Story Spine if present
     setStorySpine(storyboard?.story_spine || "");
@@ -420,9 +447,12 @@ export function StoryBuilderPanel({
   // Create story mutation (preserves full Story Spine)
   const createStory = useMutation({
     mutationFn: async () => {
+      // Ensure cut_type is present on all scenes
+      const scenesWithCutType = ensureCutTypes(scenes);
+      
       // Persist full narrative structure including Story Spine
       const fullStoryboard = { 
-        scenes,
+        scenes: scenesWithCutType,
         tier,
         story_spine: storySpine,
         motif_anchors: motifAnchors,
@@ -878,9 +908,12 @@ export function StoryBuilderPanel({
       return;
     }
 
+    // Ensure cut_type is present on all scenes
+    const scenesWithCutType = ensureCutTypes(scenes);
+
     // Build full storyboard with Story Spine preserved
     const fullStoryboard = {
-      scenes,
+      scenes: scenesWithCutType,
       tier,
       story_spine: storySpine,
       motif_anchors: motifAnchors,
