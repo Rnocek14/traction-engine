@@ -310,10 +310,10 @@ export function UnifiedFilmstrip({
   );
 
   return (
-    <Collapsible open={isExpanded} onOpenChange={setIsExpanded}>
+    <Collapsible open={isExpanded} onOpenChange={setIsExpanded} className="shrink-0">
       <div className={cn(
-        "border-t border-primary/30 bg-card/50 shrink-0 transition-all overflow-hidden",
-        isExpanded ? "max-h-[280px]" : "max-h-[120px]",
+        "border-t border-primary/30 bg-card/50 transition-all overflow-hidden",
+        isExpanded ? "h-[200px]" : "h-[100px]",
         className
       )}>
         {/* Header */}
