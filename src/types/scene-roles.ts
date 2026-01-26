@@ -131,8 +131,10 @@ export function getSceneRoleConfig(role: SceneRole): SceneRoleConfig {
 }
 
 /**
- * Get the provider for a role with tier awareness
+ * Get the provider for a role with tier awareness (LEGACY - use getProviderForRoleWithContext when possible)
  * Volume tier limits Sora usage, Hero tier allows full Sora
+ * 
+ * @deprecated Use getProviderForRoleWithContext for template-aware routing
  */
 export function getProviderForRole(
   role: SceneRole,
@@ -146,13 +148,16 @@ export function getProviderForRole(
     return config.defaultProvider;
   }
   
-  // Volume tier: limit Sora to 1 scene (story_b only)
+  // Volume tier: limit Sora to 1 scene (story_b preferred, else story_a)
   if (config.defaultProvider === "sora") {
-    // Allow Sora only for story_b in volume tier, and only 1 usage
-    if (role === "story_b" && soraUsedCount === 0) {
+    if (soraUsedCount >= 1) {
+      return config.fallbackProviders[0];
+    }
+    // Allow Sora for story_b or story_a (when no story_b context available)
+    if (role === "story_b" || role === "story_a") {
       return "sora";
     }
-    // Otherwise use first fallback
+    // Other Sora-default roles fall back
     return config.fallbackProviders[0];
   }
   
@@ -199,3 +204,85 @@ export const ROLE_DISPLAY: Record<SceneRole, { label: string; shortLabel: string
   atmosphere: { label: "Atmosphere", shortLabel: "AT" },
   establish: { label: "Establish", shortLabel: "ES" },
 };
+
+/**
+ * Infer role from narrative position (canonical implementation)
+ * Used when scene doesn't have an explicit role assigned.
+ * 
+ * This is the single source of truth - import this function
+ * in UI and edge functions instead of reimplementing.
+ */
+export function inferRoleFromPosition(sceneIndex: number, totalScenes: number): SceneRole {
+  // Handle edge cases
+  if (totalScenes <= 0) totalScenes = 6; // Default assumption
+  if (sceneIndex === 0) return "hook";
+  if (sceneIndex === totalScenes - 1) return "cta";
+  
+  const position = sceneIndex / totalScenes;
+  
+  if (position < 0.25) return "problem";
+  if (position < 0.5) return "story_a";
+  if (position < 0.65) return "reset";
+  if (position < 0.85) return "story_b";
+  return "cta";
+}
+
+/**
+ * Check if a template/scene-list has story_b role
+ * Used to determine if story_a should get Sora in volume tier
+ */
+export function hasStoryBRole(roles: SceneRole[]): boolean {
+  return roles.includes("story_b");
+}
+
+/**
+ * Get the provider for a role with tier awareness (ENHANCED)
+ * 
+ * Volume tier logic:
+ * - If story_b exists: only story_b gets Sora
+ * - If no story_b: story_a gets Sora (for quick_hook-style templates)
+ * - Limit: 1 Sora scene total
+ * 
+ * Hero tier: all story roles get Sora
+ */
+export function getProviderForRoleWithContext(
+  role: SceneRole,
+  tier: "volume" | "hero",
+  soraUsedCount: number,
+  templateRoles: SceneRole[] = []
+): VideoProvider {
+  const config = getSceneRoleConfig(role);
+  
+  // Hero tier: always use default provider
+  if (tier === "hero") {
+    return config.defaultProvider;
+  }
+  
+  // Volume tier: smart Sora limiting
+  if (config.defaultProvider === "sora") {
+    // Already used Sora quota
+    if (soraUsedCount >= 1) {
+      return config.fallbackProviders[0];
+    }
+    
+    const hasStoryB = hasStoryBRole(templateRoles);
+    
+    // If story_b exists, only it gets Sora
+    if (hasStoryB) {
+      if (role === "story_b") {
+        return "sora";
+      }
+      return config.fallbackProviders[0];
+    }
+    
+    // No story_b in template - allow story_a to use Sora
+    if (role === "story_a") {
+      return "sora";
+    }
+    
+    // Other Sora-default roles fall back
+    return config.fallbackProviders[0];
+  }
+  
+  return config.defaultProvider;
+}

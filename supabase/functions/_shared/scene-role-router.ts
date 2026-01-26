@@ -100,6 +100,8 @@ export interface RoleRoutingOptions {
   isChained?: boolean;
   /** Force a specific provider (user override) */
   forceProvider?: VideoProvider;
+  /** All roles in the template (for smart story_a fallback) */
+  templateRoles?: SceneRole[];
 }
 
 export interface RoleRoutingResult {
@@ -112,13 +114,26 @@ export interface RoleRoutingResult {
 
 /**
  * Route a scene to the best provider based on its role
+ * 
+ * VOLUME TIER LOGIC (improved):
+ * - If template has story_b: only story_b gets Sora
+ * - If template has NO story_b: story_a gets Sora (for quick_hook-style templates)
+ * - Limit: 1 Sora scene total in volume tier
+ * 
+ * HERO TIER: All story roles get their default provider (Sora for story scenes)
  */
 export function routeBySceneRole(
   role: SceneRole,
   options: RoleRoutingOptions = {}
 ): RoleRoutingResult {
   const config = ROLE_CONFIGS[role] || ROLE_CONFIGS.story_a;
-  const { tier = "volume", soraUsedCount = 0, isChained = false, forceProvider } = options;
+  const { 
+    tier = "volume", 
+    soraUsedCount = 0, 
+    isChained = false, 
+    forceProvider,
+    templateRoles = []
+  } = options;
   
   // Force provider override
   if (forceProvider) {
@@ -138,14 +153,35 @@ export function routeBySceneRole(
   // Tier-based Sora limiting
   if (provider === "sora" && tier === "volume") {
     const VOLUME_SORA_LIMIT = 1;
+    
+    // Check if already used Sora quota
     if (soraUsedCount >= VOLUME_SORA_LIMIT) {
-      // Already used Sora quota, fallback
       provider = config.fallbackProviders[0];
       routingReason = `Volume tier: Sora limit (${VOLUME_SORA_LIMIT}) reached, using ${provider}`;
-    } else if (role !== "story_b") {
-      // In volume tier, only story_b gets Sora
-      provider = config.fallbackProviders[0];
-      routingReason = `Volume tier: Reserving Sora for story_b, using ${provider} for ${role}`;
+    } else {
+      // Smart routing: check if template has story_b
+      const hasStoryB = templateRoles.includes("story_b");
+      
+      if (hasStoryB) {
+        // Template has story_b - reserve Sora for it
+        if (role === "story_b") {
+          // story_b gets Sora
+          routingReason = `Volume tier: story_b gets Sora (primary story beat)`;
+        } else {
+          // Other Sora-default roles fall back
+          provider = config.fallbackProviders[0];
+          routingReason = `Volume tier: Reserving Sora for story_b, using ${provider} for ${role}`;
+        }
+      } else {
+        // Template has NO story_b - allow story_a to use Sora
+        if (role === "story_a") {
+          routingReason = `Volume tier: No story_b in template, story_a gets Sora`;
+        } else {
+          // Other Sora-default roles still fall back
+          provider = config.fallbackProviders[0];
+          routingReason = `Volume tier: Using ${provider} for ${role} (Sora reserved for story beats)`;
+        }
+      }
     }
   }
   
