@@ -10,6 +10,12 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { 
+  routeBySceneRole, 
+  inferRoleFromPosition,
+  type SceneRole,
+  type VideoProvider,
+} from "../_shared/scene-role-router.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -24,53 +30,13 @@ interface ChainedStoryRequest {
     enriched_prompt?: string;
     duration_target: number;
     camera_direction?: string;
+    role?: SceneRole;
   }>;
   anchors: Record<string, unknown>;
   settings?: {
     size?: string;
+    tier?: "volume" | "hero";
   };
-}
-
-/**
- * Extract routing tags from scene metadata for smart provider selection
- */
-function extractRoutingTags(scene: { prompt: string; camera_direction?: string }): string[] {
-  const tags: string[] = [];
-  
-  const prompt = scene.prompt.toLowerCase();
-  
-  // Action/motion detection
-  if (/action|fight|battle|explosion|chase|run|jump/.test(prompt)) {
-    tags.push("action");
-  }
-  if (/slow|peaceful|calm|serene|quiet/.test(prompt)) {
-    tags.push("slow_motion");
-  }
-  
-  // Shot type from camera direction
-  if (scene.camera_direction) {
-    const cam = scene.camera_direction.toLowerCase();
-    if (/close/.test(cam)) tags.push("close_up");
-    if (/wide/.test(cam)) tags.push("wide_shot");
-    if (/tracking|follow/.test(cam)) tags.push("tracking");
-    if (/aerial|drone/.test(cam)) tags.push("aerial");
-  }
-  
-  // Genre/style detection
-  if (/fantasy|dragon|magic|wizard|medieval/.test(prompt)) {
-    tags.push("fantasy");
-  }
-  if (/horror|dark|scary|creepy/.test(prompt)) {
-    tags.push("horror");
-  }
-  if (/nature|landscape|forest|ocean|mountain/.test(prompt)) {
-    tags.push("nature");
-  }
-  if (/person|character|man|woman|figure/.test(prompt)) {
-    tags.push("character");
-  }
-  
-  return tags.slice(0, 5); // Limit to top 5 tags
 }
 
 /**
@@ -90,12 +56,23 @@ function normalizeSize(input?: string): string {
 }
 
 /**
- * Snap duration to valid Sora values (4, 8, 12 seconds)
+ * Snap duration to valid values per provider
  */
-function snapToValidDuration(seconds: number): number {
-  if (seconds <= 6) return 4;
-  if (seconds <= 10) return 8;
-  return 12;
+function snapDurationForProvider(seconds: number, provider: VideoProvider): number {
+  switch (provider) {
+    case "sora":
+      if (seconds <= 6) return 4;
+      if (seconds <= 10) return 8;
+      return 12;
+    case "runway":
+      if (seconds <= 5) return 4;
+      if (seconds <= 7) return 6;
+      return 8;
+    case "luma":
+      return 5;
+    default:
+      return 4;
+  }
 }
 
 Deno.serve(async (req) => {
@@ -154,11 +131,31 @@ Deno.serve(async (req) => {
       })
       .eq("id", story_job_id);
 
-    // Extract routing hints from scene metadata
-    const sceneRoutingTags = extractRoutingTags(firstScene);
+    // Determine scene role (explicit or inferred from position)
+    const sceneRole: SceneRole = firstScene.role || 
+      inferRoleFromPosition(0, scenes.length);
     
-    // Queue ONLY scene 1 via smart router (will pick best provider)
-    const response = await fetch(`${supabaseUrl}/functions/v1/queue-video-smart`, {
+    // Route by scene role (deterministic)
+    const tier = settings?.tier || "volume";
+    const routingResult = routeBySceneRole(sceneRole, {
+      tier,
+      isChained: false, // First scene is T2V
+      soraUsedCount: 0,
+    });
+    
+    const selectedProvider = routingResult.provider;
+    const snappedDuration = snapDurationForProvider(firstScene.duration_target || 5, selectedProvider);
+    
+    console.log(`[chained] Role-based routing: ${sceneRole} → ${selectedProvider} (${routingResult.routingReason})`);
+    
+    // Queue to the selected provider directly
+    const providerEndpoint = {
+      sora: "queue-video",
+      runway: "queue-video-runway",
+      luma: "queue-video-luma",
+    }[selectedProvider];
+    
+    const response = await fetch(`${supabaseUrl}/functions/v1/${providerEndpoint}`, {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${supabaseServiceKey}`,
@@ -169,13 +166,7 @@ Deno.serve(async (req) => {
         prompt: prompt,
         settings: {
           size: size,
-          seconds: snapToValidDuration(firstScene.duration_target || 5),
-        },
-        provider: "smart", // Let the router decide
-        routing_hint: {
-          shot_type: firstScene.camera_direction,
-          is_chained: false, // First scene is T2V, not chained
-          routing_tags: sceneRoutingTags,
+          seconds: snappedDuration,
         },
       }),
     });

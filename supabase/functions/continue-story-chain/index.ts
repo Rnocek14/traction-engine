@@ -13,60 +13,36 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+import { 
+  routeBySceneRole, 
+  inferRoleFromPosition,
+  type SceneRole,
+  type VideoProvider,
+} from "../_shared/scene-role-router.ts";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
 /**
- * Extract routing tags from scene metadata for smart provider selection
+ * Snap duration to valid values per provider
  */
-function extractRoutingTags(scene: { prompt: string; camera_direction?: string }): string[] {
-  const tags: string[] = [];
-  
-  const prompt = scene.prompt.toLowerCase();
-  
-  // Action/motion detection
-  if (/action|fight|battle|explosion|chase|run|jump/.test(prompt)) {
-    tags.push("action");
+function snapDurationForProvider(seconds: number, provider: VideoProvider): number {
+  switch (provider) {
+    case "sora":
+      if (seconds <= 6) return 4;
+      if (seconds <= 10) return 8;
+      return 12;
+    case "runway":
+      if (seconds <= 5) return 4;
+      if (seconds <= 7) return 6;
+      return 8;
+    case "luma":
+      return 5; // Luma Ray-2 is fixed at 5s
+    default:
+      return 4;
   }
-  if (/slow|peaceful|calm|serene|quiet/.test(prompt)) {
-    tags.push("slow_motion");
-  }
-  
-  // Shot type from camera direction
-  if (scene.camera_direction) {
-    const cam = scene.camera_direction.toLowerCase();
-    if (/close/.test(cam)) tags.push("close_up");
-    if (/wide/.test(cam)) tags.push("wide_shot");
-    if (/tracking|follow/.test(cam)) tags.push("tracking");
-    if (/aerial|drone/.test(cam)) tags.push("aerial");
-  }
-  
-  // Genre/style detection
-  if (/fantasy|dragon|magic|wizard|medieval/.test(prompt)) {
-    tags.push("fantasy");
-  }
-  if (/horror|dark|scary|creepy/.test(prompt)) {
-    tags.push("horror");
-  }
-  if (/nature|landscape|forest|ocean|mountain/.test(prompt)) {
-    tags.push("nature");
-  }
-  if (/person|character|man|woman|figure/.test(prompt)) {
-    tags.push("character");
-  }
-  
-  return tags.slice(0, 5); // Limit to top 5 tags
-}
-
-/**
- * Snap duration to valid Sora values (4, 8, or 12 seconds)
- */
-function snapToSoraDuration(seconds: number): number {
-  if (seconds <= 6) return 4;
-  if (seconds <= 10) return 8;
-  return 12;
 }
 
 Deno.serve(async (req) => {
@@ -227,11 +203,31 @@ Deno.serve(async (req) => {
 
       console.log(`[chain-continue] Queueing scene ${nextSceneIndex + 1}/${totalScenes} for story ${story.id} [${isFirstScene ? "T2V" : "I2V"}]`);
 
-      // Extract routing hints from scene metadata
-      const sceneRoutingTags = extractRoutingTags(nextScene);
+      // Determine scene role - use explicit role or infer from position
+      const sceneRole: SceneRole = (nextScene as { role?: SceneRole }).role || 
+        inferRoleFromPosition(nextSceneIndex, totalScenes);
       
-      // Queue via SMART router (will pick best provider per scene)
-      const response = await fetch(`${supabaseUrl}/functions/v1/queue-video-smart`, {
+      // Route by scene role (deterministic, with tier/chaining awareness)
+      // Default to volume tier for cron jobs - hero tier is opt-in
+      const routingResult = routeBySceneRole(sceneRole, {
+        tier: "volume",
+        isChained: !isFirstScene,
+        soraUsedCount: 0, // Could track this across scenes for true enforcement
+      });
+      
+      const selectedProvider = routingResult.provider;
+      const snappedDuration = snapDurationForProvider(nextScene.duration_target || 5, selectedProvider);
+      
+      console.log(`[chain-continue] Role-based routing: ${sceneRole} → ${selectedProvider} (${routingResult.routingReason})`);
+      
+      // Queue to the selected provider directly (not "smart" - we've already made the decision)
+      const providerEndpoint = {
+        sora: "queue-video",
+        runway: "queue-video-runway",
+        luma: "queue-video-luma",
+      }[selectedProvider];
+      
+      const response = await fetch(`${supabaseUrl}/functions/v1/${providerEndpoint}`, {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${supabaseServiceKey}`,
@@ -242,16 +238,9 @@ Deno.serve(async (req) => {
           prompt: prompt,
           settings: {
             size: "720x1280",
-            // Sora only supports 4/8/12s, snap to nearest valid value
-            seconds: snapToSoraDuration(nextScene.duration_target || 5),
+            seconds: snappedDuration,
           },
           starting_frame_url: isFirstScene ? undefined : latestThumbnail,
-          provider: "smart", // Let the router decide based on scene content
-          routing_hint: {
-            shot_type: nextScene.camera_direction,
-            is_chained: !isFirstScene, // I2V scenes are chained
-            routing_tags: sceneRoutingTags,
-          },
         }),
       });
 
