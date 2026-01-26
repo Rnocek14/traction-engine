@@ -322,9 +322,16 @@ Deno.serve(async (req) => {
             error: updates.error as string,
           });
         } else {
-          // Still processing
+          // Still processing - update progress
           if (lumaData.progress !== undefined) {
             updates.progress = Math.round(lumaData.progress * 100);
+          } else if (newStatus === "running") {
+            // Luma doesn't always report progress, estimate based on time elapsed
+            // Typical Luma generation takes ~60-90s
+            const createdAt = new Date(job.created_at).getTime();
+            const elapsed = (Date.now() - createdAt) / 1000;
+            const estimatedProgress = Math.min(90, Math.round((elapsed / 90) * 100));
+            updates.progress = Math.max(job.progress || 0, estimatedProgress);
           }
 
           results.push({
