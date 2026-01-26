@@ -287,16 +287,27 @@ Generate a complete, filmable storyboard with vivid, specific visual prompts for
     const scenesWithIds = storyboard.scenes.map((scene, i) => {
       const isFinalScene = i === totalScenes - 1;
       const effectiveRole: SceneRole = (scene.role as SceneRole) || "story_a";
+      const positionRatio = i / Math.max(totalScenes - 1, 1);
+      
+      // Bridge change_type early for conditional zone logic
+      const effectiveChangeType = scene.change_type 
+        || (scene as { defaultChangeType?: ChangeType }).defaultChangeType 
+        || "info";
       
       // Compute zone: use GPT-provided zone, or derive from role
       // Final CTA uses "button" zone for clean hold
-      const computedZone: CutZone = (isFinalScene && effectiveRole === "cta") 
+      // Early "info" resets use hook speed (pattern interrupt)
+      let computedZone: CutZone = (isFinalScene && effectiveRole === "cta") 
         ? "button" 
         : (scene as { zone?: CutZone }).zone || ROLE_TO_ZONE[effectiveRole] || "setup";
+      
+      // Reset speed override: early info-resets get hook pacing
+      if (effectiveRole === "reset" && effectiveChangeType === "info" && positionRatio < 0.4) {
+        computedZone = "hook";
+      }
 
       // Duration suggestion based on zone + position
       const zoneDuration = ZONE_DURATIONS[computedZone];
-      const positionRatio = i / Math.max(totalScenes - 1, 1);
       
       // Zone-specific duration multiplier (payoff breathes, hook stays punchy)
       let t = 0.5; // default midpoint
@@ -314,10 +325,8 @@ Generate a complete, filmable storyboard with vivid, specific visual prompts for
         // Force role in output (prevent undefined leaking)
         role: effectiveRole,
         sequence_index: i,
-        // Bridge defaultChangeType from templates OR use GPT-provided change_type
-        change_type: scene.change_type 
-          || (scene as { defaultChangeType?: ChangeType }).defaultChangeType 
-          || "info",
+        // Use pre-computed change_type (already bridged from defaultChangeType)
+        change_type: effectiveChangeType,
         // Compute zone from role if not provided
         zone: computedZone,
         // Duration guidance from zone
