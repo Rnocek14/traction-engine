@@ -95,6 +95,29 @@ function shouldFallback(errorMessage: string): boolean {
 }
 
 /**
+ * Snap duration to valid values per provider
+ * - Sora: 4, 8, 12 seconds
+ * - Runway T2V: 4, 6, 8 seconds
+ * - Luma: 5 seconds (fixed)
+ */
+function snapDurationForProvider(seconds: number, provider: "sora" | "runway" | "luma"): number {
+  switch (provider) {
+    case "sora":
+      if (seconds <= 6) return 4;
+      if (seconds <= 10) return 8;
+      return 12;
+    case "runway":
+      if (seconds <= 5) return 4;
+      if (seconds <= 7) return 6;
+      return 8;
+    case "luma":
+      return 5; // Luma Ray-2 is fixed at 5s
+    default:
+      return 4;
+  }
+}
+
+/**
  * Determine the best provider based on shot type, genre, and chaining mode
  * 
  * Chained mode prioritizes:
@@ -169,6 +192,12 @@ async function trySora(
   body: SmartVideoRequest
 ): Promise<ProviderResult> {
   try {
+    // Snap duration to valid Sora values
+    const snappedSettings = {
+      ...body.settings,
+      seconds: snapDurationForProvider(body.settings.seconds, "sora"),
+    };
+    
     const response = await fetch(`${supabaseUrl}/functions/v1/queue-video`, {
       method: "POST",
       headers: {
@@ -179,7 +208,7 @@ async function trySora(
         script_run_id: body.script_run_id,
         clip_id: body.clip_id,
         prompt: body.prompt,
-        settings: body.settings,
+        settings: snappedSettings,
         starting_frame_url: body.starting_frame_url,
       }),
     });
@@ -217,6 +246,12 @@ async function tryRunway(
   body: SmartVideoRequest
 ): Promise<ProviderResult> {
   try {
+    // Snap duration to valid Runway values
+    const snappedSettings = {
+      ...body.settings,
+      seconds: snapDurationForProvider(body.settings.seconds, "runway"),
+    };
+    
     const response = await fetch(`${supabaseUrl}/functions/v1/queue-video-runway`, {
       method: "POST",
       headers: {
@@ -227,7 +262,7 @@ async function tryRunway(
         script_run_id: body.script_run_id,
         clip_id: body.clip_id,
         prompt: body.prompt,
-        settings: body.settings,
+        settings: snappedSettings,
         starting_frame_url: body.starting_frame_url,
       }),
     });
@@ -265,6 +300,12 @@ async function tryLuma(
   body: SmartVideoRequest
 ): Promise<ProviderResult> {
   try {
+    // Snap duration to valid Luma values (fixed 5s)
+    const snappedSettings = {
+      ...body.settings,
+      seconds: snapDurationForProvider(body.settings.seconds, "luma"),
+    };
+    
     const response = await fetch(`${supabaseUrl}/functions/v1/queue-video-luma`, {
       method: "POST",
       headers: {
@@ -275,7 +316,7 @@ async function tryLuma(
         script_run_id: body.script_run_id,
         clip_id: body.clip_id,
         prompt: body.prompt,
-        settings: body.settings,
+        settings: snappedSettings,
         starting_frame_url: body.starting_frame_url,
       }),
     });

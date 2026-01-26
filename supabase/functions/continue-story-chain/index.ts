@@ -60,6 +60,15 @@ function extractRoutingTags(scene: { prompt: string; camera_direction?: string }
   return tags.slice(0, 5); // Limit to top 5 tags
 }
 
+/**
+ * Snap duration to valid Sora values (4, 8, or 12 seconds)
+ */
+function snapToSoraDuration(seconds: number): number {
+  if (seconds <= 6) return 4;
+  if (seconds <= 10) return 8;
+  return 12;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -233,7 +242,8 @@ Deno.serve(async (req) => {
           prompt: prompt,
           settings: {
             size: "720x1280",
-            seconds: nextScene.duration_target || 5,
+            // Sora only supports 4/8/12s, snap to nearest valid value
+            seconds: snapToSoraDuration(nextScene.duration_target || 5),
           },
           starting_frame_url: isFirstScene ? undefined : latestThumbnail,
           provider: "smart", // Let the router decide based on scene content
