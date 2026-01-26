@@ -213,7 +213,21 @@ Deno.serve(async (req) => {
             throw new Error("Failed to download/upload video");
           }
 
-          // Update job as completed with all URLs - use "done" to match DB constraint
+          // Extract thumbnail dimensions from settings.size (Sora output matches request)
+          // Format: "720x1280" → width=720, height=1280
+          let thumbnailWidth: number | null = null;
+          let thumbnailHeight: number | null = null;
+          const size = settings?.size as string | undefined;
+          if (size && size.includes("x")) {
+            const [w, h] = size.split("x").map(Number);
+            if (!isNaN(w) && !isNaN(h)) {
+              thumbnailWidth = w;
+              thumbnailHeight = h;
+              console.log(`Sora job ${job.id}: parsed dimensions ${thumbnailWidth}x${thumbnailHeight} from settings.size`);
+            }
+          }
+
+          // Update job as completed with all URLs + dimensions - use "done" to match DB constraint
           await supabase
             .from("video_jobs")
             .update({ 
@@ -222,6 +236,8 @@ Deno.serve(async (req) => {
               output_url: outputUrl,
               thumbnail_url: thumbnailUrl,
               spritesheet_url: spritesheetUrl,
+              thumbnail_width: thumbnailWidth,
+              thumbnail_height: thumbnailHeight,
             })
             .eq("id", job.id);
 
