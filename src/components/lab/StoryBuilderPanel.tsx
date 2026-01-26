@@ -203,6 +203,7 @@ export function StoryBuilderPanel({
   // Local state for new/editing story
   const [title, setTitle] = useState("");
   const [storyType, setStoryType] = useState<StoryType>("short_story");
+  const [tier, setTier] = useState<"volume" | "hero">("volume");
   const [scenes, setScenes] = useState<StoryScene[]>([]);
   const [anchors, setAnchors] = useState<ContinuityAnchors>(getDefaultAnchors());
   const [isGenerating, setIsGenerating] = useState(false);
@@ -385,8 +386,9 @@ export function StoryBuilderPanel({
     setTitle(existingStory.title || "");
     setStoryType((existingStory.story_type as StoryType) || "short_story");
     setAnchors((existingStory.continuity_anchors as unknown as ContinuityAnchors) || {});
-    const storyboard = existingStory.storyboard_json as unknown as Storyboard | null;
+    const storyboard = existingStory.storyboard_json as unknown as (Storyboard & { tier?: "volume" | "hero" }) | null;
     setScenes(storyboard?.scenes || []);
+    setTier(storyboard?.tier || "volume");
   }, [existingStory, forceNew]);
 
   // Create story mutation
@@ -492,6 +494,7 @@ export function StoryBuilderPanel({
           settings: {
             size: "1280x720", // 16:9 in pixels - must be valid dimension, not aspect ratio
             provider: "smart", // Use intelligent per-scene provider selection
+            tier, // Pass actual tier for routing decisions
           },
         },
       });
@@ -922,6 +925,19 @@ export function StoryBuilderPanel({
                     ))}
                   </SelectContent>
                 </Select>
+                <Select value={tier} onValueChange={(v) => setTier(v as "volume" | "hero")}>
+                  <SelectTrigger className="h-8 text-xs w-24">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="volume" className="text-xs">
+                      <span className="font-medium">📦 Volume</span>
+                    </SelectItem>
+                    <SelectItem value="hero" className="text-xs">
+                      <span className="font-medium">⭐ Hero</span>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
                 <Button
                   onClick={() => generateStory.mutate()}
                   disabled={!concept.trim() || isGeneratingStory}
@@ -1026,10 +1042,10 @@ export function StoryBuilderPanel({
                       
                       for (let i = 0; i < scenes.length; i++) {
                         soraUsedAtScene.push(cumulativeSoraCount);
-                        // Use the real routing logic to check if this scene would use Sora
+                        // Use the real routing logic with actual tier state
                         const provider = getProviderForRoleWithContext(
                           allRoles[i],
-                          "volume", // TODO: Get from tier selector
+                          tier,
                           cumulativeSoraCount,
                           allRoles
                         );
@@ -1045,7 +1061,7 @@ export function StoryBuilderPanel({
                           index={index}
                           totalScenes={scenes.length}
                           defaultDuration={config.defaultDuration}
-                          tier="volume" // TODO: Add tier selector to UI
+                          tier={tier}
                           allRoles={allRoles}
                           soraUsedBeforeThis={soraUsedAtScene[index]}
                           onUpdate={(updates) => updateScene(scene.id, updates)}
