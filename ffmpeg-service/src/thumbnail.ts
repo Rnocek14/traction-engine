@@ -21,6 +21,8 @@ export interface ThumbnailRequest {
 export interface ThumbnailResult {
   thumbnail_url: string;
   spritesheet_url?: string;
+  thumbnail_width?: number;
+  thumbnail_height?: number;
 }
 
 async function download(url: string, outPath: string): Promise<void> {
@@ -77,6 +79,33 @@ function runFFmpeg(args: string[]): Promise<void> {
   });
 }
 
+async function getImageDimensions(imagePath: string): Promise<{ width: number; height: number }> {
+  return new Promise((resolve, reject) => {
+    const p = spawn("ffprobe", [
+      "-v", "error",
+      "-select_streams", "v:0",
+      "-show_entries", "stream=width,height",
+      "-of", "csv=p=0:s=x",
+      imagePath,
+    ]);
+    let stdout = "";
+    p.stdout.on("data", (d) => (stdout += d.toString()));
+    p.on("close", (code) => {
+      if (code !== 0) {
+        console.error("ffprobe failed for dimensions, using defaults");
+        return resolve({ width: 720, height: 1280 }); // Default to portrait
+      }
+      const parts = stdout.trim().split("x");
+      if (parts.length === 2) {
+        resolve({ width: parseInt(parts[0], 10), height: parseInt(parts[1], 10) });
+      } else {
+        console.error(`Could not parse dimensions: ${stdout}, using defaults`);
+        resolve({ width: 720, height: 1280 });
+      }
+    });
+  });
+}
+
 export async function extractThumbnail(req: ThumbnailRequest): Promise<ThumbnailResult> {
   const tmpDir = `/tmp/thumb_${req.job_id}`;
   await fs.mkdir(tmpDir, { recursive: true });
@@ -99,6 +128,9 @@ export async function extractThumbnail(req: ThumbnailRequest): Promise<Thumbnail
       thumbnailPath,
     ]);
 
+    // Get thumbnail dimensions
+    const thumbDims = await getImageDimensions(thumbnailPath);
+
     // Upload thumbnail
     const thumbnailUrl = await uploadToSupabase(
       thumbnailPath,
@@ -109,7 +141,11 @@ export async function extractThumbnail(req: ThumbnailRequest): Promise<Thumbnail
       req.upload.supabase_service_key
     );
 
-    const result: ThumbnailResult = { thumbnail_url: thumbnailUrl };
+    const result: ThumbnailResult = { 
+      thumbnail_url: thumbnailUrl,
+      thumbnail_width: thumbDims.width,
+      thumbnail_height: thumbDims.height,
+    };
 
     // Optionally extract spritesheet
     if (req.upload.spritesheet_path) {
