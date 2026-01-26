@@ -1145,30 +1145,58 @@ export function StoryBuilderPanel({
             </CardContent>
           </Card>
 
-          {/* Generated/Manual Story Details */}
+          {/* Story Overview - The Narrative Arc */}
           {scenes.length > 0 && (
-            <div className="space-y-3">
-              <div className="flex items-center gap-3">
-                <Film className="h-5 w-5 text-primary" />
-                <Input
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="Story title..."
-                  className="h-8 text-sm font-medium flex-1"
-                />
-              </div>
-              <div className="flex gap-2">
-                <Badge variant="outline" className="text-[10px]">
-                  {config.clipPacing} cuts
-                </Badge>
-                <Badge variant="outline" className="text-[10px]">
-                  {config.continuityStrictness}
-                </Badge>
-                <Badge variant="secondary" className="text-[10px]">
-                  {scenes.length} scenes
-                </Badge>
-              </div>
-            </div>
+            <Card className="border-l-4 border-l-primary bg-gradient-to-r from-primary/5 to-transparent">
+              <CardContent className="p-4 space-y-3">
+                {/* Title */}
+                <div className="flex items-center gap-3">
+                  <Film className="h-5 w-5 text-primary shrink-0" />
+                  <Input
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    placeholder="Story title..."
+                    className="h-8 text-sm font-semibold flex-1 border-none bg-transparent px-0 focus-visible:ring-0"
+                  />
+                </div>
+                
+                {/* Story Spine - The Narrative Arc */}
+                {storySpine && (
+                  <div className="space-y-1">
+                    <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                      Story Arc
+                    </Label>
+                    <p className="text-sm text-foreground/90 leading-relaxed italic">
+                      "{storySpine}"
+                    </p>
+                  </div>
+                )}
+                
+                {/* Visual Motifs */}
+                {motifAnchors.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {motifAnchors.map((motif, i) => (
+                      <Badge key={i} variant="outline" className="text-[10px] bg-background/50">
+                        🎬 {motif}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+                
+                {/* Stats */}
+                <div className="flex gap-2 pt-1 border-t border-border/50">
+                  <Badge variant="secondary" className="text-[10px]">
+                    {scenes.length} scenes
+                  </Badge>
+                  <Badge variant="outline" className="text-[10px]">
+                    ~{Math.round(scenes.reduce((sum, s) => sum + (s.duration_target || 5), 0))}s total
+                  </Badge>
+                  <Badge variant="outline" className="text-[10px]">
+                    {tier === "hero" ? "⭐ Hero" : "📦 Volume"} tier
+                  </Badge>
+                </div>
+              </CardContent>
+            </Card>
           )}
 
           {/* Continuity Anchors - collapsed by default, AI fills these */}
