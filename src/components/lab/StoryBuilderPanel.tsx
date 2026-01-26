@@ -1014,16 +1014,31 @@ export function StoryBuilderPanel({
               >
                 <SortableContext items={scenes.map(s => s.id)} strategy={verticalListSortingStrategy}>
                   <div className="space-y-2">
-                    {scenes.map((scene, index) => {
-                      // Calculate Sora usage before this scene for accurate badge
-                      const allRoles = scenes.map(s => s.role || inferRoleFromPosition(scenes.indexOf(s), scenes.length));
-                      const soraUsedBeforeThis = allRoles.slice(0, index).filter(role => {
-                        // Check if this role would use Sora (approximation for UI display)
-                        const roleConfig = SCENE_ROLE_CONFIGS[role];
-                        return roleConfig?.defaultProvider === "sora";
-                      }).length > 0 ? 1 : 0; // Simplified: just track if any Sora-default role came before
+                    {(() => {
+                      // Pre-compute routing for ALL scenes to get accurate soraUsedCount
+                      const allRoles = scenes.map((s, i) => 
+                        s.role || inferRoleFromPosition(i, scenes.length)
+                      );
                       
-                      return (
+                      // Compute Sora usage up to each scene by simulating routing
+                      let cumulativeSoraCount = 0;
+                      const soraUsedAtScene: number[] = [];
+                      
+                      for (let i = 0; i < scenes.length; i++) {
+                        soraUsedAtScene.push(cumulativeSoraCount);
+                        // Use the real routing logic to check if this scene would use Sora
+                        const provider = getProviderForRoleWithContext(
+                          allRoles[i],
+                          "volume", // TODO: Get from tier selector
+                          cumulativeSoraCount,
+                          allRoles
+                        );
+                        if (provider === "sora") {
+                          cumulativeSoraCount++;
+                        }
+                      }
+                      
+                      return scenes.map((scene, index) => (
                         <SortableScene
                           key={scene.id}
                           scene={scene}
@@ -1032,12 +1047,12 @@ export function StoryBuilderPanel({
                           defaultDuration={config.defaultDuration}
                           tier="volume" // TODO: Add tier selector to UI
                           allRoles={allRoles}
-                          soraUsedBeforeThis={soraUsedBeforeThis}
+                          soraUsedBeforeThis={soraUsedAtScene[index]}
                           onUpdate={(updates) => updateScene(scene.id, updates)}
                           onRemove={() => removeScene(scene.id)}
                         />
-                      );
-                    })}
+                      ));
+                    })()}
                   </div>
                 </SortableContext>
               </DndContext>

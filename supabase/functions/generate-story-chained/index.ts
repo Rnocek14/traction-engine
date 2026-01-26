@@ -55,8 +55,11 @@ function normalizeSize(input?: string): string {
   return sizeMap[input || ""] || "720x1280";
 }
 
+import { clampDurationToRole } from "../_shared/scene-role-router.ts";
+
 /**
  * Snap duration to valid values per provider
+ * IMPORTANT: Call clampDurationToRole() FIRST, then this function
  */
 function snapDurationForProvider(seconds: number, provider: VideoProvider): number {
   switch (provider) {
@@ -73,6 +76,14 @@ function snapDurationForProvider(seconds: number, provider: VideoProvider): numb
     default:
       return 4;
   }
+}
+
+/**
+ * Combined duration processing: clamp to role range, then snap to provider
+ */
+function processDuration(rawDuration: number, role: SceneRole, provider: VideoProvider): number {
+  const roleClampedDuration = clampDurationToRole(rawDuration, role);
+  return snapDurationForProvider(roleClampedDuration, provider);
 }
 
 Deno.serve(async (req) => {
@@ -119,14 +130,20 @@ Deno.serve(async (req) => {
     const scriptRunId = newScript.id;
     console.log(`[chained] Created script_run ${scriptRunId}`);
 
-    // Update story status and store storyboard for cron to use
+    // Determine tier from settings (will be persisted in storyboard_json for chain continuation)
+    const tier = settings?.tier || "volume";
+    
+    // Update story status and store storyboard WITH TIER for cron to use
     await supabase
       .from("story_jobs")
       .update({ 
         status: "generating",
         total_clips: scenes.length,
         completed_clips: 0,
-        storyboard_json: { scenes },
+        storyboard_json: { 
+          scenes,
+          tier, // Persist tier so continue-story-chain can read it
+        },
         continuity_anchors: anchors,
       })
       .eq("id", story_job_id);
@@ -150,7 +167,8 @@ Deno.serve(async (req) => {
     });
     
     const selectedProvider = routingResult.provider;
-    const snappedDuration = snapDurationForProvider(firstScene.duration_target || 5, selectedProvider);
+    // Process duration: clamp to role range first, then snap to provider
+    const processedDuration = processDuration(firstScene.duration_target || 5, sceneRole, selectedProvider);
     
     console.log(`[chained] Role-based routing: ${sceneRole} → ${selectedProvider} (${routingResult.routingReason})`);
     
@@ -172,7 +190,7 @@ Deno.serve(async (req) => {
         prompt: prompt,
         settings: {
           size: size,
-          seconds: snappedDuration,
+          seconds: processedDuration,
         },
       }),
     });
