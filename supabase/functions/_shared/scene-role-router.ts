@@ -24,6 +24,28 @@ export type SceneRole =
 export type VideoProvider = "sora" | "runway" | "luma";
 export type StoryTier = "volume" | "hero";
 export type PromptStyle = "runway" | "luma" | "sora";
+export type CutType = "hard" | "continuity";
+
+/**
+ * Default cut type by role
+ * 
+ * Philosophy:
+ * - "hard" = New shot, no visual continuity needed (T2V)
+ * - "continuity" = Continue from previous frame (I2V)
+ * 
+ * Only story beats (story_a, story_b) default to continuity
+ * Everything else is a hard cut for punchy editing
+ */
+export const DEFAULT_CUT_TYPES: Record<SceneRole, CutType> = {
+  hook: "hard",       // Always a new attention-grabbing shot
+  problem: "hard",    // Usually different angle/location
+  story_a: "continuity", // May chain from problem (same location)
+  reset: "hard",      // Pattern interrupt - always hard
+  story_b: "continuity", // Often continues from story_a
+  cta: "hard",        // Call-to-action, usually different visual
+  atmosphere: "hard", // Texture/mood transition
+  establish: "hard",  // Wide establishing shot - new context
+};
 
 export interface SceneRoleConfig {
   defaultProvider: VideoProvider;
@@ -272,4 +294,69 @@ export function getDurationRangeForRole(role: SceneRole): [number, number] {
 export function clampDurationToRole(duration: number, role: SceneRole): number {
   const [min, max] = getDurationRangeForRole(role);
   return Math.max(min, Math.min(max, duration));
+}
+
+/**
+ * Resolve cut type for a scene with deterministic rules
+ * 
+ * This is the key function that determines I2V vs T2V
+ * 
+ * Rules (in priority order):
+ * 1. First scene is always T2V (no reference frame)
+ * 2. hook/cta/reset are ALWAYS hard cuts
+ * 3. Provider switch = hard cut (unless explicitly overridden)
+ * 4. continuity only allowed for story_a/story_b when:
+ *    - Previous scene exists
+ *    - Same provider as previous scene
+ *    - Previous role is "eligible" (problem, story_a, story_b)
+ * 5. Otherwise, use role default
+ */
+export function resolveCutType(options: {
+  sceneIndex: number;
+  role: SceneRole;
+  prevRole: SceneRole | null;
+  currentProvider: VideoProvider;
+  prevProvider: VideoProvider | null;
+  explicitCutType?: CutType;
+}): { cutType: CutType; reason: string } {
+  const { sceneIndex, role, prevRole, currentProvider, prevProvider, explicitCutType } = options;
+
+  // Rule 1: First scene is always hard (T2V)
+  if (sceneIndex === 0) {
+    return { cutType: "hard", reason: "first scene (T2V)" };
+  }
+
+  // Rule 2: Certain roles are ALWAYS hard cuts
+  if (role === "hook" || role === "cta" || role === "reset") {
+    return { cutType: "hard", reason: `${role} always uses hard cut` };
+  }
+
+  // Rule 3: Provider switch = hard cut
+  if (prevProvider && prevProvider !== currentProvider) {
+    return { cutType: "hard", reason: `provider switch ${prevProvider}→${currentProvider}` };
+  }
+
+  // Rule 4: Continuity only for story beats with eligible previous role
+  const CONTINUITY_ELIGIBLE_ROLES: SceneRole[] = ["story_a", "story_b"];
+  const CONTINUITY_SOURCE_ROLES: SceneRole[] = ["problem", "story_a", "story_b"];
+
+  if (CONTINUITY_ELIGIBLE_ROLES.includes(role)) {
+    // Check if previous role is eligible source for continuity
+    if (prevRole && CONTINUITY_SOURCE_ROLES.includes(prevRole)) {
+      // If explicit cut_type was provided by GPT, respect it (but we've already applied overrides)
+      return { 
+        cutType: explicitCutType || "continuity", 
+        reason: explicitCutType 
+          ? `GPT suggested ${explicitCutType}` 
+          : `${role} can chain from ${prevRole}`
+      };
+    } else {
+      // Previous role not eligible for continuity
+      return { cutType: "hard", reason: `${role} cannot chain from ${prevRole || "none"}` };
+    }
+  }
+
+  // Rule 5: Use role default
+  const defaultCut = DEFAULT_CUT_TYPES[role] || "hard";
+  return { cutType: defaultCut, reason: `role default for ${role}` };
 }
