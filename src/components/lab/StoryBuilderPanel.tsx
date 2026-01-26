@@ -306,7 +306,7 @@ export function StoryBuilderPanel({
 
   // Load clips for existing story - deduplicated to show best clip per sequence_index
   // Also filters out clips that don't match current storyboard prompts (from previous versions)
-  const { data: storyClips = [] } = useQuery({
+  const { data: storyClips = [], refetch: refetchClips } = useQuery({
     queryKey: ["story-clips", effectiveStoryId, scenes.map(s => s.prompt.slice(0, 30)).join("|")],
     queryFn: async () => {
       if (!effectiveStoryId) return [];
@@ -379,8 +379,34 @@ export function StoryBuilderPanel({
         .sort((a, b) => (a.sequence_index ?? 0) - (b.sequence_index ?? 0));
     },
     enabled: !!effectiveStoryId,
-    refetchInterval: effectiveStoryId ? 5000 : false,
+    refetchInterval: effectiveStoryId ? 5000 : false, // Backup polling
   });
+
+  // Real-time subscription for instant progress updates
+  useEffect(() => {
+    if (!effectiveStoryId) return;
+
+    const channel = supabase
+      .channel(`story-clips-${effectiveStoryId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "video_jobs",
+          filter: `story_job_id=eq.${effectiveStoryId}`,
+        },
+        () => {
+          // Refetch on any change to video_jobs for this story
+          refetchClips();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [effectiveStoryId, refetchClips]);
 
   // Auto-complete story when all clips are done
   useEffect(() => {
