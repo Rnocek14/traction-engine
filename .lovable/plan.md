@@ -1,23 +1,27 @@
 # Story Spine Architecture Fix
 
-## Status: ✅ IMPLEMENTED
+## Status: ✅ FULLY IMPLEMENTED (Auto-Save Fixed)
 
 ---
 
-## Problem: Narrative Collapse
+## Problem: Narrative Collapse + Persistence Gap
 
-The system was generating **scenes**, not **stories**. GPT-4o produces rich narrative structure (`story_spine`, `motif_anchors`, `change_type`, `action_summary`) but it was being **discarded** before storage.
+Two distinct bugs were causing narrative loss:
+
+1. **Narrative Collapse**: GPT-4o produces rich narrative structure (`story_spine`, `motif_anchors`, `change_type`, `action_summary`) but it was being **discarded** before storage.
+
+2. **Persistence Gap**: Story data was only saved to DB when user clicked "Generate Clips". If they navigated away after generating a storyboard, all narrative structure was lost.
 
 **Root Cause Chain:**
-1. GPT generates full Director Brain output including `story_spine`
-2. `StoryBuilderPanel.onSuccess` only extracted `scenes` and `anchors`
-3. `storyboard_json` was saved as `{ scenes }` — no spine
-4. Chain functions had no access to the narrative structure
-5. Progression injection had nothing meaningful to work with
+1. GPT generates full Director Brain output including `story_spine` + `action_summary`
+2. `generate-storyboard` edge function returns all fields correctly ✅
+3. `generateStory.onSuccess` captured state but **didn't save to DB**
+4. `action_summary` wasn't being mapped from scene objects
+5. Data only persisted when user clicked "Generate Clips" button
 
 ---
 
-## Implemented Fixes (5 Phases)
+## Implemented Fixes (6 Phases)
 
 ### Phase 1: Store Full Storyboard_json ✅
 
@@ -67,6 +71,16 @@ The system was generating **scenes**, not **stories**. GPT-4o produces rich narr
 | hook | runway | runway | Attention mechanics |
 | reset | runway | runway | Punchy micro-cuts |
 
+### Phase 6: Auto-Save + action_summary Capture ✅ (NEW)
+
+**File:** `src/components/lab/StoryBuilderPanel.tsx`
+
+- `generateStory.onSuccess` now **auto-saves to DB immediately**
+- Creates new story_job or updates existing one right after edge function returns
+- Captures `action_summary` in scene mapping (was missing!)
+- Navigates to new story after creation via `onStoryCreated` callback
+- Console logs saved storyboard for debugging
+
 ---
 
 ## Validation Criteria
@@ -88,13 +102,28 @@ After generating a new story, check:
    - Character/environment continuity maintained
    - Stories feel like cause→effect, not montages
 
+**Test SQL query:**
+```sql
+SELECT
+  id,
+  title,
+  created_at,
+  storyboard_json->>'story_spine' as story_spine,
+  storyboard_json->'motif_anchors' as motif_anchors,
+  storyboard_json->'scenes'->0->>'action_summary' as scene_1_action_summary,
+  storyboard_json->'scenes'->0->>'change_type' as scene_1_change_type
+FROM story_jobs
+ORDER BY created_at DESC
+LIMIT 5;
+```
+
 ---
 
 ## Files Changed
 
 | File | Change |
 |------|--------|
-| `src/components/lab/StoryBuilderPanel.tsx` | Capture + persist full narrative structure |
+| `src/components/lab/StoryBuilderPanel.tsx` | Capture + persist full narrative structure + auto-save |
 | `supabase/functions/generate-storyboard/index.ts` | Add action_summary to schema |
 | `supabase/functions/generate-story-chained/index.ts` | Accept and persist story_spine |
 | `supabase/functions/continue-story-chain/index.ts` | Read spine, prefer action_summary |
@@ -102,16 +131,16 @@ After generating a new story, check:
 
 ---
 
-## Why This Fixes Narrative Collapse
+## Why This Fixes Narrative Collapse + Persistence Gap
 
 The dragon story worked because its prompts were **simple, evocative, and causally linked**. New stories failed because:
 
-1. GPT generates structure → system discarded it
-2. Enrichment added technical noise
-3. Progression injection extracted from noise
-4. Providers received visual specs without story intent
+1. GPT generates structure → system discarded it (now captured)
+2. User generates storyboard → navigates away → data lost (now auto-saved)
+3. `action_summary` wasn't captured → progression injection blind (now captured)
+4. Enrichment added technical noise → spine overwritten (now minimal enrichment when spine exists)
 
-By **preserving the narrative layer** and using **explicit action_summary**, every scene knows:
+By **preserving the narrative layer** and **auto-saving immediately**, every scene knows:
 - What happened before
 - What happens now
 - What must change
