@@ -515,13 +515,13 @@ OUTPUT (JSON only):
     const parsed = safeJsonParse<AnyObj>(content);
     if (!parsed) throw new Error("Model did not return valid JSON");
 
-    // Parse scores
-    let promptAdherence = Math.max(0, Math.min(100, Math.round(parsed.prompt_adherence || 70)));
-    let temporalConsistency = Math.max(0, Math.min(100, Math.round(parsed.temporal_consistency || 70)));
-    let motionRealism = Math.max(0, Math.min(100, Math.round(parsed.motion_realism || 70)));
-    let visualFidelity = Math.max(0, Math.min(100, Math.round(parsed.visual_fidelity || 70)));
-    let cinematicQuality = Math.max(0, Math.min(100, Math.round(parsed.cinematic_quality || 65)));
-    let confidence = Math.max(0, Math.min(1, parsed.confidence || 0.5));
+    // Parse scores with explicit type coercion
+    let promptAdherence = Math.max(0, Math.min(100, Math.round(Number(parsed.prompt_adherence) || 70)));
+    let temporalConsistency = Math.max(0, Math.min(100, Math.round(Number(parsed.temporal_consistency) || 70)));
+    let motionRealism = Math.max(0, Math.min(100, Math.round(Number(parsed.motion_realism) || 70)));
+    let visualFidelity = Math.max(0, Math.min(100, Math.round(Number(parsed.visual_fidelity) || 70)));
+    let cinematicQuality = Math.max(0, Math.min(100, Math.round(Number(parsed.cinematic_quality) || 65)));
+    let confidence = Math.max(0, Math.min(1, Number(parsed.confidence) || 0.5));
 
     const defects = sanitizeDefects(parsed.defects);
     const rawRoutingTags = normalizeAllRoutingTags(parsed.routing_tags);  // Capture all tags first
@@ -714,8 +714,9 @@ Deno.serve(async (req) => {
     const learned = await maybeLearn(supabase, job as VideoJob, rating);
 
     return new Response(JSON.stringify({ jobId, ...rating, learned }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
-  } catch (error) {
+  } catch (error: unknown) {
     console.error("Auto-rate error:", error);
-    return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    return new Response(JSON.stringify({ error: errorMsg }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 });

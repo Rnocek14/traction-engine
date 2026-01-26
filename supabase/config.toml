@@ -65,3 +65,6 @@ verify_jwt = false
 
 [functions.auto-rate-story]
 verify_jwt = false
+
+[functions.auto-rate-video]
+verify_jwt = false

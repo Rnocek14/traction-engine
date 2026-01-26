@@ -26,6 +26,7 @@ interface StoryAnalysisResult {
     continuity_score: number;
     continuity_notes: string[];
   }>;
+  raw_response?: string; // Store raw VLM output for debugging
 }
 
 interface SceneData {
@@ -219,11 +220,12 @@ Focus on WHERE the chain breaks, not just that it did.`;
   ];
 
   // Add timeout for API call
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout
+    let rawResponseContent = ""; // Store for debugging
 
-  try {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    try {
+      const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${openaiKey}`,
@@ -251,20 +253,21 @@ Focus on WHERE the chain breaks, not just that it did.`;
 
     const data = await response.json();
     const content = data.choices?.[0]?.message?.content;
+    rawResponseContent = content || ""; // Store raw for debugging
     
     if (!content || content.trim() === "") {
       console.error("[auto-rate-story] Empty VLM response");
       throw new Error("VLM returned empty response");
     }
     
-    const parsed = safeJsonParse<StoryAnalysisResult>(content);
+    const parsed = safeJsonParse<StoryAnalysisResult & { raw_response?: string }>(content);
     
     if (!parsed) {
       console.error("[auto-rate-story] Failed to parse VLM response:", content.slice(0, 500));
       throw new Error("VLM did not return valid JSON");
     }
 
-    // Normalize and validate scores
+    // Normalize and validate scores, include raw response for debugging
     return {
       overall_flow_score: Math.max(0, Math.min(100, parsed.overall_flow_score || 50)),
       character_continuity: Math.max(0, Math.min(100, parsed.character_continuity || 50)),
@@ -281,6 +284,7 @@ Focus on WHERE the chain breaks, not just that it did.`;
             continuity_notes: Array.isArray(s.continuity_notes) ? s.continuity_notes.map(String) : [],
           }))
         : [],
+      raw_response: rawResponseContent, // Store raw VLM output for debugging
     };
   } catch (err) {
     clearTimeout(timeoutId);
@@ -432,8 +436,9 @@ Deno.serve(async (req) => {
           continue;
         }
 
-        // Build scene data
-        const scenes: SceneData[] = withVisuals.map(clip => ({
+        // Build scene data from ALL deduped clips (preserving sequence_index alignment)
+        // We build descriptions for all scenes but only include images for those that have them
+        const scenes: SceneData[] = dedupedClips.map(clip => ({
           index: clip.sequence_index ?? 0,
           prompt: clip.original_prompt || "",
           thumbnail_url: clip.thumbnail_url,
@@ -469,7 +474,10 @@ Deno.serve(async (req) => {
               : ["Story shows good continuity - consider as reference"],
             analyzed_at: new Date().toISOString(),
             analyzer_version: ANALYZER_VERSION,
-            raw: analysis as unknown as Record<string, unknown>,
+            raw: {
+              ...analysis as unknown as Record<string, unknown>,
+              vlm_raw_text: analysis.raw_response || null, // Store original VLM text for debugging
+            },
           }, { onConflict: "story_job_id" });
 
         if (insertError) {
