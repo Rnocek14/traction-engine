@@ -6,7 +6,7 @@
  */
 
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import {
   ChevronDown,
@@ -18,9 +18,21 @@ import {
   Play,
   AlertCircle,
   Plus,
+  MoreHorizontal,
+  Archive,
+  ArchiveRestore,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { toast } from "@/hooks/use-toast";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Progress } from "@/components/ui/progress";
 import {
@@ -57,22 +69,58 @@ export function StoryLibrary({
 }: StoryLibraryProps) {
   const [isOpen, setIsOpen] = useState(true);
   const [expandedStories, setExpandedStories] = useState<Set<string>>(new Set());
+  const [showArchived, setShowArchived] = useState(false);
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
-  // Fetch all stories
+  // Fetch all stories (excluding archived unless showArchived is true)
   const { data: stories, isLoading: storiesLoading } = useQuery({
-    queryKey: ["story-library"],
+    queryKey: ["story-library", showArchived],
     queryFn: async () => {
-      const { data, error } = await supabase
+      let query = supabase
         .from("story_jobs")
         .select("*")
         .order("created_at", { ascending: false })
-        .limit(20);
+        .limit(50);
 
+      if (!showArchived) {
+        query = query.neq("status", "archived");
+      }
+
+      const { data, error } = await query;
       if (error) throw error;
       return data as StoryJob[];
     },
     refetchInterval: 10000,
+  });
+
+  // Archive/unarchive mutation
+  const archiveMutation = useMutation({
+    mutationFn: async ({ storyId, archive }: { storyId: string; archive: boolean }) => {
+      const { error } = await supabase
+        .from("story_jobs")
+        .update({ status: archive ? "archived" : "draft" })
+        .eq("id", storyId);
+
+      if (error) throw error;
+    },
+    onSuccess: (_, { archive }) => {
+      queryClient.invalidateQueries({ queryKey: ["story-library"] });
+      toast({
+        title: archive ? "Story archived" : "Story restored",
+        description: archive 
+          ? "The story has been moved to archives." 
+          : "The story has been restored.",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Error",
+        description: "Failed to update story. Please try again.",
+        variant: "destructive",
+      });
+      console.error("Archive mutation error:", error);
+    },
   });
 
   // Fetch all video_jobs for these stories
@@ -223,18 +271,37 @@ export function StoryLibrary({
           </Button>
         </CollapsibleTrigger>
         
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-7 px-2 gap-1"
-          onClick={(e) => {
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0"
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowArchived(!showArchived);
+            }}
+            title={showArchived ? "Hide archived" : "Show archived"}
+          >
+            {showArchived ? (
+              <EyeOff className="h-3 w-3 text-muted-foreground" />
+            ) : (
+              <Eye className="h-3 w-3 text-muted-foreground" />
+            )}
+          </Button>
+          
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 px-2 gap-1"
+            onClick={(e) => {
             e.stopPropagation();
             navigate("/studio/lab/story");
           }}
         >
-          <Plus className="h-3 w-3" />
-          <span className="text-xs">New</span>
-        </Button>
+            <Plus className="h-3 w-3" />
+            <span className="text-xs">New</span>
+          </Button>
+        </div>
       </div>
 
       <CollapsibleContent>
@@ -258,6 +325,8 @@ export function StoryLibrary({
                     isExpanded={expandedStories.has(story.id)}
                     onToggleExpand={() => toggleStoryExpanded(story.id)}
                     onSelect={() => onSelectStory?.(story.id)}
+                    onArchive={(archive) => archiveMutation.mutate({ storyId: story.id, archive })}
+                    isArchiving={archiveMutation.isPending}
                     statusBadge={getStatusBadge(story)}
                     formatDate={formatDate}
                   />
@@ -277,6 +346,8 @@ interface StoryCardProps {
   isExpanded: boolean;
   onToggleExpand: () => void;
   onSelect: () => void;
+  onArchive: (archive: boolean) => void;
+  isArchiving: boolean;
   statusBadge: React.ReactNode;
   formatDate: (dateStr: string) => string;
 }
@@ -287,9 +358,12 @@ function StoryCard({
   isExpanded,
   onToggleExpand,
   onSelect,
+  onArchive,
+  isArchiving,
   statusBadge,
   formatDate,
 }: StoryCardProps) {
+  const isArchived = story.status === "archived";
   const doneCount = story.clips.filter((c) => c.status === "done").length;
   const total = story.total_clips || story.clips.length || 1;
   const progress = Math.round((doneCount / total) * 100);
@@ -298,12 +372,14 @@ function StoryCard({
     <div
       className={cn(
         "rounded-lg border transition-all",
+        isArchived && "opacity-60",
         isActive
           ? "border-primary bg-primary/5"
           : "border-border/50 hover:border-border"
       )}
     >
       {/* Story Header */}
+      <div className="group">
       <div className="p-2">
         <div className="flex items-center gap-2">
           <Button
@@ -328,7 +404,14 @@ function StoryCard({
               <span className="font-medium text-sm truncate">
                 {story.title || "Untitled Story"}
               </span>
-              {statusBadge}
+              {isArchived ? (
+                <Badge variant="secondary" className="text-[10px]">
+                  <Archive className="h-2.5 w-2.5 mr-0.5" />
+                  Archived
+                </Badge>
+              ) : (
+                statusBadge
+              )}
             </div>
             <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
               <Clock className="h-3 w-3" />
@@ -337,7 +420,44 @@ function StoryCard({
               <span>{total} scenes</span>
             </div>
           </Link>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                onClick={(e) => e.stopPropagation()}
+                disabled={isArchiving}
+              >
+                <MoreHorizontal className="h-3 w-3" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-36">
+              <DropdownMenuItem
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onArchive(!isArchived);
+                }}
+                disabled={isArchiving}
+              >
+                {isArchived ? (
+                  <>
+                    <ArchiveRestore className="h-3.5 w-3.5 mr-2" />
+                    Restore
+                  </>
+                ) : (
+                  <>
+                    <Archive className="h-3.5 w-3.5 mr-2" />
+                    Archive
+                  </>
+                )}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
+
+      </div>
 
         {/* Progress bar */}
         {story.status === "generating" && (
