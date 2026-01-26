@@ -107,7 +107,7 @@ Deno.serve(async (req) => {
       // Get all clips for this story
       const { data: clips, error: clipsError } = await supabase
         .from("video_jobs")
-        .select("id, sequence_index, status, thumbnail_url, script_run_id")
+        .select("id, sequence_index, status, thumbnail_url, script_run_id, provider")
         .eq("story_job_id", story.id)
         .order("sequence_index", { ascending: true })
         .order("created_at", { ascending: false });
@@ -231,15 +231,15 @@ Deno.serve(async (req) => {
       );
       
       // Count how many Sora scenes have been used before this one
-      // (approximate: count completed Sora-routed scenes)
-      const soraUsedCount = completedClips.filter(c => c.provider === "sora").length;
+      // (approximate: count completed Sora-routed scenes from the clips we fetched)
+      const completedSoraCount = (clips || []).filter(c => c.status === "done" && c.provider === "sora").length;
       
       // Route by scene role (deterministic, with tier/chaining/template awareness)
       // Use the tier stored in storyboard_json (set during story creation)
       const routingResult = routeBySceneRole(sceneRole, {
         tier: storyTier, // Use persisted tier instead of hardcoded "volume"
         isChained: !isFirstScene,
-        soraUsedCount,
+        soraUsedCount: completedSoraCount,
         templateRoles,
       });
       
