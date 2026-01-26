@@ -303,7 +303,7 @@ export default function Lab() {
             <ResizableHandle withHandle className="bg-border/50 hover:bg-primary/20 transition-colors" />
 
             {/* Right: Preview with integrated filmstrip */}
-            <ResizablePanel defaultSize={70} minSize={45}>
+            <ResizablePanel defaultSize={70} minSize={45} className="h-full">
               <LabPreviewPanel
                 results={results}
                 activeResultId={activeResultId}
