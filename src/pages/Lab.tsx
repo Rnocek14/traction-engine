@@ -286,7 +286,7 @@ export default function Lab() {
           </Button>
         </div>
 
-        <TabsContent value="generate" className="flex-1 min-h-0 m-0">
+        <TabsContent value="generate" className="flex-1 min-h-0 m-0 flex flex-col h-full">
           <ResizablePanelGroup direction="horizontal" className="flex-1 min-h-0 w-full">
             {/* Left: Generate Panel - narrower */}
             <ResizablePanel defaultSize={30} minSize={22} maxSize={45}>
@@ -320,9 +320,9 @@ export default function Lab() {
           </ResizablePanelGroup>
         </TabsContent>
 
-        <TabsContent value="story" className="flex-1 min-h-0 m-0 flex">
+        <TabsContent value="story" className="flex-1 min-h-0 m-0 flex h-full">
           {/* Story Library sidebar */}
-          <div className="w-72 border-r border-border/50 overflow-y-auto p-2">
+          <div className="w-72 border-r border-border/50 overflow-y-auto p-2 h-full">
             <StoryLibrary
               activeStoryId={storyId}
               onSelectStory={(id) => navigate(`/studio/lab/story/${id}`)}
@@ -330,7 +330,7 @@ export default function Lab() {
           </div>
           
           {/* Story Builder main panel */}
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1 overflow-y-auto h-full">
             <StoryBuilderPanel
               storyId={storyId}
               forceNew={forceNewStory && !storyId}
@@ -339,7 +339,7 @@ export default function Lab() {
           </div>
         </TabsContent>
 
-        <TabsContent value="compare" className="flex-1 min-h-0 m-0 flex flex-col">
+        <TabsContent value="compare" className="flex-1 min-h-0 m-0 flex flex-col h-full">
           <ComparePanel
             initialJobIdA={compareJobIdA}
             initialJobIdB={compareJobIdB}
@@ -350,7 +350,7 @@ export default function Lab() {
           />
         </TabsContent>
 
-        <TabsContent value="learning" className="flex-1 min-h-0 m-0 flex flex-col">
+        <TabsContent value="learning" className="flex-1 min-h-0 m-0 flex flex-col h-full">
           <LearningInspector />
         </TabsContent>
       </Tabs>
