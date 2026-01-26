@@ -113,6 +113,9 @@ Deno.serve(async (req) => {
     console.log(`[chained] Starting story ${story_job_id}: ${scenes.length} scenes`);
     console.log(`[chained] Queueing scene 1 (T2V), scenes 2-${scenes.length} will be handled by cron`);
 
+    // Determine tier from settings (will be persisted in storyboard_json for chain continuation)
+    const tier = settings?.tier || "volume";
+
     // Create a dedicated script_run for this story
     const { data: newScript, error: scriptError } = await supabase
       .from("script_runs")
@@ -129,9 +132,6 @@ Deno.serve(async (req) => {
     }
     const scriptRunId = newScript.id;
     console.log(`[chained] Created script_run ${scriptRunId}`);
-
-    // Determine tier from settings (will be persisted in storyboard_json for chain continuation)
-    const tier = settings?.tier || "volume";
     
     // Update story status and store storyboard WITH TIER for cron to use
     await supabase
@@ -156,9 +156,6 @@ Deno.serve(async (req) => {
     const templateRoles: SceneRole[] = scenes.map((s: { role?: SceneRole }, i: number) => 
       s.role || inferRoleFromPosition(i, scenes.length)
     );
-    
-    // Route by scene role (deterministic, with template context)
-    const tier = settings?.tier || "volume";
     const routingResult = routeBySceneRole(sceneRole, {
       tier,
       isChained: false, // First scene is T2V

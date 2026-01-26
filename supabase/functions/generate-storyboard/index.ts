@@ -143,7 +143,7 @@ Deno.serve(async (req) => {
     }
 
     const body = await req.json() as GenerateRequest;
-    const { concept, story_type = "short_story", scene_count } = body;
+    const { concept, story_type = "short_story", scene_count, tier = "volume" } = body as GenerateRequest & { tier?: string };
 
     if (!concept?.trim()) {
       return new Response(
@@ -223,6 +223,7 @@ Generate a complete, filmable storyboard with vivid, specific visual prompts for
         title: storyboard.title,
         scenes: scenesWithIds,
         anchors: storyboard.anchors,
+        tier, // Persist tier in storyboard output
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
