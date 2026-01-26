@@ -113,7 +113,7 @@ Deno.serve(async (req) => {
     // Fetch script and validate status
     const { data: script, error: scriptError } = await supabase
       .from("script_runs")
-      .select("id, status, scene_prompts")
+      .select("id, status, script_content")
       .eq("id", body.script_run_id)
       .single();
 
