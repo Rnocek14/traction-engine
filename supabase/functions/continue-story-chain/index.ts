@@ -498,16 +498,23 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      // Link job to story
+      // Link job to story with audit fields for cut_type debugging
       const jobId = data.job?.id;
       if (jobId) {
+        const auditData = {
+          ...(story.continuity_anchors || {}),
+          resolved_cut_type: cutType,
+          had_starting_frame: !!startingFrameUrl,
+          provider_selected: selectedProvider,
+          scene_role: sceneRole,
+        };
         await supabase
           .from("video_jobs")
           .update({
             story_job_id: story.id,
             sequence_index: nextSceneIndex,
             original_prompt: nextScene.prompt,
-            style_hints: JSON.stringify(story.continuity_anchors || {}),
+            style_hints: JSON.stringify(auditData),
           })
           .eq("id", jobId);
       }

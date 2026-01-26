@@ -66,6 +66,8 @@ export interface StoryScene {
   onscreen_text?: string;
   is_hero_shot?: boolean;
   zone?: CutZone;
+  // Cut type architecture (Phase 2)
+  cut_type?: "hard" | "continuity";
 }
 
 export interface Storyboard {

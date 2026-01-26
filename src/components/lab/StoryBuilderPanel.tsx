@@ -741,6 +741,7 @@ export function StoryBuilderPanel({
         narration_line?: string; 
         is_hero_shot?: boolean;
         action_summary?: string;
+        cut_type?: "hard" | "continuity";
       }, i: number) => ({
         ...s,
         id: s.id || nanoid(8),
@@ -751,6 +752,7 @@ export function StoryBuilderPanel({
         action_summary: s.action_summary, // Critical for progression injection
         role: s.role,
         is_hero_shot: s.is_hero_shot,
+        cut_type: s.cut_type, // Critical for T2V vs I2V decision
       }));
       
       // Update local state
