@@ -286,8 +286,8 @@ export default function Lab() {
           </Button>
         </div>
 
-        <TabsContent value="generate" className="flex-1 min-h-0 m-0">
-          <ResizablePanelGroup direction="horizontal" className="h-full">
+        <TabsContent value="generate" className="flex-1 min-h-0 m-0 h-full">
+          <ResizablePanelGroup direction="horizontal" className="h-full w-full">
             {/* Left: Generate Panel - narrower */}
             <ResizablePanel defaultSize={30} minSize={22} maxSize={45}>
               <div className="h-full overflow-y-auto overflow-x-hidden p-3 border-r border-border">
