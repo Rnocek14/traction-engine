@@ -226,9 +226,9 @@ export default function Lab() {
   ).length;
 
   return (
-    <div className="h-screen flex flex-col bg-background">
+    <div className="h-screen flex flex-col bg-background overflow-hidden">
       {/* Compact Header */}
-      <header className="flex items-center justify-between px-4 py-1.5 border-b bg-card/50">
+      <header className="flex items-center justify-between px-4 py-1.5 border-b bg-card/50 shrink-0">
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="icon" className="h-8 w-8" asChild>
             <Link to="/studio">
@@ -257,8 +257,8 @@ export default function Lab() {
       </header>
 
       {/* Main Content - Tabs for Generate vs Learning vs Compare */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 min-h-0 flex flex-col">
-        <div className="px-4 py-1.5 border-b bg-card/30 flex items-center justify-between">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 min-h-0 flex flex-col overflow-hidden">
+        <div className="px-4 py-1.5 border-b bg-card/30 flex items-center justify-between shrink-0">
           <TabsList className="h-8">
             <TabsTrigger value="generate" className="gap-1.5 text-xs h-7">
               <Beaker className="h-3.5 w-3.5" />
@@ -286,73 +286,75 @@ export default function Lab() {
           </Button>
         </div>
 
-        <TabsContent value="generate" className="flex-1 min-h-0 m-0 flex flex-col h-full">
-          <ResizablePanelGroup direction="horizontal" className="flex-1 min-h-0 w-full">
-            {/* Left: Generate Panel - narrower */}
-            <ResizablePanel defaultSize={30} minSize={22} maxSize={45}>
-              <div className="h-full overflow-y-auto overflow-x-hidden p-3 border-r border-border">
-                <LabGeneratePanel
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <TabsContent value="generate" className="h-full m-0 data-[state=active]:block">
+            <ResizablePanelGroup direction="horizontal" className="h-full w-full">
+              {/* Left: Generate Panel - narrower */}
+              <ResizablePanel defaultSize={30} minSize={22} maxSize={45}>
+                <div className="h-full overflow-y-auto overflow-x-hidden p-3 border-r border-border">
+                  <LabGeneratePanel
+                    results={results}
+                    onResultCreated={handleResultCreated}
+                    onResultUpdated={handleResultUpdated}
+                    onExtendReady={(handler) => setExtendHandler(() => handler)}
+                  />
+                </div>
+              </ResizablePanel>
+
+              <ResizableHandle withHandle className="bg-border/50 hover:bg-primary/20 transition-colors" />
+
+              {/* Right: Preview with integrated filmstrip */}
+              <ResizablePanel defaultSize={70} minSize={45}>
+                <LabPreviewPanel
                   results={results}
-                  onResultCreated={handleResultCreated}
-                  onResultUpdated={handleResultUpdated}
-                  onExtendReady={(handler) => setExtendHandler(() => handler)}
+                  activeResultId={activeResultId}
+                  onSelectResult={handleSelectResult}
+                  onAddResult={handleResultCreated}
+                  onExtendVideo={extendHandler || undefined}
+                  compareJobIdA={compareJobIdA}
+                  compareJobIdB={compareJobIdB}
+                  onSetCompareA={setCompareJobIdA}
+                  onSetCompareB={setCompareJobIdB}
+                  onGoToCompare={() => setActiveTab("compare")}
                 />
-              </div>
-            </ResizablePanel>
+              </ResizablePanel>
+            </ResizablePanelGroup>
+          </TabsContent>
 
-            <ResizableHandle withHandle className="bg-border/50 hover:bg-primary/20 transition-colors" />
-
-            {/* Right: Preview with integrated filmstrip */}
-            <ResizablePanel defaultSize={70} minSize={45}>
-              <LabPreviewPanel
-                results={results}
-                activeResultId={activeResultId}
-                onSelectResult={handleSelectResult}
-                onAddResult={handleResultCreated}
-                onExtendVideo={extendHandler || undefined}
-                compareJobIdA={compareJobIdA}
-                compareJobIdB={compareJobIdB}
-                onSetCompareA={setCompareJobIdA}
-                onSetCompareB={setCompareJobIdB}
-                onGoToCompare={() => setActiveTab("compare")}
+          <TabsContent value="story" className="h-full m-0 data-[state=active]:flex">
+            {/* Story Library sidebar */}
+            <div className="w-72 h-full border-r border-border/50 overflow-y-auto p-2">
+              <StoryLibrary
+                activeStoryId={storyId}
+                onSelectStory={(id) => navigate(`/studio/lab/story/${id}`)}
               />
-            </ResizablePanel>
-          </ResizablePanelGroup>
-        </TabsContent>
+            </div>
+            
+            {/* Story Builder main panel */}
+            <div className="flex-1 h-full overflow-hidden">
+              <StoryBuilderPanel
+                storyId={storyId}
+                forceNew={forceNewStory && !storyId}
+                onStoryCreated={(newStoryId) => navigate(`/studio/lab/story/${newStoryId}`)}
+              />
+            </div>
+          </TabsContent>
 
-        <TabsContent value="story" className="flex-1 min-h-0 m-0 flex h-full">
-          {/* Story Library sidebar */}
-          <div className="w-72 border-r border-border/50 overflow-y-auto p-2 h-full">
-            <StoryLibrary
-              activeStoryId={storyId}
-              onSelectStory={(id) => navigate(`/studio/lab/story/${id}`)}
+          <TabsContent value="compare" className="h-full m-0 data-[state=active]:block">
+            <ComparePanel
+              initialJobIdA={compareJobIdA}
+              initialJobIdB={compareJobIdB}
+              onJobIdsChange={(a, b) => {
+                setCompareJobIdA(a);
+                setCompareJobIdB(b);
+              }}
             />
-          </div>
-          
-          {/* Story Builder main panel */}
-          <div className="flex-1 overflow-y-auto h-full">
-            <StoryBuilderPanel
-              storyId={storyId}
-              forceNew={forceNewStory && !storyId}
-              onStoryCreated={(newStoryId) => navigate(`/studio/lab/story/${newStoryId}`)}
-            />
-          </div>
-        </TabsContent>
+          </TabsContent>
 
-        <TabsContent value="compare" className="flex-1 min-h-0 m-0 flex flex-col h-full">
-          <ComparePanel
-            initialJobIdA={compareJobIdA}
-            initialJobIdB={compareJobIdB}
-            onJobIdsChange={(a, b) => {
-              setCompareJobIdA(a);
-              setCompareJobIdB(b);
-            }}
-          />
-        </TabsContent>
-
-        <TabsContent value="learning" className="flex-1 min-h-0 m-0 flex flex-col h-full">
-          <LearningInspector />
-        </TabsContent>
+          <TabsContent value="learning" className="h-full m-0 data-[state=active]:block">
+            <LearningInspector />
+          </TabsContent>
+        </div>
       </Tabs>
     </div>
   );
