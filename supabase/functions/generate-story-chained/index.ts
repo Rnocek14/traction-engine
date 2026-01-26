@@ -135,12 +135,18 @@ Deno.serve(async (req) => {
     const sceneRole: SceneRole = firstScene.role || 
       inferRoleFromPosition(0, scenes.length);
     
-    // Route by scene role (deterministic)
+    // Extract all roles for template-aware routing
+    const templateRoles: SceneRole[] = scenes.map((s: { role?: SceneRole }, i: number) => 
+      s.role || inferRoleFromPosition(i, scenes.length)
+    );
+    
+    // Route by scene role (deterministic, with template context)
     const tier = settings?.tier || "volume";
     const routingResult = routeBySceneRole(sceneRole, {
       tier,
       isChained: false, // First scene is T2V
       soraUsedCount: 0,
+      templateRoles, // Pass all roles for smart story_a fallback
     });
     
     const selectedProvider = routingResult.provider;

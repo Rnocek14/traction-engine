@@ -207,12 +207,21 @@ Deno.serve(async (req) => {
       const sceneRole: SceneRole = (nextScene as { role?: SceneRole }).role || 
         inferRoleFromPosition(nextSceneIndex, totalScenes);
       
-      // Route by scene role (deterministic, with tier/chaining awareness)
-      // Default to volume tier for cron jobs - hero tier is opt-in
+      // Extract all roles for template-aware routing
+      const templateRoles: SceneRole[] = scenes.map((s: { role?: SceneRole }, i: number) => 
+        (s.role as SceneRole) || inferRoleFromPosition(i, totalScenes)
+      );
+      
+      // Count how many Sora scenes have been used before this one
+      // (approximate: count completed Sora-routed scenes)
+      const soraUsedCount = completedClips.filter(c => c.provider === "sora").length;
+      
+      // Route by scene role (deterministic, with tier/chaining/template awareness)
       const routingResult = routeBySceneRole(sceneRole, {
-        tier: "volume",
+        tier: "volume", // Default to volume tier for cron jobs
         isChained: !isFirstScene,
-        soraUsedCount: 0, // Could track this across scenes for true enforcement
+        soraUsedCount,
+        templateRoles,
       });
       
       const selectedProvider = routingResult.provider;
