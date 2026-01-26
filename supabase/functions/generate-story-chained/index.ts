@@ -73,6 +73,31 @@ function extractRoutingTags(scene: { prompt: string; camera_direction?: string }
   return tags.slice(0, 5); // Limit to top 5 tags
 }
 
+/**
+ * Normalize size input - convert aspect ratios to pixel dimensions
+ */
+function normalizeSize(input?: string): string {
+  const sizeMap: Record<string, string> = {
+    "16:9": "1280x720",
+    "9:16": "720x1280",
+    "1:1": "1024x1024",
+    "4:3": "1024x768",
+    "3:4": "768x1024",
+  };
+  const validSizes = ["720x1280", "1280x720", "1024x1792", "1792x1024"];
+  if (validSizes.includes(input || "")) return input!;
+  return sizeMap[input || ""] || "720x1280";
+}
+
+/**
+ * Snap duration to valid Sora values (4, 8, 12 seconds)
+ */
+function snapToValidDuration(seconds: number): number {
+  if (seconds <= 6) return 4;
+  if (seconds <= 10) return 8;
+  return 12;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -93,7 +118,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    const size = settings?.size || "720x1280";
+    const size = normalizeSize(settings?.size);
     const firstScene = scenes[0];
     const prompt = firstScene.enriched_prompt || firstScene.prompt;
     
@@ -144,7 +169,7 @@ Deno.serve(async (req) => {
         prompt: prompt,
         settings: {
           size: size,
-          seconds: firstScene.duration_target || 5,
+          seconds: snapToValidDuration(firstScene.duration_target || 5),
         },
         provider: "smart", // Let the router decide
         routing_hint: {
