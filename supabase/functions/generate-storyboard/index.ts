@@ -18,6 +18,19 @@ interface GenerateRequest {
 
 type SceneRole = "hook" | "problem" | "story_a" | "reset" | "story_b" | "cta" | "atmosphere" | "establish";
 type ChangeType = "info" | "emotion" | "goal" | "stakes" | "location";
+type CutZone = "hook" | "setup" | "escalation" | "payoff" | "button";
+
+// Role-to-zone mapping for computed zones
+const ROLE_TO_ZONE: Record<SceneRole, CutZone> = {
+  hook: "hook",
+  problem: "setup",
+  story_a: "setup",
+  reset: "escalation",
+  story_b: "escalation",
+  cta: "payoff",
+  atmosphere: "payoff",
+  establish: "setup",
+};
 
 interface GeneratedScene {
   prompt: string;
@@ -256,18 +269,33 @@ Generate a complete, filmable storyboard with vivid, specific visual prompts for
     const hasStoryB = storyboard.scenes.some(s => s.role === "story_b");
     const heroRole = hasStoryB ? "story_b" : "story_a";
 
-    // Add IDs and sequence to scenes, mark hero shot
-    const scenesWithIds = storyboard.scenes.map((scene, i) => ({
-      id: `scene_${Date.now()}_${i}`,
-      ...scene,
-      sequence_index: i,
-      // Default change_type to "info" if not provided
-      change_type: scene.change_type || "info",
-      // Mark hero shot (one per story in volume tier)
-      is_hero_shot: tier === "hero" 
-        ? ["story_a", "story_b", "establish"].includes(scene.role)
-        : scene.role === heroRole,
-    }));
+    // Add IDs and sequence to scenes, mark hero shot, compute zone
+    const scenesWithIds = storyboard.scenes.map((scene, i, arr) => {
+      const isFinalScene = i === arr.length - 1;
+      const effectiveRole = scene.role || "story_a";
+      
+      // Compute zone: use GPT-provided zone, or derive from role
+      // Final CTA uses "button" zone for clean hold
+      const computedZone: CutZone = (isFinalScene && effectiveRole === "cta") 
+        ? "button" 
+        : (scene as { zone?: CutZone }).zone || ROLE_TO_ZONE[effectiveRole] || "setup";
+      
+      return {
+        id: `scene_${Date.now()}_${i}`,
+        ...scene,
+        sequence_index: i,
+        // Bridge defaultChangeType from templates OR use GPT-provided change_type
+        change_type: scene.change_type 
+          || (scene as { defaultChangeType?: ChangeType }).defaultChangeType 
+          || "info",
+        // Compute zone from role if not provided
+        zone: computedZone,
+        // Mark hero shot (one per story in volume tier)
+        is_hero_shot: tier === "hero" 
+          ? ["story_a", "story_b", "establish"].includes(effectiveRole)
+          : effectiveRole === heroRole,
+      };
+    });
 
     return new Response(
       JSON.stringify({
