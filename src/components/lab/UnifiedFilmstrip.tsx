@@ -312,7 +312,7 @@ export function UnifiedFilmstrip({
   return (
     <Collapsible open={isExpanded} onOpenChange={setIsExpanded} className="shrink-0">
       <div className={cn(
-        "border-t border-primary/30 bg-card/50 transition-all overflow-hidden",
+        "border-t border-primary/30 bg-card/50 transition-all overflow-hidden flex flex-col",
         isExpanded ? "h-[200px]" : "h-[100px]",
         className
       )}>
@@ -376,13 +376,13 @@ export function UnifiedFilmstrip({
         </div>
 
         {/* Content */}
-        <div className="p-1.5 overflow-hidden">
+        <div className="p-1.5 overflow-hidden flex-1 min-h-0">
           {displayItems.length === 0 ? (
             <div className="text-center py-3 text-xs text-muted-foreground">
               {filterView === "session" ? "Generate videos to see them here" : "No videos found"}
             </div>
           ) : viewMode === "grid" ? (
-            <ScrollArea className={cn("w-full", isExpanded ? "h-[200px]" : "h-[70px]")}>
+            <ScrollArea className="w-full h-full">
               <div className="flex flex-wrap gap-1.5 p-0.5">
                 {displayItems.map(renderThumbnail)}
               </div>
