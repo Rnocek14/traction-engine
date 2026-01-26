@@ -156,6 +156,28 @@ Deno.serve(async (req) => {
           .from("story_jobs")
           .update({ status: "done", completed_clips: totalScenes })
           .eq("id", story.id);
+        
+        // Trigger auto-analysis immediately (best-effort, cron is backup)
+        // Short delay to allow thumbnails/spritesheets to be written
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        try {
+          console.log(`[chain-continue] Triggering auto-rate-story for ${story.id}`);
+          const analysisResponse = await fetch(`${supabaseUrl}/functions/v1/auto-rate-story`, {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${supabaseServiceKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ story_id: story.id }),
+          });
+          const analysisResult = await analysisResponse.json();
+          console.log(`[chain-continue] Auto-rate-story result for ${story.id}:`, analysisResult);
+        } catch (analysisError) {
+          // Non-fatal - cron will catch it on next pass
+          console.error(`[chain-continue] Auto-rate-story failed for ${story.id}, cron will retry:`, analysisError);
+        }
+        
         results.push({ storyId: story.id, action: "completed" });
         continue;
       }
