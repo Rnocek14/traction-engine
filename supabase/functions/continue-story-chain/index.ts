@@ -25,8 +25,11 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+import { clampDurationToRole, getDurationRangeForRole } from "../_shared/scene-role-router.ts";
+
 /**
  * Snap duration to valid values per provider
+ * IMPORTANT: Call clampDurationToRole() FIRST, then this function
  */
 function snapDurationForProvider(seconds: number, provider: VideoProvider): number {
   switch (provider) {
@@ -43,6 +46,16 @@ function snapDurationForProvider(seconds: number, provider: VideoProvider): numb
     default:
       return 4;
   }
+}
+
+/**
+ * Combined duration processing: clamp to role range, then snap to provider
+ */
+function processDuration(rawDuration: number, role: SceneRole, provider: VideoProvider): number {
+  // Step 1: Clamp to role's valid range (preserves narrative pacing)
+  const roleClampedDuration = clampDurationToRole(rawDuration, role);
+  // Step 2: Snap to provider's supported durations
+  return snapDurationForProvider(roleClampedDuration, provider);
 }
 
 Deno.serve(async (req) => {
@@ -78,7 +91,12 @@ Deno.serve(async (req) => {
     const results: Array<{ storyId: string; action: string; nextScene?: number }> = [];
 
     for (const story of activeStories) {
-      const scenes = (story.storyboard_json as { scenes?: Array<{ id: string; prompt: string; enriched_prompt?: string; duration_target: number }> })?.scenes || [];
+      const storyboardData = story.storyboard_json as { 
+        scenes?: Array<{ id: string; prompt: string; enriched_prompt?: string; duration_target: number; role?: SceneRole }>;
+        tier?: "volume" | "hero";
+      };
+      const scenes = storyboardData?.scenes || [];
+      const storyTier = storyboardData?.tier || "volume"; // Read tier from storyboard
       const totalScenes = scenes.length;
 
       if (totalScenes === 0) {
@@ -217,15 +235,17 @@ Deno.serve(async (req) => {
       const soraUsedCount = completedClips.filter(c => c.provider === "sora").length;
       
       // Route by scene role (deterministic, with tier/chaining/template awareness)
+      // Use the tier stored in storyboard_json (set during story creation)
       const routingResult = routeBySceneRole(sceneRole, {
-        tier: "volume", // Default to volume tier for cron jobs
+        tier: storyTier, // Use persisted tier instead of hardcoded "volume"
         isChained: !isFirstScene,
         soraUsedCount,
         templateRoles,
       });
       
       const selectedProvider = routingResult.provider;
-      const snappedDuration = snapDurationForProvider(nextScene.duration_target || 5, selectedProvider);
+      // Process duration: clamp to role range first, then snap to provider
+      const processedDuration = processDuration(nextScene.duration_target || 5, sceneRole, selectedProvider);
       
       console.log(`[chain-continue] Role-based routing: ${sceneRole} → ${selectedProvider} (${routingResult.routingReason})`);
       
@@ -247,7 +267,7 @@ Deno.serve(async (req) => {
           prompt: prompt,
           settings: {
             size: "720x1280",
-            seconds: snappedDuration,
+            seconds: processedDuration,
           },
           starting_frame_url: isFirstScene ? undefined : latestThumbnail,
         }),
