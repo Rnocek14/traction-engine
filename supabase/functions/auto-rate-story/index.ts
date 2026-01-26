@@ -457,7 +457,8 @@ Deno.serve(async (req) => {
         const categorizedPatterns = categorizeFailures(analysis.failure_patterns);
         const recommendations = generateRecommendations(categorizedPatterns);
 
-        // Insert story analysis
+        // Insert story analysis - use dedicated vlm_raw_text column for raw response
+        const { raw_response: vlmRawText, ...analysisWithoutRaw } = analysis;
         const { error: insertError } = await supabase
           .from("story_analysis")
           .upsert({
@@ -474,10 +475,8 @@ Deno.serve(async (req) => {
               : ["Story shows good continuity - consider as reference"],
             analyzed_at: new Date().toISOString(),
             analyzer_version: ANALYZER_VERSION,
-            raw: {
-              ...analysis as unknown as Record<string, unknown>,
-              vlm_raw_text: analysis.raw_response || null, // Store original VLM text for debugging
-            },
+            raw: analysisWithoutRaw as unknown as Record<string, unknown>, // Compact parsed JSON
+            vlm_raw_text: vlmRawText || null, // Dedicated column for raw VLM output
           }, { onConflict: "story_job_id" });
 
         if (insertError) {

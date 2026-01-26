@@ -876,6 +876,7 @@ export type Database = {
           raw: Json | null
           recommendations: string[] | null
           story_job_id: string
+          vlm_raw_text: string | null
           weak_scenes: number[] | null
         }
         Insert: {
@@ -892,6 +893,7 @@ export type Database = {
           raw?: Json | null
           recommendations?: string[] | null
           story_job_id: string
+          vlm_raw_text?: string | null
           weak_scenes?: number[] | null
         }
         Update: {
@@ -908,6 +910,7 @@ export type Database = {
           raw?: Json | null
           recommendations?: string[] | null
           story_job_id?: string
+          vlm_raw_text?: string | null
           weak_scenes?: number[] | null
         }
         Relationships: [
