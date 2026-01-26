@@ -17,16 +17,26 @@ interface GenerateRequest {
 }
 
 type SceneRole = "hook" | "problem" | "story_a" | "reset" | "story_b" | "cta" | "atmosphere" | "establish";
+type ChangeType = "info" | "emotion" | "goal" | "stakes" | "location";
 
 interface GeneratedScene {
   prompt: string;
   duration_target: number;
   camera_direction: string;
   role: SceneRole;
+  // Director Brain fields (Phase 1)
+  change_type: ChangeType;
+  narration_line?: string;
+  onscreen_text?: string;
+  is_hero_shot?: boolean;
 }
 
 interface GeneratedStoryboard {
   title: string;
+  // Director Brain fields (Phase 1)
+  story_spine: string;
+  motif_anchors: string[];
+  palette_keywords: string[];
   scenes: GeneratedScene[];
   anchors: {
     character?: {
@@ -65,6 +75,14 @@ const STORY_TYPE_GUIDANCE: Record<string, string> = {
 
 const SYSTEM_PROMPT = `You are an expert cinematographer and storyboard artist. Given a concept, create a complete video storyboard with multiple scenes.
 
+NARRATIVE STRUCTURE (required):
+- story_spine: One sentence capturing desire → tension → turn → payoff
+  Example: "Person discovers creepy targeting → realizes data is being copied → maps exposure → regains control"
+- motif_anchors: 2-3 recurring visual metaphors that appear across scenes
+  Example: ["floating data strings", "shadow duplicate", "dissolving map pins"]
+- palette_keywords: 3-5 color terms for visual consistency
+  Example: ["cool blues", "warm highlights", "soft film grain"]
+
 SCENE ROLES - Assign each scene a narrative role:
 - "hook": Opening attention-grabber (2-4 seconds) - pattern interrupt, curiosity spike
 - "problem": Show the pain point (4-6 seconds) - atmospheric mood, physics
@@ -75,6 +93,14 @@ SCENE ROLES - Assign each scene a narrative role:
 - "atmosphere": Texture transition (3-5 seconds) - optional physics glue
 - "establish": Wide establishing shot (4-6 seconds) - environment, context
 
+CHANGE TYPE (required per scene) - What changes from the previous beat?
+Every cut MUST change something meaningful (no montage drift):
+- "info": New information revealed (we learn something)
+- "emotion": Feeling/tone shift (face, body language, mood changes)
+- "goal": What character wants changes (motivation shift)
+- "stakes": Why it matters increases (tension rises)
+- "location": Physical move with meaning (we move somewhere)
+
 Choose roles based on narrative position and purpose. A typical 6-scene story uses:
 hook → problem → story_a → reset → story_b → cta
 
@@ -83,6 +109,9 @@ For each scene, provide:
 2. Suggested duration (match the role's recommended range)
 3. Camera direction (movement, framing, lens suggestion)
 4. Role assignment from the list above
+5. change_type: What changes at this beat
+6. narration_line (optional): TTS voiceover line for this beat
+7. onscreen_text (optional): Text overlay if needed
 
 Also extract continuity anchors:
 - Character details (if any characters appear)
@@ -99,16 +128,23 @@ IMPORTANT PROMPT GUIDELINES:
 - Use cinematic language (wide shot, close-up, tracking, etc.)
 - For HOOK/RESET scenes: Start with camera motion (e.g., "Whip pan:", "Tracking shot:")
 - For STORY scenes: Use full cinematic description
+- Reference motif_anchors in scene prompts for visual continuity
 
 Respond ONLY with valid JSON in this exact format:
 {
   "title": "Story title",
+  "story_spine": "Person discovers X → tries Y → realizes Z → resolves with W",
+  "motif_anchors": ["visual metaphor 1", "visual metaphor 2"],
+  "palette_keywords": ["color 1", "color 2", "texture"],
   "scenes": [
     {
       "prompt": "Detailed visual description for video generation",
       "duration_target": 5,
       "camera_direction": "Camera movement and framing notes",
-      "role": "story_a"
+      "role": "story_a",
+      "change_type": "info",
+      "narration_line": "Optional TTS line for this beat",
+      "onscreen_text": "Optional text overlay"
     }
   ],
   "anchors": {
@@ -211,16 +247,34 @@ Generate a complete, filmable storyboard with vivid, specific visual prompts for
       ];
     }
 
-    // Add IDs to scenes
+    // Ensure Director Brain fields have defaults
+    const storySpine = storyboard.story_spine || "";
+    const motifAnchors = storyboard.motif_anchors || [];
+    const paletteKeywords = storyboard.palette_keywords || [];
+
+    // Auto-select hero shot (story_b preferred, else story_a)
+    const hasStoryB = storyboard.scenes.some(s => s.role === "story_b");
+    const heroRole = hasStoryB ? "story_b" : "story_a";
+
+    // Add IDs and sequence to scenes, mark hero shot
     const scenesWithIds = storyboard.scenes.map((scene, i) => ({
       id: `scene_${Date.now()}_${i}`,
       ...scene,
       sequence_index: i,
+      // Default change_type to "info" if not provided
+      change_type: scene.change_type || "info",
+      // Mark hero shot (one per story in volume tier)
+      is_hero_shot: tier === "hero" 
+        ? ["story_a", "story_b", "establish"].includes(scene.role)
+        : scene.role === heroRole,
     }));
 
     return new Response(
       JSON.stringify({
         title: storyboard.title,
+        story_spine: storySpine,
+        motif_anchors: motifAnchors,
+        palette_keywords: paletteKeywords,
         scenes: scenesWithIds,
         anchors: storyboard.anchors,
         tier, // Persist tier in storyboard output
