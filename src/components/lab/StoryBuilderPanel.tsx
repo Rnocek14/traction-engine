@@ -419,7 +419,7 @@ export function StoryBuilderPanel({
           })),
           anchors: workingAnchors,
           settings: {
-            size: "16:9",
+            size: "1280x720", // 16:9 in pixels - must be valid dimension, not aspect ratio
             provider: "smart", // Use intelligent per-scene provider selection
           },
         },
