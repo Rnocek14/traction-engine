@@ -28,6 +28,81 @@ const corsHeaders = {
 };
 
 /**
+ * Parse size string to width/height
+ */
+function parseSize(size: string): { width: number; height: number } {
+  const match = size.match(/^(\d+)x(\d+)$/);
+  if (match) {
+    return { width: parseInt(match[1], 10), height: parseInt(match[2], 10) };
+  }
+  // Default to portrait 9:16
+  return { width: 720, height: 1280 };
+}
+
+/**
+ * Call FFmpeg service to resize an image to target dimensions
+ */
+async function resizeStartingFrame(
+  imageUrl: string,
+  targetWidth: number,
+  targetHeight: number,
+  storyJobId: string,
+  sceneIndex: number
+): Promise<string | null> {
+  const ffmpegServiceUrl = Deno.env.get("FFMPEG_SERVICE_URL");
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  
+  if (!ffmpegServiceUrl) {
+    console.warn("[chain-continue] FFMPEG_SERVICE_URL not configured, cannot resize");
+    return null;
+  }
+  
+  const outputPath = `stories/${storyJobId}/resized_frame_${sceneIndex}_${Date.now()}.jpg`;
+  
+  try {
+    console.log(`[chain-continue] Resizing starting frame to ${targetWidth}x${targetHeight}`);
+    
+    const response = await fetch(`${ffmpegServiceUrl}/resize`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        job_id: `${storyJobId}_s${sceneIndex}`,
+        image_url: imageUrl,
+        target_width: targetWidth,
+        target_height: targetHeight,
+        mode: "cover", // Crop to fill
+        upload: {
+          bucket: "videos",
+          output_path: outputPath,
+          supabase_url: supabaseUrl,
+          supabase_service_key: supabaseServiceKey,
+        },
+      }),
+    });
+    
+    const data = await response.json();
+    
+    if (response.ok && data.resized_url) {
+      console.log(`[chain-continue] ✓ Resized frame: ${data.resized_url}`);
+      return data.resized_url;
+    } else {
+      console.error(`[chain-continue] Resize failed: ${data.error || response.status}`);
+      return null;
+    }
+  } catch (err) {
+    console.error("[chain-continue] Resize error:", err);
+    return null;
+  }
+}
+import { type MotifScene } from "../_shared/motif-injection.ts";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
+/**
  * Snap duration to valid values per provider
  * IMPORTANT: Call clampDurationToRole() FIRST, then this function
  */
@@ -114,10 +189,10 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      // Get all clips for this story
+      // Get all clips for this story (include thumbnail dimensions for resize logic)
       const { data: clips, error: clipsError } = await supabase
         .from("video_jobs")
-        .select("id, sequence_index, status, thumbnail_url, script_run_id, provider")
+        .select("id, sequence_index, status, thumbnail_url, thumbnail_width, thumbnail_height, script_run_id, provider")
         .eq("story_job_id", story.id)
         .order("sequence_index", { ascending: true })
         .order("created_at", { ascending: false });
@@ -139,6 +214,8 @@ Deno.serve(async (req) => {
       // Find the highest completed scene
       let highestDoneIndex = -1;
       let latestThumbnail: string | null = null;
+      let latestThumbnailWidth: number | null = null;
+      let latestThumbnailHeight: number | null = null;
       let latestScriptRunId: string | null = null;
       let hasRunningJob = false;
 
@@ -147,6 +224,8 @@ Deno.serve(async (req) => {
         if (clip?.status === "done" && clip.thumbnail_url) {
           highestDoneIndex = i;
           latestThumbnail = clip.thumbnail_url;
+          latestThumbnailWidth = clip.thumbnail_width ?? null;
+          latestThumbnailHeight = clip.thumbnail_height ?? null;
           latestScriptRunId = clip.script_run_id;
         } else if (clip?.status === "running" || clip?.status === "queued") {
           hasRunningJob = true;
@@ -284,6 +363,40 @@ Deno.serve(async (req) => {
         allScenes: allMotifScenes,
       } : undefined;
       
+      // Determine the starting frame for I2V scenes
+      let startingFrameUrl: string | undefined = undefined;
+      const targetSize = parseSize("720x1280"); // Standard portrait
+      
+      if (!isFirstScene && latestThumbnail) {
+        // Check if Sora and dimensions mismatch - Sora requires exact match
+        const needsResize = selectedProvider === "sora" && 
+          latestThumbnailWidth && latestThumbnailHeight &&
+          (latestThumbnailWidth !== targetSize.width || latestThumbnailHeight !== targetSize.height);
+        
+        if (needsResize) {
+          console.log(`[chain-continue] Thumbnail ${latestThumbnailWidth}x${latestThumbnailHeight} doesn't match target ${targetSize.width}x${targetSize.height} - resizing for Sora`);
+          
+          const resizedUrl = await resizeStartingFrame(
+            latestThumbnail,
+            targetSize.width,
+            targetSize.height,
+            story.id,
+            nextSceneIndex
+          );
+          
+          if (resizedUrl) {
+            startingFrameUrl = resizedUrl;
+          } else {
+            // Resize failed - fall back to T2V for this scene to avoid blocking chain
+            console.warn(`[chain-continue] Resize failed, falling back to T2V for scene ${nextSceneIndex + 1}`);
+            startingFrameUrl = undefined;
+          }
+        } else {
+          // Dimensions match or unknown - use original
+          startingFrameUrl = latestThumbnail;
+        }
+      }
+      
       const response = await fetch(`${supabaseUrl}/functions/v1/${providerEndpoint}`, {
         method: "POST",
         headers: {
@@ -297,7 +410,7 @@ Deno.serve(async (req) => {
             size: "720x1280",
             seconds: processedDuration,
           },
-          starting_frame_url: isFirstScene ? undefined : latestThumbnail,
+          starting_frame_url: startingFrameUrl,
           motif_context: motifContext,
         }),
       });

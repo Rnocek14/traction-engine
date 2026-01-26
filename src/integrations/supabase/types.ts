@@ -1350,7 +1350,9 @@ export type Database = {
           status: string
           story_job_id: string | null
           style_hints: string | null
+          thumbnail_height: number | null
           thumbnail_url: string | null
+          thumbnail_width: number | null
           updated_at: string
         }
         Insert: {
@@ -1403,7 +1405,9 @@ export type Database = {
           status?: string
           story_job_id?: string | null
           style_hints?: string | null
+          thumbnail_height?: number | null
           thumbnail_url?: string | null
+          thumbnail_width?: number | null
           updated_at?: string
         }
         Update: {
@@ -1456,7 +1460,9 @@ export type Database = {
           status?: string
           story_job_id?: string | null
           style_hints?: string | null
+          thumbnail_height?: number | null
           thumbnail_url?: string | null
+          thumbnail_width?: number | null
           updated_at?: string
         }
         Relationships: [

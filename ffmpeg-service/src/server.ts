@@ -3,6 +3,7 @@ import { getJob, getJobByIdempotencyKey, upsertJob, cleanupOldJobs } from "./job
 import { runRenderJob, type FFmpegServiceRequest } from "./ffmpeg.js";
 import { validateRenderRequest } from "./validation.js";
 import { extractThumbnail, type ThumbnailRequest } from "./thumbnail.js";
+import { resizeImage, type ResizeRequest } from "./resize.js";
 
 const app = express();
 app.use(express.json({ limit: "50mb" }));
@@ -98,6 +99,33 @@ app.post("/thumbnail", async (req, res) => {
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "error";
     console.error(`Thumbnail extraction failed for ${body?.job_id}:`, message);
+    return res.status(500).json({
+      error: message,
+    });
+  }
+});
+
+// Image resize endpoint for I2V dimension matching
+app.post("/resize", async (req, res) => {
+  const body = req.body as ResizeRequest;
+
+  try {
+    if (!body.job_id || !body.image_url || !body.target_width || !body.target_height || !body.upload?.output_path) {
+      return res.status(400).json({
+        error: "Missing required fields: job_id, image_url, target_width, target_height, upload.output_path",
+      });
+    }
+
+    console.log(`Resizing image for job ${body.job_id}: ${body.target_width}x${body.target_height}`);
+    const result = await resizeImage(body);
+
+    return res.json({
+      success: true,
+      ...result,
+    });
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : "error";
+    console.error(`Resize failed for ${body?.job_id}:`, message);
     return res.status(500).json({
       error: message,
     });

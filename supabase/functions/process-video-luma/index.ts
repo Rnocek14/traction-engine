@@ -87,7 +87,7 @@ async function extractThumbnailFromVideo(
   videoUrl: string,
   supabaseUrl: string,
   supabaseServiceKey: string
-): Promise<{ thumbnail_url?: string; spritesheet_url?: string }> {
+): Promise<{ thumbnail_url?: string; spritesheet_url?: string; thumbnail_width?: number; thumbnail_height?: number }> {
   const ffmpegServiceUrl = Deno.env.get("FFMPEG_SERVICE_URL");
   if (!ffmpegServiceUrl) {
     console.log("FFMPEG_SERVICE_URL not configured, skipping thumbnail extraction");
@@ -128,6 +128,8 @@ async function extractThumbnailFromVideo(
     return {
       thumbnail_url: result.thumbnail_url,
       spritesheet_url: result.spritesheet_url,
+      thumbnail_width: result.thumbnail_width,
+      thumbnail_height: result.thumbnail_height,
     };
   } catch (err) {
     console.error(`Error extracting thumbnail for Luma job ${jobId}:`, err);
@@ -291,6 +293,12 @@ Deno.serve(async (req) => {
             }
             if (thumbResult.spritesheet_url) {
               updates.spritesheet_url = thumbResult.spritesheet_url;
+            }
+            if (thumbResult.thumbnail_width) {
+              updates.thumbnail_width = thumbResult.thumbnail_width;
+            }
+            if (thumbResult.thumbnail_height) {
+              updates.thumbnail_height = thumbResult.thumbnail_height;
             }
           } else {
             // Fallback to direct Luma URL (temporary)

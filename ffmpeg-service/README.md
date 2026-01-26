@@ -37,6 +37,15 @@ fly deploy
 ### `POST /render/reel`
 Start a render job. Returns 202 with job_id.
 
+### `POST /thumbnail`
+Extract thumbnail and spritesheet from a video. Returns dimensions for I2V chaining.
+
+### `POST /resize`
+Resize an image to target dimensions (for I2V chains when dimensions mismatch).
+- `mode: "cover"` - Scale and crop to fill (default)
+- `mode: "fit"` - Scale to fit with letterboxing
+- `mode: "stretch"` - Force exact dimensions
+
 ### `GET /jobs/:job_id`
 Poll job status (queued → rendering → succeeded/failed).
 
