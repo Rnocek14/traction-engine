@@ -959,6 +959,14 @@ export function StoryBuilderPanel({
             </CardContent>
           </Card>
 
+          {/* Story Analysis Panel - shows narrative/continuity scores */}
+          {effectiveStoryId && storyClips.length >= 2 && (
+            <StoryAnalysisPanel
+              storyId={effectiveStoryId}
+              clips={storyClips}
+            />
+          )}
+
           {/* Continuity Monitor (for existing stories with clips) */}
           {storyClips.length > 0 && (
             <ContinuityMonitor
