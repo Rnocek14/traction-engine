@@ -706,7 +706,7 @@ export function StoryBuilderPanel({
     return enrichedScenes;
   }
 
-  // AI Story Generation
+  // AI Story Generation - auto-saves to DB immediately
   const generateStory = useMutation({
     mutationFn: async () => {
       if (!concept.trim()) throw new Error("Enter a concept first");
@@ -716,6 +716,7 @@ export function StoryBuilderPanel({
         body: {
           concept: concept.trim(),
           story_type: storyType,
+          tier,
         },
       });
       
@@ -724,36 +725,99 @@ export function StoryBuilderPanel({
       
       return data;
     },
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
       setIsGeneratingStory(false);
-      // Set the generated content
-      if (data.title) setTitle(data.title);
-      // Capture Story Spine (Director Brain output)
-      if (data.story_spine) setStorySpine(data.story_spine);
-      if (data.motif_anchors) setMotifAnchors(data.motif_anchors);
-      if (data.palette_keywords) setPaletteKeywords(data.palette_keywords);
-      if (data.scenes?.length) {
-        // Preserve per-scene Director Brain fields (change_type, narration_line, role)
-        setScenes(data.scenes.map((s: StoryScene & { 
-          change_type?: string; 
-          narration_line?: string; 
-          is_hero_shot?: boolean;
-        }, i: number) => ({
-          ...s,
-          id: s.id || nanoid(8),
-          sequence_index: i,
-          // Preserve Director Brain fields
-          change_type: s.change_type,
-          narration_line: s.narration_line,
-          role: s.role,
-          is_hero_shot: s.is_hero_shot,
-        })));
+      
+      // Capture Director Brain output
+      const newTitle = data.title || `Story ${new Date().toLocaleDateString()}`;
+      const newSpine = data.story_spine || "";
+      const newMotifs = data.motif_anchors || [];
+      const newPalette = data.palette_keywords || [];
+      const newAnchors = data.anchors || getDefaultAnchors();
+      
+      // Map scenes with ALL Director Brain fields including action_summary
+      const newScenes = (data.scenes || []).map((s: StoryScene & { 
+        change_type?: string; 
+        narration_line?: string; 
+        is_hero_shot?: boolean;
+        action_summary?: string;
+      }, i: number) => ({
+        ...s,
+        id: s.id || nanoid(8),
+        sequence_index: i,
+        // Preserve ALL Director Brain fields
+        change_type: s.change_type,
+        narration_line: s.narration_line,
+        action_summary: s.action_summary, // Critical for progression injection
+        role: s.role,
+        is_hero_shot: s.is_hero_shot,
+      }));
+      
+      // Update local state
+      setTitle(newTitle);
+      setStorySpine(newSpine);
+      setMotifAnchors(newMotifs);
+      setPaletteKeywords(newPalette);
+      setScenes(newScenes);
+      setAnchors(newAnchors);
+      setConcept("");
+      
+      // Build full storyboard with ALL narrative structure
+      const fullStoryboard = {
+        scenes: newScenes,
+        tier,
+        story_spine: newSpine,
+        motif_anchors: newMotifs,
+        palette_keywords: newPalette,
+      };
+      
+      console.log("[StoryBuilder] Saving full storyboard:", {
+        story_spine: newSpine,
+        scene_count: newScenes.length,
+        scene_1_action_summary: newScenes[0]?.action_summary,
+      });
+      
+      // AUTO-SAVE: Create story in DB immediately (don't wait for Generate Clips click)
+      if (storyId) {
+        // Update existing story
+        await supabase
+          .from("story_jobs")
+          .update({
+            title: newTitle,
+            storyboard_json: JSON.parse(JSON.stringify(fullStoryboard)),
+            continuity_anchors: JSON.parse(JSON.stringify(newAnchors)),
+            total_clips: newScenes.length,
+          })
+          .eq("id", storyId);
+        queryClient.invalidateQueries({ queryKey: ["story-job", storyId] });
+      } else {
+        // Create new story and navigate to it
+        const { data: newStory, error: insertError } = await supabase
+          .from("story_jobs")
+          .insert([{
+            account_id: DEFAULT_ACCOUNT_ID,
+            title: newTitle,
+            story_type: storyType,
+            storyboard_json: JSON.parse(JSON.stringify(fullStoryboard)),
+            continuity_anchors: JSON.parse(JSON.stringify(newAnchors)),
+            total_clips: newScenes.length,
+            status: "draft",
+          }])
+          .select()
+          .single();
+        
+        if (insertError) {
+          console.error("[StoryBuilder] Failed to auto-save:", insertError);
+        } else if (newStory) {
+          queryClient.invalidateQueries({ queryKey: ["story-jobs"] });
+          queryClient.invalidateQueries({ queryKey: ["recent-story"] });
+          onStoryCreated?.(newStory.id);
+        }
       }
-      if (data.anchors) setAnchors(data.anchors);
-      setConcept(""); // Clear input
+      
       toast({
-        title: "Story generated!",
-        description: `Created ${data.scenes?.length || 0} scenes with narrative spine. Review and generate.`,
+        title: "Story saved!",
+        description: `Created ${newScenes.length} scenes with narrative spine. Click Generate to start.`,
       });
     },
     onError: (error) => {
