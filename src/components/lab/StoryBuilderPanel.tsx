@@ -35,6 +35,11 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   DndContext,
   closestCenter,
   KeyboardSensor,
@@ -63,6 +68,9 @@ import {
   Sparkles,
   AlertTriangle,
   Download,
+  CheckCircle2,
+  Clock,
+  XCircle,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
@@ -886,10 +894,53 @@ export function StoryBuilderPanel({
             value={progressPercent} 
             className={`h-1.5 ${isStoryGenerating ? "animate-pulse" : ""}`}
           />
-          {isStoryGenerating && runningClips > 0 && (
-            <p className="text-[10px] text-muted-foreground">
-              {runningClips} clip{runningClips > 1 ? "s" : ""} rendering...
-            </p>
+          {/* Per-clip progress breakdown */}
+          {isStoryGenerating && (
+            <div className="flex gap-1 flex-wrap">
+              {Array.from({ length: totalClips }).map((_, idx) => {
+                const clip = storyClips.find(c => c.sequence_index === idx);
+                const status = clip?.status || "pending";
+                const pct = clip?.progress ?? 0;
+                
+                let bgColor = "bg-muted";
+                let textColor = "text-muted-foreground";
+                let icon = <Clock className="h-2.5 w-2.5" />;
+                
+                if (status === "done" || status === "rendered") {
+                  bgColor = "bg-success/20";
+                  textColor = "text-success";
+                  icon = <CheckCircle2 className="h-2.5 w-2.5" />;
+                } else if (status === "running" || status === "rendering") {
+                  bgColor = "bg-primary/20";
+                  textColor = "text-primary";
+                  icon = <Loader2 className="h-2.5 w-2.5 animate-spin" />;
+                } else if (status === "queued") {
+                  bgColor = "bg-warning/20";
+                  textColor = "text-warning";
+                  icon = <Clock className="h-2.5 w-2.5" />;
+                } else if (status === "failed") {
+                  bgColor = "bg-destructive/20";
+                  textColor = "text-destructive";
+                  icon = <XCircle className="h-2.5 w-2.5" />;
+                }
+                
+                return (
+                  <Tooltip key={idx}>
+                    <TooltipTrigger asChild>
+                      <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] ${bgColor} ${textColor}`}>
+                        {icon}
+                        <span>
+                          {status === "done" || status === "rendered" ? "100" : pct}%
+                        </span>
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="text-xs">
+                      Scene {idx + 1}: {status}{clip?.provider ? ` (${clip.provider})` : ""}
+                    </TooltipContent>
+                  </Tooltip>
+                );
+              })}
+            </div>
           )}
         </div>
       )}
@@ -1054,6 +1105,20 @@ export function StoryBuilderPanel({
                         }
                       }
                       
+                      // Build clip status map by sequence_index
+                      const clipStatusByIndex = new Map<number, ClipStatus>();
+                      storyClips.forEach(clip => {
+                        const idx = clip.sequence_index ?? -1;
+                        if (idx >= 0) {
+                          clipStatusByIndex.set(idx, {
+                            status: clip.status,
+                            progress: clip.progress,
+                            provider: clip.provider,
+                            error: clip.error,
+                          });
+                        }
+                      });
+                      
                       return scenes.map((scene, index) => (
                         <SortableScene
                           key={scene.id}
@@ -1064,6 +1129,7 @@ export function StoryBuilderPanel({
                           tier={tier}
                           allRoles={allRoles}
                           soraUsedBeforeThis={soraUsedAtScene[index]}
+                          clipStatus={clipStatusByIndex.get(index)}
                           onUpdate={(updates) => updateScene(scene.id, updates)}
                           onRemove={() => removeScene(scene.id)}
                         />
@@ -1212,6 +1278,13 @@ export function StoryBuilderPanel({
 // SortableScene
 // ============================================================================
 
+interface ClipStatus {
+  status: string;
+  progress: number | null;
+  provider: string;
+  error?: string | null;
+}
+
 interface SortableSceneProps {
   scene: StoryScene;
   index: number;
@@ -1220,6 +1293,7 @@ interface SortableSceneProps {
   tier: "volume" | "hero";
   allRoles: (SceneRole | undefined)[];
   soraUsedBeforeThis: number;
+  clipStatus?: ClipStatus;
   onUpdate: (updates: Partial<StoryScene>) => void;
   onRemove: () => void;
 }
@@ -1232,8 +1306,9 @@ function SortableScene({
   tier,
   allRoles,
   soraUsedBeforeThis,
+  clipStatus,
   onUpdate, 
-  onRemove 
+  onRemove
 }: SortableSceneProps) {
   const {
     attributes,
@@ -1248,6 +1323,64 @@ function SortableScene({
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.5 : 1,
+  };
+
+  // Clip status indicator
+  const getStatusBadge = () => {
+    if (!clipStatus) return null;
+    
+    const { status, progress, provider, error } = clipStatus;
+    
+    if (status === "done" || status === "rendered") {
+      return (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Badge variant="outline" className="text-[9px] h-5 px-1.5 gap-1 bg-success/10 text-success border-success/30">
+              <CheckCircle2 className="h-3 w-3" />
+              100%
+            </Badge>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="text-xs">
+            Completed via {provider}
+          </TooltipContent>
+        </Tooltip>
+      );
+    }
+    
+    if (status === "running" || status === "queued" || status === "rendering") {
+      const pct = progress ?? (status === "queued" ? 0 : 50);
+      return (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Badge variant="outline" className="text-[9px] h-5 px-1.5 gap-1 bg-primary/10 text-primary border-primary/30">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              {pct}%
+            </Badge>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="text-xs">
+            {status === "queued" ? "Waiting in queue" : `Rendering via ${provider}`}
+          </TooltipContent>
+        </Tooltip>
+      );
+    }
+    
+    if (status === "failed") {
+      return (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Badge variant="outline" className="text-[9px] h-5 px-1.5 gap-1 bg-destructive/10 text-destructive border-destructive/30">
+              <XCircle className="h-3 w-3" />
+              Failed
+            </Badge>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="text-xs max-w-[200px]">
+            {error || "Generation failed"}
+          </TooltipContent>
+        </Tooltip>
+      );
+    }
+    
+    return null;
   };
 
   return (
@@ -1267,7 +1400,7 @@ function SortableScene({
       <div className="flex-1 space-y-2">
         <div className="flex items-center gap-2">
           <Label className="text-[10px] text-muted-foreground w-4">#{index + 1}</Label>
-          {/* Role Badge with Provider Indicator - NOW ACCURATE */}
+          {/* Role Badge with Provider Indicator */}
           <SceneRoleBadge 
             role={scene.role} 
             sceneIndex={index} 
@@ -1276,6 +1409,8 @@ function SortableScene({
             allRoles={allRoles.filter((r): r is SceneRole => r !== undefined)}
             soraUsedBeforeThis={soraUsedBeforeThis}
           />
+          {/* Generation Status Badge */}
+          {getStatusBadge()}
           <Textarea
             value={scene.prompt}
             onChange={(e) => onUpdate({ prompt: e.target.value })}
