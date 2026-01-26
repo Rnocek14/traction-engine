@@ -32,6 +32,8 @@ const ROLE_TO_ZONE: Record<SceneRole, CutZone> = {
   establish: "setup",
 };
 
+type CutType = "hard" | "continuity";
+
 interface GeneratedScene {
   prompt: string;
   duration_target: number;
@@ -44,6 +46,8 @@ interface GeneratedScene {
   is_hero_shot?: boolean;
   // Phase 2: Explicit action summary for progression injection
   action_summary?: string;
+  // Phase 3: Cut type for I2V vs T2V decision
+  cut_type?: CutType;
 }
 
 interface GeneratedStoryboard {
@@ -290,7 +294,22 @@ Generate a complete, filmable storyboard with vivid, specific visual prompts for
       button: { min: 1.0, max: 2.0, reason: "Clean hold for CTA" },
     };
 
-    // Add IDs, sequence, zone, duration suggestions
+    // Default cut types by role (deterministic, not relying on GPT)
+    const DEFAULT_CUT_TYPES: Record<SceneRole, CutType> = {
+      hook: "hard",
+      problem: "hard",
+      story_a: "continuity",
+      reset: "hard",
+      story_b: "continuity",
+      cta: "hard",
+      atmosphere: "hard",
+      establish: "hard",
+    };
+    
+    // Roles that can source continuity (previous scene must be one of these)
+    const CONTINUITY_SOURCE_ROLES: SceneRole[] = ["problem", "story_a", "story_b"];
+
+    // Add IDs, sequence, zone, duration suggestions, and cut_type
     const totalScenes = storyboard.scenes.length;
     const scenesWithIds = storyboard.scenes.map((scene, i) => {
       const isFinalScene = i === totalScenes - 1;
@@ -301,6 +320,31 @@ Generate a complete, filmable storyboard with vivid, specific visual prompts for
       const effectiveChangeType = scene.change_type 
         || (scene as { defaultChangeType?: ChangeType }).defaultChangeType 
         || "info";
+      
+      // === CUT TYPE RESOLUTION (deterministic) ===
+      // Get previous scene's role for continuity eligibility check
+      const prevScene = i > 0 ? storyboard.scenes[i - 1] : null;
+      const prevRole: SceneRole | null = prevScene 
+        ? ((prevScene.role as SceneRole) || "story_a") 
+        : null;
+      
+      let computedCutType: CutType = DEFAULT_CUT_TYPES[effectiveRole] || "hard";
+      
+      // Rule 1: First scene is ALWAYS hard (T2V)
+      if (i === 0) {
+        computedCutType = "hard";
+      }
+      // Rule 2: hook/cta/reset are ALWAYS hard
+      else if (effectiveRole === "hook" || effectiveRole === "cta" || effectiveRole === "reset") {
+        computedCutType = "hard";
+      }
+      // Rule 3: continuity only if previous role is eligible
+      else if (computedCutType === "continuity") {
+        if (!prevRole || !CONTINUITY_SOURCE_ROLES.includes(prevRole)) {
+          computedCutType = "hard"; // Can't chain from non-eligible role
+        }
+      }
+      // Note: Provider switch check happens in continue-story-chain (we don't know provider here)
       
       // Compute zone: use GPT-provided zone, or derive from role
       // Final CTA uses "button" zone for clean hold
@@ -335,6 +379,8 @@ Generate a complete, filmable storyboard with vivid, specific visual prompts for
         sequence_index: i,
         // Use pre-computed change_type (already bridged from defaultChangeType)
         change_type: effectiveChangeType,
+        // CUT TYPE (deterministic, key for I2V vs T2V)
+        cut_type: computedCutType,
         // Compute zone from role if not provided
         zone: computedZone,
         // Duration guidance from zone

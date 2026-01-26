@@ -172,6 +172,8 @@ Deno.serve(async (req) => {
           change_type?: string;
           // Phase 2: Explicit action summary
           action_summary?: string;
+          // Phase 3: Cut type for I2V vs T2V
+          cut_type?: "hard" | "continuity";
         }>;
         tier?: "volume" | "hero";
         motif_anchors?: string[];
@@ -376,11 +378,32 @@ Deno.serve(async (req) => {
         allScenes: allMotifScenes,
       } : undefined;
       
-      // Determine the starting frame for I2V scenes
+      // === CUT TYPE RESOLUTION (the key fix) ===
+      // Read cut_type from storyboard, apply provider-switch override
+      const prevClip = clipsByIndex.get(nextSceneIndex - 1);
+      const prevProvider = prevClip?.provider as VideoProvider | null;
+      const prevSceneData = nextSceneIndex > 0 ? scenes[nextSceneIndex - 1] : null;
+      const prevRole = prevSceneData?.role as SceneRole | null;
+      
+      // Get cut_type from storyboard (already has deterministic defaults from generate-storyboard)
+      let cutType: "hard" | "continuity" = nextScene.cut_type || "hard";
+      let cutReason = nextScene.cut_type ? "from storyboard" : "default hard";
+      
+      // CRITICAL: Provider switch ALWAYS forces hard cut
+      if (prevProvider && prevProvider !== selectedProvider) {
+        cutType = "hard";
+        cutReason = `provider switch ${prevProvider}→${selectedProvider}`;
+      }
+      
+      // Log the cut type decision (this is the key diagnostic)
+      console.log(`[chain-continue] Scene ${nextSceneIndex + 1} cut_type="${cutType}" (${cutReason}) → ${cutType === "continuity" ? "I2V" : "T2V"}`);
+      
+      // Determine the starting frame ONLY for continuity cuts
       let startingFrameUrl: string | undefined = undefined;
       const targetSize = parseSize("720x1280"); // Standard portrait
       
-      if (!isFirstScene && latestThumbnail) {
+      // THE KEY CONDITIONAL: Only use I2V for continuity cuts
+      if (cutType === "continuity" && !isFirstScene && latestThumbnail) {
         // Check if Sora and dimensions mismatch - Sora requires exact match
         const needsResize = selectedProvider === "sora" && 
           latestThumbnailWidth && latestThumbnailHeight &&
@@ -409,6 +432,7 @@ Deno.serve(async (req) => {
           startingFrameUrl = latestThumbnail;
         }
       }
+      // For hard cuts: startingFrameUrl stays undefined (T2V) - no resize calls needed
       
       // Apply progression injection for I2V scenes (prevents repeated actions)
       // Phase 2: Prefer action_summary over heuristic extraction
