@@ -28,6 +28,12 @@ Story chains were failing at Scene 3+ (Sora) because thumbnails didn't match 720
 I2V models repeat the most salient motion from the previous frame when not given explicit progression directives.
 
 **Fix:** Added `progression-injection.ts` module that injects delta directives:
+- Uses RAW scene prompts for action extraction (not compiled provider prompts)
+- Normalizes `change_type` to valid Director Brain enum values
+- Logs `prev_action` and `next_action` for easy debugging
+- Warns when `prev_action == next_action` (potential repeat)
+
+**Provider-specific directives:**
 - **Sora:** "DIRECTOR NOTE (story progression): Previous action: X (DO NOT repeat)"
 - **Runway:** "NEW action: Y. Do not repeat: X."
 - **Luma:** "New action: Y. Previous action (X) must not repeat."
