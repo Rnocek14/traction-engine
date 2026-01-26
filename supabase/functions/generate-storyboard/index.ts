@@ -269,20 +269,41 @@ Generate a complete, filmable storyboard with vivid, specific visual prompts for
     const hasStoryB = storyboard.scenes.some(s => s.role === "story_b");
     const heroRole = hasStoryB ? "story_b" : "story_a";
 
-    // Add IDs and sequence to scenes, mark hero shot, compute zone
-    const scenesWithIds = storyboard.scenes.map((scene, i, arr) => {
-      const isFinalScene = i === arr.length - 1;
-      const effectiveRole = scene.role || "story_a";
+    // Stable storyboard ID for collision-safe scene IDs
+    const storyboardId = crypto.randomUUID?.() ?? `sb_${Date.now()}`;
+
+    // Zone duration configs for suggestions
+    const ZONE_DURATIONS: Record<CutZone, { min: number; max: number; reason: string }> = {
+      hook: { min: 0.4, max: 0.9, reason: "Pattern interrupt - keep it punchy" },
+      setup: { min: 1.2, max: 2.0, reason: "Establish context" },
+      escalation: { min: 1.0, max: 1.8, reason: "Build tension" },
+      payoff: { min: 1.8, max: 3.5, reason: "Let it land" },
+      button: { min: 1.0, max: 2.0, reason: "Clean hold for CTA" },
+    };
+
+    // Add IDs, sequence, zone, duration suggestions
+    const totalScenes = storyboard.scenes.length;
+    const scenesWithIds = storyboard.scenes.map((scene, i) => {
+      const isFinalScene = i === totalScenes - 1;
+      const effectiveRole: SceneRole = (scene.role as SceneRole) || "story_a";
       
       // Compute zone: use GPT-provided zone, or derive from role
       // Final CTA uses "button" zone for clean hold
       const computedZone: CutZone = (isFinalScene && effectiveRole === "cta") 
         ? "button" 
         : (scene as { zone?: CutZone }).zone || ROLE_TO_ZONE[effectiveRole] || "setup";
+
+      // Duration suggestion based on zone + position
+      const zoneDuration = ZONE_DURATIONS[computedZone];
+      const positionRatio = i / Math.max(totalScenes - 1, 1);
+      const durationMid = zoneDuration.min + (zoneDuration.max - zoneDuration.min) * 
+        (computedZone === "hook" ? 0.3 : positionRatio > 0.7 ? 0.7 : 0.5);
       
       return {
-        id: `scene_${Date.now()}_${i}`,
+        id: `scene_${storyboardId}_${i}`,
         ...scene,
+        // Force role in output (prevent undefined leaking)
+        role: effectiveRole,
         sequence_index: i,
         // Bridge defaultChangeType from templates OR use GPT-provided change_type
         change_type: scene.change_type 
@@ -290,6 +311,11 @@ Generate a complete, filmable storyboard with vivid, specific visual prompts for
           || "info",
         // Compute zone from role if not provided
         zone: computedZone,
+        // Duration guidance from zone
+        duration_suggested: Math.round(durationMid * 10) / 10,
+        duration_min: zoneDuration.min,
+        duration_max: zoneDuration.max,
+        duration_reason: zoneDuration.reason,
         // Mark hero shot (one per story in volume tier)
         is_hero_shot: tier === "hero" 
           ? ["story_a", "story_b", "establish"].includes(effectiveRole)
