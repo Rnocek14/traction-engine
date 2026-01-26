@@ -18,6 +18,48 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+/**
+ * Extract routing tags from scene metadata for smart provider selection
+ */
+function extractRoutingTags(scene: { prompt: string; camera_direction?: string }): string[] {
+  const tags: string[] = [];
+  
+  const prompt = scene.prompt.toLowerCase();
+  
+  // Action/motion detection
+  if (/action|fight|battle|explosion|chase|run|jump/.test(prompt)) {
+    tags.push("action");
+  }
+  if (/slow|peaceful|calm|serene|quiet/.test(prompt)) {
+    tags.push("slow_motion");
+  }
+  
+  // Shot type from camera direction
+  if (scene.camera_direction) {
+    const cam = scene.camera_direction.toLowerCase();
+    if (/close/.test(cam)) tags.push("close_up");
+    if (/wide/.test(cam)) tags.push("wide_shot");
+    if (/tracking|follow/.test(cam)) tags.push("tracking");
+    if (/aerial|drone/.test(cam)) tags.push("aerial");
+  }
+  
+  // Genre/style detection
+  if (/fantasy|dragon|magic|wizard|medieval/.test(prompt)) {
+    tags.push("fantasy");
+  }
+  if (/horror|dark|scary|creepy/.test(prompt)) {
+    tags.push("horror");
+  }
+  if (/nature|landscape|forest|ocean|mountain/.test(prompt)) {
+    tags.push("nature");
+  }
+  if (/person|character|man|woman|figure/.test(prompt)) {
+    tags.push("character");
+  }
+  
+  return tags.slice(0, 5); // Limit to top 5 tags
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -156,8 +198,11 @@ Deno.serve(async (req) => {
 
       console.log(`[chain-continue] Queueing scene ${nextSceneIndex + 1}/${totalScenes} for story ${story.id} [${isFirstScene ? "T2V" : "I2V"}]`);
 
-      // Queue via runway
-      const response = await fetch(`${supabaseUrl}/functions/v1/queue-video-runway`, {
+      // Extract routing hints from scene metadata
+      const sceneRoutingTags = extractRoutingTags(nextScene);
+      
+      // Queue via SMART router (will pick best provider per scene)
+      const response = await fetch(`${supabaseUrl}/functions/v1/queue-video-smart`, {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${supabaseServiceKey}`,
@@ -168,10 +213,15 @@ Deno.serve(async (req) => {
           prompt: prompt,
           settings: {
             size: "720x1280",
-            requested_seconds: nextScene.duration_target || 5,
-            model: isFirstScene ? "veo3.1_fast" : "gen4_turbo",
+            seconds: nextScene.duration_target || 5,
           },
           starting_frame_url: isFirstScene ? undefined : latestThumbnail,
+          provider: "smart", // Let the router decide based on scene content
+          routing_hint: {
+            shot_type: nextScene.camera_direction,
+            is_chained: !isFirstScene, // I2V scenes are chained
+            routing_tags: sceneRoutingTags,
+          },
         }),
       });
 
