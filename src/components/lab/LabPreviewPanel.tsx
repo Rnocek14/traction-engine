@@ -159,12 +159,12 @@ export function LabPreviewPanel({
 
   return (
     <div className={cn("flex flex-col h-full overflow-hidden", className)}>
-      {/* Main Preview Area */}
-      <div className="flex-1 min-h-0 flex flex-col">
+      {/* Main Preview Area - takes majority of space */}
+      <div className="flex-[3] min-h-0 flex flex-col">
         {activeResult ? (
-          <div className="flex-1 min-h-0 flex flex-col">
+          <div className="h-full flex flex-col">
             {/* Minimal header - just status */}
-            <div className="flex items-center gap-2 p-2 border-b bg-card/30">
+            <div className="flex items-center gap-2 p-2 border-b bg-card/30 shrink-0">
               {activeResult.type === "video" ? (
                 <Video className="h-3.5 w-3.5 text-muted-foreground" />
               ) : (
@@ -186,8 +186,8 @@ export function LabPreviewPanel({
               )}
             </div>
 
-            {/* Preview Content */}
-            <div className="flex-1 min-h-0 flex items-center justify-center bg-black/50 relative overflow-hidden">
+            {/* Preview Content - expand to fill available space */}
+            <div className="flex-1 min-h-[300px] flex items-center justify-center bg-black/50 relative overflow-hidden">
               {activeResult.status === "done" && activeResult.outputUrl ? (
                 previewFailed ? (
                   <div className="flex flex-col items-center gap-3 text-muted-foreground">
