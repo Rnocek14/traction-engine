@@ -861,6 +861,65 @@ export type Database = {
         }
         Relationships: []
       }
+      story_analysis: {
+        Row: {
+          analyzed_at: string
+          analyzer_version: string
+          character_continuity: number | null
+          created_at: string
+          environment_consistency: number | null
+          failure_patterns: string[] | null
+          id: string
+          motion_logic: number | null
+          overall_flow_score: number | null
+          prompt_execution: number | null
+          raw: Json | null
+          recommendations: string[] | null
+          story_job_id: string
+          weak_scenes: number[] | null
+        }
+        Insert: {
+          analyzed_at?: string
+          analyzer_version?: string
+          character_continuity?: number | null
+          created_at?: string
+          environment_consistency?: number | null
+          failure_patterns?: string[] | null
+          id?: string
+          motion_logic?: number | null
+          overall_flow_score?: number | null
+          prompt_execution?: number | null
+          raw?: Json | null
+          recommendations?: string[] | null
+          story_job_id: string
+          weak_scenes?: number[] | null
+        }
+        Update: {
+          analyzed_at?: string
+          analyzer_version?: string
+          character_continuity?: number | null
+          created_at?: string
+          environment_consistency?: number | null
+          failure_patterns?: string[] | null
+          id?: string
+          motion_logic?: number | null
+          overall_flow_score?: number | null
+          prompt_execution?: number | null
+          raw?: Json | null
+          recommendations?: string[] | null
+          story_job_id?: string
+          weak_scenes?: number[] | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "story_analysis_story_job_id_fkey"
+            columns: ["story_job_id"]
+            isOneToOne: true
+            referencedRelation: "story_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       story_jobs: {
         Row: {
           account_id: string
