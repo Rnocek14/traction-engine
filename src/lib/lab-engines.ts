@@ -217,14 +217,27 @@ export async function assemblePreview(
 
 // ============ PROMPT ENRICHMENT ============
 
+export interface EnrichmentResult {
+  original: string;
+  enriched: string;
+  fullEnrichment?: string;  // Full GPT output before compression
+  provider?: VideoEngine;
+  schemaVersion: string;
+  charCount: number;
+  maxChars: number;
+  wasCompressed: boolean;
+  error?: string;
+}
+
 /**
- * Enrich a simple prompt using GPT-4o cinematography expertise
+ * Enrich a simple prompt using GPT-4o with provider-specific optimization
+ * V2: Uses provider-specific prompting + hard length limits
  */
 export async function enrichPrompt(
   prompt: string,
   provider?: VideoEngine,
   styleHints?: string
-): Promise<{ original: string; enriched: string; error?: string }> {
+): Promise<EnrichmentResult> {
   const { data, error } = await supabase.functions.invoke("enrich-video-prompt", {
     body: { 
       prompt, 
@@ -235,12 +248,26 @@ export async function enrichPrompt(
 
   if (error) {
     console.error("Prompt enrichment failed:", error);
-    return { original: prompt, enriched: prompt, error: error.message };
+    return { 
+      original: prompt, 
+      enriched: prompt, 
+      schemaVersion: "error",
+      charCount: prompt.length,
+      maxChars: 500,
+      wasCompressed: false,
+      error: error.message 
+    };
   }
 
   return {
     original: data?.original || prompt,
     enriched: data?.enriched || prompt,
+    fullEnrichment: data?.full_enrichment,
+    provider: data?.provider,
+    schemaVersion: data?.schema_version || "v1.0",
+    charCount: data?.char_count || (data?.enriched?.length || prompt.length),
+    maxChars: data?.max_chars || 500,
+    wasCompressed: data?.was_compressed || false,
     error: data?.error,
   };
 }
