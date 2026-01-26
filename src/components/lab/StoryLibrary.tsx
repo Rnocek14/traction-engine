@@ -7,7 +7,7 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   ChevronDown,
   ChevronRight,
@@ -17,6 +17,7 @@ import {
   Loader2,
   Play,
   AlertCircle,
+  Plus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -56,6 +57,7 @@ export function StoryLibrary({
 }: StoryLibraryProps) {
   const [isOpen, setIsOpen] = useState(true);
   const [expandedStories, setExpandedStories] = useState<Set<string>>(new Set());
+  const navigate = useNavigate();
 
   // Fetch all stories
   const { data: stories, isLoading: storiesLoading } = useQuery({
@@ -198,27 +200,42 @@ export function StoryLibrary({
 
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen} className={className}>
-      <CollapsibleTrigger asChild>
+      <div className="flex items-center justify-between px-2 py-1">
+        <CollapsibleTrigger asChild>
+          <Button
+            variant="ghost"
+            className="flex-1 justify-start px-2 py-2 h-auto hover:bg-secondary/50"
+          >
+            <div className="flex items-center gap-2">
+              {isOpen ? (
+                <ChevronDown className="h-4 w-4" />
+              ) : (
+                <ChevronRight className="h-4 w-4" />
+              )}
+              <Film className="h-4 w-4 text-muted-foreground" />
+              <span className="font-medium">Story Library</span>
+              {stories && (
+                <Badge variant="secondary" className="text-xs">
+                  {stories.length}
+                </Badge>
+              )}
+            </div>
+          </Button>
+        </CollapsibleTrigger>
+        
         <Button
-          variant="ghost"
-          className="w-full justify-between px-3 py-2 h-auto hover:bg-secondary/50"
+          variant="outline"
+          size="sm"
+          className="h-7 px-2 gap-1"
+          onClick={(e) => {
+            e.stopPropagation();
+            navigate("/studio/lab/story");
+          }}
         >
-          <div className="flex items-center gap-2">
-            {isOpen ? (
-              <ChevronDown className="h-4 w-4" />
-            ) : (
-              <ChevronRight className="h-4 w-4" />
-            )}
-            <Film className="h-4 w-4 text-muted-foreground" />
-            <span className="font-medium">Story Library</span>
-            {stories && (
-              <Badge variant="secondary" className="text-xs">
-                {stories.length}
-              </Badge>
-            )}
-          </div>
+          <Plus className="h-3 w-3" />
+          <span className="text-xs">New</span>
         </Button>
-      </CollapsibleTrigger>
+      </div>
 
       <CollapsibleContent>
         <div className="border-t border-border/50">
