@@ -36,6 +36,7 @@ interface ChainedStoryRequest {
   settings?: {
     size?: string;
     tier?: "volume" | "hero";
+    template_id?: string;
   };
 }
 
@@ -133,7 +134,7 @@ Deno.serve(async (req) => {
     const scriptRunId = newScript.id;
     console.log(`[chained] Created script_run ${scriptRunId}`);
     
-    // Update story status and store storyboard WITH TIER for cron to use
+    // Update story status and store storyboard WITH TIER + TEMPLATE_ID for cron to use
     await supabase
       .from("story_jobs")
       .update({ 
@@ -143,6 +144,7 @@ Deno.serve(async (req) => {
         storyboard_json: { 
           scenes,
           tier, // Persist tier so continue-story-chain can read it
+          template_id: settings?.template_id || null, // For analytics/debugging
         },
         continuity_anchors: anchors,
       })
