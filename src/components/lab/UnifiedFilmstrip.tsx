@@ -180,7 +180,7 @@ export function UnifiedFilmstrip({
   };
 
   return (
-    <div className={cn("border-t border-primary/30 bg-card/50 shrink-0", className)}>
+    <div className={cn("border-t border-primary/30 bg-card/50 shrink-0 max-h-[180px]", className)}>
       {/* Header with filters */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border/50">
         <Film className="h-4 w-4 text-muted-foreground" />

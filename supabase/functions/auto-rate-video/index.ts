@@ -655,34 +655,50 @@ Deno.serve(async (req) => {
     const { jobId, batchMode } = await req.json();
 
     if (batchMode) {
+      console.log("[auto-rate-video] Batch mode started");
       // Load dynamic allowlist once for the batch
       const dynamicAllowlist = await getDynamicAllowlist(supabase);
       
       const { data: unratedJobs, error: fetchError } = await supabase.from("video_jobs")
         .select("id, output_url, thumbnail_url, spritesheet_url, enriched_prompt, original_prompt, provider, style_hints, settings")
-        .eq("status", "done").is("auto_rated_at", null).not("output_url", "is", null).limit(10);
+        .eq("status", "done")
+        .is("auto_rated_at", null)
+        .not("output_url", "is", null)
+        .not("original_prompt", "is", null)  // Filter out jobs without prompts
+        .order("created_at", { ascending: false })  // Process newest first
+        .limit(5);
+      
       if (fetchError) throw fetchError;
 
       const results = [];
       for (const job of unratedJobs || []) {
         const prompt = job.enriched_prompt || job.original_prompt;
-        if (!prompt || !job.output_url) continue;
+        if (!prompt || !job.output_url) {
+          console.log(`[auto-rate-video] Skipping ${job.id}: no prompt or output`);
+          continue;
+        }
 
         let imageUrl = job.spritesheet_url || job.thumbnail_url;
         if (!imageUrl && job.output_url) {
+          console.log(`[auto-rate-video] Extracting thumbnail for ${job.id}`);
           const extracted = await extractThumbnailOnDemand(job.id, job.output_url, job.provider, supabaseUrl, serviceKey);
           if (extracted.thumbnail_url || extracted.spritesheet_url) {
             await supabase.from("video_jobs").update({ thumbnail_url: extracted.thumbnail_url, spritesheet_url: extracted.spritesheet_url }).eq("id", job.id);
             imageUrl = extracted.spritesheet_url || extracted.thumbnail_url;
           }
         }
-        if (!imageUrl) continue;
+        if (!imageUrl) {
+          console.log(`[auto-rate-video] Skipping ${job.id}: no image`);
+          continue;
+        }
 
+        console.log(`[auto-rate-video] Rating ${job.id} (${job.provider})`);
         const rating = await scoreVideoWithVLM(imageUrl, prompt, job.style_hints, openaiKey, job.provider, dynamicAllowlist);
         await persistRating(supabase, job.id, rating);
         await maybeLearn(supabase, job as VideoJob, rating);
         results.push({ jobId: job.id, ...rating });
       }
+      console.log(`[auto-rate-video] Batch complete: ${results.length} processed`);
       return new Response(JSON.stringify({ processed: results.length, results }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
