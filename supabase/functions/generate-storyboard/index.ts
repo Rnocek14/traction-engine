@@ -16,10 +16,13 @@ interface GenerateRequest {
   scene_count?: number;
 }
 
+type SceneRole = "hook" | "problem" | "story_a" | "reset" | "story_b" | "cta" | "atmosphere" | "establish";
+
 interface GeneratedScene {
   prompt: string;
   duration_target: number;
   camera_direction: string;
+  role: SceneRole;
 }
 
 interface GeneratedStoryboard {
@@ -62,10 +65,24 @@ const STORY_TYPE_GUIDANCE: Record<string, string> = {
 
 const SYSTEM_PROMPT = `You are an expert cinematographer and storyboard artist. Given a concept, create a complete video storyboard with multiple scenes.
 
+SCENE ROLES - Assign each scene a narrative role:
+- "hook": Opening attention-grabber (2-4 seconds) - pattern interrupt, curiosity spike
+- "problem": Show the pain point (4-6 seconds) - atmospheric mood, physics
+- "story_a": First narrative beat (6-8 seconds) - establish the situation, cinematic
+- "reset": Quick attention reset (2-3 seconds) - micro-cut, whip pan, dopamine hit
+- "story_b": Payoff/reveal (6-10 seconds) - the hero moment, transformation
+- "cta": Call to action (4-6 seconds) - proof, result, next step
+- "atmosphere": Texture transition (3-5 seconds) - optional physics glue
+- "establish": Wide establishing shot (4-6 seconds) - environment, context
+
+Choose roles based on narrative position and purpose. A typical 6-scene story uses:
+hook → problem → story_a → reset → story_b → cta
+
 For each scene, provide:
 1. A detailed visual prompt (what's happening, composition, lighting, mood)
-2. Suggested duration (3-8 seconds)
+2. Suggested duration (match the role's recommended range)
 3. Camera direction (movement, framing, lens suggestion)
+4. Role assignment from the list above
 
 Also extract continuity anchors:
 - Character details (if any characters appear)
@@ -80,6 +97,8 @@ IMPORTANT PROMPT GUIDELINES:
 - Keep each prompt focused on ONE clear action/moment
 - Avoid abstract concepts - make it concrete and filmable
 - Use cinematic language (wide shot, close-up, tracking, etc.)
+- For HOOK/RESET scenes: Start with camera motion (e.g., "Whip pan:", "Tracking shot:")
+- For STORY scenes: Use full cinematic description
 
 Respond ONLY with valid JSON in this exact format:
 {
@@ -88,7 +107,8 @@ Respond ONLY with valid JSON in this exact format:
     {
       "prompt": "Detailed visual description for video generation",
       "duration_target": 5,
-      "camera_direction": "Camera movement and framing notes"
+      "camera_direction": "Camera movement and framing notes",
+      "role": "story_a"
     }
   ],
   "anchors": {

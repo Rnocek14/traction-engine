@@ -46,12 +46,16 @@ export interface RegenSuggestion {
 
 export type StoryType = "short_story" | "brainrot" | "info" | "hybrid";
 
+export type SceneRole = "hook" | "problem" | "story_a" | "reset" | "story_b" | "cta" | "atmosphere" | "establish";
+
 export interface StoryScene {
   id: string;
   prompt: string;
   duration_target: number;
   sequence_index: number;
   camera_direction?: string;
+  role?: SceneRole;
+  enrichedPrompt?: string;
 }
 
 export interface Storyboard {

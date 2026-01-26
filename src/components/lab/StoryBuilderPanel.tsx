@@ -75,10 +75,76 @@ import {
   type StoryType,
   type StoryScene,
   type Storyboard,
+  type SceneRole,
   STORY_TYPE_CONFIGS,
 } from "@/lib/continuity-scoring";
 import { enrichPrompt, inferAnchorsFromScenes } from "@/lib/lab-engines";
 import type { Tables } from "@/integrations/supabase/types";
+import {
+  SCENE_ROLE_CONFIGS,
+  getProviderForRole,
+  ROLE_DISPLAY,
+  PROVIDER_DISPLAY,
+} from "@/types/scene-roles";
+
+// Scene role options for selector
+const AVAILABLE_ROLES: Array<{ value: SceneRole; label: string; color: string }> = [
+  { value: "hook", label: "Hook", color: "bg-green-500" },
+  { value: "problem", label: "Problem", color: "bg-blue-500" },
+  { value: "story_a", label: "Story A", color: "bg-purple-500" },
+  { value: "reset", label: "Reset", color: "bg-green-500" },
+  { value: "story_b", label: "Story B", color: "bg-purple-500" },
+  { value: "cta", label: "CTA", color: "bg-blue-500" },
+  { value: "atmosphere", label: "Atmosphere", color: "bg-blue-500" },
+  { value: "establish", label: "Establish", color: "bg-purple-500" },
+];
+
+/**
+ * Scene Role Badge with provider indicator
+ */
+function SceneRoleBadge({ role, sceneIndex, totalScenes }: { 
+  role?: SceneRole; 
+  sceneIndex: number;
+  totalScenes: number;
+}) {
+  // Infer role from position if not set
+  const inferredRole = role || inferRoleFromPosition(sceneIndex, totalScenes);
+  const config = SCENE_ROLE_CONFIGS[inferredRole];
+  const roleDisplay = ROLE_DISPLAY[inferredRole];
+  const provider = getProviderForRole(inferredRole, "volume", 0);
+  const providerDisplay = PROVIDER_DISPLAY[provider];
+  
+  return (
+    <div className="flex items-center gap-1">
+      <Badge 
+        variant="outline" 
+        className={`text-[9px] px-1.5 py-0 h-5 ${config?.color || 'bg-muted'} text-white border-0`}
+      >
+        {roleDisplay?.shortLabel || inferredRole.slice(0, 2).toUpperCase()}
+      </Badge>
+      <span className="text-[9px] text-muted-foreground" title={`Routes to ${providerDisplay?.label}`}>
+        {providerDisplay?.emoji}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Infer role from narrative position (simple heuristic)
+ */
+function inferRoleFromPosition(sceneIndex: number, totalScenes: number): SceneRole {
+  if (totalScenes === 0) totalScenes = 6; // Default assumption
+  if (sceneIndex === 0) return "hook";
+  if (sceneIndex === totalScenes - 1) return "cta";
+  
+  const position = sceneIndex / totalScenes;
+  
+  if (position < 0.25) return "problem";
+  if (position < 0.5) return "story_a";
+  if (position < 0.65) return "reset";
+  if (position < 0.85) return "story_b";
+  return "cta";
+}
 
 type VideoJob = Tables<"video_jobs">;
 
@@ -1137,6 +1203,8 @@ function SortableScene({ scene, index, defaultDuration, onUpdate, onRemove }: So
       <div className="flex-1 space-y-2">
         <div className="flex items-center gap-2">
           <Label className="text-[10px] text-muted-foreground w-4">#{index + 1}</Label>
+          {/* Role Badge with Provider Indicator */}
+          <SceneRoleBadge role={scene.role} sceneIndex={index} totalScenes={0} />
           <Textarea
             value={scene.prompt}
             onChange={(e) => onUpdate({ prompt: e.target.value })}
@@ -1145,11 +1213,30 @@ function SortableScene({ scene, index, defaultDuration, onUpdate, onRemove }: So
           />
         </div>
         <div className="flex items-center gap-2">
+          {/* Role Selector */}
+          <Select
+            value={scene.role || ""}
+            onValueChange={(v) => onUpdate({ role: v as SceneRole })}
+          >
+            <SelectTrigger className="h-7 text-xs w-24">
+              <SelectValue placeholder="Role..." />
+            </SelectTrigger>
+            <SelectContent>
+              {AVAILABLE_ROLES.map(r => (
+                <SelectItem key={r.value} value={r.value} className="text-xs">
+                  <span className="flex items-center gap-1">
+                    <span className={`w-2 h-2 rounded-full ${r.color}`} />
+                    {r.label}
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Select
             value={String(scene.duration_target)}
             onValueChange={(v) => onUpdate({ duration_target: Number(v) })}
           >
-            <SelectTrigger className="h-7 text-xs w-20">
+            <SelectTrigger className="h-7 text-xs w-16">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
