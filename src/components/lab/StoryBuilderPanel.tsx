@@ -84,6 +84,7 @@ type VideoJob = Tables<"video_jobs">;
 
 interface StoryBuilderPanelProps {
   storyId?: string;
+  forceNew?: boolean; // When true, create a blank template instead of loading recent story
   onStoryCreated?: (storyId: string) => void;
   className?: string;
 }
@@ -121,6 +122,7 @@ function getContinuityWarnings(_anchors: ContinuityAnchors, scenes: StoryScene[]
 
 export function StoryBuilderPanel({
   storyId,
+  forceNew = false,
   onStoryCreated,
   className,
 }: StoryBuilderPanelProps) {
@@ -156,7 +158,7 @@ export function StoryBuilderPanel({
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
-  // Load most recent story if no storyId provided
+  // Load most recent story if no storyId provided AND not in forceNew mode
   const { data: recentStory } = useQuery({
     queryKey: ["recent-story"],
     queryFn: async () => {
@@ -169,11 +171,11 @@ export function StoryBuilderPanel({
       if (error) throw error;
       return data;
     },
-    enabled: !storyId,
+    enabled: !storyId && !forceNew, // Don't load recent story if forceNew is true
   });
 
-  // Use provided storyId or fall back to most recent story
-  const effectiveStoryId = storyId || recentStory?.id;
+  // Use provided storyId or fall back to most recent story (unless forceNew)
+  const effectiveStoryId = forceNew ? undefined : (storyId || recentStory?.id);
 
   // Load existing story if storyId provided
   const { data: existingStory, isLoading: storyLoading } = useQuery({
@@ -294,15 +296,27 @@ export function StoryBuilderPanel({
     }
   }, [existingStory, storyClips, scenes.length, effectiveStoryId, queryClient]);
 
+  // Reset state when forceNew is true (creating a new blank story)
+  useEffect(() => {
+    if (forceNew) {
+      setTitle("");
+      setStoryType("short_story");
+      setAnchors(getDefaultAnchors());
+      setScenes([]);
+      setConcept("");
+      setAssembledUrl(null);
+    }
+  }, [forceNew]);
+
   // Hydrate from existing story
   useEffect(() => {
-    if (!existingStory) return;
+    if (forceNew || !existingStory) return;
     setTitle(existingStory.title || "");
     setStoryType((existingStory.story_type as StoryType) || "short_story");
     setAnchors((existingStory.continuity_anchors as unknown as ContinuityAnchors) || {});
     const storyboard = existingStory.storyboard_json as unknown as Storyboard | null;
     setScenes(storyboard?.scenes || []);
-  }, [existingStory]);
+  }, [existingStory, forceNew]);
 
   // Create story mutation
   const createStory = useMutation({
