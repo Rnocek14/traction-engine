@@ -10,6 +10,9 @@
 
 import type { SceneRole } from "./scene-role-router.ts";
 
+/** Valid change types from Director Brain */
+export type ChangeType = "info" | "emotion" | "goal" | "stakes" | "location";
+
 export interface ProgressionContext {
   /** 1-sentence summary of what happened in the previous scene */
   prev_scene_summary: string;
@@ -18,9 +21,37 @@ export interface ProgressionContext {
   /** Main action verb phrase for this scene */
   next_action: string;
   /** What type of change should be visible */
-  change_type: string;
+  change_type: ChangeType;
   /** Actions that MUST NOT recur */
   must_not_repeat: string[];
+}
+
+/**
+ * Normalize change_type to valid ChangeType enum.
+ * Maps legacy/invalid values to appropriate defaults.
+ */
+export function normalizeChangeType(raw: string): ChangeType {
+  const normalized = raw?.toLowerCase().trim() || "info";
+  
+  // Direct matches
+  if (["info", "emotion", "goal", "stakes", "location"].includes(normalized)) {
+    return normalized as ChangeType;
+  }
+  
+  // Common aliases
+  const aliases: Record<string, ChangeType> = {
+    "action": "goal",      // "action" maps to goal (what character does)
+    "setting": "location", // "setting" maps to location
+    "place": "location",
+    "feeling": "emotion",
+    "mood": "emotion",
+    "tension": "stakes",
+    "risk": "stakes",
+    "reveal": "info",
+    "information": "info",
+  };
+  
+  return aliases[normalized] || "info";
 }
 
 /**
@@ -28,32 +59,42 @@ export interface ProgressionContext {
  * Uses simple heuristics to find the dominant verb phrase.
  */
 export function extractActionFromPrompt(prompt: string): string {
-  // Normalize
+  if (!prompt) return "previous beat";
+  
   const normalized = prompt.toLowerCase().trim();
   
-  // Common action verbs to look for
-  const actionPatterns = [
-    /(?:is |are )?(walking|running|eating|drinking|looking|watching|sitting|standing|moving|dancing|fighting|crying|laughing|talking|speaking|working|playing|reading|writing|cooking|sleeping|waking)/i,
-    /(?:he |she |they |it |man |woman |person |character )(\w+(?:s|ing|es))/i,
-    /(picks? up|puts? down|takes?|grabs?|holds?|reaches?|opens?|closes?|turns?|moves?)/i,
+  // Priority 1: Look for explicit action phrases
+  const explicitPatterns = [
+    /(?:character |person |man |woman |he |she |they )([\w\s]+?(?:ing|es|s))\b/i,
+    /\b(walks?|runs?|eats?|drinks?|looks?|watches?|sits?|stands?|moves?|dances?|fights?|cries?|laughs?|talks?|speaks?|works?|plays?|reads?|writes?|cooks?|sleeps?|wakes?|picks? up|puts? down|takes?|grabs?|holds?|reaches?|opens?|closes?|turns?|discovers?|realizes?|reacts?|notices?|spits?|falls?|jumps?|climbs?|swims?|flies?)\b/i,
   ];
   
-  for (const pattern of actionPatterns) {
+  for (const pattern of explicitPatterns) {
     const match = normalized.match(pattern);
     if (match) {
-      return match[1] || match[0];
+      return match[1]?.trim() || match[0]?.trim();
     }
   }
   
-  // Fallback: take first 30 chars as summary
-  return normalized.slice(0, 30).replace(/[,.!?].*/, '').trim() || "previous beat";
+  // Priority 2: Take first meaningful clause (up to 40 chars, before comma/period)
+  const firstClause = normalized
+    .split(/[,.:;!?]/)[0]
+    ?.trim()
+    .slice(0, 40);
+  
+  if (firstClause && firstClause.length > 5) {
+    return firstClause;
+  }
+  
+  return "previous beat";
 }
 
 /**
  * Generate a 1-sentence summary from a prompt
  */
 export function summarizePrompt(prompt: string): string {
-  // Take first sentence or first 100 chars
+  if (!prompt) return "Previous scene";
+  
   const firstSentence = prompt.split(/[.!?]/)[0]?.trim();
   if (firstSentence && firstSentence.length < 100) {
     return firstSentence;
@@ -62,21 +103,25 @@ export function summarizePrompt(prompt: string): string {
 }
 
 /**
- * Build progression context from previous and current scene data
+ * Build progression context from previous and current scene data.
+ * 
+ * IMPORTANT: Pass the RAW scene prompts (not compiled provider prompts)
+ * for better action extraction.
  */
 export function buildProgressionContext(
   prevPrompt: string,
   nextPrompt: string,
-  changeType: string = "action"
+  changeType: string = "info"
 ): ProgressionContext {
   const prevAction = extractActionFromPrompt(prevPrompt);
   const nextAction = extractActionFromPrompt(nextPrompt);
+  const normalizedChangeType = normalizeChangeType(changeType);
   
   return {
     prev_scene_summary: summarizePrompt(prevPrompt),
     prev_action: prevAction,
     next_action: nextAction,
-    change_type: changeType,
+    change_type: normalizedChangeType,
     must_not_repeat: [prevAction],
   };
 }

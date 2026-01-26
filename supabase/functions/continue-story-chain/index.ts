@@ -1,14 +1,14 @@
 /**
- * continue-story-chain
+ * continue-story-chain (v2)
  * 
  * Cron-triggered function that advances story generation chains.
  * Runs every 30s to check for stories needing the next scene queued.
  * 
- * Logic:
- * 1. Find stories with status='generating'
- * 2. Check if the latest scene is done
- * 3. If done, queue the next scene using the thumbnail as reference
- * 4. If all scenes done, mark story complete
+ * Features:
+ * - Visual continuity via I2V chaining
+ * - Progression injection to prevent repeated actions
+ * - Role-based provider routing
+ * - Dimension-aware resize for Sora
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -21,7 +21,7 @@ import {
   type VideoProvider,
 } from "../_shared/scene-role-router.ts";
 import { type MotifScene } from "../_shared/motif-injection.ts";
-import { applyProgressionInjection } from "../_shared/progression-injection.ts";
+import { applyProgressionInjection, buildProgressionContext } from "../_shared/progression-injection.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -269,12 +269,16 @@ Deno.serve(async (req) => {
 
       // Need to queue next scene
       const nextScene = scenes[nextSceneIndex];
-      const basePrompt = nextScene.enriched_prompt || nextScene.prompt;
       const isFirstScene = nextSceneIndex === 0;
       
-      // Get previous scene prompt for progression injection
+      // Get previous scene's RAW prompt for action extraction (not compiled)
+      // Using raw prompts gives better verb phrase extraction
       const prevScene = nextSceneIndex > 0 ? scenes[nextSceneIndex - 1] : null;
-      const prevPrompt = prevScene ? (prevScene.enriched_prompt || prevScene.prompt) : null;
+      const prevRawPrompt = prevScene?.prompt || null;
+      const nextRawPrompt = nextScene.prompt;
+      
+      // Use enriched prompt for the actual generation (has camera directions, etc.)
+      const basePrompt = nextScene.enriched_prompt || nextScene.prompt;
 
       // For I2V scenes, we need a reference image
       if (!isFirstScene && !latestThumbnail) {
@@ -397,18 +401,31 @@ Deno.serve(async (req) => {
       }
       
       // Apply progression injection for I2V scenes (prevents repeated actions)
-      const changeType = nextScene.change_type || "action";
-      const finalPrompt = applyProgressionInjection(
-        basePrompt,
-        prevPrompt,
-        nextSceneIndex,
-        changeType,
-        selectedProvider as "sora" | "runway" | "luma",
-        sceneRole
-      );
+      // Use RAW prompts for action extraction (cleaner verb phrases)
+      const changeType = nextScene.change_type || "info"; // Default to "info" not "action"
+      let finalPrompt = basePrompt;
       
-      if (nextSceneIndex > 0) {
-        console.log(`[chain-continue] Progression injection applied: change_type=${changeType}`);
+      if (nextSceneIndex > 0 && prevRawPrompt) {
+        // Build context from RAW prompts for better action extraction
+        const progressionCtx = buildProgressionContext(prevRawPrompt, nextRawPrompt, changeType);
+        
+        // Diagnostic logging - makes debugging effortless
+        console.log(`[progression] scene=${nextSceneIndex + 1} prev_action="${progressionCtx.prev_action}" next_action="${progressionCtx.next_action}" change_type="${progressionCtx.change_type}"`);
+        
+        // Check for potential repeat (flag but don't block)
+        if (progressionCtx.prev_action === progressionCtx.next_action) {
+          console.warn(`[progression] ⚠️ prev_action == next_action - may cause repeated motion`);
+        }
+        
+        // Inject progression directive into the compiled prompt
+        finalPrompt = applyProgressionInjection(
+          basePrompt,
+          prevRawPrompt,
+          nextSceneIndex,
+          changeType,
+          selectedProvider as "sora" | "runway" | "luma",
+          sceneRole
+        );
       }
       
       const response = await fetch(`${supabaseUrl}/functions/v1/${providerEndpoint}`, {
