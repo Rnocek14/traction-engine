@@ -21,6 +21,7 @@ import {
   type VideoProvider,
 } from "../_shared/scene-role-router.ts";
 import { type MotifScene } from "../_shared/motif-injection.ts";
+import { applyProgressionInjection } from "../_shared/progression-injection.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -95,12 +96,6 @@ async function resizeStartingFrame(
     return null;
   }
 }
-import { type MotifScene } from "../_shared/motif-injection.ts";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
 
 /**
  * Snap duration to valid values per provider
@@ -274,8 +269,12 @@ Deno.serve(async (req) => {
 
       // Need to queue next scene
       const nextScene = scenes[nextSceneIndex];
-      const prompt = nextScene.enriched_prompt || nextScene.prompt;
+      const basePrompt = nextScene.enriched_prompt || nextScene.prompt;
       const isFirstScene = nextSceneIndex === 0;
+      
+      // Get previous scene prompt for progression injection
+      const prevScene = nextSceneIndex > 0 ? scenes[nextSceneIndex - 1] : null;
+      const prevPrompt = prevScene ? (prevScene.enriched_prompt || prevScene.prompt) : null;
 
       // For I2V scenes, we need a reference image
       if (!isFirstScene && !latestThumbnail) {
@@ -397,6 +396,21 @@ Deno.serve(async (req) => {
         }
       }
       
+      // Apply progression injection for I2V scenes (prevents repeated actions)
+      const changeType = nextScene.change_type || "action";
+      const finalPrompt = applyProgressionInjection(
+        basePrompt,
+        prevPrompt,
+        nextSceneIndex,
+        changeType,
+        selectedProvider as "sora" | "runway" | "luma",
+        sceneRole
+      );
+      
+      if (nextSceneIndex > 0) {
+        console.log(`[chain-continue] Progression injection applied: change_type=${changeType}`);
+      }
+      
       const response = await fetch(`${supabaseUrl}/functions/v1/${providerEndpoint}`, {
         method: "POST",
         headers: {
@@ -405,7 +419,7 @@ Deno.serve(async (req) => {
         },
         body: JSON.stringify({
           script_run_id: scriptRunId,
-          prompt: prompt,
+          prompt: finalPrompt,
           settings: {
             size: "720x1280",
             seconds: processedDuration,
