@@ -31,6 +31,48 @@ interface ChainedStoryRequest {
   };
 }
 
+/**
+ * Extract routing tags from scene metadata for smart provider selection
+ */
+function extractRoutingTags(scene: { prompt: string; camera_direction?: string }): string[] {
+  const tags: string[] = [];
+  
+  const prompt = scene.prompt.toLowerCase();
+  
+  // Action/motion detection
+  if (/action|fight|battle|explosion|chase|run|jump/.test(prompt)) {
+    tags.push("action");
+  }
+  if (/slow|peaceful|calm|serene|quiet/.test(prompt)) {
+    tags.push("slow_motion");
+  }
+  
+  // Shot type from camera direction
+  if (scene.camera_direction) {
+    const cam = scene.camera_direction.toLowerCase();
+    if (/close/.test(cam)) tags.push("close_up");
+    if (/wide/.test(cam)) tags.push("wide_shot");
+    if (/tracking|follow/.test(cam)) tags.push("tracking");
+    if (/aerial|drone/.test(cam)) tags.push("aerial");
+  }
+  
+  // Genre/style detection
+  if (/fantasy|dragon|magic|wizard|medieval/.test(prompt)) {
+    tags.push("fantasy");
+  }
+  if (/horror|dark|scary|creepy/.test(prompt)) {
+    tags.push("horror");
+  }
+  if (/nature|landscape|forest|ocean|mountain/.test(prompt)) {
+    tags.push("nature");
+  }
+  if (/person|character|man|woman|figure/.test(prompt)) {
+    tags.push("character");
+  }
+  
+  return tags.slice(0, 5); // Limit to top 5 tags
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -87,8 +129,11 @@ Deno.serve(async (req) => {
       })
       .eq("id", story_job_id);
 
-    // Queue ONLY scene 1 (Text-to-Video)
-    const response = await fetch(`${supabaseUrl}/functions/v1/queue-video-runway`, {
+    // Extract routing hints from scene metadata
+    const sceneRoutingTags = extractRoutingTags(firstScene);
+    
+    // Queue ONLY scene 1 via smart router (will pick best provider)
+    const response = await fetch(`${supabaseUrl}/functions/v1/queue-video-smart`, {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${supabaseServiceKey}`,
@@ -99,10 +144,14 @@ Deno.serve(async (req) => {
         prompt: prompt,
         settings: {
           size: size,
-          requested_seconds: firstScene.duration_target || 5,
-          model: "veo3.1_fast", // T2V model
+          seconds: firstScene.duration_target || 5,
         },
-        // No starting_frame_url for first scene
+        provider: "smart", // Let the router decide
+        routing_hint: {
+          shot_type: firstScene.camera_direction,
+          is_chained: false, // First scene is T2V, not chained
+          routing_tags: sceneRoutingTags,
+        },
       }),
     });
 
