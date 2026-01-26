@@ -61,11 +61,12 @@ export interface SceneRoleConfig {
 /**
  * Scene role configurations with default providers and fallbacks
  * 
- * Routing logic:
- * - hook/reset → Runway (fast, punchy, kinetic)
- * - story_a/story_b/establish → Sora (coherence, cinematic)
- * - problem/atmosphere → Luma (physics, mood)
- * - cta → Luma (but consider template-first in future)
+ * Phase 5: Sora-first for story-advancing content
+ * 
+ * Routing philosophy:
+ * - hook/reset → Runway (fast, punchy, kinetic - attention mechanics)
+ * - story_a/story_b/establish/problem/cta → Sora (narrative, coherence)
+ * - atmosphere → Luma (physics, texture, mood glue only)
  */
 export const SCENE_ROLE_CONFIGS: Record<SceneRole, SceneRoleConfig> = {
   hook: {
@@ -79,12 +80,13 @@ export const SCENE_ROLE_CONFIGS: Record<SceneRole, SceneRoleConfig> = {
   },
   problem: {
     role: "problem",
-    defaultProvider: "luma",
-    fallbackProviders: ["runway", "sora"],
+    // Phase 5: Changed from luma → sora (narrative clarity > atmosphere)
+    defaultProvider: "sora",
+    fallbackProviders: ["luma", "runway"],
     durationRange: [4, 6],
-    promptStyle: "physics_first",
-    description: "Show the pain point with atmospheric mood",
-    color: "bg-blue-500",
+    promptStyle: "director_brief",
+    description: "Show the pain point with narrative clarity",
+    color: "bg-purple-500",
   },
   story_a: {
     role: "story_a",
@@ -115,15 +117,17 @@ export const SCENE_ROLE_CONFIGS: Record<SceneRole, SceneRoleConfig> = {
   },
   cta: {
     role: "cta",
-    defaultProvider: "luma",
-    fallbackProviders: ["runway", "sora"],
+    // Phase 5: Changed from luma → sora (story resolution > atmosphere)
+    defaultProvider: "sora",
+    fallbackProviders: ["luma", "runway"],
     durationRange: [4, 6],
-    promptStyle: "physics_first",
+    promptStyle: "director_brief",
     description: "Call to action, proof, result",
-    color: "bg-blue-500",
+    color: "bg-purple-500",
   },
   atmosphere: {
     role: "atmosphere",
+    // Keep Luma for pure texture/physics shots
     defaultProvider: "luma",
     fallbackProviders: ["runway", "sora"],
     durationRange: [3, 5],
