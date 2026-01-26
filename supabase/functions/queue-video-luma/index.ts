@@ -72,10 +72,12 @@ function mapSizeToLumaAspect(size: string): string {
 
 /**
  * Get Luma model from settings
+ * Valid models: ray-2, ray-flash-2, ray-3, ray-hdr-3, ray-3-14, ray-hdr-3-14, ray-1-6
  */
 function getLumaModel(model?: string): string {
-  if (model === "ray2-flash") return "ray2";
-  return "ray2";
+  if (model === "ray2-flash" || model === "ray-flash-2") return "ray-flash-2";
+  if (model === "ray-3" || model === "ray3") return "ray-3";
+  return "ray-2"; // Default to ray-2 (was incorrectly "ray2")
 }
 
 Deno.serve(async (req) => {
