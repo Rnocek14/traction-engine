@@ -1,148 +1,141 @@
 
-# Fix "Generate 6 Clips (AI Enhanced)" - Complete Root Cause Analysis
+# Fix Video Lab Generate Page - Complete Layout Chain Repair
 
-## Issue Summary
-The generation fails with "Invalid size" error because the frontend sends `size: "16:9"` (aspect ratio string), but the backend expects pixel dimensions like `"720x1280"`.
+## Problem Analysis
 
-## Error Chain Traced
+The video preview appears "scrunched to the top" because the height chain is broken at multiple points in the component hierarchy.
+
+## Layout Chain Traced (with issues marked)
 
 ```text
-Frontend (StoryBuilderPanel.tsx line 422)
-   │
-   │  sends: { size: "16:9" }   ← WRONG: aspect ratio, not pixel dimensions
-   ▼
-generate-story-chained (line 96)
-   │
-   │  uses settings.size directly: const size = settings?.size || "720x1280"
-   │  receives: "16:9"
-   ▼
-queue-video-smart (line 208)
-   │
-   │  passes size unchanged to queue-video
-   ▼
-queue-video (line 87-88)
-   │
-   │  Validates: if (!allowedSizes.includes(size)) throw Error
-   │  allowedSizes = ["720x1280", "1280x720", "1024x1792", "1792x1024"]
-   │
-   ▼
-ERROR: "Invalid size. Allowed: 720x1280, 1280x720, 1024x1792, 1792x1024"
+Lab.tsx
+├── div (h-screen flex flex-col)                    ✓ OK
+├── header (shrink-0 ~40px)                         ✓ OK  
+└── Tabs (flex-1 min-h-0)                           ✓ OK
+    └── TabsContent[generate] (flex-1 min-h-0)      ✓ OK
+        └── ResizablePanelGroup (h-full)            ✓ OK
+            └── ResizablePanel[70%]                 ⚠️ NO h-full CLASS
+                └── LabPreviewPanel                 ← Height not passed down!
+                    ├── Preview (flex-1)            ← Can't grow, parent has no height
+                    └── UnifiedFilmstrip (shrink-0)
+                        └── Inner div (h-[200px])   ← Fixed but content overflows
+                            └── ScrollArea (h-[200px]) ← Exceeds parent!
 ```
 
-## All Issues Found
+## Root Causes
 
-### Issue 1: Frontend sends wrong size format (CRITICAL)
-**File**: `src/components/lab/StoryBuilderPanel.tsx`
-**Line**: 421-422
-**Problem**: `size: "16:9"` - sends aspect ratio instead of pixel dimensions
-**Fix**: Change to `size: "1280x720"` (16:9 in pixels) or `size: "720x1280"` (9:16)
+### Issue 1: Lab.tsx - ResizablePanel missing height
+**File**: `src/pages/Lab.tsx` line 306-318
+**Problem**: The `ResizablePanel` containing `LabPreviewPanel` has no explicit height class
+**Fix**: Add `className="h-full"` to the `ResizablePanel`
 
-### Issue 2: Edge function doesn't convert aspect ratios (CRITICAL)
-**File**: `supabase/functions/generate-story-chained/index.ts`
-**Line**: 96
-**Problem**: Passes `settings.size` directly without validation/conversion
-**Fix**: Add aspect ratio to pixel dimension mapping:
+### Issue 2: UnifiedFilmstrip - Grid ScrollArea too tall
+**File**: `src/components/lab/UnifiedFilmstrip.tsx` line 385
+**Problem**: `ScrollArea` has `h-[200px]` inside a container that's also `h-[200px]`, but the container includes the header (~28px), causing overflow
+**Fix**: Change grid mode ScrollArea to use remaining space calculation
+
+### Issue 3: UnifiedFilmstrip - Header not accounted for in content height
+**File**: `src/components/lab/UnifiedFilmstrip.tsx` line 379
+**Problem**: Content div wraps everything but doesn't properly size for remaining space
+**Fix**: Make content area use flex-1 and proper overflow handling
+
+## Solution
+
+### Fix 1: Lab.tsx - Add height to ResizablePanel
+
+Line 306, change:
 ```typescript
-function normalizeSize(input?: string): string {
-  const sizeMap: Record<string, string> = {
-    "16:9": "1280x720",
-    "9:16": "720x1280",
-    "4:3": "1024x768",   // Not supported, but prevent crash
-    "3:4": "768x1024",   // Not supported
-  };
-  return sizeMap[input || ""] || input || "720x1280";
-}
+<ResizablePanel defaultSize={70} minSize={45}>
 ```
-
-### Issue 3: Duration not snapped in generate-story-chained (CRITICAL)
-**File**: `supabase/functions/generate-story-chained/index.ts`
-**Line**: 147
-**Problem**: Still sends raw `duration_target` (e.g., 5) without snapping to valid Sora values (4/8/12)
-**Evidence**: Log shows `seconds=4` after smart router, but initial call sends 5
-**Fix**: Snap duration before calling queue-video-smart
-
-### Issue 4: Duration 5/6s causing OpenAI API rejections (SECONDARY)
-**Evidence from logs**:
-```
-OpenAI API error: 400 "Invalid value: '6'. Supported values are: '4', '8', and '12'."
-OpenAI API error: 400 "Invalid value: '5'. Supported values are: '4', '8', and '12'."
-```
-This confirms duration snapping isn't happening at some point in the chain.
-
-## Complete Fix Plan
-
-### 1. Fix Frontend - StoryBuilderPanel.tsx
-Change line 421-422:
+To:
 ```typescript
-// FROM:
-settings: {
-  size: "16:9",
-  provider: "smart",
-}
-
-// TO:
-settings: {
-  size: "1280x720",  // 16:9 in pixels (landscape)
-  provider: "smart",
-}
+<ResizablePanel defaultSize={70} minSize={45} className="h-full">
 ```
 
-### 2. Fix generate-story-chained/index.ts
-Add size normalization and duration snapping:
+### Fix 2: UnifiedFilmstrip - Fix container structure
 
+The filmstrip container needs proper flex layout to handle the header + content split correctly.
+
+Lines 313-318, change:
 ```typescript
-// Add size normalization function (after line 73)
-function normalizeSize(input?: string): string {
-  const sizeMap: Record<string, string> = {
-    "16:9": "1280x720",
-    "9:16": "720x1280", 
-    "1:1": "1024x1024",
-  };
-  // If already a valid pixel dimension, use it; otherwise map or default
-  const validSizes = ["720x1280", "1280x720", "1024x1792", "1792x1024"];
-  if (validSizes.includes(input || "")) return input!;
-  return sizeMap[input || ""] || "720x1280";
-}
-
-// Add duration snapping function
-function snapToValidDuration(seconds: number): number {
-  if (seconds <= 6) return 4;
-  if (seconds <= 10) return 8;
-  return 12;
-}
-
-// Update line 96 (size handling)
-const size = normalizeSize(settings?.size);
-
-// Update line 147 (duration handling)
-seconds: snapToValidDuration(firstScene.duration_target || 5),
+<Collapsible open={isExpanded} onOpenChange={setIsExpanded} className="shrink-0">
+  <div className={cn(
+    "border-t border-primary/30 bg-card/50 transition-all overflow-hidden",
+    isExpanded ? "h-[200px]" : "h-[100px]",
+    className
+  )}>
+```
+To:
+```typescript
+<Collapsible open={isExpanded} onOpenChange={setIsExpanded} className="shrink-0">
+  <div className={cn(
+    "border-t border-primary/30 bg-card/50 transition-all overflow-hidden flex flex-col",
+    isExpanded ? "h-[200px]" : "h-[100px]",
+    className
+  )}>
 ```
 
-### 3. Verify queue-video-smart already has snapping (it does)
-The queue-video-smart already has `snapDurationForProvider` from the previous fix - confirmed in the diff.
+### Fix 3: UnifiedFilmstrip - Fix content area sizing
+
+Line 379, change:
+```typescript
+<div className="p-1.5 overflow-hidden">
+```
+To:
+```typescript
+<div className="p-1.5 overflow-hidden flex-1 min-h-0">
+```
+
+### Fix 4: UnifiedFilmstrip - Fix grid ScrollArea height
+
+Line 385, change:
+```typescript
+<ScrollArea className={cn("w-full", isExpanded ? "h-[200px]" : "h-[70px]")}>
+```
+To:
+```typescript
+<ScrollArea className="w-full h-full">
+```
 
 ## Files to Modify
 
-| File | Change |
-|------|--------|
-| `src/components/lab/StoryBuilderPanel.tsx` | Line 422: Change `"16:9"` to `"1280x720"` |
-| `supabase/functions/generate-story-chained/index.ts` | Add `normalizeSize()` and `snapToValidDuration()` functions, apply to settings |
+| File | Lines | Change |
+|------|-------|--------|
+| `src/pages/Lab.tsx` | 306 | Add `className="h-full"` to ResizablePanel |
+| `src/components/lab/UnifiedFilmstrip.tsx` | 314 | Add `flex flex-col` to inner div |
+| `src/components/lab/UnifiedFilmstrip.tsx` | 379 | Add `flex-1 min-h-0` to content div |
+| `src/components/lab/UnifiedFilmstrip.tsx` | 385 | Change ScrollArea to `h-full` |
 
-## Deployment Required
-After editing, deploy:
-- `generate-story-chained`
+## Visual Result After Fix
 
-## Expected Result After Fix
-- Frontend sends valid pixel dimensions (`1280x720`)
-- generate-story-chained validates/normalizes size
-- Duration is snapped to 4/8/12 before any API calls
-- Queue-video receives valid parameters
-- OpenAI accepts the request
+```text
+┌─────────────────────────────────────────────────────────┐
+│ Header [Lab | R&D Sandbox]                     ~40px    │
+├─────────────────────────────────────────────────────────┤
+│ Tabs [Generate | Story | Compare | Learning]   ~32px    │
+├─────────────────────────────────────────────────────────┤
+│         │                                               │
+│ Generate│            VIDEO PREVIEW                      │
+│  Panel  │         (fills ~60% of height)                │
+│  (30%)  │                                               │
+│         │                                               │
+│         ├───────────────────────────────────────────────┤
+│         │ Prompt + Action Bar                    ~40px  │
+│         ├───────────────────────────────────────────────┤
+│         │ ▼ Filmstrip [Videos: 5]               100px   │
+│         │ [🎬][🎬][🎬][🎬][🎬] →                        │
+└─────────┴───────────────────────────────────────────────┘
+```
 
-## Test Verification
-1. Click "Generate 6 Clips (AI Enhanced)"
-2. Check logs show:
-   - `size: "1280x720"` or `"720x1280"`
-   - `seconds: 4` or `8` or `12`
-3. No "Invalid size" or "Invalid value" errors
-4. Video generation starts successfully
+## Technical Explanation
+
+**Why the current layout fails:**
+1. `ResizablePanel` is a flex child but doesn't have explicit height
+2. When `LabPreviewPanel` uses `h-full`, it references an uncomputed height
+3. The video `flex-1` can't expand because its ancestor chain lacks proper height flow
+
+**Why this fix works:**
+1. Adding `h-full` to `ResizablePanel` ensures it fills its grid cell
+2. Making the filmstrip's inner div `flex flex-col` allows proper header/content split
+3. Using `flex-1 min-h-0` on content allows it to shrink and scroll properly
+4. Using `h-full` on ScrollArea makes it fill the remaining space dynamically
