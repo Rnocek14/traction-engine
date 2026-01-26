@@ -273,7 +273,8 @@ Generate a complete, filmable storyboard with vivid, specific visual prompts for
     const storyboardId = crypto.randomUUID?.() ?? `sb_${Date.now()}`;
 
     // Zone duration configs for suggestions
-    const ZONE_DURATIONS: Record<CutZone, { min: number; max: number; reason: string }> = {
+    type ZoneDuration = { min: number; max: number; reason: string };
+    const ZONE_DURATIONS: Record<CutZone, ZoneDuration> = {
       hook: { min: 0.4, max: 0.9, reason: "Pattern interrupt - keep it punchy" },
       setup: { min: 1.2, max: 2.0, reason: "Establish context" },
       escalation: { min: 1.0, max: 1.8, reason: "Build tension" },
@@ -296,8 +297,16 @@ Generate a complete, filmable storyboard with vivid, specific visual prompts for
       // Duration suggestion based on zone + position
       const zoneDuration = ZONE_DURATIONS[computedZone];
       const positionRatio = i / Math.max(totalScenes - 1, 1);
-      const durationMid = zoneDuration.min + (zoneDuration.max - zoneDuration.min) * 
-        (computedZone === "hook" ? 0.3 : positionRatio > 0.7 ? 0.7 : 0.5);
+      
+      // Zone-specific duration multiplier (payoff breathes, hook stays punchy)
+      let t = 0.5; // default midpoint
+      if (computedZone === "hook") t = 0.3;
+      else if (computedZone === "button") t = 0.5;
+      else if (computedZone === "setup") t = positionRatio < 0.35 ? 0.35 : 0.5;
+      else if (computedZone === "escalation") t = 0.5; // keep tight
+      else if (computedZone === "payoff") t = positionRatio > 0.7 ? 0.7 : 0.6;
+      
+      const durationMid = zoneDuration.min + (zoneDuration.max - zoneDuration.min) * t;
       
       return {
         id: `scene_${storyboardId}_${i}`,
