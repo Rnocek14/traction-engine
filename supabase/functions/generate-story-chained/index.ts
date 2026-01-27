@@ -119,10 +119,18 @@ Deno.serve(async (req) => {
     const firstScene = scenes[0];
     const prompt = firstScene.enriched_prompt || firstScene.prompt;
     
+    // Check for Character Continuity Mode from request body
+    const characterContinuityMode = (body as { character_continuity_mode?: boolean }).character_continuity_mode || false;
+    const lockedProviderName = (body as { locked_provider?: "sora" | "runway" | "luma" }).locked_provider || null;
+    
     console.log(`[chained] Starting story ${story_job_id}: ${scenes.length} scenes`);
     // Phase 3: Log story_spine for debugging narrative flow
     if (story_spine) {
       console.log(`[chained] Story Spine: "${story_spine}"`);
+    }
+    // Log Character Continuity Mode if enabled
+    if (characterContinuityMode && lockedProviderName) {
+      console.log(`[chained] Character Continuity Mode ENABLED → Locked to ${lockedProviderName}`);
     }
     console.log(`[chained] Queueing scene 1 (T2V), scenes 2-${scenes.length} will be handled by cron`);
 
@@ -162,6 +170,8 @@ Deno.serve(async (req) => {
           template_id: settings?.template_id || null, // For analytics/debugging
           motif_anchors: motifAnchors, // Persist motifs for chain continuation
           story_spine: story_spine || null, // Phase 1: Persist story spine
+          character_continuity_mode: characterContinuityMode, // NEW: Persist for chain
+          locked_provider: lockedProviderName, // NEW: Persist for chain
         },
         continuity_anchors: anchors,
       })
@@ -175,18 +185,31 @@ Deno.serve(async (req) => {
     const templateRoles: SceneRole[] = scenes.map((s: { role?: SceneRole }, i: number) => 
       s.role || inferRoleFromPosition(i, scenes.length)
     );
-    const routingResult = routeBySceneRole(sceneRole, {
-      tier,
-      isChained: false, // First scene is T2V
-      soraUsedCount: 0,
-      templateRoles, // Pass all roles for smart story_a fallback
-    });
     
-    const selectedProvider = routingResult.provider;
+    // Check for Character Continuity Mode - override routing if enabled
+    let selectedProvider: VideoProvider;
+    let routingReason: string;
+    
+    if (characterContinuityMode && lockedProviderName) {
+      // LOCKED: Use the specified provider for ALL scenes
+      selectedProvider = lockedProviderName;
+      routingReason = `Character Continuity Mode → locked to ${lockedProviderName}`;
+    } else {
+      // NORMAL: Use role-based routing
+      const routingResult = routeBySceneRole(sceneRole, {
+        tier,
+        isChained: false, // First scene is T2V
+        soraUsedCount: 0,
+        templateRoles, // Pass all roles for smart story_a fallback
+      });
+      selectedProvider = routingResult.provider;
+      routingReason = routingResult.routingReason;
+    }
+    
     // Process duration: clamp to role range first, then snap to provider
     const processedDuration = processDuration(firstScene.duration_target || 5, sceneRole, selectedProvider);
     
-    console.log(`[chained] Role-based routing: ${sceneRole} → ${selectedProvider} (${routingResult.routingReason})`);
+    console.log(`[chained] Role-based routing: ${sceneRole} → ${selectedProvider} (${routingReason})`);
     
     // Queue to the selected provider directly
     const providerEndpoint = {
