@@ -160,18 +160,34 @@ Deno.serve(async (req) => {
     let videoPrompt: string;
     let scenePrompt: string;
 
-    if (overridePrompt) {
-      scenePrompt = overridePrompt;
-    } else if (clipData?.prompt) {
-      scenePrompt = clipData.prompt;
-    } else {
-      // Build combined prompt from script content (legacy full-script mode)
-      const content = script.script_content as Record<string, unknown>;
-      const hook = (content?.hook as string) || "";
-      const voiceover = (content?.voiceover as string) || "";
-      const scenePrompts = (content?.scene_prompts as string[]) || [];
+    // Helper: detect if prompt was pre-built by continue-story-chain
+    // These prompts already have cinematography, capture contracts, and narrative context
+    const isPreBuiltPrompt = (prompt: string): boolean => {
+      return prompt.includes("[CAPTURE:") || 
+             prompt.includes("[CINEMATOGRAPHY role=") ||
+             prompt.includes("=== DIRECTOR'S BRIEF ===");
+    };
 
-      scenePrompt = `
+    if (overridePrompt && isPreBuiltPrompt(overridePrompt)) {
+      // PASS-THROUGH MODE: Prompt already has cinematography, capture contract, etc.
+      // Do NOT rebuild - this preserves role-based variety and realism anchors
+      videoPrompt = overridePrompt;
+      scenePrompt = overridePrompt; // For logging
+      console.log("[queue-video] Using pre-built prompt (pass-through mode)");
+    } else {
+      // Determine the raw scene prompt first
+      if (overridePrompt) {
+        scenePrompt = overridePrompt;
+      } else if (clipData?.prompt) {
+        scenePrompt = clipData.prompt;
+      } else {
+        // Build combined prompt from script content (legacy full-script mode)
+        const content = script.script_content as Record<string, unknown>;
+        const hook = (content?.hook as string) || "";
+        const voiceover = (content?.voiceover as string) || "";
+        const scenePrompts = (content?.scene_prompts as string[]) || [];
+
+        scenePrompt = `
 Create a cinematic short-form video for social media.
 
 HOOK TEXT (opening): "${hook}"
@@ -182,36 +198,37 @@ VISUAL SCENES:
 ${scenePrompts.map((p, i) => `Scene ${i + 1}: ${p}`).join("\n")}
 
 Style: Professional, engaging, suitable for TikTok/Reels. Smooth transitions between scenes.
-      `.trim();
-    }
+        `.trim();
+      }
 
-    // Use motif-aware prompt builder if context provided, otherwise standard cinematic
-    if (body.motif_context) {
-      const storyContext: StoryPromptContext = {
-        sceneId: body.motif_context.sceneId,
-        sceneIndex: body.motif_context.sceneIndex,
-        role: body.motif_context.role,
-        isHeroShot: body.motif_context.isHeroShot,
-        changeType: body.motif_context.changeType,
-        motifs: body.motif_context.motifs,
-        allScenes: body.motif_context.allScenes,
-      };
-      videoPrompt = buildProviderPromptWithMotif(
-        "sora",
-        styleGuide,
-        scenePrompt,
-        !starting_frame_url,
-        clipData?.camera_direction,
-        storyContext
-      );
-    } else {
-      // Use full cinematic prompt builder for professional quality
-      videoPrompt = buildCinematicPrompt(
-        styleGuide,
-        scenePrompt,
-        !starting_frame_url, // isFirstClip - true if no starting frame
-        clipData?.camera_direction // Per-clip shot direction
-      );
+      // Now build the cinematic prompt
+      if (body.motif_context) {
+        const storyContext: StoryPromptContext = {
+          sceneId: body.motif_context.sceneId,
+          sceneIndex: body.motif_context.sceneIndex,
+          role: body.motif_context.role,
+          isHeroShot: body.motif_context.isHeroShot,
+          changeType: body.motif_context.changeType,
+          motifs: body.motif_context.motifs,
+          allScenes: body.motif_context.allScenes,
+        };
+        videoPrompt = buildProviderPromptWithMotif(
+          "sora",
+          styleGuide,
+          scenePrompt,
+          !starting_frame_url,
+          clipData?.camera_direction,
+          storyContext
+        );
+      } else {
+        // Use full cinematic prompt builder for professional quality
+        videoPrompt = buildCinematicPrompt(
+          styleGuide,
+          scenePrompt,
+          !starting_frame_url, // isFirstClip - true if no starting frame
+          clipData?.camera_direction // Per-clip shot direction
+        );
+      }
     }
 
     // Create the video job in database first

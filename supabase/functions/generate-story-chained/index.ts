@@ -18,6 +18,14 @@ import {
   type VideoProvider,
 } from "../_shared/scene-role-router.ts";
 import { type MotifScene } from "../_shared/motif-injection.ts";
+import { buildCinematographyDirective, getRoleCinematography } from "../_shared/cinematic-prompts.ts";
+import {
+  autoScoreDifficulty,
+  buildCaptureContract,
+  describeCaptureContract,
+  type CoverageType,
+} from "../_shared/capture-contract.ts";
+import { inferCoverageFromPrompt } from "../_shared/narrative-context.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -239,6 +247,21 @@ Deno.serve(async (req) => {
       allScenes: allMotifScenes,
     } : undefined;
     
+    // === CAPTURE CONTRACT + CINEMATOGRAPHY (Film Realism Prior) ===
+    // Build capture contract and cinematography directive for scene 1
+    // This ensures the first scene also gets the film-look treatment
+    const resolvedCoverage: CoverageType = inferCoverageFromPrompt(prompt, sceneRole);
+    const { difficulty, isInterior, hasMetalArmor } = autoScoreDifficulty(prompt, resolvedCoverage);
+    const captureContract = buildCaptureContract(difficulty);
+    const cinematographyDirective = buildCinematographyDirective(0, sceneRole, true);
+    const roleCine = getRoleCinematography(sceneRole);
+    
+    console.log(`[chained] Scene 1 capture: difficulty=${difficulty} (interior=${isInterior}, metal=${hasMetalArmor}) → ${describeCaptureContract(difficulty)}`);
+    console.log(`[chained] Scene 1 cinematography: ${roleCine.lens} lens, ${roleCine.motion} motion, ${roleCine.lighting} lighting`);
+    
+    // Build final prompt with capture contract at top
+    const finalPrompt = captureContract + cinematographyDirective + prompt;
+    
     const response = await fetch(`${supabaseUrl}/functions/v1/${providerEndpoint}`, {
       method: "POST",
       headers: {
@@ -247,7 +270,7 @@ Deno.serve(async (req) => {
       },
       body: JSON.stringify({
         script_run_id: scriptRunId,
-        prompt: prompt,
+        prompt: finalPrompt,
         settings: {
           size: size,
           seconds: processedDuration,
