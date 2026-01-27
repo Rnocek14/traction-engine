@@ -88,6 +88,10 @@ const MOTION_SPECS: Record<string, string> = {
   handheld: "Subtle organic handheld movement, breathing micro-shake, human imperfection, documentary authenticity",
   static: "Completely locked-off camera, zero movement, tableau framing, action happens within frame",
   tracking: "Following camera movement, subject-locked tracking, lateral or forward movement, dynamic energy",
+  whip_pan: "Fast horizontal whip pan with motion blur, then settle/lock on new framing, energetic transition",
+  dolly: "Forward or backward dolly movement, push-in for emphasis, pull-out for reveal, deliberate pacing",
+  crane: "Vertical crane movement, rising reveal or descending approach, epic scope, dimensional shift",
+  dynamic: "Energetic handheld with intentional movement, reactive to action, visceral and immediate",
 };
 
 /**
@@ -314,6 +318,115 @@ export function getOptimalApiParams(loop: boolean = false): SoraApiParams {
 
 // Re-export specs for external use if needed
 export { LENS_SPECS, CAMERA_SPECS, LIGHTING_SPECS, COLOR_SPECS, DOF_SPECS, MOTION_SPECS, FILM_SPECS, TIME_SPECS };
+
+// =============================================================================
+// ROLE-BASED CINEMATOGRAPHY (Anti-"Video Game Look")
+// =============================================================================
+
+import type { SceneRole } from "./scene-role-router.ts";
+
+/**
+ * Role-based cinematography defaults for visual variety
+ * Each role gets distinct lens + motion + lighting to prevent "sameness"
+ */
+export const ROLE_CINEMATOGRAPHY: Record<SceneRole, { lens: string; motion: string; lighting: string }> = {
+  hook: { lens: "24mm", motion: "dynamic", lighting: "dramatic" },
+  problem: { lens: "35mm", motion: "handheld", lighting: "atmospheric" },
+  story_a: { lens: "50mm", motion: "tracking", lighting: "natural" },
+  reset: { lens: "85mm", motion: "whip_pan", lighting: "dramatic" },
+  story_b: { lens: "50mm", motion: "dolly", lighting: "motivated" },
+  cta: { lens: "85mm", motion: "static", lighting: "soft" },
+  atmosphere: { lens: "35mm", motion: "smooth", lighting: "ambient" },
+  establish: { lens: "24mm", motion: "crane", lighting: "environmental" },
+};
+
+/**
+ * Realism anchors to break the "video game" look
+ * These add "imperfection" that makes footage feel real
+ */
+const REALISM_ANCHORS = [
+  "handheld micro-jitter with operator breathing",
+  "motion blur on fast movements, 180-degree shutter",
+  "dust particles catching rim light, atmospheric haze",
+  "practical fire flicker affects exposure, light variation",
+  "lens flare on bright sources, natural aberration",
+  "subtle focus breathing, organic rack focus",
+  "debris interaction with environment, physics-based particles",
+  "natural exposure breathing as bright elements enter frame",
+];
+
+/**
+ * Build realism anchor for action scenes
+ * Rotates through imperfections to add variety
+ */
+export function buildRealismAnchor(sceneIndex: number, role: SceneRole): string {
+  const actionRoles: SceneRole[] = ["hook", "story_a", "story_b", "reset"];
+  
+  if (!actionRoles.includes(role)) {
+    return ""; // Non-action scenes don't need grit
+  }
+  
+  // Deterministic rotation based on scene index
+  const anchorIndex = sceneIndex % REALISM_ANCHORS.length;
+  return `[REALISM: ${REALISM_ANCHORS[anchorIndex]}]`;
+}
+
+/**
+ * Get role-based cinematography settings
+ */
+export function getRoleCinematography(role: SceneRole): { lens: string; motion: string; lighting: string } {
+  return ROLE_CINEMATOGRAPHY[role] || ROLE_CINEMATOGRAPHY.story_a;
+}
+
+/**
+ * Build complete cinematography directive for a scene
+ * Combines role-based defaults with realism anchors
+ */
+export function buildCinematographyDirective(
+  sceneIndex: number, 
+  role: SceneRole,
+  includeRealism: boolean = true
+): string {
+  const cine = getRoleCinematography(role);
+  const lensSpec = LENS_SPECS[cine.lens] || LENS_SPECS["50mm"];
+  const motionSpec = MOTION_SPECS[cine.motion] || MOTION_SPECS.smooth;
+  const lightingSpec = LIGHTING_SPECS[cine.lighting] || LIGHTING_SPECS.natural;
+  
+  let directive = `[CINEMATOGRAPHY role=${role}]\nLENS: ${lensSpec}\nMOTION: ${motionSpec}\nLIGHTING: ${lightingSpec}\n`;
+  
+  if (includeRealism) {
+    const realism = buildRealismAnchor(sceneIndex, role);
+    if (realism) {
+      directive += `${realism}\n`;
+    }
+  }
+  
+  return directive;
+}
+
+/**
+ * Global identity anchors for maintaining "same movie" feel
+ * These should be included in all hero scenes (not spectacle)
+ */
+export interface IdentityAnchors {
+  wardrobe?: string;
+  distinctiveProp?: string;
+  palette?: string;
+  environmentTag?: string;
+}
+
+export function buildIdentityAnchors(anchors: IdentityAnchors): string {
+  const parts: string[] = [];
+  
+  if (anchors.wardrobe) parts.push(`WARDROBE: ${anchors.wardrobe}`);
+  if (anchors.distinctiveProp) parts.push(`PROP: ${anchors.distinctiveProp}`);
+  if (anchors.palette) parts.push(`PALETTE: ${anchors.palette}`);
+  if (anchors.environmentTag) parts.push(`ENVIRONMENT: ${anchors.environmentTag}`);
+  
+  if (parts.length === 0) return "";
+  
+  return `[IDENTITY_ANCHORS]\n${parts.join("\n")}\n`;
+}
 
 /**
  * =============================================================================

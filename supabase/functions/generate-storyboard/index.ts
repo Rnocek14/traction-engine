@@ -639,6 +639,78 @@ Generate a complete, filmable storyboard with vivid, specific visual prompts for
         return scene;
       });
     }
+    
+    // === SHOT SIGNATURE VARIETY CONTRACT ===
+    // Prevent "scenes 4/5/6 identical" by ensuring adjacent scenes differ
+    interface ShotSignature {
+      framing: string;
+      angle: string;
+      motion: string;
+      primaryAction: string;
+    }
+    
+    const extractShotSignature = (scene: GeneratedScene): ShotSignature => {
+      const prompt = scene.prompt.toLowerCase();
+      const camDir = (scene.camera_direction || "").toLowerCase();
+      
+      // Extract framing from camera_direction or infer from coverage
+      let framing = "medium";
+      if (camDir.includes("wide") || camDir.includes("establish") || scene.coverage_type === "wide") framing = "wide";
+      else if (camDir.includes("close") || scene.coverage_type === "face") framing = "close";
+      else if (prompt.includes("full body") || scene.coverage_type === "body") framing = "full";
+      
+      // Extract angle
+      let angle = "eye";
+      if (camDir.includes("low") || prompt.includes("looking up")) angle = "low";
+      else if (camDir.includes("high") || camDir.includes("overhead") || prompt.includes("looking down")) angle = "high";
+      else if (camDir.includes("dutch") || camDir.includes("tilt")) angle = "dutch";
+      
+      // Extract motion
+      let motion = "static";
+      if (camDir.includes("track") || camDir.includes("follow")) motion = "tracking";
+      else if (camDir.includes("pan") || camDir.includes("whip")) motion = "pan";
+      else if (camDir.includes("dolly") || camDir.includes("push")) motion = "dolly";
+      else if (camDir.includes("crane") || camDir.includes("jib")) motion = "crane";
+      else if (camDir.includes("handheld")) motion = "handheld";
+      
+      // Extract primary action (first verb)
+      const actionVerb = scene.beat_action?.split(",")[0]?.trim() || 
+        REQUIRED_ACTION_VERBS.find(v => prompt.includes(v)) || "unknown";
+      
+      return { framing, angle, motion, primaryAction: actionVerb };
+    };
+    
+    const signatures = storyboard.scenes.map(extractShotSignature);
+    const varietyIssues: string[] = [];
+    
+    for (let i = 1; i < signatures.length; i++) {
+      const prev = signatures[i - 1];
+      const curr = signatures[i];
+      
+      // Check for signature collision (framing + angle)
+      if (prev.framing === curr.framing && prev.angle === curr.angle) {
+        varietyIssues.push(`Scenes ${i}→${i + 1}: same framing+angle (${curr.framing}/${curr.angle})`);
+      }
+      
+      // Check for same motion
+      if (prev.motion === curr.motion && prev.motion !== "static") {
+        varietyIssues.push(`Scenes ${i}→${i + 1}: same motion (${curr.motion})`);
+      }
+      
+      // Check for same primary action
+      if (prev.primaryAction === curr.primaryAction && prev.primaryAction !== "unknown") {
+        varietyIssues.push(`Scenes ${i}→${i + 1}: same action verb (${curr.primaryAction})`);
+      }
+    }
+    
+    if (varietyIssues.length > 0) {
+      console.warn(`[generate-storyboard] ⚠️ Shot Signature Variety Contract violations:`);
+      varietyIssues.forEach(issue => console.warn(`  - ${issue}`));
+      // Note: We log but don't fail - the system will still produce varied output
+      // via the Face-Only I2V rule + T2V motion freedom
+    } else {
+      console.log(`[generate-storyboard] ✓ Shot Signature Variety: all adjacent scenes differ`);
+    }
 
     // Ensure negative_list always has base items
     const baseNegatives = ["flicker", "jitter", "identity drift", "morph"];

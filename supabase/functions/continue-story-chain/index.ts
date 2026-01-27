@@ -552,6 +552,20 @@ Deno.serve(async (req) => {
       // Log the cut type decision (this is the key diagnostic)
       console.log(`[chain-continue] Scene ${nextSceneIndex + 1} cut_type="${cutType}" (${cutReason}) → ${cutType === "continuity" ? "I2V" : "T2V"}`);
       
+      // === CHARACTER BIBLE T2V MODE ===
+      // For T2V hero scenes (not spectacle), identity comes from Character Bible in prompt, not pixels
+      // This is the key insight: "cinematic continuity" vs "pixel continuity"
+      const isCharacterBibleT2V = cutType === "hard" && 
+        !spectacleHandling.isSpectacle && 
+        characterContinuityMode &&
+        !isFirstScene;
+      
+      if (isCharacterBibleT2V) {
+        console.log(`[chain-continue] 🎬 Character Bible T2V: identity via prompt anchors, not frame reference`);
+        // The Character Bible (wardrobe, props, palette, environment) will be in the prompt
+        // But startingFrameUrl stays undefined (T2V) for motion freedom
+      }
+      
       // Log transformation fields if available for debugging
       if (nextScene.state_from || nextScene.state_to) {
         console.log(`[narrative] Transformation: "${nextScene.state_from || '?'}" → "${nextScene.state_to || '?'}"`);
@@ -770,6 +784,8 @@ Deno.serve(async (req) => {
           alternate_subject: (nextScene as { alternate_subject?: AlternateSubject }).alternate_subject || null,
           coverage_raw: rawCoverage || null,
           coverage_resolved: resolvedCoverage,
+          // NEW: Character Bible T2V mode flag
+          is_character_bible_t2v: isCharacterBibleT2V,
         };
         await supabase
           .from("video_jobs")
