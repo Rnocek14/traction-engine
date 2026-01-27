@@ -96,8 +96,11 @@ import {
   PROVIDER_DISPLAY,
   COVERAGE_DISPLAY,
   DEFAULT_COVERAGE_BY_ROLE,
+  ALTERNATE_SUBJECT_DISPLAY,
   inferRoleFromPosition,
+  isSpectacleScene,
   type CoverageType,
+  type AlternateSubject,
 } from "@/types/scene-roles";
 
 // Scene role options for selector
@@ -1765,6 +1768,32 @@ function SortableScene({
             allRoles={allRoles.filter((r): r is SceneRole => r !== undefined)}
             soraUsedBeforeThis={soraUsedBeforeThis}
           />
+          {/* Spectacle vs Hero Badge */}
+          {isSpectacleScene(scene as unknown as { subject_required?: boolean; alternate_subject?: AlternateSubject }) ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge variant="outline" className="text-[9px] h-5 px-1.5 bg-accent text-accent-foreground border-border">
+                  {(scene as unknown as { alternate_subject?: AlternateSubject }).alternate_subject 
+                    ? ALTERNATE_SUBJECT_DISPLAY[(scene as unknown as { alternate_subject: AlternateSubject }).alternate_subject]?.emoji || "🎬"
+                    : "🌟"} Spectacle
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="text-xs">
+                No protagonist needed - pure spectacle/cross-cut
+              </TooltipContent>
+            </Tooltip>
+          ) : (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge variant="outline" className="text-[9px] h-5 px-1.5 bg-primary/10 text-primary border-primary/30">
+                  👤 Hero
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="text-xs">
+                Protagonist appears in this scene
+              </TooltipContent>
+            </Tooltip>
+          )}
           {/* Generation Status Badge */}
           {getStatusBadge()}
           <Textarea

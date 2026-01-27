@@ -30,9 +30,13 @@ import {
   inferCoverageFromPrompt,
   getCutTypeFromCoverage,
   buildCoverageDirective,
+  buildSpectacleDirective,
+  isSpectacleScene,
+  getSpectacleHandling,
   type NarrativeScene,
   type NarrativeStoryContext,
   type CoverageType,
+  type AlternateSubject,
 } from "../_shared/narrative-context.ts";
 
 const corsHeaders = {
@@ -240,6 +244,9 @@ Deno.serve(async (req) => {
           end_state?: string;
           // Phase 6: Coverage type for action vs identity
           coverage_type?: CoverageType;
+          // Phase 7: Spectacle scene system (subject freedom)
+          subject_required?: boolean;
+          alternate_subject?: AlternateSubject;
         }>;
         tier?: "volume" | "hero";
         motif_anchors?: string[];
@@ -470,14 +477,28 @@ Deno.serve(async (req) => {
       } : undefined;
       
       // === CUT TYPE RESOLUTION ===
-      // NEW PRIORITY ORDER (coverage is FINAL authority):
+      // NEW PRIORITY ORDER (spectacle → coverage → I2V):
       // 1. First scene always T2V
-      // 2. Resolve coverage_type (explicit → inferred from prompt → default by role)
-      // 3. Coverage determines cut type (face→I2V, back/wide/pov/obscured/none→T2V)
-      // 4. Provider switch forces T2V (only matters if coverage allowed I2V)
+      // 2. Spectacle scenes (subject_required=false) always T2V + strip identity
+      // 3. Resolve coverage_type (explicit → inferred from prompt → default by role)
+      // 4. Coverage determines cut type (face→I2V, back/wide/pov/obscured/none→T2V)
+      // 5. Provider switch forces T2V (only matters if coverage allowed I2V)
       
       const prevClip = clipsByIndex.get(nextSceneIndex - 1);
       const prevProvider = prevClip?.provider as VideoProvider | null;
+      
+      // === SPECTACLE SCENE CHECK (highest priority) ===
+      const spectacleHandling = getSpectacleHandling({
+        subject_required: (nextScene as { subject_required?: boolean }).subject_required,
+        alternate_subject: (nextScene as { alternate_subject?: AlternateSubject }).alternate_subject,
+        coverage_type: (nextScene as { coverage_type?: CoverageType }).coverage_type,
+      });
+      
+      if (spectacleHandling.isSpectacle) {
+        console.log(`[chain-continue] Scene ${nextSceneIndex + 1} is SPECTACLE (${
+          (nextScene as { alternate_subject?: AlternateSubject }).alternate_subject || "no protagonist"
+        }) → forcing T2V, stripping identity`);
+      }
       
       // === COVERAGE RESOLUTION (3-tier fallback) ===
       // Tier 1: Use explicit coverage_type from storyboard
@@ -493,13 +514,17 @@ Deno.serve(async (req) => {
         (nextScene as { coverage_type?: CoverageType }).coverage_type ? "explicit" : "inferred"
       })`);
       
-      // === CUT TYPE FROM COVERAGE (final authority) ===
+      // === CUT TYPE FROM SPECTACLE/COVERAGE (final authority) ===
       let cutType: "hard" | "continuity" = "hard";
       let cutReason = "default hard";
       
       if (isFirstScene) {
         cutType = "hard";
         cutReason = "first scene always T2V";
+      } else if (spectacleHandling.forceT2V) {
+        // SPECTACLE SCENES: Always T2V (highest priority after first scene)
+        cutType = "hard";
+        cutReason = `spectacle scene (${(nextScene as { alternate_subject?: AlternateSubject }).alternate_subject || "no subject"}) → forced T2V`;
       } else {
         // Coverage is the FINAL AUTHORITY on I2V vs T2V
         const coverageResult = getCutTypeFromCoverage(
@@ -594,6 +619,9 @@ Deno.serve(async (req) => {
         state_to: s.state_to,
         end_state: s.end_state,
         coverage_type: (s as { coverage_type?: CoverageType }).coverage_type,
+        // Spectacle scene fields
+        subject_required: (s as { subject_required?: boolean }).subject_required,
+        alternate_subject: (s as { alternate_subject?: AlternateSubject }).alternate_subject,
       }));
       
       const storyContext: NarrativeStoryContext = {
@@ -659,10 +687,24 @@ Deno.serve(async (req) => {
         
         console.log(`[narrative] ✓ I2V order: motion→narrative→visual for ${selectedProvider}`);
       } else {
-        // T2V ORDER: Coverage directive at TOP (if non-face), then narrative
-        const coverageDirective = buildCoverageDirective(resolvedCoverage);
-        finalPrompt = coverageDirective + narrativeBlock + finalPrompt;
-        console.log(`[narrative] ✓ T2V order: coverage=${resolvedCoverage}→narrative→visual`);
+        // T2V ORDER: 
+        // SPECTACLE: spectacle directive at TOP (if subject_required=false)
+        // COVERAGE: coverage directive (if non-face)
+        // Then narrative context
+        
+        if (spectacleHandling.isSpectacle) {
+          // Spectacle scene: add spectacle directive at very top
+          const spectacleDirective = spectacleHandling.directive;
+          finalPrompt = spectacleDirective + narrativeBlock + finalPrompt;
+          console.log(`[narrative] ✓ T2V spectacle order: spectacle→narrative→visual (${
+            (nextScene as { alternate_subject?: AlternateSubject }).alternate_subject || "no subject"
+          })`);
+        } else {
+          // Regular T2V: coverage directive then narrative
+          const coverageDirective = buildCoverageDirective(resolvedCoverage);
+          finalPrompt = coverageDirective + narrativeBlock + finalPrompt;
+          console.log(`[narrative] ✓ T2V order: coverage=${resolvedCoverage}→narrative→visual`);
+        }
       }
       
       const response = await fetch(`${supabaseUrl}/functions/v1/${providerEndpoint}`, {

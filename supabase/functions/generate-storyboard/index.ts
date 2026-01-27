@@ -37,6 +37,9 @@ type CutType = "hard" | "continuity";
 // Coverage type for action vs identity trade-off
 type CoverageType = "face" | "body" | "back" | "wide" | "pov" | "obscured" | "none";
 
+// Spectacle scene alternate subjects (when protagonist not required)
+type AlternateSubject = "environment" | "creature" | "object" | "abstract" | "threat";
+
 interface GeneratedScene {
   prompt: string;
   duration_target: number;
@@ -61,6 +64,9 @@ interface GeneratedScene {
   beat_result?: string;
   // Phase 6: Coverage type for action vs identity
   coverage_type?: CoverageType;
+  // Phase 7: Spectacle scene system (subject freedom)
+  subject_required?: boolean;
+  alternate_subject?: AlternateSubject;
 }
 
 interface GeneratedStoryboard {
@@ -246,6 +252,8 @@ For each scene, provide:
 13. narration_line (optional): TTS voiceover line for this beat
 14. onscreen_text (optional): Text overlay if needed
 15. coverage_type: Camera coverage for action vs identity trade-off (CRITICAL)
+16. subject_required: Does the protagonist need to appear in this scene? (CRITICAL)
+17. alternate_subject: If subject_required=false, what's the focus? (environment/creature/object/abstract/threat)
 
 ═══════════════════════════════════════════════════════════════════════════════
 📷 COVERAGE TYPE (CRITICAL FOR ACTION SCENES)
@@ -263,27 +271,47 @@ coverage_type options:
 - "obscured": Face hidden by dust/rain/blur/darkness. Use for: storm scenes, dramatic tension
 - "none": Pure spectacle, abstract, environment-only. No character needed. Use for: portals, explosions, cosmic
 
-COVERAGE RULES FOR ACTION:
-- Fast physical action → NEVER use "face" (use body, back, wide, or pov)
-- Running/sprinting → "back" or "wide"
-- Diving/falling/plunging → "pov" or "body"
-- Storm/chaos/environmental danger → "obscured"
-- Portal/abstract/cosmic transitions → "none" (pure spectacle!)
-- Emotional reaction/reveal → "face"
-- Final connection/CTA → "face"
+═══════════════════════════════════════════════════════════════════════════════
+🎭 SPECTACLE SCENE SYSTEM (CRITICAL FOR ACTION VARIETY)
+═══════════════════════════════════════════════════════════════════════════════
 
-IDENTITY ONLY MATTERS IN ~2 SCENES OF A 6-SCENE STORY:
-- Scene 4/5: first clear reveal / reaction (face)
-- Final scene: payoff / CTA (face)
-- Everything else can be wide/back/POV/obscured/none for MAXIMUM ACTION FREEDOM
+NOT EVERY SCENE NEEDS THE PROTAGONIST! This is how action films work.
+Use "spectacle scenes" for cross-cutting, insert shots, and world-building.
 
-Example coverage flow for action story:
-Scene 0 (hook): "wide" - dramatic landscape establishes scale
-Scene 1 (problem): "obscured" - dust storm creates tension, face hidden
-Scene 2 (story_a): "pov" - diving through portal (motion freedom!)
-Scene 3 (reset): "back" - silhouette emerging from chaos
-Scene 4 (story_b): "body" - approaching, building to reveal
-Scene 5 (cta): "face" - emotional connection moment
+For each scene, specify:
+- subject_required: true (protagonist must appear) OR false (pure spectacle)
+- alternate_subject (only if subject_required=false): 
+  "environment" | "creature" | "object" | "abstract" | "threat"
+
+WHEN TO USE SPECTACLE SCENES (subject_required=false):
+- Establishing the world/environment (Scene 0-1)
+- Showing the THREAT/antagonist alone (dragon, alien, storm, war machines)
+- Cause of conflict (portal tearing open, explosion, storm wall approaching)
+- Insert shots (artifact glowing, radar ping, map reveal)
+- Abstract/cosmic transitions
+
+RECOMMENDED PATTERN FOR 6-SCENE STORY (3 hero / 3 spectacle):
+Scene 0 (hook): subject_required=FALSE, alternate_subject="environment" or "threat"
+Scene 1 (problem): subject_required=FALSE, alternate_subject="threat" (show the danger!)
+Scene 2 (story_a): subject_required=TRUE (first protagonist action)
+Scene 3 (reset): subject_required=FALSE, alternate_subject="environment" or "creature"
+Scene 4 (story_b): subject_required=TRUE (protagonist payoff)
+Scene 5 (cta): subject_required=TRUE, coverage_type="face" (emotional landing)
+
+SPECTACLE SCENE RULES:
+- When subject_required=false: coverage_type MUST be "wide", "pov", "obscured", or "none"
+- When subject_required=false: prompt should NOT mention the protagonist
+- When subject_required=false: focus on the alternate_subject (threat, environment, etc.)
+
+EXAMPLE - "Medieval War with Dragons" (why it worked):
+Scene 0: subject_required=false, alternate_subject="environment" → "Aerial shot of smoldering battlefield"
+Scene 1: subject_required=false, alternate_subject="threat" → "Dragon DESCENDS through clouds, wings SPREAD"
+Scene 2: subject_required=true → "Knight SPRINTS across battlefield toward siege tower"
+Scene 3: subject_required=false, alternate_subject="creature" → "Dragon BANKS hard, fire ERUPTS"
+Scene 4: subject_required=true → "Knight DIVES for cover as flames ROAR overhead"
+Scene 5: subject_required=true, coverage_type="face" → "Knight's visor OPENS, revealing determined expression"
+
+↑ This pattern gives you WILD ACTION (3 spectacle) + EMOTIONAL PAYOFF (3 hero).
 
 CRITICAL RULES FOR NARRATIVE GLUE:
 - The prompt's FIRST CLAUSE must contain an action verb (not buried later)
@@ -309,6 +337,7 @@ IMPORTANT PROMPT GUIDELINES:
 - For STORY scenes: Use full cinematic description
 - Reference motif_anchors in scene prompts for visual continuity
 - START THE PROMPT WITH ACTION - don't bury the verb
+- For SPECTACLE SCENES: Focus entirely on the alternate_subject, no protagonist reference
 
 Respond ONLY with valid JSON in this exact format:
 {
@@ -318,21 +347,41 @@ Respond ONLY with valid JSON in this exact format:
   "palette_keywords": ["color 1", "color 2", "texture"],
   "scenes": [
     {
-      "prompt": "ACTION VERB FIRST: The Martian DIVES for cover as dust storm...",
-      "beat_trigger": "dust storm crashes over ridge",
-      "beat_action": "dives, scrambles",
-      "beat_result": "reaches shelter behind rock",
-      "action_summary": "Subject transforms from [state A] to [state B]",
-      "state_from": "initial observable state",
-      "state_to": "final observable state (must differ from state_from)",
-      "end_state": "What is true at the end of this clip",
+      "prompt": "ACTION VERB FIRST: Dragon DESCENDS through storm clouds...",
+      "beat_trigger": "storm intensifies",
+      "beat_action": "descends, spreads wings",
+      "beat_result": "dominates the sky",
+      "action_summary": "Dragon emerges from clouds, wings spread in threat display",
+      "state_from": "hidden in clouds",
+      "state_to": "fully visible, wings spread",
+      "end_state": "Dragon dominates the sky, threat established",
       "duration_target": 5,
-      "camera_direction": "Camera movement and framing notes",
-      "role": "story_a",
-      "change_type": "info",
-      "coverage_type": "pov",
+      "camera_direction": "Low angle looking up, dramatic lighting",
+      "role": "problem",
+      "change_type": "stakes",
+      "coverage_type": "wide",
+      "subject_required": false,
+      "alternate_subject": "creature",
       "narration_line": "Optional TTS line for this beat",
       "onscreen_text": "Optional text overlay"
+    },
+    {
+      "prompt": "ACTION VERB FIRST: Knight SPRINTS across battlefield...",
+      "beat_trigger": "dragon spotted",
+      "beat_action": "sprints, dodges",
+      "beat_result": "reaches cover",
+      "action_summary": "Knight reacts to dragon threat with desperate sprint",
+      "state_from": "exposed on battlefield",
+      "state_to": "diving toward cover",
+      "end_state": "Knight in motion, actively evading",
+      "duration_target": 5,
+      "camera_direction": "Tracking shot following knight",
+      "role": "story_a",
+      "change_type": "goal",
+      "coverage_type": "back",
+      "subject_required": true,
+      "narration_line": "Optional TTS line",
+      "onscreen_text": "Optional overlay"
     }
   ],
   "anchors": {
