@@ -80,6 +80,8 @@ Deno.serve(async (req) => {
       const storyboard = story.storyboard_json as FilmStoryboard & { 
         anchor_library?: AnchorLibrary;
         generation_settings?: Record<string, boolean>;
+        brutality_mode?: boolean;
+        sanitization_level?: string;
       };
       
       if (!storyboard?.scenes) {
@@ -136,7 +138,8 @@ Deno.serve(async (req) => {
       // === FORCE/ESCALATION INJECTION (Phase 8) ===
       // Even Film Mode injects force/escalation for intensity
       // Film Mode uses Sora by default (long form injection)
-      const brutalityMode = storyboard.generation_settings?.brutality_mode || false;
+      // FIXED: Read brutality_mode from top-level storyboard OR generation_settings
+      const brutalityMode = storyboard.brutality_mode ?? storyboard.generation_settings?.brutality_mode ?? false;
       const forceSceneData = {
         force_present: nextScene.force_present,
         force_type: nextScene.force_type as ForceType | undefined,

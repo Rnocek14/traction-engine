@@ -786,23 +786,33 @@ Deno.serve(async (req) => {
         console.log(`[narrative] ✓ I2V order: motion→capture→force/esc→cinematography→narrative→visual for ${selectedProvider}`);
       } else {
         // T2V ORDER: 
-        // CAPTURE at very TOP (establishes live-action prior)
-        // FORCE/ESCALATION next (drives intensity)
-        // SPECTACLE/COVERAGE next (if applicable)
-        // Then cinematography + narrative
+        // RUNWAY: Force/Escalation FIRST (survives truncation) → capture → rest
+        // SORA/LUMA: Capture → Force/Escalation → rest (more tokens available)
+        
+        const isRunway = selectedProvider === "runway";
         
         if (spectacleHandling.isSpectacle) {
-          // Spectacle scene: capture + force + spectacle directive + cinematography
+          // Spectacle scene
           const spectacleDirective = spectacleHandling.directive;
-          finalPrompt = captureContract + forceEscalationBlock + spectacleDirective + cinematographyDirective + narrativeBlock + finalPrompt;
-          console.log(`[narrative] ✓ T2V spectacle order: capture→force/esc→spectacle→cinematography→narrative→visual (${
-            (nextScene as { alternate_subject?: AlternateSubject }).alternate_subject || "no subject"
-          })`);
+          if (isRunway) {
+            // Runway: force/esc FIRST to survive truncation
+            finalPrompt = forceEscalationBlock + captureContract + spectacleDirective + cinematographyDirective + narrativeBlock + finalPrompt;
+            console.log(`[narrative] ✓ Runway T2V spectacle: FORCE→capture→spectacle→cinematography→visual`);
+          } else {
+            finalPrompt = captureContract + forceEscalationBlock + spectacleDirective + cinematographyDirective + narrativeBlock + finalPrompt;
+            console.log(`[narrative] ✓ T2V spectacle: capture→force/esc→spectacle→cinematography→visual`);
+          }
         } else {
-          // Regular T2V: capture + force + coverage + cinematography + narrative
+          // Regular T2V
           const coverageDirective = buildCoverageDirective(resolvedCoverage);
-          finalPrompt = captureContract + forceEscalationBlock + coverageDirective + cinematographyDirective + narrativeBlock + finalPrompt;
-          console.log(`[narrative] ✓ T2V order: capture→force/esc→coverage=${resolvedCoverage}→cinematography→narrative→visual`);
+          if (isRunway) {
+            // Runway: force/esc FIRST to survive truncation
+            finalPrompt = forceEscalationBlock + captureContract + coverageDirective + cinematographyDirective + narrativeBlock + finalPrompt;
+            console.log(`[narrative] ✓ Runway T2V: FORCE→capture→coverage=${resolvedCoverage}→cinematography→visual`);
+          } else {
+            finalPrompt = captureContract + forceEscalationBlock + coverageDirective + cinematographyDirective + narrativeBlock + finalPrompt;
+            console.log(`[narrative] ✓ T2V: capture→force/esc→coverage=${resolvedCoverage}→cinematography→visual`);
+          }
         }
       }
       
