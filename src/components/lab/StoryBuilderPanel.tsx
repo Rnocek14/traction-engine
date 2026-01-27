@@ -412,6 +412,43 @@ export function StoryBuilderPanel({
     };
   }, [effectiveStoryId, refetchClips]);
 
+  // Active job processing trigger - polls process-video functions while jobs are running
+  useEffect(() => {
+    if (!storyClips.length) return;
+    
+    const activeJobs = storyClips.filter(
+      c => c.status === "running" || c.status === "queued"
+    );
+    
+    if (activeJobs.length === 0) return;
+
+    // Determine which providers have active jobs
+    const activeProviders = new Set(activeJobs.map(j => j.provider));
+    
+    const triggerProcessing = async () => {
+      const calls = [];
+      if (activeProviders.has("sora")) {
+        calls.push(supabase.functions.invoke("process-video", { body: {} }));
+      }
+      if (activeProviders.has("runway")) {
+        calls.push(supabase.functions.invoke("process-video-runway", { body: {} }));
+      }
+      if (activeProviders.has("luma")) {
+        calls.push(supabase.functions.invoke("process-video-luma", { body: {} }));
+      }
+      if (calls.length > 0) {
+        await Promise.allSettled(calls);
+        refetchClips();
+      }
+    };
+
+    // Trigger immediately, then every 5 seconds
+    triggerProcessing();
+    const interval = setInterval(triggerProcessing, 5000);
+    
+    return () => clearInterval(interval);
+  }, [storyClips, refetchClips]);
+
   // Auto-complete story when all clips are done
   useEffect(() => {
     if (!existingStory || !storyClips.length) return;
