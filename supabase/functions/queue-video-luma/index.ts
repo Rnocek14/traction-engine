@@ -146,13 +146,25 @@ Deno.serve(async (req) => {
       ) || null;
     }
 
+    // Check for pre-built prompts (Capture Contract, Cinematography directives)
+    const isPreBuiltPrompt = (p: string): boolean => {
+      return p.includes("[CAPTURE:") || 
+             p.includes("[CINEMATOGRAPHY") ||
+             p.includes("=== DIRECTOR'S BRIEF ===");
+    };
+
     // Build prompt using provider-aware prompt builder (with optional motif injection)
-    const scenePrompt = body.prompt || clipData?.prompt || 
+    const rawPrompt = body.prompt || clipData?.prompt || 
       (script.scene_prompts && script.scene_prompts[0]) || 
       "A cinematic scene";
 
     let videoPrompt: string;
-    if (body.motif_context) {
+
+    // Pass-through mode for pre-built prompts - skip rebuild entirely
+    if (isPreBuiltPrompt(rawPrompt)) {
+      console.log("[queue-video-luma] Using pre-built prompt (pass-through mode)");
+      videoPrompt = rawPrompt;
+    } else if (body.motif_context) {
       const storyContext: StoryPromptContext = {
         sceneId: body.motif_context.sceneId,
         sceneIndex: body.motif_context.sceneIndex,
@@ -165,7 +177,7 @@ Deno.serve(async (req) => {
       videoPrompt = buildProviderPromptWithMotif(
         "luma",
         styleGuide,
-        scenePrompt,
+        rawPrompt,
         true,
         clipData?.camera_direction,
         storyContext
@@ -174,7 +186,7 @@ Deno.serve(async (req) => {
       videoPrompt = buildProviderPrompt(
         "luma", // Use Luma-optimized prompts
         styleGuide,
-        scenePrompt,
+        rawPrompt,
         true, // isFirstClip - handled differently for Luma
         clipData?.camera_direction
       );

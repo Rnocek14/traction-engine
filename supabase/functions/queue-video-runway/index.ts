@@ -180,8 +180,140 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Check for pre-built prompts (Capture Contract, Cinematography directives)
+    // If present, pass through directly - do NOT rebuild
+    const isPreBuiltPrompt = (p: string): boolean => {
+      return p.includes("[CAPTURE:") || 
+             p.includes("[CINEMATOGRAPHY") ||
+             p.includes("=== DIRECTOR'S BRIEF ===");
+    };
+
     // Build the video prompt
     let scenePrompt: string;
+
+    if (overridePrompt && isPreBuiltPrompt(overridePrompt)) {
+      // Pass-through mode: pre-built prompt survives untouched
+      console.log("[queue-video-runway] Using pre-built prompt (pass-through mode)");
+      
+      // Calculate I2V mode for pre-built prompt path
+      const isI2V = !!starting_frame_url || !!styleGuide?.reference_image_url;
+      const refImageUrl = starting_frame_url || styleGuide?.reference_image_url;
+      const model = isI2V ? getImageToVideoModel(settings?.model) : getTextToVideoModel(settings?.model);
+      const duration = isI2V 
+        ? mapDurationToRunwayImageToVideo(baseDuration)
+        : mapDurationToRunwayTextToVideo(baseDuration);
+
+      // Store prompts and queue the job
+      const { data: job, error: jobError } = await supabase
+        .from("video_jobs")
+        .insert({
+          script_run_id,
+          status: "queued",
+          provider: "runway",
+          original_prompt: overridePrompt.slice(0, 500),
+          enriched_prompt: overridePrompt,
+          settings: {
+            size: runwaySize,
+            requested_seconds: requestedSeconds ?? legacySeconds ?? baseDuration,
+            provider_seconds: duration,
+            seconds: duration,
+            model,
+            clip_id: clip_id || null,
+            prompt: overridePrompt.slice(0, 500),
+            seed: settings?.seed,
+            camera_direction: clipData?.camera_direction,
+            original_sora_size: settings?.size,
+            provider_job_id: null,
+          },
+          progress: 0,
+          openai_status: "pending",
+        })
+        .select()
+        .single();
+
+      if (jobError) {
+        throw new Error(`Failed to create job: ${jobError.message}`);
+      }
+
+      // Build API request for pre-built prompt
+      let runwayEndpoint: string;
+      let runwayBody: Record<string, unknown>;
+
+      if (isI2V && refImageUrl) {
+        runwayEndpoint = "https://api.dev.runwayml.com/v1/image_to_video";
+        runwayBody = {
+          model,
+          promptImage: refImageUrl,
+          promptText: overridePrompt,
+          duration,
+          ratio: runwaySize,
+          seed: settings?.seed,
+        };
+      } else {
+        runwayEndpoint = "https://api.dev.runwayml.com/v1/text_to_video";
+        runwayBody = {
+          model,
+          promptText: overridePrompt,
+          duration,
+          ratio: runwaySize,
+          seed: settings?.seed,
+        };
+      }
+
+      // Call Runway API
+      const runwayResponse = await fetch(runwayEndpoint, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${runwayApiKey}`,
+          "X-Runway-Version": RUNWAY_API_VERSION,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(runwayBody),
+      });
+
+      if (!runwayResponse.ok) {
+        const errorText = await runwayResponse.text();
+        const isQuotaError = errorText.includes("credits") || errorText.includes("quota");
+        await supabase
+          .from("video_jobs")
+          .update({
+            status: "failed",
+            openai_status: "failed",
+            error: `Runway API error: ${runwayResponse.status} - ${errorText.slice(0, 200)}`,
+          })
+          .eq("id", job.id);
+        throw new Error(isQuotaError 
+          ? `Runway API error: ${runwayResponse.status} - no credits available`
+          : `Runway API error: ${runwayResponse.status}`);
+      }
+
+      const runwayData = await runwayResponse.json();
+      await supabase
+        .from("video_jobs")
+        .update({
+          status: "running",
+          settings: { ...job.settings, provider_job_id: runwayData.id },
+          openai_video_id: runwayData.id,
+          openai_status: "PENDING",
+        })
+        .eq("id", job.id);
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          job: {
+            id: job.id,
+            status: "running",
+            provider: "runway",
+            provider_job_id: runwayData.id,
+            requested_seconds: requestedSeconds ?? legacySeconds ?? duration,
+            provider_seconds: duration,
+            clip_id: clip_id || null,
+          },
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     if (overridePrompt) {
       scenePrompt = overridePrompt;
