@@ -379,12 +379,14 @@ Deno.serve(async (req) => {
       
       // Get previous scene's RAW prompt for action extraction (not compiled)
       // Using raw prompts gives better verb phrase extraction
+      // NOTE: Film Mode stories use subject_action instead of prompt
       const prevScene = nextSceneIndex > 0 ? scenes[nextSceneIndex - 1] : null;
-      const prevRawPrompt = prevScene?.prompt || null;
-      const nextRawPrompt = nextScene.prompt;
+      const prevRawPrompt = prevScene?.prompt || prevScene?.subject_action || null;
+      const nextRawPrompt = nextScene.prompt || nextScene.subject_action;
       
       // Use enriched prompt for the actual generation (has camera directions, etc.)
-      const basePrompt = nextScene.enriched_prompt || nextScene.prompt;
+      // Fall back to subject_action for Film Mode stories
+      const basePrompt = nextScene.enriched_prompt || nextScene.prompt || nextScene.subject_action || "";
 
       // For I2V scenes, we need a reference image
       if (!isFirstScene && !latestThumbnail) {
