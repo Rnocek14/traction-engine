@@ -494,26 +494,32 @@ Deno.serve(async (req) => {
         coverage_type: (nextScene as { coverage_type?: CoverageType }).coverage_type,
       });
       
+      // === COVERAGE RESOLUTION ===
+      // SPECTACLE OVERRIDE: If subject_required=false, force coverage to "none"
+      // This prevents contradictions like subject_required=false + coverage_type=face
+      let resolvedCoverage: CoverageType;
+      const rawCoverage = (nextScene as { coverage_type?: CoverageType }).coverage_type;
+      
       if (spectacleHandling.isSpectacle) {
+        // Force "none" for spectacle scenes (final authority)
+        resolvedCoverage = "none";
         console.log(`[chain-continue] Scene ${nextSceneIndex + 1} is SPECTACLE (${
           (nextScene as { alternate_subject?: AlternateSubject }).alternate_subject || "no protagonist"
-        }) → forcing T2V, stripping identity`);
+        }) → forcing coverage="none", stripping identity`);
+        if (rawCoverage && rawCoverage !== "none" && rawCoverage !== "wide") {
+          console.log(`[chain-continue] ⚠️ Overriding contradictory coverage="${rawCoverage}" to "none"`);
+        }
+      } else {
+        // Normal: 3-tier fallback (explicit → inferred from prompt → default by role)
+        resolvedCoverage = inferCoverageFromPrompt(
+          nextScene.prompt || basePrompt,
+          sceneRole,
+          rawCoverage
+        );
+        console.log(`[chain-continue] Scene ${nextSceneIndex + 1} coverage_type="${resolvedCoverage}" (${
+          rawCoverage ? "explicit" : "inferred"
+        })`);
       }
-      
-      // === COVERAGE RESOLUTION (3-tier fallback) ===
-      // Tier 1: Use explicit coverage_type from storyboard
-      // Tier 2: Infer from prompt verbs
-      // Tier 3: Default by role
-      const resolvedCoverage = inferCoverageFromPrompt(
-        nextScene.prompt || basePrompt,
-        sceneRole,
-        (nextScene as { coverage_type?: CoverageType }).coverage_type
-      );
-      
-      console.log(`[chain-continue] Scene ${nextSceneIndex + 1} coverage_type="${resolvedCoverage}" (${
-        (nextScene as { coverage_type?: CoverageType }).coverage_type ? "explicit" : "inferred"
-      })`);
-      
       // === CUT TYPE FROM SPECTACLE/COVERAGE (final authority) ===
       let cutType: "hard" | "continuity" = "hard";
       let cutReason = "default hard";
@@ -759,6 +765,11 @@ Deno.serve(async (req) => {
           had_starting_frame: !!startingFrameUrl,
           provider_selected: selectedProvider,
           scene_role: sceneRole,
+          // NEW: Spectacle and coverage audit fields
+          is_spectacle: spectacleHandling.isSpectacle,
+          alternate_subject: (nextScene as { alternate_subject?: AlternateSubject }).alternate_subject || null,
+          coverage_raw: rawCoverage || null,
+          coverage_resolved: resolvedCoverage,
         };
         await supabase
           .from("video_jobs")

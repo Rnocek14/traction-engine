@@ -283,33 +283,65 @@ For each scene, specify:
 - alternate_subject (only if subject_required=false): 
   "environment" | "creature" | "object" | "abstract" | "threat"
 
-WHEN TO USE SPECTACLE SCENES (subject_required=false):
-- Establishing the world/environment (Scene 0-1)
-- Showing the THREAT/antagonist alone (dragon, alien, storm, war machines)
-- Cause of conflict (portal tearing open, explosion, storm wall approaching)
-- Insert shots (artifact glowing, radar ping, map reveal)
-- Abstract/cosmic transitions
+═══════════════════════════════════════════════════════════════════════════════
+⚠️ SPECTACLE = PLOT ENGINE, NOT SCENERY (CRITICAL!)
+═══════════════════════════════════════════════════════════════════════════════
 
-RECOMMENDED PATTERN FOR 6-SCENE STORY (3 hero / 3 spectacle):
-Scene 0 (hook): subject_required=FALSE, alternate_subject="environment" or "threat"
-Scene 1 (problem): subject_required=FALSE, alternate_subject="threat" (show the danger!)
-Scene 2 (story_a): subject_required=TRUE (first protagonist action)
-Scene 3 (reset): subject_required=FALSE, alternate_subject="environment" or "creature"
-Scene 4 (story_b): subject_required=TRUE (protagonist payoff)
-Scene 5 (cta): subject_required=TRUE, coverage_type="face" (emotional landing)
+Spectacle scenes are NOT pretty backgrounds! They are ACTIVE PLOT BEATS.
+Every spectacle scene MUST be one of these categories:
+
+1. THREAT REVEAL: Antagonist appears, escalates, attacks
+   ✓ "Dragon DESCENDS through clouds, jaws OPEN in attack posture"
+   ✗ "Dragon flies in the distance" (passive, boring)
+
+2. CAUSE EVENT: Explosion, portal opens, storm wall hits, invasion begins
+   ✓ "Portal TEARS through reality, debris SPIRALING into the void"
+   ✗ "Portal glows softly in the forest" (static, no action)
+
+3. INSERT CLUE: Artifact activates, radar spikes, warning lights, map reveals doom
+   ✓ "Radar screen ERUPTS with contacts, warning klaxon BLARES"
+   ✗ "Radar shows something on the screen" (vague, no urgency)
+
+4. CROSS-CUT ESCALATION: War intensifies, dragon closes in, portal destabilizes
+   ✓ "Battlefield EXPLODES with cavalry charge, siege towers TOPPLE"
+   ✗ "Wide shot of the battle" (description, not action)
+
+SPECTACLE SCENE ENFORCEMENT:
+- MUST include one physical action verb (same rules as hero scenes!)
+- MUST include one impact outcome (what changes by the end)
+- Environment is allowed BUT IT MUST BE ACTIVE (storm SLAMS, ground CRACKS)
+- Passive environment shots will be REJECTED
+
+RECOMMENDED 6-SCENE PATTERN (3 hero / 3 spectacle with CROSS-CUT RHYTHM):
+Scene 0 (hook): subject_required=FALSE, alternate_subject="threat" or "environment"
+  → CAUSE EVENT: "What triggers the story? Show it exploding/appearing/attacking"
+Scene 1 (problem): subject_required=FALSE, alternate_subject="threat"
+  → THREAT REVEAL: "Show the DANGER, not the hero's reaction"
+Scene 2 (story_a): subject_required=TRUE
+  → HERO REACTS: First protagonist action (escape, engage, respond)
+Scene 3 (reset): subject_required=FALSE, alternate_subject="threat" or "creature"
+  → ESCALATION: "Threat gets WORSE while hero is away" (cross-cut tension)
+Scene 4 (story_b): subject_required=TRUE
+  → HERO PAYOFF: Protagonist's counter-move or transformation
+Scene 5 (cta): subject_required=TRUE, coverage_type="face"
+  → EMOTIONAL LANDING: Face reveal, resolution, determination
+
+This creates CROSS-CUT RHYTHM: Threat → Hero → Threat → Hero → Hero
+That's what makes action films feel exciting!
 
 SPECTACLE SCENE RULES:
 - When subject_required=false: coverage_type MUST be "wide", "pov", "obscured", or "none"
-- When subject_required=false: prompt should NOT mention the protagonist
-- When subject_required=false: focus on the alternate_subject (threat, environment, etc.)
+- When subject_required=false: prompt should NOT mention the protagonist AT ALL
+- When subject_required=false: focus 100% on the alternate_subject (threat, environment, etc.)
+- When subject_required=false: describe what the THREAT/ENVIRONMENT does, not how characters react
 
 EXAMPLE - "Medieval War with Dragons" (why it worked):
-Scene 0: subject_required=false, alternate_subject="environment" → "Aerial shot of smoldering battlefield"
-Scene 1: subject_required=false, alternate_subject="threat" → "Dragon DESCENDS through clouds, wings SPREAD"
-Scene 2: subject_required=true → "Knight SPRINTS across battlefield toward siege tower"
-Scene 3: subject_required=false, alternate_subject="creature" → "Dragon BANKS hard, fire ERUPTS"
-Scene 4: subject_required=true → "Knight DIVES for cover as flames ROAR overhead"
-Scene 5: subject_required=true, coverage_type="face" → "Knight's visor OPENS, revealing determined expression"
+Scene 0: subject_required=false, alternate_subject="environment" → "Siege towers CRASH against walls, flames ERUPT"
+Scene 1: subject_required=false, alternate_subject="threat" → "Dragon DESCENDS through clouds, wings SPREAD, fire BUILDING"
+Scene 2: subject_required=true → "Knight SPRINTS across battlefield, DODGING falling debris"
+Scene 3: subject_required=false, alternate_subject="creature" → "Dragon BANKS hard, fire ERUPTS across infantry lines"
+Scene 4: subject_required=true → "Knight DIVES for cover as flames ROAR overhead, shield RAISED"
+Scene 5: subject_required=true, coverage_type="face" → "Knight's visor OPENS, ash FALLING, expression HARDENS"
 
 ↑ This pattern gives you WILD ACTION (3 spectacle) + EMOTIONAL PAYOFF (3 hero).
 
@@ -319,6 +351,7 @@ CRITICAL RULES FOR NARRATIVE GLUE:
 - state_from and state_to must be DIFFERENT (if they're the same, the scene is static)
 - end_state describes the OBSERVABLE RESULT that the next scene will react to
 - Each scene must RESPOND to the previous scene's end_state (cause → effect)
+- SPECTACLE SCENES: Must also have action verbs and impact outcomes - they are NOT exempt!
 
 Also extract continuity anchors:
 - Character details (if any characters appear)
@@ -337,7 +370,7 @@ IMPORTANT PROMPT GUIDELINES:
 - For STORY scenes: Use full cinematic description
 - Reference motif_anchors in scene prompts for visual continuity
 - START THE PROMPT WITH ACTION - don't bury the verb
-- For SPECTACLE SCENES: Focus entirely on the alternate_subject, no protagonist reference
+- For SPECTACLE SCENES: Focus entirely on the alternate_subject doing something ACTIVE, no protagonist reference
 
 Respond ONLY with valid JSON in this exact format:
 {
