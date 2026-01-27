@@ -160,45 +160,122 @@ export function getMotionStrength(provider: "sora" | "runway" | "luma"): MotionS
 }
 
 /**
+ * Build concrete beat structure: anticipation → action → follow-through
+ * These are IMPERATIVE commands, not descriptions
+ */
+function buildConcreteBeats(breakdown: ActionBreakdown): string {
+  const verb = breakdown.primaryVerb;
+  
+  // Map common verbs to concrete beat sequences
+  const beatTemplates: Record<string, [string, string, string]> = {
+    melts: [
+      "slight sag, body weight shifts downward",
+      "visible streams run down face/body, features soften",
+      "hand or limb droops, watches the change"
+    ],
+    looks: [
+      "head begins to turn, eyes shift direction",
+      "full head rotation, shoulders follow slightly",
+      "settles into new gaze, subtle body adjustment"
+    ],
+    walks: [
+      "weight shifts to front foot, lean forward",
+      "full stride, arms swing, body progresses",
+      "plants foot, settles into new position"
+    ],
+    turns: [
+      "shoulders begin rotation, weight shifts",
+      "full body turn, head leads movement",
+      "settles facing new direction, posture adjusts"
+    ],
+    reaches: [
+      "body leans toward target, arm begins extending",
+      "full arm extension, fingers stretch",
+      "grasps or touches, reaction visible in posture"
+    ],
+    falls: [
+      "balance breaks, body tips",
+      "descent accelerates, limbs react",
+      "impact, settle, reaction"
+    ],
+  };
+  
+  // Get specific beats or generate from verb
+  const beats = beatTemplates[verb] || [
+    `anticipation: lean/shift preparing to ${verb}`,
+    `primary action: visibly ${verb}s with clear motion`,
+    `follow-through: reaction, settle, or next position`
+  ];
+  
+  return `Beat 1 (Anticipation): ${beats[0]}
+Beat 2 (Primary Action): ${beats[1]}
+Beat 3 (Follow-through): ${beats[2]}`;
+}
+
+/**
+ * Normalize camera action for whip pans (make them forceful)
+ */
+function normalizeWhipPan(cameraAction: string): string {
+  const lower = cameraAction.toLowerCase();
+  
+  if (lower.includes("whip pan") || lower.includes("whip-pan")) {
+    return "FAST PAN with motion blur, then settle/lock on new framing for final 0.5s. Camera movement is ABRUPT, not smooth.";
+  }
+  
+  if (lower.includes("pan") && (lower.includes("fast") || lower.includes("quick"))) {
+    return cameraAction + " — with visible motion blur, then settle.";
+  }
+  
+  return cameraAction;
+}
+
+/**
  * Build the Sora-specific motion amplification block (STRONGEST)
  * 
  * This goes at the VERY TOP of the prompt before anything else.
+ * Includes anti-cheat rules and concrete beat structure.
  */
 export function buildSoraMotionAmplification(
   breakdown: ActionBreakdown,
   prevAction?: string
 ): string {
   const previousComplete = prevAction 
-    ? `\nPREVIOUS ACTION COMPLETE: "${prevAction}" is FINISHED and must not continue.`
+    ? `
+PREVIOUS ACTION COMPLETE: "${prevAction}" is FINISHED and must not continue.
+Start in the END-STATE of the last scene, then immediately begin new action.`
     : "";
   
+  const concreteBeats = buildConcreteBeats(breakdown);
+  const normalizedCamera = normalizeWhipPan(breakdown.cameraAction);
+  
   return `═══════════════════════════════════════════════════════════════
-CRITICAL MOTION REQUIREMENT (I2V - NOT A HOLD)
+🎬 CRITICAL MOTION REQUIREMENT (I2V - NOT A HOLD)
 ═══════════════════════════════════════════════════════════════
 
 ⚠️ THIS IS NOT A STILL IMAGE. PRODUCE 2-3 DISTINCT MOTION BEATS.
 
-MOTION BEATS REQUIRED:
-• Beat 1: Initial movement (setup)
-• Beat 2: Primary action (${breakdown.primaryVerb})
-• Beat 3: Follow-through or reaction
+MOTION BEATS (EXECUTE IN ORDER):
+${concreteBeats}
 
-SUBJECT MOTION IS MANDATORY:
-• Subject must physically ${breakdown.subjectAction}
-• Motion must be visible in silhouette (head turn, step, arm swing)
-• Particles/drips alone do NOT satisfy this requirement
+ANTI-CHEAT RULES:
+✗ Micro-motion does NOT count (tiny drips, eye flickers = FAIL)
+✗ Particles/smoke alone do NOT satisfy motion requirement
+✗ Camera motion does NOT count unless subject ALSO changes pose
+✓ Subject must change SILHOUETTE or LIMB POSITION
+✓ At least ONE beat must include clear pose change (head turn + shoulders / arm lift / step)
 
-POSE DRIFT REQUIREMENT:
-• End frame composition must differ 15-30% from start frame
-• Subject pose/position must visibly change by shot end
-• Static hold is a FAILURE
+END-FRAME MISMATCH (MANDATORY):
+• End frame must NOT match start frame composition
+• End pose must be NOTICEABLY DIFFERENT from start pose
+• If end looks like start = FAILURE
+• Target: 15-30% composition shift by shot end
 ${previousComplete}
 
-CAMERA MOTION: ${breakdown.cameraAction}
+SUBJECT MOTION: ${breakdown.subjectAction}
+CAMERA: ${normalizedCamera}
 ENVIRONMENT: ${breakdown.environmentAction}
 
-If motion seems subtle in the prompt, EXAGGERATE it until it reads clearly.
-Camera motion does NOT count unless subject also changes pose.
+If motion seems subtle, EXAGGERATE until it reads clearly on first viewing.
 
 ═══════════════════════════════════════════════════════════════
 
@@ -207,20 +284,25 @@ Camera motion does NOT count unless subject also changes pose.
 
 /**
  * Build Runway-specific motion amplification (STRONG)
+ * Includes anti-cheat and concrete beats
  */
 export function buildRunwayMotionAmplification(
   breakdown: ActionBreakdown,
   prevAction?: string
 ): string {
   const previousNote = prevAction 
-    ? ` Previous action "${prevAction}" is complete.`
+    ? ` Previous "${prevAction}" is DONE.`
     : "";
+
+  const normalizedCamera = normalizeWhipPan(breakdown.cameraAction);
   
-  return `[MOTION DIRECTIVE]
-2-3 visible motion beats required. Subject ${breakdown.primaryVerb} with clear movement.
-Pose must change by end of shot.${previousNote}
-Primary motion: ${breakdown.subjectAction}
-Camera: ${breakdown.cameraAction}
+  return `[MOTION DIRECTIVE - NOT A STILL]
+2-3 distinct motion beats required. Micro-motion (drips/particles only) = FAIL.
+Subject must change pose/silhouette. End frame ≠ start frame.${previousNote}
+Beat 1: Anticipation (lean/shift/prepare)
+Beat 2: ${breakdown.primaryVerb} (primary action, visible movement)
+Beat 3: Follow-through (settle/react/reposition)
+Camera: ${normalizedCamera}
 
 ---
 
