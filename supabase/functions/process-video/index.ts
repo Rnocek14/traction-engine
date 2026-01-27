@@ -91,6 +91,30 @@ async function downloadAndUpload(
   }
 }
 
+// Helper: retry with exponential backoff for transient network errors
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  maxRetries = 3,
+  baseDelayMs = 500
+): Promise<T> {
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      const isTransient = lastError.message.includes("connection reset") ||
+                          lastError.message.includes("connection error") ||
+                          lastError.message.includes("network");
+      if (!isTransient || attempt === maxRetries - 1) throw lastError;
+      const delay = baseDelayMs * Math.pow(2, attempt);
+      console.log(`[process-video] Retry ${attempt + 1}/${maxRetries} after ${delay}ms: ${lastError.message}`);
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+  throw lastError;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -110,23 +134,23 @@ Deno.serve(async (req) => {
     const body: ProcessRequest = await req.json().catch(() => ({}));
     const { job_id } = body;
 
-    // Fetch jobs to process (only Sora/OpenAI jobs with openai_video_id)
-    let query = supabase
-      .from("video_jobs")
-      .select("*")
-      .eq("provider", "sora")  // Only process Sora jobs - Luma/Runway have their own processors
-      .in("status", ["running", "queued"])
-      .not("openai_video_id", "is", null);
+    // Fetch jobs to process with retry for transient network errors
+    const jobs = await withRetry(async () => {
+      let query = supabase
+        .from("video_jobs")
+        .select("*")
+        .eq("provider", "sora")
+        .in("status", ["running", "queued"])
+        .not("openai_video_id", "is", null);
 
-    if (job_id) {
-      query = query.eq("id", job_id);
-    }
+      if (job_id) {
+        query = query.eq("id", job_id);
+      }
 
-    const { data: jobs, error: jobsError } = await query.limit(10);
-
-    if (jobsError) {
-      throw new Error(`Failed to fetch jobs: ${jobsError.message}`);
-    }
+      const { data, error } = await query.limit(10);
+      if (error) throw new Error(`DB query failed: ${error.message}`);
+      return data;
+    });
 
     if (!jobs || jobs.length === 0) {
       return new Response(
@@ -149,13 +173,14 @@ Deno.serve(async (req) => {
           continue;
         }
 
-        // Check status with OpenAI
-        const statusResponse = await fetch(
-          `https://api.openai.com/v1/videos/${videoId}`,
-          {
-            headers: { "Authorization": `Bearer ${openaiApiKey}` },
-          }
-        );
+        // Check status with OpenAI (with retry for transient network errors)
+        const statusResponse = await withRetry(async () => {
+          const resp = await fetch(
+            `https://api.openai.com/v1/videos/${videoId}`,
+            { headers: { "Authorization": `Bearer ${openaiApiKey}` } }
+          );
+          return resp;
+        });
 
         if (!statusResponse.ok) {
           const errorText = await statusResponse.text();
