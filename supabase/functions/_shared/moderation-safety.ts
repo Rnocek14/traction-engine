@@ -58,16 +58,17 @@ const WEAPON_REPLACEMENTS: Array<[RegExp, string]> = [
   [/\bdeadly\b/gi, "powerful"],
 ];
 
-// Extreme violence that should be removed entirely
-const REMOVE_PATTERNS: RegExp[] = [
-  /\bdecapitat(e|es|ed|ing)\b/gi,
-  /\bdismember(s|ed|ing)?\b/gi,
-  /\bgor(e|y)\b/gi,
-  /\bexecut(e|es|ed|ing|ion)\b/gi,
-  /\bmassacre(s|d)?\b/gi,
-  /\bslaughter(s|ed|ing)?\b/gi,
-  /\btortur(e|es|ed|ing)\b/gi,
-  /\bmutilat(e|es|ed|ing)\b/gi,
+// Extreme violence that should be removed or replaced
+const REMOVE_PATTERNS: Array<[RegExp, string]> = [
+  [/\bdecapitat(e|es|ed|ing)\b/gi, "defeat"],
+  [/\bdismember(s|ed|ing)?\b/gi, "scatter"],
+  [/\bgor(e|y)\b/gi, "intense"],
+  [/\bexecut(e|es|ed|ing)\s+(the\s+)?(enemy|foe|opponent|target)(s)?\b/gi, "confront $3$4"],
+  [/\bexecution\s+style\b/gi, "dramatic"],
+  [/\bmassacre(s|d)?\b/gi, "overwhelm"],
+  [/\bslaughter(s|ed|ing)?\b/gi, "defeat"],
+  [/\btortur(e|es|ed|ing)\b/gi, "confront"],
+  [/\bmutilat(e|es|ed|ing)\b/gi, "damage"],
 ];
 
 /**
@@ -82,14 +83,12 @@ export function sanitizeForModeration(prompt: string): {
   let result = prompt;
   const replacements: string[] = [];
   
-  // First, remove extreme violence terms
-  for (const pattern of REMOVE_PATTERNS) {
-    if (pattern.test(result)) {
-      const match = result.match(pattern);
-      if (match) {
-        replacements.push(`removed: "${match[0]}"`);
-      }
-      result = result.replace(pattern, "");
+  // First, apply extreme violence replacements
+  for (const [pattern, replacement] of REMOVE_PATTERNS) {
+    const before = result;
+    result = result.replace(pattern, replacement);
+    if (result !== before) {
+      replacements.push(`"${pattern.source}" → "${replacement}"`);
     }
   }
   
