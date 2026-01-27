@@ -681,7 +681,12 @@ Generate a complete, filmable storyboard with vivid, specific visual prompts for
     };
     
     const signatures = storyboard.scenes.map(extractShotSignature);
-    const varietyIssues: string[] = [];
+    interface VarietyIssue {
+      sceneIndex: number;
+      type: "framing_angle" | "motion" | "action";
+      detail: string;
+    }
+    const varietyIssues: VarietyIssue[] = [];
     
     for (let i = 1; i < signatures.length; i++) {
       const prev = signatures[i - 1];
@@ -689,27 +694,157 @@ Generate a complete, filmable storyboard with vivid, specific visual prompts for
       
       // Check for signature collision (framing + angle)
       if (prev.framing === curr.framing && prev.angle === curr.angle) {
-        varietyIssues.push(`Scenes ${i}→${i + 1}: same framing+angle (${curr.framing}/${curr.angle})`);
+        varietyIssues.push({ 
+          sceneIndex: i, 
+          type: "framing_angle", 
+          detail: `same framing+angle (${curr.framing}/${curr.angle})` 
+        });
       }
       
       // Check for same motion
       if (prev.motion === curr.motion && prev.motion !== "static") {
-        varietyIssues.push(`Scenes ${i}→${i + 1}: same motion (${curr.motion})`);
+        varietyIssues.push({ 
+          sceneIndex: i, 
+          type: "motion", 
+          detail: `same motion (${curr.motion})` 
+        });
       }
       
       // Check for same primary action
       if (prev.primaryAction === curr.primaryAction && prev.primaryAction !== "unknown") {
-        varietyIssues.push(`Scenes ${i}→${i + 1}: same action verb (${curr.primaryAction})`);
+        varietyIssues.push({ 
+          sceneIndex: i, 
+          type: "action", 
+          detail: `same action verb (${curr.primaryAction})` 
+        });
+      }
+    }
+    
+    // === AUTO-REWRITE COLLIDING SCENES (max 2 retries) ===
+    const MAX_VARIETY_RETRIES = 2;
+    let varietyRetryCount = 0;
+    
+    while (varietyIssues.length > 0 && varietyRetryCount < MAX_VARIETY_RETRIES) {
+      varietyRetryCount++;
+      console.log(`[generate-storyboard] 🔄 Variety retry ${varietyRetryCount}/${MAX_VARIETY_RETRIES}: ${varietyIssues.length} collisions`);
+      
+      // Get unique scene indices that need rewriting
+      const scenesToRewrite = [...new Set(varietyIssues.map(i => i.sceneIndex))];
+      
+      for (const sceneIndex of scenesToRewrite) {
+        const scene = storyboard.scenes[sceneIndex];
+        const prevScene = storyboard.scenes[sceneIndex - 1];
+        const prevSig = signatures[sceneIndex - 1];
+        const issuesForScene = varietyIssues.filter(i => i.sceneIndex === sceneIndex);
+        
+        // Build rewrite constraint based on what needs to change
+        const constraints: string[] = [];
+        if (issuesForScene.some(i => i.type === "framing_angle")) {
+          // Force different framing OR different angle
+          const newFraming = prevSig.framing === "wide" ? "close" : (prevSig.framing === "close" ? "medium" : "wide");
+          const newAngle = prevSig.angle === "eye" ? "low" : (prevSig.angle === "low" ? "high" : "eye");
+          constraints.push(`MUST use ${newFraming} framing OR ${newAngle} angle`);
+        }
+        if (issuesForScene.some(i => i.type === "motion")) {
+          const altMotions = ["tracking", "dolly", "crane", "handheld", "pan"].filter(m => m !== prevSig.motion);
+          constraints.push(`MUST use ${altMotions[0]} or ${altMotions[1]} camera motion (NOT ${prevSig.motion})`);
+        }
+        if (issuesForScene.some(i => i.type === "action")) {
+          constraints.push(`MUST use a DIFFERENT primary action verb (NOT ${prevSig.primaryAction})`);
+        }
+        
+        // Quick rewrite request (single scene)
+        const rewritePrompt = `Rewrite ONLY this scene prompt to fix shot signature collision:
+
+ORIGINAL SCENE ${sceneIndex + 1}:
+prompt: "${scene.prompt}"
+camera_direction: "${scene.camera_direction}"
+role: "${scene.role}"
+
+PREVIOUS SCENE ${sceneIndex} (for context):
+prompt: "${prevScene.prompt}"
+camera_direction: "${prevScene.camera_direction}"
+
+CONSTRAINTS (MUST follow):
+${constraints.join("\n")}
+
+Return ONLY the rewritten scene as JSON:
+{
+  "prompt": "...",
+  "camera_direction": "..."
+}
+
+Keep the same action intent, just change the shot design.`;
+
+        console.log(`[generate-storyboard] Rewriting scene ${sceneIndex + 1} with constraints: ${constraints.join("; ")}`);
+        
+        try {
+          const rewriteResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${openaiKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              model: "gpt-4o-mini", // Use mini for fast rewrites
+              messages: [
+                { role: "system", content: "You are a cinematographer. Return only valid JSON, no markdown." },
+                { role: "user", content: rewritePrompt },
+              ],
+              temperature: 0.9, // Higher temp for variety
+              max_tokens: 300,
+            }),
+          });
+
+          if (rewriteResponse.ok) {
+            const rewriteData = await rewriteResponse.json();
+            const rewriteContent = rewriteData.choices?.[0]?.message?.content || "";
+            const rewriteMatch = rewriteContent.match(/\{[\s\S]*\}/);
+            
+            if (rewriteMatch) {
+              const rewrite = JSON.parse(rewriteMatch[0]);
+              if (rewrite.prompt) {
+                storyboard.scenes[sceneIndex].prompt = rewrite.prompt;
+                console.log(`[generate-storyboard] ✓ Rewrote scene ${sceneIndex + 1}`);
+              }
+              if (rewrite.camera_direction) {
+                storyboard.scenes[sceneIndex].camera_direction = rewrite.camera_direction;
+              }
+            }
+          }
+        } catch (rewriteError) {
+          console.warn(`[generate-storyboard] Rewrite failed for scene ${sceneIndex + 1}:`, rewriteError);
+          // Continue with original - variety issues logged but not blocking
+        }
+      }
+      
+      // Re-extract signatures and check for remaining issues
+      const newSignatures = storyboard.scenes.map(extractShotSignature);
+      Object.assign(signatures, newSignatures);
+      
+      // Clear and re-check
+      varietyIssues.length = 0;
+      for (let i = 1; i < signatures.length; i++) {
+        const prev = signatures[i - 1];
+        const curr = signatures[i];
+        if (prev.framing === curr.framing && prev.angle === curr.angle) {
+          varietyIssues.push({ sceneIndex: i, type: "framing_angle", detail: `same framing+angle` });
+        }
+        if (prev.motion === curr.motion && prev.motion !== "static") {
+          varietyIssues.push({ sceneIndex: i, type: "motion", detail: `same motion` });
+        }
+        if (prev.primaryAction === curr.primaryAction && prev.primaryAction !== "unknown") {
+          varietyIssues.push({ sceneIndex: i, type: "action", detail: `same action` });
+        }
       }
     }
     
     if (varietyIssues.length > 0) {
-      console.warn(`[generate-storyboard] ⚠️ Shot Signature Variety Contract violations:`);
-      varietyIssues.forEach(issue => console.warn(`  - ${issue}`));
-      // Note: We log but don't fail - the system will still produce varied output
-      // via the Face-Only I2V rule + T2V motion freedom
+      console.warn(`[generate-storyboard] ⚠️ Shot Signature issues remain after ${varietyRetryCount} retries:`);
+      varietyIssues.forEach(issue => console.warn(`  - Scene ${issue.sceneIndex + 1}: ${issue.detail}`));
+      // Log but don't fail - Face-Only I2V + T2V motion freedom will help
     } else {
-      console.log(`[generate-storyboard] ✓ Shot Signature Variety: all adjacent scenes differ`);
+      console.log(`[generate-storyboard] ✓ Shot Signature Variety: all adjacent scenes differ${varietyRetryCount > 0 ? ` (after ${varietyRetryCount} rewrites)` : ""}`);
     }
 
     // Ensure negative_list always has base items
