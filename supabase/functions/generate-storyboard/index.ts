@@ -34,6 +34,9 @@ const ROLE_TO_ZONE: Record<SceneRole, CutZone> = {
 
 type CutType = "hard" | "continuity";
 
+// Coverage type for action vs identity trade-off
+type CoverageType = "face" | "body" | "back" | "wide" | "pov" | "obscured" | "none";
+
 interface GeneratedScene {
   prompt: string;
   duration_target: number;
@@ -56,6 +59,8 @@ interface GeneratedScene {
   beat_trigger?: string;
   beat_action?: string;
   beat_result?: string;
+  // Phase 6: Coverage type for action vs identity
+  coverage_type?: CoverageType;
 }
 
 interface GeneratedStoryboard {
@@ -240,6 +245,45 @@ For each scene, provide:
 12. change_type: What changes at this beat
 13. narration_line (optional): TTS voiceover line for this beat
 14. onscreen_text (optional): Text overlay if needed
+15. coverage_type: Camera coverage for action vs identity trade-off (CRITICAL)
+
+═══════════════════════════════════════════════════════════════════════════════
+📷 COVERAGE TYPE (CRITICAL FOR ACTION SCENES)
+═══════════════════════════════════════════════════════════════════════════════
+
+Every scene must specify camera coverage that balances action vs identity.
+This determines whether we can go "crazy" with motion or must preserve faces.
+
+coverage_type options:
+- "face": Closeup, emotional beat. Identity critical. Use for: reactions, reveals, CTA
+- "body": Full-body action. Face visible but secondary. Use for: running, fighting, gesturing
+- "back": Back-turned or silhouette. Face not visible. Use for: sprinting away, dramatic reveals
+- "wide": Environment-dominant, figure small. Use for: establishing, chase across landscape
+- "pov": First-person, helmet cam, visor view. Use for: diving, falling, subjective action
+- "obscured": Face hidden by dust/rain/blur/darkness. Use for: storm scenes, dramatic tension
+- "none": Pure spectacle, abstract, environment-only. No character needed. Use for: portals, explosions, cosmic
+
+COVERAGE RULES FOR ACTION:
+- Fast physical action → NEVER use "face" (use body, back, wide, or pov)
+- Running/sprinting → "back" or "wide"
+- Diving/falling/plunging → "pov" or "body"
+- Storm/chaos/environmental danger → "obscured"
+- Portal/abstract/cosmic transitions → "none" (pure spectacle!)
+- Emotional reaction/reveal → "face"
+- Final connection/CTA → "face"
+
+IDENTITY ONLY MATTERS IN ~2 SCENES OF A 6-SCENE STORY:
+- Scene 4/5: first clear reveal / reaction (face)
+- Final scene: payoff / CTA (face)
+- Everything else can be wide/back/POV/obscured/none for MAXIMUM ACTION FREEDOM
+
+Example coverage flow for action story:
+Scene 0 (hook): "wide" - dramatic landscape establishes scale
+Scene 1 (problem): "obscured" - dust storm creates tension, face hidden
+Scene 2 (story_a): "pov" - diving through portal (motion freedom!)
+Scene 3 (reset): "back" - silhouette emerging from chaos
+Scene 4 (story_b): "body" - approaching, building to reveal
+Scene 5 (cta): "face" - emotional connection moment
 
 CRITICAL RULES FOR NARRATIVE GLUE:
 - The prompt's FIRST CLAUSE must contain an action verb (not buried later)
@@ -286,6 +330,7 @@ Respond ONLY with valid JSON in this exact format:
       "camera_direction": "Camera movement and framing notes",
       "role": "story_a",
       "change_type": "info",
+      "coverage_type": "pov",
       "narration_line": "Optional TTS line for this beat",
       "onscreen_text": "Optional text overlay"
     }

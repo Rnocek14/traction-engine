@@ -94,7 +94,10 @@ import {
   getProviderForRoleWithContext,
   ROLE_DISPLAY,
   PROVIDER_DISPLAY,
+  COVERAGE_DISPLAY,
+  DEFAULT_COVERAGE_BY_ROLE,
   inferRoleFromPosition,
+  type CoverageType,
 } from "@/types/scene-roles";
 
 // Scene role options for selector

@@ -39,6 +39,27 @@ export type SceneRole =
   | "atmosphere"  // Texture transition, physics glue
   | "establish";  // Wide establishing shot
 
+// ============================================================================
+// Coverage Type - Camera Framing for Action vs Identity
+// ============================================================================
+
+/**
+ * Coverage type determines camera framing and whether face is visible.
+ * This is the final authority on I2V vs T2V - coverage overrides soft continuity.
+ * 
+ * Philosophy:
+ * - Face coverage → I2V (preserve identity)
+ * - Non-face coverage → T2V (maximize motion freedom)
+ */
+export type CoverageType =
+  | "face"       // Closeup, emotional beat. Identity critical. Use for: reactions, reveals, CTA
+  | "body"       // Full-body action. Face visible but secondary. Use for: running, fighting
+  | "back"       // Back-turned or silhouette. Face not visible. Use for: sprinting away, dramatic reveals
+  | "wide"       // Environment-dominant, figure small. Use for: establishing, chase across landscape
+  | "pov"        // First-person, helmet cam, visor view. Use for: diving, falling, subjective action
+  | "obscured"   // Face hidden by dust/rain/blur/darkness. Use for: storm scenes, dramatic tension
+  | "none";      // Pure spectacle / abstract / environment-only. No character identity needed.
+
 export type VideoProvider = "sora" | "runway" | "luma";
 export type PromptStyle = "motion_first" | "physics_first" | "director_brief";
 
@@ -227,6 +248,49 @@ export const ROLE_DISPLAY: Record<SceneRole, { label: string; shortLabel: string
   atmosphere: { label: "Atmosphere", shortLabel: "AT" },
   establish: { label: "Establish", shortLabel: "ES" },
 };
+
+/**
+ * Coverage type display info for UI
+ */
+export const COVERAGE_DISPLAY: Record<CoverageType, { label: string; emoji: string; color: string }> = {
+  face: { label: "Face", emoji: "👤", color: "bg-purple-500" },
+  body: { label: "Body", emoji: "🏃", color: "bg-blue-500" },
+  back: { label: "Back", emoji: "🔙", color: "bg-green-500" },
+  wide: { label: "Wide", emoji: "🌄", color: "bg-amber-500" },
+  pov: { label: "POV", emoji: "👁️", color: "bg-red-500" },
+  obscured: { label: "Obscured", emoji: "🌫️", color: "bg-gray-500" },
+  none: { label: "Spectacle", emoji: "✨", color: "bg-pink-500" },
+};
+
+/**
+ * Default coverage by scene role (fallback when not explicitly set)
+ */
+export const DEFAULT_COVERAGE_BY_ROLE: Record<SceneRole, CoverageType> = {
+  hook: "wide",        // Establish with freedom
+  problem: "obscured", // Tension/chaos
+  story_a: "body",     // Action-focused
+  reset: "back",       // Quick energy burst
+  story_b: "body",     // Building to payoff
+  cta: "face",         // Emotional connection
+  atmosphere: "wide",  // Environmental
+  establish: "wide",   // Environmental
+};
+
+/**
+ * Coverage types that allow maximum motion freedom (T2V)
+ * Face is NOT visible, so identity doesn't need preserving
+ */
+export const MOTION_FREE_COVERAGE: CoverageType[] = ["back", "wide", "pov", "obscured", "none"];
+
+/**
+ * Coverage types that need face preservation (I2V when possible)
+ */
+export const FACE_CRITICAL_COVERAGE: CoverageType[] = ["face"];
+
+/**
+ * Coverage that's hybrid - I2V if good reference, T2V if not
+ */
+export const HYBRID_COVERAGE: CoverageType[] = ["body"];
 
 /**
  * Infer role from narrative position (canonical implementation)
