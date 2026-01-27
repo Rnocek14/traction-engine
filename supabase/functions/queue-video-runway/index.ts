@@ -329,6 +329,12 @@ Style: Professional short-form video, engaging, smooth transitions.
       const errorText = await runwayResponse.text();
       console.error("Runway API error:", runwayResponse.status, errorText);
       
+      // Detect credits/quota error for clearer messaging
+      const isQuotaError = errorText.includes("credits") || errorText.includes("quota");
+      const errorSummary = isQuotaError 
+        ? "No credits available" 
+        : `Runway API error: ${runwayResponse.status}`;
+      
       // Update job with error
       await supabase
         .from("video_jobs")
@@ -339,7 +345,10 @@ Style: Professional short-form video, engaging, smooth transitions.
         })
         .eq("id", job.id);
 
-      throw new Error(`Runway API error: ${runwayResponse.status}`);
+      // Include quota indicator in thrown error for continue-story-chain to detect
+      throw new Error(isQuotaError 
+        ? `Runway API error: ${runwayResponse.status} - no credits available`
+        : `Runway API error: ${runwayResponse.status}`);
     }
 
     const runwayData = await runwayResponse.json();
