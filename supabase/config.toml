@@ -68,3 +68,9 @@ verify_jwt = false
 
 [functions.auto-rate-video]
 verify_jwt = false
+
+[functions.create-story-film-mode]
+verify_jwt = false
+
+[functions.continue-story-film-mode]
+verify_jwt = false
