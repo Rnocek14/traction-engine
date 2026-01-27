@@ -231,8 +231,9 @@ export function buildFilmPrompt(
   storyboard: FilmStoryboard,
   isFirstScene: boolean
 ): string {
-  const { character_bible, location_logic } = storyboard;
-  const { shot_signature } = scene;
+  const character_bible = storyboard?.character_bible;
+  const location_logic = storyboard?.location_logic;
+  const shot_signature = scene?.shot_signature;
   
   const parts: string[] = [];
   
@@ -241,24 +242,33 @@ export function buildFilmPrompt(
     parts.push(`CHARACTER: ${character_bible.wardrobe}${character_bible.physique ? `, ${character_bible.physique}` : ""}`);
   }
   
-  // 2. Location/light logic (consistency across cuts)
-  parts.push(`SETTING: ${location_logic.setting}, ${location_logic.time_of_day}`);
-  parts.push(`LIGHT: ${location_logic.light_quality}`);
-  if (location_logic.color_palette.length > 0) {
-    parts.push(`PALETTE: ${location_logic.color_palette.join(", ")}`);
+  // 2. Location/light logic (consistency across cuts) - with fallbacks
+  if (location_logic) {
+    parts.push(`SETTING: ${location_logic.setting || "unspecified"}, ${location_logic.time_of_day || "day"}`);
+    parts.push(`LIGHT: ${location_logic.light_quality || "natural"}`);
+    if (location_logic.color_palette && location_logic.color_palette.length > 0) {
+      parts.push(`PALETTE: ${location_logic.color_palette.join(", ")}`);
+    }
   }
   
-  // 3. Shot description (framing + lens + angle)
-  const shotDesc = `${shot_signature.framing.replace("_", " ")} shot, ${shot_signature.lens} lens, ${shot_signature.angle.replace("_", " ")} angle`;
-  parts.push(`SHOT: ${shotDesc}`);
+  // 3. Shot description (framing + lens + angle) - with null checks
+  if (shot_signature) {
+    const framing = shot_signature.framing || "medium";
+    const lens = shot_signature.lens || "35mm";
+    const angle = shot_signature.angle || "eye_level";
+    const shotDesc = `${framing.replace("_", " ")} shot, ${lens} lens, ${angle.replace("_", " ")} angle`;
+    parts.push(`SHOT: ${shotDesc}`);
+  }
   
   // 4. Camera move (one clear instruction)
-  parts.push(`CAMERA: ${scene.camera_move}`);
+  if (scene.camera_move) {
+    parts.push(`CAMERA: ${scene.camera_move}`);
+  }
   
   // 5. Subject action (one clear action)
   if (scene.subject_required) {
-    parts.push(`ACTION: ${scene.subject_action}`);
-  } else {
+    parts.push(`ACTION: ${scene.subject_action || "performs action"}`);
+  } else if (scene.subject_action) {
     parts.push(`EVENT: ${scene.alternate_subject || ""} — ${scene.subject_action}`);
   }
   
