@@ -7,6 +7,10 @@
  * Key insight: Visual continuity (I2V) ≠ Narrative continuity.
  * This module provides the "cause → effect" glue that makes
  * scenes feel like a story, not a slideshow.
+ * 
+ * NEW: Spectacle Scene System - subject_required=false allows scenes
+ * without the protagonist, enabling "Medieval War with Dragons" style
+ * cross-cutting for maximum action freedom.
  */
 
 import type { SceneRole } from "./scene-role-router.ts";
@@ -21,6 +25,12 @@ import type { SceneRole } from "./scene-role-router.ts";
  */
 export type CoverageType = 
   | "face" | "body" | "back" | "wide" | "pov" | "obscured" | "none";
+
+/**
+ * Alternate subject types for spectacle scenes
+ */
+export type AlternateSubject = 
+  | "environment" | "creature" | "object" | "abstract" | "threat";
 
 /**
  * Coverage types that allow maximum motion freedom (T2V)
@@ -166,6 +176,71 @@ export function buildCoverageDirective(coverageType: CoverageType): string {
 }
 
 // ============================================================================
+// SPECTACLE SCENE SYSTEM
+// ============================================================================
+
+/**
+ * Build spectacle directive for scenes without protagonist
+ * This frees the model from any character identity constraints
+ */
+export function buildSpectacleDirective(alternateSubject?: AlternateSubject): string {
+  if (!alternateSubject) {
+    return "[SPECTACLE SHOT: No protagonist needed. Focus on environment/spectacle. MAXIMIZE motion, scale, visual impact.]\n\n";
+  }
+  
+  const subjectHints: Record<AlternateSubject, string> = {
+    environment: "Focus on landscape, weather, atmosphere, scale. No character needed. Show the WORLD.",
+    creature: "Focus on creature/monster/threat. Maximize menace, power, and motion. Show the BEAST.",
+    object: "Focus on artifact/portal/vehicle. Detail, mystery, and significance. Show the OBJECT.",
+    abstract: "Pure visual spectacle. Cosmic, surreal, overwhelming. Show the IMPOSSIBLE.",
+    threat: "Show the DANGER. Explosion, destruction, approaching doom. Make it visceral and immediate.",
+  };
+  
+  return `[SPECTACLE SHOT: ${subjectHints[alternateSubject]}]\n\n`;
+}
+
+/**
+ * Check if a scene is a spectacle scene (subject not required)
+ */
+export function isSpectacleScene(scene: { subject_required?: boolean; alternate_subject?: AlternateSubject }): boolean {
+  return scene.subject_required === false || !!scene.alternate_subject;
+}
+
+/**
+ * Get spectacle handling for prompt assembly
+ * Returns directives and flags for spectacle scene processing
+ */
+export function getSpectacleHandling(scene: {
+  subject_required?: boolean;
+  alternate_subject?: AlternateSubject;
+  coverage_type?: CoverageType;
+}): {
+  isSpectacle: boolean;
+  forceT2V: boolean;
+  directive: string;
+  stripIdentity: boolean;
+} {
+  const spectacle = isSpectacleScene(scene);
+  
+  if (!spectacle) {
+    return {
+      isSpectacle: false,
+      forceT2V: false,
+      directive: "",
+      stripIdentity: false,
+    };
+  }
+  
+  // Spectacle scenes: always T2V, strip identity tokens
+  return {
+    isSpectacle: true,
+    forceT2V: true,
+    directive: buildSpectacleDirective(scene.alternate_subject),
+    stripIdentity: true, // Signal to strip character bible from prompt
+  };
+}
+
+// ============================================================================
 // Narrative Scene Types
 // ============================================================================
 
@@ -185,6 +260,9 @@ export interface NarrativeScene {
   end_state?: string;
   // NEW: Coverage type for action vs identity
   coverage_type?: CoverageType;
+  // NEW: Spectacle scene fields (subject freedom)
+  subject_required?: boolean;
+  alternate_subject?: AlternateSubject;
 }
 
 /**

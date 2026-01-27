@@ -60,8 +60,41 @@ export type CoverageType =
   | "obscured"   // Face hidden by dust/rain/blur/darkness. Use for: storm scenes, dramatic tension
   | "none";      // Pure spectacle / abstract / environment-only. No character identity needed.
 
+// ============================================================================
+// Spectacle Scene System - Subject Freedom
+// ============================================================================
+
+/**
+ * Alternate subject types for spectacle scenes (when protagonist not required)
+ * This unlocks "Medieval War with Dragons" style cross-cutting
+ */
+export type AlternateSubject = 
+  | "environment"  // Landscape, weather, scenery - pure world-building
+  | "creature"     // Dragon, alien, monster - threat or ally reveal
+  | "object"       // Artifact, portal, vehicle - plot device
+  | "abstract"     // Cosmic, surreal, metaphorical - pure visual spectacle
+  | "threat";      // Danger approaching, explosion, destruction - tension builder
+
+/**
+ * Spectacle scene display info for UI
+ */
+export const ALTERNATE_SUBJECT_DISPLAY: Record<AlternateSubject, { label: string; emoji: string; color: string }> = {
+  environment: { label: "Environment", emoji: "🌄", color: "bg-emerald-500" },
+  creature: { label: "Creature", emoji: "🐉", color: "bg-red-500" },
+  object: { label: "Object", emoji: "✨", color: "bg-amber-500" },
+  abstract: { label: "Abstract", emoji: "🌌", color: "bg-violet-500" },
+  threat: { label: "Threat", emoji: "⚡", color: "bg-orange-500" },
+};
+
 export type VideoProvider = "sora" | "runway" | "luma";
 export type PromptStyle = "motion_first" | "physics_first" | "director_brief";
+
+/**
+ * Check if a scene is a spectacle scene (subject not required)
+ */
+export function isSpectacleScene(scene: { subject_required?: boolean; alternate_subject?: AlternateSubject }): boolean {
+  return scene.subject_required === false || !!scene.alternate_subject;
+}
 
 export interface SceneRoleConfig {
   role: SceneRole;
