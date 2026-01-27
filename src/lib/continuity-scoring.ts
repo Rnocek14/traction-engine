@@ -54,12 +54,17 @@ export type CutZone = "hook" | "setup" | "escalation" | "payoff" | "button";
 
 export interface StoryScene {
   id: string;
-  prompt: string;
-  duration_target: number;
-  sequence_index: number;
+  prompt?: string; // Standard mode prompt
+  subject_action?: string; // Film mode action (alternative to prompt)
+  duration_target?: number; // Standard mode
+  duration_seconds?: number; // Film mode (alternative to duration_target)
+  sequence_index?: number;
+  index?: number; // Film mode uses 'index' instead of 'sequence_index'
   camera_direction?: string;
+  camera_move?: string; // Film mode camera
   role?: SceneRole;
   enrichedPrompt?: string;
+  coverage?: string; // Film mode coverage type
   // Director Brain fields (Phase 1)
   change_type?: ChangeType;
   narration_line?: string;
@@ -68,6 +73,38 @@ export interface StoryScene {
   zone?: CutZone;
   // Cut type architecture (Phase 2)
   cut_type?: "hard" | "continuity";
+  // Film mode specific
+  subject_required?: boolean;
+  shot_signature?: {
+    framing?: string;
+    angle?: string;
+    lens?: string;
+    motion?: string;
+  };
+  realism_hints?: string[];
+  timing_beats?: string;
+  setpiece_delta?: string;
+}
+
+/**
+ * Get the effective prompt from a scene (supports both standard and Film Mode)
+ */
+export function getScenePrompt(scene: StoryScene): string {
+  return scene.prompt || scene.subject_action || "";
+}
+
+/**
+ * Get the effective duration from a scene (supports both standard and Film Mode)
+ */
+export function getSceneDuration(scene: StoryScene): number {
+  return scene.duration_target || scene.duration_seconds || 4;
+}
+
+/**
+ * Get the effective sequence index from a scene (supports both standard and Film Mode)
+ */
+export function getSceneIndex(scene: StoryScene): number {
+  return scene.sequence_index ?? scene.index ?? 0;
 }
 
 export interface Storyboard {
