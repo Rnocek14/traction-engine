@@ -21,7 +21,8 @@ import {
   type VideoProvider,
 } from "../_shared/scene-role-router.ts";
 import { type MotifScene } from "../_shared/motif-injection.ts";
-import { applyProgressionInjection, buildProgressionContext } from "../_shared/progression-injection.ts";
+import { applyProgressionInjection, buildProgressionContext, extractActionFromPrompt } from "../_shared/progression-injection.ts";
+import { applyMotionAmplification, summarizeMotionIntent } from "../_shared/motion-amplification.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -461,34 +462,28 @@ Deno.serve(async (req) => {
       }
       // For hard cuts: startingFrameUrl stays undefined (T2V) - no resize calls needed
       
-      // Apply progression injection for I2V scenes (prevents repeated actions)
-      // Phase 2: Prefer action_summary over heuristic extraction
-      const changeType = nextScene.change_type || "info"; // Default to "info" not "action"
+      // === PROMPT ENHANCEMENT FOR I2V ===
+      // Apply progression injection + motion amplification for I2V scenes
+      const changeType = nextScene.change_type || "info";
       let finalPrompt = basePrompt;
+      const isI2V = cutType === "continuity" && !!startingFrameUrl;
+      
+      // Extract previous action for "finished" constraint
+      let prevActionForMotion: string | null = null;
       
       if (nextSceneIndex > 0 && prevScene) {
         // Phase 2: Use action_summary if available, else fall back to extraction
-        const prevAction = prevScene.action_summary || null;
-        const nextAction = nextScene.action_summary || null;
+        const prevAction = prevScene.action_summary || extractActionFromPrompt(prevRawPrompt || "");
+        const nextAction = nextScene.action_summary || extractActionFromPrompt(nextRawPrompt);
+        prevActionForMotion = prevAction;
         
-        if (prevAction && nextAction) {
-          // Use explicit action summaries (much more reliable)
-          console.log(`[progression] scene=${nextSceneIndex + 1} action_summary: prev="${prevAction}" next="${nextAction}" change_type="${changeType}"`);
-          
-          if (prevAction.toLowerCase() === nextAction.toLowerCase()) {
-            console.warn(`[progression] ⚠️ action_summary identical - may cause repeated motion`);
-          }
-        } else {
-          // Fall back to heuristic extraction from RAW prompts
-          const progressionCtx = buildProgressionContext(prevRawPrompt || "", nextRawPrompt, changeType);
-          console.log(`[progression] scene=${nextSceneIndex + 1} prev_action="${progressionCtx.prev_action}" next_action="${progressionCtx.next_action}" change_type="${progressionCtx.change_type}"`);
-          
-          if (progressionCtx.prev_action === progressionCtx.next_action) {
-            console.warn(`[progression] ⚠️ prev_action == next_action - may cause repeated motion`);
-          }
+        console.log(`[progression] scene=${nextSceneIndex + 1} prev="${prevAction}" next="${nextAction}" change="${changeType}" isI2V=${isI2V}`);
+        
+        if (prevAction.toLowerCase() === nextAction.toLowerCase()) {
+          console.warn(`[progression] ⚠️ prev_action == next_action - may cause repeated motion`);
         }
         
-        // Inject progression directive into the compiled prompt
+        // Apply progression injection (moves DIRECTOR NOTE to TOP of prompt)
         finalPrompt = applyProgressionInjection(
           basePrompt,
           prevRawPrompt,
@@ -497,6 +492,24 @@ Deno.serve(async (req) => {
           selectedProvider as "sora" | "runway" | "luma",
           sceneRole
         );
+      }
+      
+      // === MOTION AMPLIFICATION (I2V Only) ===
+      // This is the KEY fix: inject 2-3 motion beats at the VERY TOP
+      // to overpower Sora's "hold starting frame" behavior
+      if (isI2V) {
+        const motionSummary = summarizeMotionIntent(basePrompt);
+        console.log(`[motion-amp] I2V scene ${nextSceneIndex + 1}: "${motionSummary}"`);
+        
+        finalPrompt = applyMotionAmplification(
+          finalPrompt,
+          selectedProvider as "sora" | "runway" | "luma",
+          prevActionForMotion,
+          true, // isI2V
+          sceneRole
+        );
+        
+        console.log(`[motion-amp] ✓ Amplification applied for ${selectedProvider}`);
       }
       
       const response = await fetch(`${supabaseUrl}/functions/v1/${providerEndpoint}`, {
@@ -520,7 +533,24 @@ Deno.serve(async (req) => {
       const data = await response.json();
 
       if (!response.ok || !data.success) {
-        console.error(`[chain-continue] Failed to queue: ${data.error}`);
+        const errorMsg = data.error || `HTTP ${response.status}`;
+        console.error(`[chain-continue] Failed to queue: ${errorMsg}`);
+        
+        // Check if this is a credits/quota error - mark as partial to stop infinite retries
+        const isQuotaError = errorMsg.includes("credits") || 
+                             errorMsg.includes("quota") || 
+                             errorMsg.includes("rate limit");
+        
+        if (isQuotaError) {
+          console.error(`[chain-continue] Quota/credits error detected - marking story as partial to stop retries`);
+          await supabase
+            .from("story_jobs")
+            .update({ status: "partial" })
+            .eq("id", story.id);
+          results.push({ storyId: story.id, action: "quota_failed", nextScene: nextSceneIndex });
+          continue;
+        }
+        
         results.push({ storyId: story.id, action: "queue_failed", nextScene: nextSceneIndex });
         continue;
       }

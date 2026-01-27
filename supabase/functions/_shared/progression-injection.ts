@@ -127,39 +127,57 @@ export function buildProgressionContext(
 }
 
 /**
- * Inject Sora-style progression directive (director's note)
+ * Inject Sora-style progression directive (MOTION AT TOP)
+ * 
+ * CRITICAL: Motion directives go at the TOP of the prompt, not the bottom.
+ * Sora processes sequentially - if cinematography specs come first, it
+ * "sets the scene" as static before reaching action commands.
+ * 
+ * This version makes the "previous beat finished" constraint explicit.
  */
 export function injectSoraProgression(prompt: string, ctx: ProgressionContext): string {
-  return `${prompt}
+  // Motion directive at TOP - this is the key change
+  return `═══ NARRATIVE PROGRESSION (CRITICAL) ═══
 
-DIRECTOR NOTE (story progression):
-Continue from the prior shot, but introduce a clearly new beat.
-- Previous action: "${ctx.prev_action}" (DO NOT repeat this action)
-- New action: ${ctx.next_action}
-- What must change: ${ctx.change_type}
-Maintain character identity, wardrobe, and environment continuity.`;
+PREVIOUS ACTION FINISHED: "${ctx.prev_action}" is COMPLETE and must not continue.
+Start this shot in the END STATE of the previous scene.
+
+NEW ACTION REQUIRED: ${ctx.next_action}
+This is the new beat - execute it with visible motion.
+
+WHAT CHANGES: ${ctx.change_type}
+Show this change clearly through character action or environment.
+
+IDENTITY: Maintain character appearance, wardrobe, environment.
+Camera motion alone does NOT satisfy the action requirement.
+
+═══════════════════════════════════════
+
+${prompt}`;
 }
 
 /**
  * Inject Runway-style progression directive (compact, motion-first)
  */
 export function injectRunwayProgression(prompt: string, ctx: ProgressionContext): string {
-  return `${prompt}
+  // Runway gets a compact but forceful version
+  return `[BEAT TRANSITION]
+Previous: "${ctx.prev_action}" ← DONE
+New action: ${ctx.next_action}
+Change: ${ctx.change_type}
+Subject must move. Camera motion ≠ action.
 
-Same character and setting. NEW action: ${ctx.next_action}. 
-Do not repeat: ${ctx.prev_action}. Visible change: ${ctx.change_type}.`;
+${prompt}`;
 }
 
 /**
  * Inject Luma-style progression directive (atmosphere-aware)
  */
 export function injectLumaProgression(prompt: string, ctx: ProgressionContext): string {
-  return `${prompt}
+  // Luma respects physics naturally, lighter touch needed
+  return `[Continue] Previous "${ctx.prev_action}" complete. New: ${ctx.next_action}. Change: ${ctx.change_type}.
 
-Continue seamlessly with a new beat. 
-New action: ${ctx.next_action}
-Previous action (${ctx.prev_action}) must not repeat.
-Change visible: ${ctx.change_type}`;
+${prompt}`;
 }
 
 /**
