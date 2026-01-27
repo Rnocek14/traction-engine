@@ -45,6 +45,15 @@ import {
   describeCaptureContract,
   type SceneDifficulty,
 } from "../_shared/capture-contract.ts";
+import {
+  buildForceEscalationBlock,
+  logForceEscalationInjection,
+  getProviderSanitizationLevel,
+  shouldSkipSanitization,
+  type ForceType,
+  type EscalationLevel,
+  type SanitizationLevel,
+} from "../_shared/force-escalation.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -234,7 +243,8 @@ Deno.serve(async (req) => {
       const storyboardData = story.storyboard_json as { 
         scenes?: Array<{ 
           id: string; 
-          prompt: string; 
+          prompt: string;
+          subject_action?: string; // Film mode alternative to prompt
           enriched_prompt?: string; 
           duration_target: number; 
           role?: SceneRole;
@@ -254,6 +264,11 @@ Deno.serve(async (req) => {
           // Phase 7: Spectacle scene system (subject freedom)
           subject_required?: boolean;
           alternate_subject?: AlternateSubject;
+          // Phase 8: Story Forces (force/escalation injection)
+          force_present?: boolean;
+          force_type?: ForceType;
+          escalation_delta?: EscalationLevel;
+          setpiece_delta?: string;
         }>;
         tier?: "volume" | "hero";
         motif_anchors?: string[];
@@ -264,6 +279,9 @@ Deno.serve(async (req) => {
         locked_provider?: "sora" | "runway" | "luma";
         // Soft Continuity Mode: allow T2V for specific roles even in Character Continuity Mode
         soft_continuity?: boolean;
+        // Phase 8: Story-level settings
+        brutality_mode?: boolean;
+        sanitization_level?: SanitizationLevel;
       };
       const scenes = storyboardData?.scenes || [];
       // Film Mode stories automatically get "hero" tier (unlimited Sora)
@@ -276,6 +294,9 @@ Deno.serve(async (req) => {
       const lockedProviderName = storyboardData?.locked_provider as VideoProvider | null;
       // Soft Continuity Mode: allow strategic T2V cuts for energy while keeping locked provider
       const softContinuityMode = storyboardData?.soft_continuity || false;
+      // Phase 8: Story-level settings (brutality mode, sanitization)
+      const brutalityMode = storyboardData?.brutality_mode || false;
+      const storySanitizationLevel = storyboardData?.sanitization_level;
       const totalScenes = scenes.length;
 
       if (totalScenes === 0) {
@@ -713,8 +734,29 @@ Deno.serve(async (req) => {
       const captureContract = buildCaptureContract(difficulty);
       console.log(`[capture] Scene ${nextSceneIndex + 1} difficulty=${difficulty} (interior=${isInterior}, metal=${hasMetalArmor}) → ${describeCaptureContract(difficulty)}`);
       
+      // === FORCE/ESCALATION INJECTION (Phase 8) ===
+      // Transform abstract metadata (force_type, escalation_delta) into concrete visual directives
+      const forceEscalationBlock = buildForceEscalationBlock(
+        {
+          force_present: (nextScene as { force_present?: boolean }).force_present,
+          force_type: (nextScene as { force_type?: ForceType }).force_type,
+          escalation_delta: (nextScene as { escalation_delta?: EscalationLevel }).escalation_delta,
+          setpiece_delta: (nextScene as { setpiece_delta?: string }).setpiece_delta,
+        },
+        nextSceneIndex,
+        brutalityMode
+      );
+      
+      // Log force/escalation for debugging
+      logForceEscalationInjection(nextSceneIndex, {
+        force_present: (nextScene as { force_present?: boolean }).force_present,
+        force_type: (nextScene as { force_type?: ForceType }).force_type,
+        escalation_delta: (nextScene as { escalation_delta?: EscalationLevel }).escalation_delta,
+        setpiece_delta: (nextScene as { setpiece_delta?: string }).setpiece_delta,
+      });
+      
       if (isI2V) {
-        // I2V ORDER: Motion first (breaks hold), then capture→cinematography→narrative
+        // I2V ORDER: Motion first (breaks hold), then capture→force→cinematography→narrative
         const motionSummary = summarizeMotionIntent(basePrompt);
         console.log(`[motion-amp] I2V scene ${nextSceneIndex + 1}: "${motionSummary}"`);
         
@@ -727,29 +769,30 @@ Deno.serve(async (req) => {
           sceneRole
         );
         
-        // Step 2: Insert capture contract + cinematography + narrative context AFTER motion block
-        // Order: motion → capture → cinematography → narrative → visual
-        finalPrompt = insertNarrativeAfterMotion(finalPrompt, captureContract + cinematographyDirective + narrativeBlock);
+        // Step 2: Insert capture + force/escalation + cinematography + narrative AFTER motion block
+        // Order: motion → capture → FORCE/ESC → cinematography → narrative → visual
+        finalPrompt = insertNarrativeAfterMotion(finalPrompt, captureContract + forceEscalationBlock + cinematographyDirective + narrativeBlock);
         
-        console.log(`[narrative] ✓ I2V order: motion→capture→cinematography→narrative→visual for ${selectedProvider}`);
+        console.log(`[narrative] ✓ I2V order: motion→capture→force/esc→cinematography→narrative→visual for ${selectedProvider}`);
       } else {
         // T2V ORDER: 
         // CAPTURE at very TOP (establishes live-action prior)
+        // FORCE/ESCALATION next (drives intensity)
         // SPECTACLE/COVERAGE next (if applicable)
         // Then cinematography + narrative
         
         if (spectacleHandling.isSpectacle) {
-          // Spectacle scene: capture + spectacle directive + cinematography
+          // Spectacle scene: capture + force + spectacle directive + cinematography
           const spectacleDirective = spectacleHandling.directive;
-          finalPrompt = captureContract + spectacleDirective + cinematographyDirective + narrativeBlock + finalPrompt;
-          console.log(`[narrative] ✓ T2V spectacle order: capture→spectacle→cinematography→narrative→visual (${
+          finalPrompt = captureContract + forceEscalationBlock + spectacleDirective + cinematographyDirective + narrativeBlock + finalPrompt;
+          console.log(`[narrative] ✓ T2V spectacle order: capture→force/esc→spectacle→cinematography→narrative→visual (${
             (nextScene as { alternate_subject?: AlternateSubject }).alternate_subject || "no subject"
           })`);
         } else {
-          // Regular T2V: capture + coverage + cinematography + narrative
+          // Regular T2V: capture + force + coverage + cinematography + narrative
           const coverageDirective = buildCoverageDirective(resolvedCoverage);
-          finalPrompt = captureContract + coverageDirective + cinematographyDirective + narrativeBlock + finalPrompt;
-          console.log(`[narrative] ✓ T2V order: capture→coverage=${resolvedCoverage}→cinematography→narrative→visual`);
+          finalPrompt = captureContract + forceEscalationBlock + coverageDirective + cinematographyDirective + narrativeBlock + finalPrompt;
+          console.log(`[narrative] ✓ T2V order: capture→force/esc→coverage=${resolvedCoverage}→cinematography→narrative→visual`);
         }
       }
       
