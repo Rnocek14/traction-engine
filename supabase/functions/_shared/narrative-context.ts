@@ -93,7 +93,7 @@ const OBSCURED_TRIGGERS = [
  * 3-tier fallback: provided → inferred from verbs → default by role
  */
 export function inferCoverageFromPrompt(
-  prompt: string,
+  prompt: string | undefined | null,
   role: SceneRole,
   explicitCoverage?: CoverageType
 ): CoverageType {
@@ -102,7 +102,12 @@ export function inferCoverageFromPrompt(
     return explicitCoverage;
   }
   
-  // Tier 2: Infer from prompt text
+  // Tier 2: Infer from prompt text (with null safety)
+  if (!prompt) {
+    // No prompt available - fall back to role-based default
+    return DEFAULT_COVERAGE_BY_ROLE[role] || "body";
+  }
+  
   const lower = prompt.toLowerCase();
   
   if (BACK_SHOT_TRIGGERS.some(t => lower.includes(t))) return "back";
