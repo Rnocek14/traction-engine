@@ -28,7 +28,7 @@ const corsHeaders = {
 interface CreateStoryRequest {
   account_id: string;
   premise: string;
-  character_description: string;
+  character_description?: string; // Optional - will use premise if not provided
   scene_count?: number;
   title?: string;
 }
@@ -46,16 +46,20 @@ Deno.serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseKey);
     const body: CreateStoryRequest = await req.json();
 
-    if (!body.account_id || !body.premise || !body.character_description) {
-      throw new Error("account_id, premise, and character_description are required");
+    if (!body.account_id || !body.premise) {
+      throw new Error("account_id and premise are required");
     }
+
+    // Character description is optional - derive from premise if not provided
+    const characterDescription = body.character_description?.trim() || 
+      "The main character from the story premise";
 
     const sceneCount = body.scene_count || 6;
 
     // Generate storyboard via GPT-4o
     const systemPrompt = buildStoryboardGenerationPrompt(
       body.premise,
-      body.character_description,
+      characterDescription,
       sceneCount
     );
 
