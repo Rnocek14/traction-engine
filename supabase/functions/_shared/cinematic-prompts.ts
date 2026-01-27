@@ -195,9 +195,9 @@ export function buildCinematicPrompt(
   const dof = styleGuide?.depth_of_field || "medium";
   sections.push(`FOCUS: ${DOF_SPECS[dof] || DOF_SPECS.medium}`);
   
-  // Motion style
-  const motion = styleGuide?.motion_style || "smooth";
-  sections.push(`MOTION: ${MOTION_SPECS[motion] || MOTION_SPECS.smooth}`);
+  // Motion style - default to handheld (film-first, not game-first)
+  const motion = styleGuide?.motion_style || "handheld";
+  sections.push(`MOTION: ${MOTION_SPECS[motion] || MOTION_SPECS.handheld}`);
   
   // Lighting section
   sections.push("\n--- LIGHTING ---");
@@ -209,9 +209,9 @@ export function buildCinematicPrompt(
   const colorGrade = styleGuide?.color_grade || "neutral";
   sections.push(COLOR_SPECS[colorGrade] || COLOR_SPECS.neutral);
   
-  // Film stock
-  const filmStock = styleGuide?.film_stock || "digital";
-  sections.push(`FILM STOCK: ${FILM_SPECS[filmStock] || FILM_SPECS.digital}`);
+  // Film stock - default to portra (film-first, not clinical digital)
+  const filmStock = styleGuide?.film_stock || "portra";
+  sections.push(`FILM STOCK: ${FILM_SPECS[filmStock] || FILM_SPECS.portra}`);
   
   // Mood
   if (styleGuide?.mood) {
@@ -230,15 +230,15 @@ export function buildCinematicPrompt(
   sections.push("Allow for natural pauses and subtle secondary movements.");
   sections.push("Actions have weight, momentum, and follow-through.");
   
-  // Quality directives - POSITIVE FRAMING (moderation-safe)
+  // Quality directives - REALISTIC CAPTURE FRAMING (film-first, not CGI-first)
+  // Note: Removed "clean edges, sharp details, broadcast-quality" which activate CGI/game priors
   sections.push("\n--- QUALITY STANDARDS ---");
-  sections.push("MOTION: Natural motion blur with lifelike physics. Smooth 24fps cinematic cadence with realistic momentum.");
+  sections.push("MOTION: Natural motion blur with lifelike physics. 24fps cinematic cadence with realistic momentum.");
   sections.push("ANATOMY: Consistent human proportions throughout. Five fingers per hand. Natural body mechanics.");
   sections.push("FACES: Expressive and engaged. Natural eye movements. Subtle authentic micro-expressions.");
-  sections.push("TEMPORAL: Smooth frame interpolation. Consistent velocity and acceleration. Seamless movement flow.");
+  sections.push("TEMPORAL: Consistent velocity and acceleration. Movement flow with natural imperfection.");
   sections.push("SPATIAL: Coherent 3D space. Correct perspective. Objects maintain relative positions throughout.");
-  sections.push("LIGHTING: Consistent lighting direction. Stable exposure. Smooth color transitions.");
-  sections.push("PRODUCTION: Broadcast-quality output. Clean edges. Sharp details. Rich color depth.");
+  sections.push("LIGHTING: Practical light sources. Exposure can vary. Shadows allowed to crush.");
   
   // Continuity directive (critical for chained generation)
   if (!isFirstClip) {
@@ -658,8 +658,7 @@ export function buildRunwayPrompt(
     parts.push(`${styleGuide.film_stock} film look`);
   }
   
-  // Quality directive (concise)
-  parts.push("cinematic quality, smooth motion, professional production");
+  // Film-first quality (removed "cinematic quality, professional production" which activate CGI priors)
   
   // Join with commas for Runway's preferred format
   return parts.filter(Boolean).join(", ");
@@ -760,8 +759,8 @@ export function buildLumaPrompt(
     parts.push("smooth deliberate camera movement");
   }
   
-  // Quality directive - emphasize physics and natural motion (keep concise)
-  parts.push("realistic physics, natural motion, high quality, cinematic");
+  // Film-first quality (removed "high quality, cinematic" which activate CGI priors)
+  parts.push("realistic physics, natural motion");
   
   return parts.filter(Boolean).join(", ");
 }
