@@ -1,141 +1,105 @@
 
 
-# Plan: Fix "Video Game Look" - Inject Role-Based Cinematography
+# Fix Plan: Story Builder Crash on Film Mode Stories
 
 ## Problem Summary
 
-The Dragon Siege clips look "video game like" because **every scene uses identical cinematography settings**:
-- Same 50mm lens (no wide/tight variety)
-- Same "smooth" motion (no handheld/dynamic/whip_pan variety)
-- Same "natural" lighting (no dramatic/atmospheric variety)
-- No realism anchors (no jitter, motion blur, dust particles)
-
-The code for role-based cinematography **exists** (`buildCinematographyDirective`) but **is never called** during story chain generation.
+The Story Builder page crashes with `TypeError: Cannot read properties of undefined (reading 'defaultDuration')` when loading Film Mode stories.
 
 ## Root Cause
 
-In `supabase/functions/continue-story-chain/index.ts`:
-- Lines 612-728 build the `finalPrompt` with motion amplification, narrative context, and coverage directives
-- But `buildCinematographyDirective()` is never invoked
-- The prompts fall through to `queue-video` which uses default cinematography
+Film Mode stories are saved with `story_type: "film_continuity"` in the database. However:
+1. The `StoryType` TypeScript type only includes: `"short_story" | "brainrot" | "info" | "hybrid"`
+2. `STORY_TYPE_CONFIGS` has no entry for `"film_continuity"`
+3. When the UI tries to load a Film Mode story, `STORY_TYPE_CONFIGS[storyType]` returns `undefined`
+4. The component crashes when accessing `config.defaultDuration`
 
 ## Solution
 
-Inject the role-based cinematography directive into the prompt assembly pipeline, giving each scene distinct visual treatment.
+Add `"film_continuity"` as a valid story type with appropriate configuration values.
 
 ---
 
-## Implementation Details
+## Technical Implementation
 
-### File: `supabase/functions/continue-story-chain/index.ts`
+### Step 1: Update `src/lib/continuity-scoring.ts`
 
-**Step 1: Import the cinematography builder**
+Add `"film_continuity"` to the type definition and config:
 
-Add to imports (around line 24):
 ```typescript
-import { 
-  buildCinematographyDirective, 
-  getRoleCinematography,
-  buildRealismAnchor 
-} from "../_shared/cinematic-prompts.ts";
+export type StoryType = "short_story" | "brainrot" | "info" | "hybrid" | "film_continuity";
 ```
 
-**Step 2: Build cinematography directive before prompt assembly**
+Add the configuration entry:
 
-After the cut type resolution (around line 553), add:
 ```typescript
-// === ROLE-BASED CINEMATOGRAPHY (anti-"video game" variety) ===
-const cinematographyDirective = buildCinematographyDirective(
-  nextSceneIndex,
-  sceneRole,
-  true // includeRealism for action scenes
-);
-console.log(`[cinematography] Scene ${nextSceneIndex + 1} role=${sceneRole} → ${
-  getRoleCinematography(sceneRole).lens
-} lens, ${getRoleCinematography(sceneRole).motion} motion`);
-```
-
-**Step 3: Inject cinematography into prompt (near top for maximum influence)**
-
-Modify the prompt assembly section (around lines 714-727) to include the cinematography directive:
-
-For T2V spectacle scenes:
-```typescript
-finalPrompt = spectacleDirective + cinematographyDirective + narrativeBlock + finalPrompt;
-```
-
-For T2V regular scenes:
-```typescript
-finalPrompt = coverageDirective + cinematographyDirective + narrativeBlock + finalPrompt;
-```
-
-For I2V scenes:
-```typescript
-// After motion amplification, insert cinematography + narrative
-finalPrompt = insertAfterMotion(finalPrompt, cinematographyDirective + narrativeBlock);
-```
-
----
-
-## Expected Result
-
-After this fix, each scene will have distinct cinematography:
-
-| Scene | Role | Lens | Motion | Lighting | Realism |
-|-------|------|------|--------|----------|---------|
-| 0 | hook | 24mm wide | dynamic | dramatic | handheld jitter |
-| 1 | problem | 35mm | handheld | atmospheric | motion blur |
-| 2 | story_a | 50mm | tracking | natural | dust particles |
-| 3 | reset | 85mm portrait | whip_pan | dramatic | fire flicker |
-| 4 | story_b | 50mm | dolly | motivated | lens flare |
-| 5 | cta | 85mm portrait | static | soft | focus breathing |
-
-The visual variety will break the "same shot repeated" feeling.
-
----
-
-## Verification
-
-After deployment, generate a new story and check the logs for:
-```
-[cinematography] Scene 1 role=hook → 24mm lens, dynamic motion
-[cinematography] Scene 2 role=problem → 35mm lens, handheld motion
-[cinematography] Scene 3 role=story_a → 50mm lens, tracking motion
-...
-```
-
-Also verify the compiled prompts in `video_jobs.settings.prompt` contain the varied cinematography blocks.
-
----
-
-## Additional Improvements (Optional)
-
-### A: Log the full cinematography in style_hints for audit
-
-Add to the audit data (around line 776):
-```typescript
-const auditData = {
-  // ... existing fields ...
-  cinematography: getRoleCinematography(sceneRole),
+export const STORY_TYPE_CONFIGS: Record<StoryType, StoryTypeConfig> = {
+  // ... existing entries ...
+  film_continuity: {
+    name: "Film Mode",
+    description: "Film-first architecture with face-only I2V and variety contract",
+    clipPacing: "medium",
+    typicalClipCount: [6, 10],
+    continuityStrictness: "moderate",
+    defaultDuration: 4,  // Film mode scenes often use 4-5 second clips
+  },
 };
 ```
 
-### B: Override continuity_anchors camera_language with role-based values
+### Step 2: Update `src/components/lab/StoryBuilderPanel.tsx`
 
-Currently, `story.continuity_anchors.camera_language` sets a global style that gets passed to `buildCinematicPrompt`. This could be modified per-scene to use role-based settings, but that's a larger change. The directive injection is the faster fix.
+Add a safety check when hydrating from existing story to auto-enable Film Mode:
+
+```typescript
+// In the hydration useEffect (around line 509-535)
+useEffect(() => {
+  if (forceNew || !existingStory) return;
+  setTitle(existingStory.title || "");
+  
+  // Handle Film Mode stories - auto-enable film mode and map to valid type
+  const rawStoryType = existingStory.story_type as string;
+  if (rawStoryType === "film_continuity") {
+    setFilmMode(true);
+    setStoryType("film_continuity"); // Now valid since we added it to the type
+  } else {
+    setStoryType((rawStoryType as StoryType) || "short_story");
+  }
+  // ... rest of hydration
+}, [existingStory, forceNew]);
+```
+
+### Step 3: Update rendering to handle potential undefined config (defensive)
+
+Add a fallback in case config lookup fails:
+
+```typescript
+// Around line 1219
+const config = STORY_TYPE_CONFIGS[storyType] || STORY_TYPE_CONFIGS.short_story;
+```
+
+And in `addScene`:
+
+```typescript
+const addScene = () => {
+  const config = STORY_TYPE_CONFIGS[storyType] || STORY_TYPE_CONFIGS.short_story;
+  // ...
+};
+```
 
 ---
 
-## Technical Summary
+## Summary of Changes
 
-| Component | Current State | After Fix |
-|-----------|---------------|-----------|
-| Lens variety | ❌ All 50mm | ✅ 24mm → 85mm per role |
-| Motion variety | ❌ All "smooth" | ✅ dynamic/handheld/tracking/whip_pan |
-| Lighting variety | ❌ All "natural" | ✅ dramatic/atmospheric/natural/soft |
-| Realism anchors | ❌ None | ✅ Jitter, blur, dust, flare per scene |
-| Cut types | ✅ Face-only I2V working | ✅ No change needed |
-| Character Bible T2V | ✅ Working | ✅ No change needed |
+| File | Change |
+|------|--------|
+| `src/lib/continuity-scoring.ts` | Add `"film_continuity"` to `StoryType` union and add config entry |
+| `src/components/lab/StoryBuilderPanel.tsx` | Add fallback for undefined config, auto-enable filmMode when loading film_continuity stories |
 
-This fix targets the "video game look" at its source: **visual monotony due to missing cinematography variation**.
+## Expected Outcome
+
+After this fix:
+- Film Mode stories will load without crashing
+- The UI will correctly identify and render Film Mode stories
+- The `filmMode` toggle will be automatically enabled when viewing a Film Mode story
+- Defensive fallbacks prevent future crashes from unknown story types
 
