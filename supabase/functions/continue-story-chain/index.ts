@@ -22,6 +22,7 @@ import {
 } from "../_shared/scene-role-router.ts";
 import { type MotifScene } from "../_shared/motif-injection.ts";
 import { applyProgressionInjection, buildProgressionContext, extractActionFromPrompt } from "../_shared/progression-injection.ts";
+import { buildCinematographyDirective, getRoleCinematography } from "../_shared/cinematic-prompts.ts";
 import { applyMotionAmplification, summarizeMotionIntent } from "../_shared/motion-amplification.ts";
 import { 
   buildNarrativeContextBlock, 
@@ -552,6 +553,15 @@ Deno.serve(async (req) => {
       // Log the cut type decision (this is the key diagnostic)
       console.log(`[chain-continue] Scene ${nextSceneIndex + 1} cut_type="${cutType}" (${cutReason}) → ${cutType === "continuity" ? "I2V" : "T2V"}`);
       
+      // === ROLE-BASED CINEMATOGRAPHY (anti-"video game" variety) ===
+      const cinematographyDirective = buildCinematographyDirective(
+        nextSceneIndex,
+        sceneRole,
+        true // includeRealism for action scenes
+      );
+      const roleCine = getRoleCinematography(sceneRole);
+      console.log(`[cinematography] Scene ${nextSceneIndex + 1} role=${sceneRole} → ${roleCine.lens} lens, ${roleCine.motion} motion, ${roleCine.lighting} lighting`);
+      
       // === CHARACTER BIBLE T2V MODE ===
       // For T2V hero scenes (not spectacle), identity comes from Character Bible in prompt, not pixels
       // This is the key insight: "cinematic continuity" vs "pixel continuity"
@@ -700,12 +710,12 @@ Deno.serve(async (req) => {
           sceneRole
         );
         
-        // Step 2: Insert narrative context AFTER motion block
-        // The motion block is now at the top, so narrative goes between motion and visual
+        // Step 2: Insert cinematography + narrative context AFTER motion block
+        // The motion block is now at the top, so cinematography→narrative goes between motion and visual
         // We insert it by finding where the motion block ends
-        finalPrompt = insertNarrativeAfterMotion(finalPrompt, narrativeBlock);
+        finalPrompt = insertNarrativeAfterMotion(finalPrompt, cinematographyDirective + narrativeBlock);
         
-        console.log(`[narrative] ✓ I2V order: motion→narrative→visual for ${selectedProvider}`);
+        console.log(`[narrative] ✓ I2V order: motion→cinematography→narrative→visual for ${selectedProvider}`);
       } else {
         // T2V ORDER: 
         // SPECTACLE: spectacle directive at TOP (if subject_required=false)
@@ -713,17 +723,17 @@ Deno.serve(async (req) => {
         // Then narrative context
         
         if (spectacleHandling.isSpectacle) {
-          // Spectacle scene: add spectacle directive at very top
+          // Spectacle scene: spectacle directive + cinematography at very top
           const spectacleDirective = spectacleHandling.directive;
-          finalPrompt = spectacleDirective + narrativeBlock + finalPrompt;
-          console.log(`[narrative] ✓ T2V spectacle order: spectacle→narrative→visual (${
+          finalPrompt = spectacleDirective + cinematographyDirective + narrativeBlock + finalPrompt;
+          console.log(`[narrative] ✓ T2V spectacle order: spectacle→cinematography→narrative→visual (${
             (nextScene as { alternate_subject?: AlternateSubject }).alternate_subject || "no subject"
           })`);
         } else {
-          // Regular T2V: coverage directive then narrative
+          // Regular T2V: coverage directive + cinematography then narrative
           const coverageDirective = buildCoverageDirective(resolvedCoverage);
-          finalPrompt = coverageDirective + narrativeBlock + finalPrompt;
-          console.log(`[narrative] ✓ T2V order: coverage=${resolvedCoverage}→narrative→visual`);
+          finalPrompt = coverageDirective + cinematographyDirective + narrativeBlock + finalPrompt;
+          console.log(`[narrative] ✓ T2V order: coverage=${resolvedCoverage}→cinematography→narrative→visual`);
         }
       }
       
@@ -779,13 +789,15 @@ Deno.serve(async (req) => {
           had_starting_frame: !!startingFrameUrl,
           provider_selected: selectedProvider,
           scene_role: sceneRole,
-          // NEW: Spectacle and coverage audit fields
+          // Spectacle and coverage audit fields
           is_spectacle: spectacleHandling.isSpectacle,
           alternate_subject: (nextScene as { alternate_subject?: AlternateSubject }).alternate_subject || null,
           coverage_raw: rawCoverage || null,
           coverage_resolved: resolvedCoverage,
-          // NEW: Character Bible T2V mode flag
+          // Character Bible T2V mode flag
           is_character_bible_t2v: isCharacterBibleT2V,
+          // Role-based cinematography (anti-"video game" variety)
+          cinematography: roleCine,
         };
         await supabase
           .from("video_jobs")
