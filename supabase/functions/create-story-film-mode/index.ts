@@ -101,6 +101,29 @@ Deno.serve(async (req) => {
       throw new Error(`Invalid JSON from LLM: ${rawContent.slice(0, 200)}`);
     }
 
+    // === FALLBACK: Ensure character_bible always exists ===
+    if (!storyboard.character_bible || !storyboard.character_bible.wardrobe) {
+      console.warn("[film-mode] Missing character_bible, synthesizing from premise...");
+      storyboard.character_bible = {
+        wardrobe: characterDescription || "battle-worn attire, distinctive silhouette",
+        physique: "athletic build, confident posture",
+        distinguishing_features: ["consistent color accent", "recognizable profile"],
+        palette: ["earth tones", "accent color"],
+      };
+    }
+
+    // === FALLBACK: Ensure location_logic always exists ===
+    if (!storyboard.location_logic || !storyboard.location_logic.setting) {
+      console.warn("[film-mode] Missing location_logic, synthesizing defaults...");
+      storyboard.location_logic = {
+        setting: "cinematic environment",
+        time_of_day: "golden_hour",
+        weather: "clear",
+        light_quality: "dramatic natural light with strong shadows",
+        color_palette: ["amber", "shadow", "steel"],
+      };
+    }
+
     // Validate and fix variety contract
     const usedRealism: string[] = [];
     let previousSignature = null;
