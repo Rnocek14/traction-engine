@@ -201,7 +201,7 @@ Deno.serve(async (req) => {
         provider: "luma",
         status: "queued",
         // Store prompts in correct columns for auto-rating - NO TRUNCATION
-        original_prompt: scenePrompt,
+        original_prompt: rawPrompt,
         enriched_prompt: videoPrompt,
         settings: {
           size: body.settings.size,
