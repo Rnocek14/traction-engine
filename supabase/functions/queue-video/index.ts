@@ -232,12 +232,16 @@ Style: Professional, engaging, suitable for TikTok/Reels. Smooth transitions bet
     }
 
     // Create the video job in database first
+    // Store full prompts in dedicated columns (text columns are unlimited)
     const { data: job, error: jobError } = await supabase
       .from("video_jobs")
       .insert({
         script_run_id,
         status: "queued",
         provider,
+        // Store prompts in proper columns for auto-rating and audit
+        original_prompt: scenePrompt,
+        enriched_prompt: videoPrompt,
         settings: { 
           size, 
           provider_seconds: providerSeconds,
@@ -246,7 +250,6 @@ Style: Professional, engaging, suitable for TikTok/Reels. Smooth transitions bet
           seconds: providerSeconds,
           model,
           clip_id: clip_id || null,
-          prompt: videoPrompt.slice(0, 500), // Store truncated prompt for reference
           seed: settings.seed,
           camera_direction: clipData?.camera_direction,
           // Provider-neutral task ID (set after API call)
