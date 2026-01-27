@@ -74,6 +74,7 @@ interface GeneratedScene {
   force_present?: boolean;           // Is an external force acting in this scene?
   force_type?: ForceType;            // What kind of force?
   escalation_delta?: 0 | 1 | 2 | 3;  // How much worse than previous? 0=neutral, 3=crisis
+  setpiece_delta?: string;           // What changed in environment/state (e.g., "surface→tunnel")
 }
 
 interface GeneratedStoryboard {
@@ -639,52 +640,111 @@ Generate a complete, filmable storyboard with vivid, specific visual prompts for
     // === STORY FORCES VALIDATION (Escalation Contract) ===
     const forceScenes = storyboard.scenes.filter(s => s.force_present === true);
     const highEscalationScenes = storyboard.scenes.filter(s => (s.escalation_delta ?? 0) >= 2);
+    const peakScenes = storyboard.scenes.filter(s => (s.escalation_delta ?? 0) >= 3);
+    
+    // FIX: Use setpiece_delta with proper fallback chain + logging
+    const getSetpieceDelta = (s: GeneratedScene, i: number): string | null => {
+      // Priority: setpiece_delta > state_to > action_summary (legacy)
+      const delta = s.setpiece_delta ?? s.state_to ?? s.action_summary ?? null;
+      if (delta && !s.setpiece_delta) {
+        console.log(`[generate-storyboard] Scene ${i + 1}: using fallback for setpiece_delta (field used: ${s.state_to ? 'state_to' : 'action_summary'})`);
+      }
+      return delta;
+    };
     const uniqueSetpieceDeltas = new Set(
-      storyboard.scenes.map(s => s.action_summary || s.state_to).filter(Boolean)
+      storyboard.scenes.map((s, i) => getSetpieceDelta(s, i)).filter(Boolean)
     );
 
     const forceIssues: string[] = [];
     if (forceScenes.length < 2) {
       forceIssues.push(`force_present=${forceScenes.length}/2 (need more external pressure)`);
     }
-    if (highEscalationScenes.length < 3) {
-      forceIssues.push(`escalation_delta≥2 count=${highEscalationScenes.length}/3 (needs more tension)`);
+    // FIX: require 1 peak (escalation=3) + 2 high escalation
+    if (peakScenes.length < 1) {
+      forceIssues.push(`escalation_delta=3 count=${peakScenes.length}/1 (needs peak tension)`);
+    }
+    if (highEscalationScenes.length < 2) {
+      forceIssues.push(`escalation_delta≥2 count=${highEscalationScenes.length}/2 (needs rising tension)`);
     }
     if (uniqueSetpieceDeltas.size < 2) {
-      forceIssues.push(`state_deltas=${uniqueSetpieceDeltas.size}/2 (need visible state changes)`);
+      forceIssues.push(`setpiece_deltas=${uniqueSetpieceDeltas.size}/2 (need visible state changes)`);
     }
 
     if (forceIssues.length > 0) {
       console.warn(`[generate-storyboard] ⚠️ Escalation Contract not met:`);
       forceIssues.forEach(issue => console.warn(`  - ${issue}`));
       
-      // Auto-fix: inject forces into spectacle scenes first
-      const FORCE_TYPES: ("weather" | "predator" | "hazard" | "pursuit" | "time" | "resource" | "social")[] = 
-        ["hazard", "predator", "pursuit", "weather", "time", "resource", "social"];
+      // FIX: Context-aware force type inference based on scene content
+      const inferForceType = (scene: GeneratedScene): "weather" | "predator" | "hazard" | "pursuit" | "time" | "resource" | "social" => {
+        const text = `${scene.prompt || ""} ${scene.alternate_subject || ""}`.toLowerCase();
+        if (/water|rain|flood|storm|wind|snow|cold|heat|fire/.test(text)) return "weather";
+        if (/spider|bird|shadow|predator|beast|creature|enemy|hunt|dragon|monster/.test(text)) return "predator";
+        if (/chase|follow|track|escape|flee|run|pursuit/.test(text)) return "pursuit";
+        if (/collapse|debris|fall|trap|rock|cliff|explosion|crash/.test(text)) return "hazard";
+        if (/deadline|countdown|closing|timer|urgent/.test(text)) return "time";
+        if (/crowd|rival|reject|social|pressure/.test(text)) return "social";
+        return "hazard"; // Default
+      };
+      
+      // Auto-fix: inject forces into mid-story scenes (indices 2-4) first
+      const midSceneIndices = [2, 3, 4].filter(i => i < storyboard.scenes.length);
       let forcesAdded = 0;
       
-      for (let i = 0; i < storyboard.scenes.length && forceScenes.length + forcesAdded < 2; i++) {
+      // First pass: spectacle scenes in mid-story
+      for (const i of midSceneIndices) {
+        if (forceScenes.length + forcesAdded >= 2) break;
         const scene = storyboard.scenes[i];
         if (!scene.force_present && scene.subject_required === false) {
           scene.force_present = true;
-          scene.force_type = FORCE_TYPES[i % FORCE_TYPES.length];
+          scene.force_type = inferForceType(scene);
           scene.escalation_delta = 2;
-          console.log(`[generate-storyboard] Auto-injected force into spectacle scene ${i + 1}`);
+          console.log(`[generate-storyboard] Auto-injected ${scene.force_type} force into spectacle scene ${i + 1}`);
           forcesAdded++;
         }
       }
       
-      // Boost escalation on middle scenes
-      for (let i = Math.floor(storyboard.scenes.length * 0.3); i < storyboard.scenes.length - 1; i++) {
+      // Second pass: hero scenes in mid-story (2-4)
+      for (const i of midSceneIndices) {
+        if (forceScenes.length + forcesAdded >= 2) break;
+        const scene = storyboard.scenes[i];
+        if (!scene.force_present && scene.subject_required !== false) {
+          scene.force_present = true;
+          scene.force_type = inferForceType(scene);
+          scene.escalation_delta = scene.escalation_delta ?? 2;
+          console.log(`[generate-storyboard] Auto-injected ${scene.force_type} force into hero scene ${i + 1}`);
+          forcesAdded++;
+        }
+      }
+      
+      // Ensure one peak scene (escalation=3) - prefer scene 4 or last mid-scene
+      const peakIndex = Math.min(4, storyboard.scenes.length - 2);
+      if (peakScenes.length === 0 && peakIndex >= 0 && peakIndex < storyboard.scenes.length) {
+        storyboard.scenes[peakIndex].escalation_delta = 3;
+        console.log(`[generate-storyboard] Set peak escalation_delta=3 on scene ${peakIndex + 1}`);
+      }
+      
+      // Boost escalation on middle scenes (2-4 only, not all middle)
+      for (const i of midSceneIndices.filter(idx => idx < storyboard.scenes.length - 1)) {
         const scene = storyboard.scenes[i];
         if ((scene.escalation_delta ?? 0) < 2) {
           scene.escalation_delta = 2;
           console.log(`[generate-storyboard] Boosted escalation_delta on scene ${i + 1}`);
         }
       }
-    } else {
-      console.log(`[generate-storyboard] ✓ Escalation Contract met: forces=${forceScenes.length}, escalation≥2=${highEscalationScenes.length}, deltas=${uniqueSetpieceDeltas.size}`);
     }
+    
+    // === STORY FORCES SUMMARY LOG (proves system is working) ===
+    const finalForces = storyboard.scenes.filter(s => s.force_present === true).length;
+    const finalPeak = storyboard.scenes.findIndex(s => (s.escalation_delta ?? 0) >= 3);
+    const finalHigh = storyboard.scenes.filter(s => (s.escalation_delta ?? 0) >= 2).length;
+    const finalDeltas = new Set(storyboard.scenes.map((s, i) => getSetpieceDelta(s, i)).filter(Boolean)).size;
+    
+    console.log(`[generate-storyboard] ✓ Story Forces: forces=${finalForces}/6, peak=${finalPeak >= 0 ? `scene ${finalPeak + 1}` : 'none'}, escalation≥2=${finalHigh}, unique_deltas=${finalDeltas}`);
+    console.log(`[generate-storyboard] Per-scene breakdown:`);
+    storyboard.scenes.forEach((s, i) => {
+      const isSpectacle = s.subject_required === false;
+      console.log(`  ${i + 1}: role=${isSpectacle ? 'spectacle' : 'hero'} force=${s.force_type || '-'} esc=${s.escalation_delta ?? 0} delta="${getSetpieceDelta(s, i)?.slice(0, 30) || '-'}"`);
+    });
     
     // === NO-PROTAGONIST LANGUAGE CHECK (for spectacle scenes) ===
     // Spectacle prompts should NOT mention the protagonist
@@ -1071,6 +1131,15 @@ Keep the same action intent, just change the shot design.`;
         is_hero_shot: tier === "hero" 
           ? ["story_a", "story_b", "establish"].includes(effectiveRole)
           : effectiveRole === heroRole,
+        // Story Forces (Phase 8) - explicitly preserve
+        force_present: scene.force_present,
+        force_type: scene.force_type,
+        escalation_delta: scene.escalation_delta,
+        setpiece_delta: scene.setpiece_delta ?? scene.state_to ?? null,
+        // Preserve other transformation fields
+        state_from: scene.state_from,
+        state_to: scene.state_to,
+        alternate_subject: scene.alternate_subject,
       };
     });
 

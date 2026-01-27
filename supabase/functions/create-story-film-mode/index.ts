@@ -143,6 +143,7 @@ Deno.serve(async (req) => {
     // === STORY FORCES VALIDATION (Escalation Contract) ===
     const forceScenes = storyboard.scenes.filter(s => s.force_present === true);
     const highEscalationScenes = storyboard.scenes.filter(s => (s.escalation_delta ?? 0) >= 2);
+    const peakScenes = storyboard.scenes.filter(s => (s.escalation_delta ?? 0) >= 3);
     const uniqueSetpieceDeltas = new Set(
       storyboard.scenes.map(s => s.setpiece_delta).filter(Boolean)
     );
@@ -151,8 +152,12 @@ Deno.serve(async (req) => {
     if (forceScenes.length < 2) {
       forceIssues.push(`force_present=${forceScenes.length}/2 (need more external pressure)`);
     }
-    if (highEscalationScenes.length < 3) {
-      forceIssues.push(`escalation_delta≥2 count=${highEscalationScenes.length}/3 (needs more tension)`);
+    // Changed: require 1 peak (escalation=3) instead of 3 scenes with >=2
+    if (peakScenes.length < 1) {
+      forceIssues.push(`escalation_delta=3 count=${peakScenes.length}/1 (needs peak tension)`);
+    }
+    if (highEscalationScenes.length < 2) {
+      forceIssues.push(`escalation_delta≥2 count=${highEscalationScenes.length}/2 (needs rising tension)`);
     }
     if (uniqueSetpieceDeltas.size < 2) {
       forceIssues.push(`setpiece_deltas=${uniqueSetpieceDeltas.size}/2 (need location/state changes)`);
@@ -162,45 +167,76 @@ Deno.serve(async (req) => {
       console.warn("[film-mode] ⚠️ Escalation Contract not met:");
       forceIssues.forEach(issue => console.warn(`  - ${issue}`));
       
-      // Auto-fix: inject forces into scenes that are missing them
-      let forcesAdded = 0;
-      const FORCE_TYPES = ["weather", "predator", "hazard", "pursuit", "time", "resource", "social"] as const;
+      // Context-aware force type inference based on scene content
+      const inferForceType = (scene: FilmScene): "weather" | "predator" | "hazard" | "pursuit" | "time" | "resource" | "social" => {
+        const text = `${scene.subject_action || ""} ${scene.alternate_subject || ""}`.toLowerCase();
+        if (/water|rain|flood|storm|wind|snow|cold|heat/.test(text)) return "weather";
+        if (/spider|bird|shadow|predator|beast|creature|enemy|hunt/.test(text)) return "predator";
+        if (/chase|follow|track|escape|flee|run/.test(text)) return "pursuit";
+        if (/collapse|debris|fall|fire|trap|rock|cliff/.test(text)) return "hazard";
+        if (/deadline|countdown|closing|timer|urgent/.test(text)) return "time";
+        if (/crowd|rival|reject|social|pressure/.test(text)) return "social";
+        return "hazard"; // Default
+      };
       
-      for (let i = 0; i < storyboard.scenes.length && forceScenes.length + forcesAdded < 2; i++) {
+      // Auto-fix: inject forces into mid-story scenes (2-4) first, then spectacle
+      let forcesAdded = 0;
+      const midSceneIndices = [2, 3, 4].filter(i => i < storyboard.scenes.length);
+      
+      // First pass: spectacle scenes in mid-story
+      for (const i of midSceneIndices) {
+        if (forceScenes.length + forcesAdded >= 2) break;
         const scene = storyboard.scenes[i];
         if (!scene.force_present && !scene.subject_required) {
-          // Spectacle scenes are natural force carriers
           scene.force_present = true;
-          scene.force_type = FORCE_TYPES[i % FORCE_TYPES.length];
+          scene.force_type = inferForceType(scene);
           scene.escalation_delta = 2;
-          console.log(`[film-mode] Auto-injected force into spectacle scene ${i}`);
+          console.log(`[film-mode] Auto-injected ${scene.force_type} force into spectacle scene ${i}`);
           forcesAdded++;
         }
       }
       
-      // If still not enough, add to hero scenes
-      for (let i = 0; i < storyboard.scenes.length && forceScenes.length + forcesAdded < 2; i++) {
+      // Second pass: hero scenes in mid-story (2-4 only, not hook/CTA)
+      for (const i of midSceneIndices) {
+        if (forceScenes.length + forcesAdded >= 2) break;
         const scene = storyboard.scenes[i];
-        if (!scene.force_present && scene.subject_required && i > 0) {
+        if (!scene.force_present && scene.subject_required) {
           scene.force_present = true;
-          scene.force_type = "hazard";
+          scene.force_type = inferForceType(scene);
           scene.escalation_delta = scene.escalation_delta ?? 2;
-          console.log(`[film-mode] Auto-injected force into hero scene ${i}`);
+          console.log(`[film-mode] Auto-injected ${scene.force_type} force into hero scene ${i}`);
           forcesAdded++;
         }
       }
       
-      // Boost escalation on middle scenes
-      for (let i = 2; i < storyboard.scenes.length - 1; i++) {
+      // Ensure one peak scene (escalation=3) - prefer scene 4 or last mid-scene
+      const peakIndex = Math.min(4, storyboard.scenes.length - 2);
+      if (peakScenes.length === 0 && peakIndex >= 0 && peakIndex < storyboard.scenes.length) {
+        storyboard.scenes[peakIndex].escalation_delta = 3;
+        console.log(`[film-mode] Set peak escalation_delta=3 on scene ${peakIndex}`);
+      }
+      
+      // Boost escalation on scenes 2-4 (mid-story tension)
+      for (const i of [2, 3, 4].filter(idx => idx < storyboard.scenes.length - 1)) {
         const scene = storyboard.scenes[i];
         if ((scene.escalation_delta ?? 0) < 2) {
           scene.escalation_delta = 2;
           console.log(`[film-mode] Boosted escalation_delta on scene ${i}`);
         }
       }
-    } else {
-      console.log(`[film-mode] ✓ Escalation Contract met: forces=${forceScenes.length}, escalation≥2=${highEscalationScenes.length}, deltas=${uniqueSetpieceDeltas.size}`);
     }
+    
+    // === STORY FORCES SUMMARY LOG ===
+    const finalForces = storyboard.scenes.filter(s => s.force_present === true).length;
+    const finalPeak = storyboard.scenes.findIndex(s => (s.escalation_delta ?? 0) >= 3);
+    const finalHigh = storyboard.scenes.filter(s => (s.escalation_delta ?? 0) >= 2).length;
+    const finalDeltas = new Set(storyboard.scenes.map(s => s.setpiece_delta).filter(Boolean)).size;
+    
+    console.log(`[film-mode] ✓ Story Forces summary: forces=${finalForces}/6, peak=${finalPeak >= 0 ? `scene ${finalPeak}` : 'none'}, escalation≥2=${finalHigh}, unique_deltas=${finalDeltas}`);
+    console.log(`[film-mode] Per-scene breakdown:`);
+    storyboard.scenes.forEach((s, i) => {
+      console.log(`  ${i}: role=${s.subject_required ? 'hero' : 'spectacle'} force=${s.force_type || '-'} esc=${s.escalation_delta ?? 0} delta="${s.setpiece_delta || '-'}"`);
+    });
 
     // Validate coverage distribution
     const coverages = storyboard.scenes.map(s => s.coverage);

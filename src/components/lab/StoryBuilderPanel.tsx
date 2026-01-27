@@ -957,13 +957,20 @@ export function StoryBuilderPanel({
       const newPalette = data.palette_keywords || [];
       const newAnchors = data.anchors || getDefaultAnchors();
       
-      // Map scenes with ALL Director Brain fields including action_summary
+      // Map scenes with ALL Director Brain fields including Story Forces
       const newScenes = (data.scenes || []).map((s: StoryScene & { 
         change_type?: string; 
         narration_line?: string; 
         is_hero_shot?: boolean;
         action_summary?: string;
         cut_type?: "hard" | "continuity";
+        force_present?: boolean;
+        force_type?: string;
+        escalation_delta?: number;
+        setpiece_delta?: string;
+        state_from?: string;
+        state_to?: string;
+        alternate_subject?: string;
       }, i: number) => ({
         ...s,
         id: s.id || nanoid(8),
@@ -975,6 +982,14 @@ export function StoryBuilderPanel({
         role: s.role,
         is_hero_shot: s.is_hero_shot,
         cut_type: s.cut_type, // Critical for T2V vs I2V decision
+        // Story Forces (Phase 8) - preserve all escalation fields
+        force_present: s.force_present,
+        force_type: s.force_type,
+        escalation_delta: s.escalation_delta,
+        setpiece_delta: s.setpiece_delta,
+        state_from: s.state_from,
+        state_to: s.state_to,
+        alternate_subject: s.alternate_subject,
       }));
       
       // Update local state
