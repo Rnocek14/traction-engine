@@ -293,16 +293,22 @@ export function buildForceEscalationBlock(
 
 /**
  * Get recommended sanitization level for a provider
+ * 
+ * CRITICAL: Runway MUST always return "strict" - it fails on soft language.
+ * Brutality mode only reduces sanitization for Sora/Luma.
  */
 export function getProviderSanitizationLevel(
   provider: VideoProvider,
   storySanitization?: SanitizationLevel,
   brutalityMode?: boolean
 ): SanitizationLevel {
-  // Brutality mode forces "soft" (not "off" - that's dangerous)
+  // RUNWAY ALWAYS STRICT - non-negotiable, brutality mode cannot override
+  if (provider === "runway") {
+    return "strict";
+  }
+  
+  // Brutality mode forces "soft" for Sora/Luma (not "off" - that's dangerous)
   if (brutalityMode) {
-    // Even in brutality mode, Runway needs strict
-    if (provider === "runway") return "soft"; // Reduced from strict, still safer
     return "soft";
   }
   
@@ -313,8 +319,6 @@ export function getProviderSanitizationLevel(
   
   // Provider-specific defaults
   switch (provider) {
-    case "runway":
-      return "strict"; // Runway is most sensitive
     case "luma":
       return "soft";
     case "sora":

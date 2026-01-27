@@ -532,6 +532,8 @@ export function StoryBuilderPanel({
       character_continuity_mode?: boolean;
       locked_provider?: "sora" | "runway" | "luma";
       soft_continuity?: boolean;
+      brutality_mode?: boolean;
+      sanitization_level?: "soft" | "strict";
     }) | null;
     // Ensure cut_type is computed for legacy stories without it
     setScenes(ensureCutTypes(storyboard?.scenes || []));
@@ -545,6 +547,9 @@ export function StoryBuilderPanel({
     setLockedProvider(storyboard?.locked_provider || "sora");
     // Restore Soft Continuity (default true for new stories)
     setSoftContinuity(storyboard?.soft_continuity ?? true);
+    // Restore Brutality Mode and Sanitization Level
+    setBrutalityMode(storyboard?.brutality_mode || false);
+    setSanitizationLevel(storyboard?.sanitization_level || "soft");
   }, [existingStory, forceNew]);
 
   // Create story mutation (preserves full Story Spine)
@@ -563,6 +568,8 @@ export function StoryBuilderPanel({
         character_continuity_mode: characterContinuityMode,
         locked_provider: lockedProvider,
         soft_continuity: softContinuity,
+        brutality_mode: brutalityMode,
+        sanitization_level: sanitizationLevel,
       };
       
       const { data, error } = await supabase
@@ -1016,6 +1023,8 @@ export function StoryBuilderPanel({
         locked_provider: lockedProvider,
         soft_continuity: softContinuity,
         film_mode: filmMode,
+        brutality_mode: brutalityMode,
+        sanitization_level: sanitizationLevel,
       };
       
       console.log("[StoryBuilder] Saving full storyboard:", {
@@ -1135,6 +1144,9 @@ export function StoryBuilderPanel({
       palette_keywords: paletteKeywords,
       character_continuity_mode: characterContinuityMode,
       locked_provider: lockedProvider,
+      soft_continuity: softContinuity,
+      brutality_mode: brutalityMode,
+      sanitization_level: sanitizationLevel,
     };
 
     if (storyId) {
