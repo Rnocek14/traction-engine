@@ -705,6 +705,9 @@ export function StoryBuilderPanel({
           locked_provider: lockedProvider,
           // Soft Continuity: allow T2V for energy roles
           soft_continuity: softContinuity,
+          // PHASE 8: Force/Escalation settings (MUST PASS to edge function)
+          brutality_mode: brutalityMode,
+          sanitization_level: sanitizationLevel,
           settings: {
             size: "1280x720", // 16:9 in pixels - must be valid dimension, not aspect ratio
             provider: characterContinuityMode ? lockedProvider : "smart", // Use locked provider or smart routing
@@ -898,6 +901,9 @@ export function StoryBuilderPanel({
             premise: concept.trim(),
             character_description: anchors.character?.description || "",
             scene_count: STORY_TYPE_CONFIGS[storyType]?.typicalClipCount[1] || 6,
+            // PHASE 8: Force/Escalation settings (MUST PASS to edge function)
+            brutality_mode: brutalityMode,
+            sanitization_level: sanitizationLevel,
           },
         });
         
