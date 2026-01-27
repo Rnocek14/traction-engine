@@ -23,6 +23,13 @@ import {
 import { type MotifScene } from "../_shared/motif-injection.ts";
 import { applyProgressionInjection, buildProgressionContext, extractActionFromPrompt } from "../_shared/progression-injection.ts";
 import { applyMotionAmplification, summarizeMotionIntent } from "../_shared/motion-amplification.ts";
+import { 
+  buildNarrativeContextBlock, 
+  shouldForceNarrativeT2V,
+  countHardCutsUsed,
+  type NarrativeScene,
+  type NarrativeStoryContext,
+} from "../_shared/narrative-context.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -129,6 +136,53 @@ function processDuration(rawDuration: number, role: SceneRole, provider: VideoPr
   return snapDurationForProvider(roleClampedDuration, provider);
 }
 
+/**
+ * Insert narrative context block AFTER motion amplification block
+ * 
+ * For I2V, the prompt structure should be:
+ * 1. MOTION AMPLIFICATION (at very top - breaks hold)
+ * 2. NARRATIVE CONTEXT (cause/effect glue)
+ * 3. PROGRESSION INJECTION (if present)
+ * 4. VISUAL PROMPT
+ * 
+ * This function finds the end of the motion block and inserts narrative there.
+ */
+function insertNarrativeAfterMotion(prompt: string, narrativeBlock: string): string {
+  if (!narrativeBlock) return prompt;
+  
+  // Look for the end of motion amplification block markers
+  // Sora uses: ═══════════════════════════════════════════════════════════════
+  // Runway uses: ---
+  // Luma uses just a newline after the bracket
+  
+  // Try Sora format first (most common for I2V)
+  const soraEndMarker = "═══════════════════════════════════════════════════════════════\n\n";
+  const soraEndIndex = prompt.lastIndexOf(soraEndMarker);
+  if (soraEndIndex !== -1) {
+    const insertPoint = soraEndIndex + soraEndMarker.length;
+    return prompt.slice(0, insertPoint) + narrativeBlock + prompt.slice(insertPoint);
+  }
+  
+  // Try Runway format
+  const runwayEndMarker = "---\n\n";
+  const runwayEndIndex = prompt.indexOf(runwayEndMarker);
+  if (runwayEndIndex !== -1) {
+    const insertPoint = runwayEndIndex + runwayEndMarker.length;
+    return prompt.slice(0, insertPoint) + narrativeBlock + prompt.slice(insertPoint);
+  }
+  
+  // Try Luma format (ends with ]\n\n)
+  const lumaEndMarker = "]\n\n";
+  const lumaEndIndex = prompt.indexOf(lumaEndMarker);
+  if (lumaEndIndex !== -1 && lumaEndIndex < 200) { // Only if near start
+    const insertPoint = lumaEndIndex + lumaEndMarker.length;
+    return prompt.slice(0, insertPoint) + narrativeBlock + prompt.slice(insertPoint);
+  }
+  
+  // Fallback: prepend if we can't find motion block
+  return narrativeBlock + prompt;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -175,6 +229,11 @@ Deno.serve(async (req) => {
           action_summary?: string;
           // Phase 3: Cut type for I2V vs T2V
           cut_type?: "hard" | "continuity";
+          // Phase 4: Narrative context fields
+          narration_line?: string;
+          state_from?: string;
+          state_to?: string;
+          end_state?: string;
         }>;
         tier?: "volume" | "hero";
         motif_anchors?: string[];
@@ -401,7 +460,12 @@ Deno.serve(async (req) => {
       } : undefined;
       
       // === CUT TYPE RESOLUTION ===
-      // Read cut_type from storyboard, apply provider-switch override
+      // Uses a multi-layer approach:
+      // 1. Read cut_type from storyboard (deterministic defaults)
+      // 2. Apply narrative cut budget (max 2 hard cuts to protect identity)
+      // 3. Handle provider switch override
+      // 4. Character Continuity Mode override (forces I2V)
+      
       const prevClip = clipsByIndex.get(nextSceneIndex - 1);
       const prevProvider = prevClip?.provider as VideoProvider | null;
       const prevSceneData = nextSceneIndex > 0 ? scenes[nextSceneIndex - 1] : null;
@@ -410,6 +474,31 @@ Deno.serve(async (req) => {
       // Get cut_type from storyboard (already has deterministic defaults from generate-storyboard)
       let cutType: "hard" | "continuity" = nextScene.cut_type || "hard";
       let cutReason = nextScene.cut_type ? "from storyboard" : "default hard";
+      
+      // === NARRATIVE CUT BUDGET ===
+      // Limit hard cuts to protect identity: max ~2 per 6-scene story
+      // This prevents the "character drift lottery" from too many T2V cuts
+      if (!characterContinuityMode && cutType === "continuity") {
+        // Check if narrative structure wants to override to hard cut
+        const hardCutsUsed = countHardCutsUsed(
+          scenes.map(s => ({ cut_type: s.cut_type, role: s.role })),
+          nextSceneIndex
+        );
+        
+        const narrativeOverride = shouldForceNarrativeT2V(
+          nextSceneIndex,
+          prevRole,
+          sceneRole,
+          totalScenes,
+          hardCutsUsed
+        );
+        
+        if (narrativeOverride.forceT2V) {
+          cutType = "hard";
+          cutReason = `narrative override: ${narrativeOverride.reason}`;
+          console.log(`[chain-continue] Narrative cut budget: ${narrativeOverride.reason}`);
+        }
+      }
       
       // Provider switch forces hard cut ONLY if NOT in Character Continuity Mode
       // When locked to single provider, provider never switches, so I2V is always safe
@@ -426,6 +515,14 @@ Deno.serve(async (req) => {
       
       // Log the cut type decision (this is the key diagnostic)
       console.log(`[chain-continue] Scene ${nextSceneIndex + 1} cut_type="${cutType}" (${cutReason}) → ${cutType === "continuity" ? "I2V" : "T2V"}`);
+      
+      // Log transformation fields if available for debugging
+      if (nextScene.state_from || nextScene.state_to) {
+        console.log(`[narrative] Transformation: "${nextScene.state_from || '?'}" → "${nextScene.state_to || '?'}"`);
+      }
+      if (nextScene.end_state) {
+        console.log(`[narrative] Expected end_state: "${nextScene.end_state}"`);
+      }
       
       // Determine the starting frame ONLY for continuity cuts
       let startingFrameUrl: string | undefined = undefined;
@@ -462,11 +559,45 @@ Deno.serve(async (req) => {
       }
       // For hard cuts: startingFrameUrl stays undefined (T2V) - no resize calls needed
       
-      // === PROMPT ENHANCEMENT FOR I2V ===
-      // Apply progression injection + motion amplification for I2V scenes
+      // === PROMPT ENHANCEMENT ===
+      // Layer order is CRITICAL and differs for I2V vs T2V:
+      // 
+      // I2V ORDER (motion first to break hold):
+      //   1. MOTION AMPLIFICATION (breaks Sora's "hold" behavior)
+      //   2. STORY CONTEXT (narrative arc, prev/current beat)
+      //   3. PROGRESSION INJECTION (action completion)
+      //   4. VISUAL PROMPT + CONTINUITY ANCHORS
+      //
+      // T2V ORDER (story context first to establish intent):
+      //   1. STORY CONTEXT (narrative arc, intent)
+      //   2. VISUAL PROMPT + CONTINUITY ANCHORS
+      //   3. Light motion note (optional)
+      
       const changeType = nextScene.change_type || "info";
       let finalPrompt = basePrompt;
       const isI2V = cutType === "continuity" && !!startingFrameUrl;
+      
+      // Build NarrativeScene objects for context injection
+      const narrativeScenes: NarrativeScene[] = scenes.map((s, i) => ({
+        id: s.id,
+        prompt: s.prompt,
+        role: (s.role as SceneRole) || inferRoleFromPosition(i, totalScenes),
+        change_type: s.change_type || "info",
+        narration_line: s.narration_line,
+        action_summary: s.action_summary,
+        state_from: s.state_from,
+        state_to: s.state_to,
+        end_state: s.end_state,
+      }));
+      
+      const storyContext: NarrativeStoryContext = {
+        storySpine: storySpine,
+        totalScenes: totalScenes,
+        allScenes: narrativeScenes,
+        motifAnchors: motifAnchors,
+      };
+      
+      const prevNarrativeScene = nextSceneIndex > 0 ? narrativeScenes[nextSceneIndex - 1] : null;
       
       // Extract previous action for "finished" constraint
       let prevActionForMotion: string | null = null;
@@ -483,7 +614,7 @@ Deno.serve(async (req) => {
           console.warn(`[progression] ⚠️ prev_action == next_action - may cause repeated motion`);
         }
         
-        // Apply progression injection (moves DIRECTOR NOTE to TOP of prompt)
+        // Apply progression injection
         finalPrompt = applyProgressionInjection(
           basePrompt,
           prevRawPrompt,
@@ -494,13 +625,19 @@ Deno.serve(async (req) => {
         );
       }
       
-      // === MOTION AMPLIFICATION (I2V Only) ===
-      // This is the KEY fix: inject 2-3 motion beats at the VERY TOP
-      // to overpower Sora's "hold starting frame" behavior
+      // Build narrative context block (compact, token-efficient)
+      const narrativeBlock = buildNarrativeContextBlock(
+        storyContext,
+        nextSceneIndex,
+        prevNarrativeScene
+      );
+      
       if (isI2V) {
+        // I2V ORDER: Motion first (breaks hold), then narrative context
         const motionSummary = summarizeMotionIntent(basePrompt);
         console.log(`[motion-amp] I2V scene ${nextSceneIndex + 1}: "${motionSummary}"`);
         
+        // Step 1: Apply motion amplification FIRST (goes to TOP)
         finalPrompt = applyMotionAmplification(
           finalPrompt,
           selectedProvider as "sora" | "runway" | "luma",
@@ -509,7 +646,16 @@ Deno.serve(async (req) => {
           sceneRole
         );
         
-        console.log(`[motion-amp] ✓ Amplification applied for ${selectedProvider}`);
+        // Step 2: Insert narrative context AFTER motion block
+        // The motion block is now at the top, so narrative goes between motion and visual
+        // We insert it by finding where the motion block ends
+        finalPrompt = insertNarrativeAfterMotion(finalPrompt, narrativeBlock);
+        
+        console.log(`[narrative] ✓ I2V order: motion→narrative→visual for ${selectedProvider}`);
+      } else {
+        // T2V ORDER: Narrative context at TOP
+        finalPrompt = narrativeBlock + finalPrompt;
+        console.log(`[narrative] ✓ T2V order: narrative→visual`);
       }
       
       const response = await fetch(`${supabaseUrl}/functions/v1/${providerEndpoint}`, {

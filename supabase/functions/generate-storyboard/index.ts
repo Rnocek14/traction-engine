@@ -48,6 +48,10 @@ interface GeneratedScene {
   action_summary?: string;
   // Phase 3: Cut type for I2V vs T2V decision
   cut_type?: CutType;
+  // Phase 4: Transformation fields for narrative continuity
+  state_from?: string;
+  state_to?: string;
+  end_state?: string;
 }
 
 interface GeneratedStoryboard {
@@ -123,19 +127,32 @@ Every cut MUST change something meaningful (no montage drift):
 Choose roles based on narrative position and purpose. A typical 6-scene story uses:
 hook → problem → story_a → reset → story_b → cta
 
+TRANSFORMATION-BASED DESCRIPTIONS (CRITICAL):
+Each scene must describe a STATE CHANGE, not a static tableau.
+
 For each scene, provide:
 1. A detailed visual prompt (what's happening, composition, lighting, mood)
-2. action_summary: 1 sentence: WHO does WHAT (e.g., "Man pushes through brutal training")
-3. Suggested duration (match the role's recommended range)
-4. Camera direction (movement, framing, lens suggestion)
-5. Role assignment from the list above
-6. change_type: What changes at this beat
-7. narration_line (optional): TTS voiceover line for this beat
-8. onscreen_text (optional): Text overlay if needed
+2. action_summary: STATE CHANGE description, NOT static observation
+   Format: "[Subject] [transformation verb] from [state A] to [state B]"
+   ✓ Good: "Cat's posture shifts from defensive to curious as ears rotate forward"
+   ✓ Good: "Dog's expression changes from eager to submissive, rolling over"
+   ✗ Bad: "Cat looks hesitant" (static state, no transformation)
+   ✗ Bad: "Dog runs around" (no clear A→B change)
+3. state_from: 3-6 words describing starting state (posture, expression, position)
+4. state_to: 3-6 words describing ending state (must be DIFFERENT from state_from)
+5. end_state: 1 sentence describing what should be TRUE at the end of this clip
+6. Suggested duration (match the role's recommended range)
+7. Camera direction (movement, framing, lens suggestion)
+8. Role assignment from the list above
+9. change_type: What changes at this beat
+10. narration_line (optional): TTS voiceover line for this beat
+11. onscreen_text (optional): Text overlay if needed
 
-CRITICAL: action_summary must describe CHARACTER ACTION, not camera motion.
-- Good: "Woman discovers her data has been stolen"
-- Bad: "Camera pans across room"
+CRITICAL RULES FOR NARRATIVE GLUE:
+- action_summary must contain a TRANSFORMATION VERB (shifts, changes, transforms, moves, turns, reacts, responds, realizes, decides)
+- state_from and state_to must be DIFFERENT (if they're the same, the scene is static)
+- end_state describes the OBSERVABLE RESULT that the next scene will react to
+- Each scene must RESPOND to the previous scene's end_state (cause → effect)
 
 Also extract continuity anchors:
 - Character details (if any characters appear)
@@ -163,7 +180,10 @@ Respond ONLY with valid JSON in this exact format:
   "scenes": [
     {
       "prompt": "Detailed visual description for video generation",
-      "action_summary": "Character performs specific action",
+      "action_summary": "Subject transforms from [state A] to [state B]",
+      "state_from": "initial observable state",
+      "state_to": "final observable state (must differ from state_from)",
+      "end_state": "What is true at the end of this clip",
       "duration_target": 5,
       "camera_direction": "Camera movement and framing notes",
       "role": "story_a",
@@ -191,7 +211,6 @@ Respond ONLY with valid JSON in this exact format:
     "negative_list": ["flicker", "jitter", "identity drift", "morph"]
   }
 }`;
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
