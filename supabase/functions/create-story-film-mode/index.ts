@@ -244,14 +244,15 @@ Deno.serve(async (req) => {
     
     // === STORY FORCES SUMMARY LOG ===
     const finalForces = storyboard.scenes.filter(s => s.force_present === true).length;
-    const finalPeak = storyboard.scenes.findIndex(s => (s.escalation_delta ?? 0) >= 3);
+    const finalPeakIdx = storyboard.scenes.findIndex(s => (s.escalation_delta ?? 0) >= 3);
     const finalHigh = storyboard.scenes.filter(s => (s.escalation_delta ?? 0) >= 2).length;
-    const finalDeltas = new Set(storyboard.scenes.map(s => s.setpiece_delta).filter(Boolean)).size;
+    const finalDeltas = new Set(storyboard.scenes.map(normalizeSetpieceDelta).filter(Boolean)).size;
     
-    console.log(`[film-mode] ✓ Story Forces summary: forces=${finalForces}/6, peak=${finalPeak >= 0 ? `scene ${finalPeak}` : 'none'}, escalation≥2=${finalHigh}, unique_deltas=${finalDeltas}`);
+    // FIX: Use 1-based scene numbers everywhere for human readability
+    console.log(`[film-mode] ✓ Story Forces summary: forces=${finalForces}/${storyboard.scenes.length}, peak=${finalPeakIdx >= 0 ? `scene ${finalPeakIdx + 1}` : 'none'}, escalation≥2=${finalHigh}, unique_deltas=${finalDeltas}`);
     console.log(`[film-mode] Per-scene breakdown:`);
     storyboard.scenes.forEach((s, i) => {
-      console.log(`  ${i}: role=${s.subject_required ? 'hero' : 'spectacle'} force=${s.force_type || '-'} esc=${s.escalation_delta ?? 0} delta="${s.setpiece_delta || '-'}"`);
+      console.log(`  ${i + 1}: role=${s.subject_required ? 'hero' : 'spectacle'} force=${s.force_type || '-'} esc=${s.escalation_delta ?? 0} delta="${normalizeSetpieceDelta(s) || '-'}"`);
     });
 
     // Validate coverage distribution
