@@ -141,18 +141,31 @@ Deno.serve(async (req) => {
     }
 
     // === STORY FORCES VALIDATION (Escalation Contract) ===
+    // FIX: Clamp escalation_delta to 0-3 range before validation
+    for (const scene of storyboard.scenes) {
+      if (typeof scene.escalation_delta === 'number') {
+        scene.escalation_delta = Math.max(0, Math.min(3, Math.floor(scene.escalation_delta))) as 0 | 1 | 2 | 3;
+      }
+    }
+    
     const forceScenes = storyboard.scenes.filter(s => s.force_present === true);
     const highEscalationScenes = storyboard.scenes.filter(s => (s.escalation_delta ?? 0) >= 2);
     const peakScenes = storyboard.scenes.filter(s => (s.escalation_delta ?? 0) >= 3);
+    
+    // FIX: Normalize setpiece_delta (trim whitespace, lowercase, filter empty)
+    const normalizeSetpieceDelta = (s: FilmScene): string | null => {
+      const delta = (s.setpiece_delta || "").trim().toLowerCase();
+      return delta.length > 0 ? delta : null;
+    };
     const uniqueSetpieceDeltas = new Set(
-      storyboard.scenes.map(s => s.setpiece_delta).filter(Boolean)
+      storyboard.scenes.map(normalizeSetpieceDelta).filter(Boolean)
     );
 
     const forceIssues: string[] = [];
     if (forceScenes.length < 2) {
       forceIssues.push(`force_present=${forceScenes.length}/2 (need more external pressure)`);
     }
-    // Changed: require 1 peak (escalation=3) instead of 3 scenes with >=2
+    // Require 1 peak (escalation=3) instead of 3 scenes with >=2
     if (peakScenes.length < 1) {
       forceIssues.push(`escalation_delta=3 count=${peakScenes.length}/1 (needs peak tension)`);
     }
@@ -209,9 +222,12 @@ Deno.serve(async (req) => {
         }
       }
       
-      // Ensure one peak scene (escalation=3) - prefer scene 4 or last mid-scene
-      const peakIndex = Math.min(4, storyboard.scenes.length - 2);
-      if (peakScenes.length === 0 && peakIndex >= 0 && peakIndex < storyboard.scenes.length) {
+      // FIX: Ensure one peak scene (escalation=3) with safe bounds
+      // For short stories (5 scenes), peakIndex = min(4, 3) = 3 (scene 4, 0-indexed)
+      // For 6+ scenes, peakIndex = 4 (scene 5)
+      // Never point to CTA (last scene) or hook (first scene)
+      const peakIndex = Math.min(4, Math.max(2, storyboard.scenes.length - 2));
+      if (peakScenes.length === 0 && peakIndex >= 0 && peakIndex < storyboard.scenes.length - 1) {
         storyboard.scenes[peakIndex].escalation_delta = 3;
         console.log(`[film-mode] Set peak escalation_delta=3 on scene ${peakIndex}`);
       }
