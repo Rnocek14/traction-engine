@@ -428,6 +428,127 @@ export function buildIdentityAnchors(anchors: IdentityAnchors): string {
   return `[IDENTITY_ANCHORS]\n${parts.join("\n")}\n`;
 }
 
+// =============================================================================
+// PROVIDER-SPECIFIC NEGATIVE PROMPT HANDLING
+// =============================================================================
+
+/**
+ * Runway Gen-3/4 explicitly warns against negative phrasing ("no X", "don't").
+ * This function gates negative language by provider:
+ * - Runway: Strip all negative blocks, use positive constraints only
+ * - Sora/Luma: Allow minimal negative lists but keep them light
+ */
+export type VideoProvider = "sora" | "runway" | "luma";
+
+/**
+ * Negative language patterns to detect
+ */
+const NEGATIVE_PATTERNS = [
+  /\bno\s+\w+/gi,           // "no flicker"
+  /\bnever\s+\w+/gi,        // "never repeat"
+  /\bdon'?t\s+\w+/gi,       // "don't move"
+  /\bavoid\s+\w+/gi,        // "avoid jitter"
+  /\bwithout\s+\w+/gi,      // "without drift"
+  /\bnot\s+\w+/gi,          // "not static"
+];
+
+/**
+ * Detect if a prompt contains negative phrasing
+ */
+export function hasNegativeLanguage(prompt: string): boolean {
+  return NEGATIVE_PATTERNS.some(pattern => pattern.test(prompt));
+}
+
+/**
+ * Convert negative constraints to positive equivalents for Runway
+ */
+const NEGATIVE_TO_POSITIVE: Record<string, string> = {
+  "no flicker": "stable, consistent exposure",
+  "no jitter": "smooth camera motion",
+  "avoid drift": "maintain subject position",
+  "avoid identity drift": "consistent character appearance",
+  "no morph": "stable subject form",
+  "without blur": "sharp focus throughout",
+  "don't repeat": "continuous forward motion",
+  "never static": "constant subtle movement",
+  "no cut": "seamless single take",
+};
+
+/**
+ * Strip or convert negative language based on provider
+ * Runway: Convert to positive only
+ * Sora/Luma: Keep minimal negatives but log warning
+ */
+export function sanitizeNegativeLanguage(
+  prompt: string, 
+  provider: VideoProvider,
+  negativeList?: string[]
+): { prompt: string; negativeList: string[] | undefined; wasModified: boolean } {
+  let modified = false;
+  let sanitizedPrompt = prompt;
+  let sanitizedNegatives = negativeList;
+  
+  if (provider === "runway") {
+    // Runway: Strip negative blocks entirely, convert to positive constraints
+    
+    // Remove AVOID sections
+    const avoidPattern = /=== AVOID.*?===[\s\S]*?(?=\n\n|$)/gi;
+    if (avoidPattern.test(sanitizedPrompt)) {
+      sanitizedPrompt = sanitizedPrompt.replace(avoidPattern, "").trim();
+      modified = true;
+    }
+    
+    // Replace individual negative phrases with positive equivalents
+    for (const [negative, positive] of Object.entries(NEGATIVE_TO_POSITIVE)) {
+      const negRegex = new RegExp(negative.replace(/\s+/g, "\\s+"), "gi");
+      if (negRegex.test(sanitizedPrompt)) {
+        sanitizedPrompt = sanitizedPrompt.replace(negRegex, positive);
+        modified = true;
+      }
+    }
+    
+    // Remove remaining negative patterns (be aggressive for Runway)
+    for (const pattern of NEGATIVE_PATTERNS) {
+      if (pattern.test(sanitizedPrompt)) {
+        // For Runway, just remove the negative phrase
+        sanitizedPrompt = sanitizedPrompt.replace(pattern, "").replace(/\s+/g, " ").trim();
+        modified = true;
+      }
+      // Reset lastIndex
+      pattern.lastIndex = 0;
+    }
+    
+    // Strip negative_list entirely for Runway
+    if (negativeList && negativeList.length > 0) {
+      console.log(`[runway-safety] Stripping ${negativeList.length} negative_list items (Runway prefers positive only)`);
+      sanitizedNegatives = undefined;
+      modified = true;
+    }
+    
+    if (modified) {
+      console.log(`[runway-safety] Converted negative language to positive framing`);
+    }
+  } else {
+    // Sora/Luma: Log warning but allow minimal negatives
+    if (hasNegativeLanguage(prompt)) {
+      console.log(`[${provider}-warning] Prompt contains negative language - consider positive framing for better results`);
+    }
+    // Keep negatives as-is but limit to essential artifacts
+    const essentialNegatives = ["flicker", "jitter", "identity drift", "morph"];
+    if (negativeList && negativeList.length > essentialNegatives.length) {
+      sanitizedNegatives = negativeList.filter(n => 
+        essentialNegatives.some(e => n.toLowerCase().includes(e))
+      );
+      if (sanitizedNegatives.length !== negativeList.length) {
+        console.log(`[${provider}] Trimmed negative_list from ${negativeList.length} to ${sanitizedNegatives.length} essential items`);
+        modified = true;
+      }
+    }
+  }
+  
+  return { prompt: sanitizedPrompt, negativeList: sanitizedNegatives, wasModified: modified };
+}
+
 /**
  * =============================================================================
  * RUNWAY GEN-3 ALPHA PROMPT SYSTEM
