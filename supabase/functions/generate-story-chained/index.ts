@@ -122,6 +122,8 @@ Deno.serve(async (req) => {
     // Check for Character Continuity Mode from request body
     const characterContinuityMode = (body as { character_continuity_mode?: boolean }).character_continuity_mode || false;
     const lockedProviderName = (body as { locked_provider?: "sora" | "runway" | "luma" }).locked_provider || null;
+    // Soft Continuity Mode: allow strategic T2V cuts for energy roles
+    const softContinuityMode = (body as { soft_continuity?: boolean }).soft_continuity ?? true;
     
     console.log(`[chained] Starting story ${story_job_id}: ${scenes.length} scenes`);
     // Phase 3: Log story_spine for debugging narrative flow
@@ -130,7 +132,7 @@ Deno.serve(async (req) => {
     }
     // Log Character Continuity Mode if enabled
     if (characterContinuityMode && lockedProviderName) {
-      console.log(`[chained] Character Continuity Mode ENABLED → Locked to ${lockedProviderName}`);
+      console.log(`[chained] Character Continuity Mode ENABLED → Locked to ${lockedProviderName}${softContinuityMode ? " (Soft Continuity ON)" : ""}`);
     }
     console.log(`[chained] Queueing scene 1 (T2V), scenes 2-${scenes.length} will be handled by cron`);
 
@@ -172,6 +174,7 @@ Deno.serve(async (req) => {
           story_spine: story_spine || null, // Phase 1: Persist story spine
           character_continuity_mode: characterContinuityMode, // NEW: Persist for chain
           locked_provider: lockedProviderName, // NEW: Persist for chain
+          soft_continuity: softContinuityMode, // NEW: Persist for chain
         },
         continuity_anchors: anchors,
       })

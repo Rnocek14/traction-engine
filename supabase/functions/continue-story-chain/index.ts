@@ -242,6 +242,8 @@ Deno.serve(async (req) => {
         // Character Continuity Mode (NEW)
         character_continuity_mode?: boolean;
         locked_provider?: "sora" | "runway" | "luma";
+        // Soft Continuity Mode: allow T2V for specific roles even in Character Continuity Mode
+        soft_continuity?: boolean;
       };
       const scenes = storyboardData?.scenes || [];
       const storyTier = storyboardData?.tier || "volume"; // Read tier from storyboard
@@ -250,6 +252,8 @@ Deno.serve(async (req) => {
       // Character Continuity Mode (NEW)
       const characterContinuityMode = storyboardData?.character_continuity_mode || false;
       const lockedProviderName = storyboardData?.locked_provider as VideoProvider | null;
+      // Soft Continuity Mode: allow strategic T2V cuts for energy while keeping locked provider
+      const softContinuityMode = storyboardData?.soft_continuity || false;
       const totalScenes = scenes.length;
 
       if (totalScenes === 0) {
@@ -507,10 +511,22 @@ Deno.serve(async (req) => {
         cutReason = `provider switch ${prevProvider}→${selectedProvider}`;
       }
       
-      // In Character Continuity Mode with scenes 2+, FORCE continuity cut for I2V chaining
+      // In Character Continuity Mode: handle I2V vs T2V based on soft continuity
       if (characterContinuityMode && !isFirstScene && latestThumbnail) {
-        cutType = "continuity";
-        cutReason = "Character Continuity Mode forces I2V";
+        // Soft Continuity Mode: Allow strategic T2V cuts for energy roles
+        // These roles need fresh staging to inject visual energy
+        const FORCE_T2V_ROLES: SceneRole[] = ["hook", "problem", "reset", "establish"];
+        
+        if (softContinuityMode && FORCE_T2V_ROLES.includes(sceneRole)) {
+          cutType = "hard";
+          cutReason = `Soft Continuity: T2V for ${sceneRole} (energy role)`;
+          console.log(`[chain-continue] Soft Continuity: allowing T2V for ${sceneRole}`);
+        } else {
+          cutType = "continuity";
+          cutReason = softContinuityMode 
+            ? `Soft Continuity: I2V for ${sceneRole} (story beat)` 
+            : "Character Continuity Mode forces I2V";
+        }
       }
       
       // Log the cut type decision (this is the key diagnostic)

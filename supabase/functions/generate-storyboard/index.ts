@@ -52,6 +52,10 @@ interface GeneratedScene {
   state_from?: string;
   state_to?: string;
   end_state?: string;
+  // Phase 5: 3-Beat Action Schema
+  beat_trigger?: string;
+  beat_action?: string;
+  beat_result?: string;
 }
 
 interface GeneratedStoryboard {
@@ -80,6 +84,57 @@ interface GeneratedStoryboard {
     negative_list: string[];
   };
 }
+
+// === ACTION VERB ENFORCEMENT ===
+// These verbs create "static tableaux" - Sora interprets them as "hold this pose"
+const BANNED_VERBS = [
+  "stand", "stands", "standing",
+  "gaze", "gazes", "gazing",
+  "look", "looks", "looking",
+  "observe", "observes", "observing",
+  "hesitate", "hesitates", "hesitating",
+  "wonder", "wonders", "wondering",
+  "feel", "feels", "feeling",
+  "realize", "realizes", "realizing",
+  "contemplate", "contemplates", "contemplating",
+  "notice", "notices", "noticing",
+  "see", "sees", "seeing",
+  "watch", "watches", "watching",
+  "stare", "stares", "staring",
+  "hold", "holds", "holding",
+  "sit", "sits", "sitting",
+  "wait", "waits", "waiting",
+  "pause", "pauses", "pausing",
+];
+
+// These verbs FORCE physical action - at least one must appear in first 20 words
+const REQUIRED_ACTION_VERBS = [
+  "run", "runs", "running", "sprint", "sprints", "sprinting",
+  "dodge", "dodges", "dodging", "grab", "grabs", "grabbing",
+  "slam", "slams", "slamming", "leap", "leaps", "leaping",
+  "stumble", "stumbles", "stumbling", "turn", "turns", "turning",
+  "spin", "spins", "spinning", "rip", "rips", "ripping",
+  "collide", "collides", "colliding", "dive", "dives", "diving",
+  "tackle", "tackles", "tackling", "climb", "climbs", "climbing",
+  "yank", "yanks", "yanking", "recoil", "recoils", "recoiling",
+  "throw", "throws", "throwing", "catch", "catches", "catching",
+  "push", "pushes", "pushing", "pull", "pulls", "pulling",
+  "fall", "falls", "falling", "jump", "jumps", "jumping",
+  "reach", "reaches", "reaching", "step", "steps", "stepping",
+  "duck", "ducks", "ducking", "roll", "rolls", "rolling",
+  "strike", "strikes", "striking", "block", "blocks", "blocking",
+  "tear", "tears", "tearing", "smash", "smashes", "smashing",
+  "swing", "swings", "swinging", "crash", "crashes", "crashing",
+  "burst", "bursts", "bursting", "scramble", "scrambles", "scrambling",
+  "surge", "surges", "surging", "sweep", "sweeps", "sweeping",
+  "snap", "snaps", "snapping", "whip", "whips", "whipping",
+  "lunge", "lunges", "lunging", "twist", "twists", "twisting",
+  "slide", "slides", "sliding", "plunge", "plunges", "plunging",
+  "vault", "vaults", "vaulting", "hurl", "hurls", "hurling",
+  "drop", "drops", "dropping", "lift", "lifts", "lifting",
+  "discover", "discovers", "discovering", // allowed: active reveal
+  "react", "reacts", "reacting", "respond", "responds", "responding",
+];
 
 const STORY_TYPE_GUIDANCE: Record<string, string> = {
   short_story: `Create a narrative arc with beginning, middle, and end. 
@@ -127,29 +182,68 @@ Every cut MUST change something meaningful (no montage drift):
 Choose roles based on narrative position and purpose. A typical 6-scene story uses:
 hook → problem → story_a → reset → story_b → cta
 
+═══════════════════════════════════════════════════════════════════════════════
+🎬 ACTION BEAT SCHEMA (CRITICAL - READ CAREFULLY)
+═══════════════════════════════════════════════════════════════════════════════
+
+Every scene MUST contain PHYSICAL ACTION, not contemplation.
+Static scenes will be REJECTED. Video AI interprets static verbs as "freeze".
+
+For each scene, you MUST provide a 3-BEAT ACTION STRUCTURE:
+1. beat_trigger: "What external event forces action" (storm hits, door opens, branch snaps)
+2. beat_action: "Physical verb the character performs" (dives, grabs, sprints, leaps)
+3. beat_result: "Observable end-state" (lands behind rock, holds object, enters new space)
+
+BANNED VERBS (scenes will be rejected if these are the main action):
+stand, stands, gaze, gazes, look, looks, observe, hesitate, wonder, feel, realize,
+contemplate, notice, see, watch, stare, hold, holds, sit, sits, wait, pause
+
+REQUIRED ACTION VERBS (main action MUST use one of these):
+run, sprint, dodge, grab, slam, leap, stumble, turn, spin, rip, collide, dive,
+tackle, climb, yank, recoil, throw, catch, push, pull, fall, jump, reach, step,
+duck, roll, strike, block, tear, smash, swing, crash, burst, scramble, surge,
+sweep, snap, whip, lunge, twist, slide, plunge, vault, hurl, drop, lift
+
+THE ACTION MUST APPEAR IN THE FIRST 20 WORDS OF THE PROMPT.
+
+Example of GOOD scene:
+prompt: "The Martian DIVES for cover as the dust storm CRASHES over the ridge, scrambling on hands and knees toward a rock formation"
+beat_trigger: "dust storm crashes over ridge"
+beat_action: "dives, scrambles"
+beat_result: "reaches shelter behind rock formation"
+
+Example of BAD scene (will be rejected):
+prompt: "The Martian stands gazing at the approaching storm, hesitating"
+← REJECTED: "stands, gazes, hesitating" are BANNED VERBS
+
+═══════════════════════════════════════════════════════════════════════════════
+
 TRANSFORMATION-BASED DESCRIPTIONS (CRITICAL):
 Each scene must describe a STATE CHANGE, not a static tableau.
 
 For each scene, provide:
 1. A detailed visual prompt (what's happening, composition, lighting, mood)
-2. action_summary: STATE CHANGE description, NOT static observation
-   Format: "[Subject] [transformation verb] from [state A] to [state B]"
+   - THE FIRST 20 WORDS MUST CONTAIN A REQUIRED ACTION VERB
+2. beat_trigger: External event that forces action
+3. beat_action: Physical verb(s) from the REQUIRED list
+4. beat_result: Observable end-state
+5. action_summary: STATE CHANGE description in format "[Subject] [transformation verb] from [state A] to [state B]"
    ✓ Good: "Cat's posture shifts from defensive to curious as ears rotate forward"
    ✓ Good: "Dog's expression changes from eager to submissive, rolling over"
    ✗ Bad: "Cat looks hesitant" (static state, no transformation)
-   ✗ Bad: "Dog runs around" (no clear A→B change)
-3. state_from: 3-6 words describing starting state (posture, expression, position)
-4. state_to: 3-6 words describing ending state (must be DIFFERENT from state_from)
-5. end_state: 1 sentence describing what should be TRUE at the end of this clip
-6. Suggested duration (match the role's recommended range)
-7. Camera direction (movement, framing, lens suggestion)
-8. Role assignment from the list above
-9. change_type: What changes at this beat
-10. narration_line (optional): TTS voiceover line for this beat
-11. onscreen_text (optional): Text overlay if needed
+6. state_from: 3-6 words describing starting state (posture, expression, position)
+7. state_to: 3-6 words describing ending state (must be DIFFERENT from state_from)
+8. end_state: 1 sentence describing what should be TRUE at the end of this clip
+9. Suggested duration (match the role's recommended range)
+10. Camera direction (movement, framing, lens suggestion)
+11. Role assignment from the list above
+12. change_type: What changes at this beat
+13. narration_line (optional): TTS voiceover line for this beat
+14. onscreen_text (optional): Text overlay if needed
 
 CRITICAL RULES FOR NARRATIVE GLUE:
-- action_summary must contain a TRANSFORMATION VERB (shifts, changes, transforms, moves, turns, reacts, responds, realizes, decides)
+- The prompt's FIRST CLAUSE must contain an action verb (not buried later)
+- beat_action must be a physical verb (shifts, changes, transforms, moves, turns, reacts, responds, realizes, decides)
 - state_from and state_to must be DIFFERENT (if they're the same, the scene is static)
 - end_state describes the OBSERVABLE RESULT that the next scene will react to
 - Each scene must RESPOND to the previous scene's end_state (cause → effect)
@@ -170,6 +264,7 @@ IMPORTANT PROMPT GUIDELINES:
 - For HOOK/RESET scenes: Start with camera motion (e.g., "Whip pan:", "Tracking shot:")
 - For STORY scenes: Use full cinematic description
 - Reference motif_anchors in scene prompts for visual continuity
+- START THE PROMPT WITH ACTION - don't bury the verb
 
 Respond ONLY with valid JSON in this exact format:
 {
@@ -179,7 +274,10 @@ Respond ONLY with valid JSON in this exact format:
   "palette_keywords": ["color 1", "color 2", "texture"],
   "scenes": [
     {
-      "prompt": "Detailed visual description for video generation",
+      "prompt": "ACTION VERB FIRST: The Martian DIVES for cover as dust storm...",
+      "beat_trigger": "dust storm crashes over ridge",
+      "beat_action": "dives, scrambles",
+      "beat_result": "reaches shelter behind rock",
       "action_summary": "Subject transforms from [state A] to [state B]",
       "state_from": "initial observable state",
       "state_to": "final observable state (must differ from state_from)",
@@ -281,6 +379,49 @@ Generate a complete, filmable storyboard with vivid, specific visual prompts for
     } catch (parseError) {
       console.error("Failed to parse AI response:", content);
       throw new Error("Failed to parse storyboard response");
+    }
+
+    // === ACTION VERB VALIDATION ===
+    // Check each scene for banned verbs and require action verbs early
+    const validationResults = storyboard.scenes.map((scene, i) => {
+      const promptLower = scene.prompt.toLowerCase();
+      const first20Words = promptLower.split(/\s+/).slice(0, 20).join(" ");
+      
+      // Check for banned verbs in first clause (before first comma or period)
+      const firstClause = promptLower.split(/[,.:!?]/)[0] || "";
+      const bannedVerbFound = BANNED_VERBS.find(verb => {
+        const regex = new RegExp(`\\b${verb}\\b`, "i");
+        return regex.test(firstClause);
+      });
+      
+      // Check for required action verb in first 20 words
+      const hasActionVerb = REQUIRED_ACTION_VERBS.some(verb => {
+        const regex = new RegExp(`\\b${verb}\\b`, "i");
+        return regex.test(first20Words);
+      });
+      
+      // Check for 3-beat schema
+      const hasBeats = !!(scene.beat_trigger && scene.beat_action && scene.beat_result);
+      
+      return {
+        sceneIndex: i,
+        bannedVerb: bannedVerbFound,
+        hasActionVerb,
+        hasBeats,
+        valid: !bannedVerbFound && hasActionVerb,
+      };
+    });
+    
+    const invalidScenes = validationResults.filter(r => !r.valid);
+    if (invalidScenes.length > 0) {
+      console.warn(`[generate-storyboard] Validation warnings for ${invalidScenes.length} scenes:`);
+      invalidScenes.forEach(s => {
+        console.warn(`  Scene ${s.sceneIndex + 1}: ${
+          s.bannedVerb ? `banned verb "${s.bannedVerb}"` : ""
+        } ${!s.hasActionVerb ? "missing action verb in first 20 words" : ""}`);
+      });
+      // Log but don't fail - GPT sometimes still produces good content
+      // Future: could retry with stronger prompt injection here
     }
 
     // Ensure negative_list always has base items
