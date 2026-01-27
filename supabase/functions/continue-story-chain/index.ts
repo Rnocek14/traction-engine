@@ -822,7 +822,7 @@ Deno.serve(async (req) => {
           .update({
             story_job_id: story.id,
             sequence_index: nextSceneIndex,
-            original_prompt: nextScene.prompt,
+            original_prompt: nextRawPrompt,
             style_hints: JSON.stringify(auditData),
           })
           .eq("id", jobId);
