@@ -36,6 +36,9 @@ export interface ShotSignature {
   lens: "24mm" | "35mm" | "50mm" | "85mm" | "135mm";
 }
 
+// Story Forces - what acts on the protagonist
+export type ForceType = "weather" | "predator" | "time" | "pursuit" | "hazard" | "social" | "resource";
+
 export interface FilmScene {
   id: string;
   index: number;
@@ -57,6 +60,11 @@ export interface FilmScene {
   
   // Visual delta (what changes from previous)
   setpiece_delta: string;      // "fire spreads to second tower"
+  
+  // === STORY FORCES (Retrofit Phase 1) ===
+  force_present: boolean;              // Is an external force acting in this scene?
+  force_type?: ForceType;              // What kind of force?
+  escalation_delta: 0 | 1 | 2 | 3;     // How much worse than previous? 0=neutral, 3=crisis
   
   // Optional
   alternate_subject?: string;  // For spectacle: "dragon", "collapsing wall"
@@ -364,6 +372,47 @@ RULES (STRICT):
 4. Each scene must have a visible "setpiece_delta" (something changes)
 5. Timing: describe action in beats (1-2: anticipation, 3-4: action, 5: settle)
 
+═══════════════════════════════════════════════════════════════════════════════
+🎯 STORY FORCES (CRITICAL FOR TENSION!)
+═══════════════════════════════════════════════════════════════════════════════
+
+Every good story has EXTERNAL PRESSURE acting on the protagonist.
+This is what makes the ant journey exciting, not just activity.
+
+For each scene, specify:
+- force_present: boolean (is an external force acting in this scene?)
+- force_type: "weather" | "predator" | "time" | "pursuit" | "hazard" | "social" | "resource"
+- escalation_delta: 0 | 1 | 2 | 3 (how much worse than previous?)
+
+FORCE TYPES:
+- "weather": Rain, storm, flood, cold, heat (environment threatens)
+- "predator": Spider, bird, mantis, enemy (something hunts/attacks)
+- "time": Deadline, countdown, closing window (urgency)
+- "pursuit": Being chased, followed, tracked (escape pressure)
+- "hazard": Falling debris, fire, collapse, trap (danger)
+- "social": Crowd, rejection, rivals (interpersonal pressure)
+- "resource": Running out of food, air, energy (depletion)
+
+ESCALATION DELTA:
+- 0: Neutral beat (setup, breathing room, transition)
+- 1: Minor escalation (tension rises slightly)
+- 2: Significant escalation (things get notably worse)
+- 3: Crisis point (maximum tension, something must break)
+
+ESCALATION CONTRACT (MUST meet these):
+- At least 2 scenes with force_present=true
+- At least 3 scenes with escalation_delta >= 2
+- At least 2 distinct setpiece_deltas (location/state transitions)
+- Scenes 3-5 should have the highest escalation
+
+Example escalation pattern for 6 scenes:
+Scene 0 (hook): escalation_delta=1, force_present=true, force_type="hazard"
+Scene 1 (threat): escalation_delta=2, force_present=true, force_type="predator"
+Scene 2 (hero): escalation_delta=2, force_present=false
+Scene 3 (escalation): escalation_delta=3, force_present=true, force_type="pursuit"
+Scene 4 (payoff): escalation_delta=2, force_present=true, force_type="hazard"
+Scene 5 (resolution): escalation_delta=0, force_present=false
+
 SCENE TYPES:
 - "face" coverage: emotional beats, reveals, reactions (gets I2V)
 - "body/back/wide" coverage: action, movement, chase (gets T2V)
@@ -399,7 +448,10 @@ OUTPUT JSON:
       },
       "duration_seconds": 4,
       "timing_beats": "1: launches forward, 2-3: full sprint, 4: debris near-miss",
-      "setpiece_delta": "tower collapses behind"
+      "setpiece_delta": "tower collapses behind",
+      "force_present": true,
+      "force_type": "hazard",
+      "escalation_delta": 2
     }
   ]
 }`;
