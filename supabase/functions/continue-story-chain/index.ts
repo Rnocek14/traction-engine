@@ -39,6 +39,12 @@ import {
   type CoverageType,
   type AlternateSubject,
 } from "../_shared/narrative-context.ts";
+import {
+  autoScoreDifficulty,
+  buildCaptureContract,
+  describeCaptureContract,
+  type SceneDifficulty,
+} from "../_shared/capture-contract.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -696,8 +702,15 @@ Deno.serve(async (req) => {
         prevNarrativeScene
       );
       
+      // === CAPTURE CONTRACT (Film Realism Prior) ===
+      // Score scene difficulty and build appropriate capture contract
+      // This shifts the model from "render this scene" to "this was captured on-location"
+      const { difficulty, isInterior, hasMetalArmor } = autoScoreDifficulty(basePrompt, resolvedCoverage);
+      const captureContract = buildCaptureContract(difficulty);
+      console.log(`[capture] Scene ${nextSceneIndex + 1} difficulty=${difficulty} (interior=${isInterior}, metal=${hasMetalArmor}) → ${describeCaptureContract(difficulty)}`);
+      
       if (isI2V) {
-        // I2V ORDER: Motion first (breaks hold), then narrative context
+        // I2V ORDER: Motion first (breaks hold), then capture→cinematography→narrative
         const motionSummary = summarizeMotionIntent(basePrompt);
         console.log(`[motion-amp] I2V scene ${nextSceneIndex + 1}: "${motionSummary}"`);
         
@@ -710,30 +723,29 @@ Deno.serve(async (req) => {
           sceneRole
         );
         
-        // Step 2: Insert cinematography + narrative context AFTER motion block
-        // The motion block is now at the top, so cinematography→narrative goes between motion and visual
-        // We insert it by finding where the motion block ends
-        finalPrompt = insertNarrativeAfterMotion(finalPrompt, cinematographyDirective + narrativeBlock);
+        // Step 2: Insert capture contract + cinematography + narrative context AFTER motion block
+        // Order: motion → capture → cinematography → narrative → visual
+        finalPrompt = insertNarrativeAfterMotion(finalPrompt, captureContract + cinematographyDirective + narrativeBlock);
         
-        console.log(`[narrative] ✓ I2V order: motion→cinematography→narrative→visual for ${selectedProvider}`);
+        console.log(`[narrative] ✓ I2V order: motion→capture→cinematography→narrative→visual for ${selectedProvider}`);
       } else {
         // T2V ORDER: 
-        // SPECTACLE: spectacle directive at TOP (if subject_required=false)
-        // COVERAGE: coverage directive (if non-face)
-        // Then narrative context
+        // CAPTURE at very TOP (establishes live-action prior)
+        // SPECTACLE/COVERAGE next (if applicable)
+        // Then cinematography + narrative
         
         if (spectacleHandling.isSpectacle) {
-          // Spectacle scene: spectacle directive + cinematography at very top
+          // Spectacle scene: capture + spectacle directive + cinematography
           const spectacleDirective = spectacleHandling.directive;
-          finalPrompt = spectacleDirective + cinematographyDirective + narrativeBlock + finalPrompt;
-          console.log(`[narrative] ✓ T2V spectacle order: spectacle→cinematography→narrative→visual (${
+          finalPrompt = captureContract + spectacleDirective + cinematographyDirective + narrativeBlock + finalPrompt;
+          console.log(`[narrative] ✓ T2V spectacle order: capture→spectacle→cinematography→narrative→visual (${
             (nextScene as { alternate_subject?: AlternateSubject }).alternate_subject || "no subject"
           })`);
         } else {
-          // Regular T2V: coverage directive + cinematography then narrative
+          // Regular T2V: capture + coverage + cinematography + narrative
           const coverageDirective = buildCoverageDirective(resolvedCoverage);
-          finalPrompt = coverageDirective + cinematographyDirective + narrativeBlock + finalPrompt;
-          console.log(`[narrative] ✓ T2V order: coverage=${resolvedCoverage}→cinematography→narrative→visual`);
+          finalPrompt = captureContract + coverageDirective + cinematographyDirective + narrativeBlock + finalPrompt;
+          console.log(`[narrative] ✓ T2V order: capture→coverage=${resolvedCoverage}→cinematography→narrative→visual`);
         }
       }
       
@@ -798,6 +810,10 @@ Deno.serve(async (req) => {
           is_character_bible_t2v: isCharacterBibleT2V,
           // Role-based cinematography (anti-"video game" variety)
           cinematography: roleCine,
+          // Capture contract (film realism prior)
+          capture_difficulty: difficulty,
+          capture_is_interior: isInterior,
+          capture_has_metal: hasMetalArmor,
         };
         await supabase
           .from("video_jobs")
