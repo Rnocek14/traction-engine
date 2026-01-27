@@ -135,24 +135,24 @@ Deno.serve(async (req) => {
       
       // === FORCE/ESCALATION INJECTION (Phase 8) ===
       // Even Film Mode injects force/escalation for intensity
-      const forceEscalationBlock = buildForceEscalationBlock(
-        {
-          force_present: nextScene.force_present,
-          force_type: nextScene.force_type as ForceType | undefined,
-          escalation_delta: nextScene.escalation_delta as EscalationLevel | undefined,
-          setpiece_delta: nextScene.setpiece_delta,
-        },
-        nextScene.index,
-        false // brutality_mode (could be read from storyboard settings)
-      );
-      
-      // Log force/escalation
-      logForceEscalationInjection(nextScene.index, {
+      // Film Mode uses Sora by default (long form injection)
+      const brutalityMode = storyboard.generation_settings?.brutality_mode || false;
+      const forceSceneData = {
         force_present: nextScene.force_present,
         force_type: nextScene.force_type as ForceType | undefined,
         escalation_delta: nextScene.escalation_delta as EscalationLevel | undefined,
         setpiece_delta: nextScene.setpiece_delta,
-      });
+      };
+      
+      const forceEscalationBlock = buildForceEscalationBlock(
+        forceSceneData,
+        nextScene.index,
+        brutalityMode,
+        "sora" // Film mode defaults to Sora
+      );
+      
+      // Log force/escalation (with provider context)
+      logForceEscalationInjection(nextScene.index, forceSceneData, "sora");
       
       // Prepend force/escalation to minimal prompt
       prompt = forceEscalationBlock + prompt;
