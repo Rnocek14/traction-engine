@@ -283,6 +283,9 @@ export interface NarrativeStoryContext {
  * 
  * For I2V: This goes AFTER motion amplification (motion first breaks hold)
  * For T2V: This goes at the TOP (establishes intent)
+ * 
+ * SPECTACLE SCENES: Use neutral language (events, not protagonist actions)
+ * to avoid "dragging" the protagonist into non-character scenes.
  */
 export function buildNarrativeContextBlock(
   storyContext: NarrativeStoryContext,
@@ -294,6 +297,16 @@ export function buildNarrativeContextBlock(
   
   const sceneNum = currentSceneIndex + 1;
   const total = storyContext.totalScenes;
+  
+  // Check if this is a spectacle scene
+  const isSpectacle = currentScene.subject_required === false || !!currentScene.alternate_subject;
+  
+  // === SPECTACLE SCENES: Neutral language, no protagonist references ===
+  if (isSpectacle) {
+    return buildSpectacleNarrativeContext(currentScene, prevScene, sceneNum, total, storyContext);
+  }
+  
+  // === HERO SCENES: Standard narrative context with protagonist ===
   
   // Build prev_end from: end_state > state_to > action_summary > prompt extraction
   const prevEnd = prevScene 
@@ -344,6 +357,87 @@ export function buildNarrativeContextBlock(
   block += "\n";
   
   return block;
+}
+
+/**
+ * Build narrative context for SPECTACLE scenes
+ * Uses event-based language, not protagonist-based
+ * 
+ * Key difference: "PREV_EVENT" and "THIS_EVENT" instead of 
+ * protagonist-referencing "PREV_END" and "NOW_INTENT"
+ */
+function buildSpectacleNarrativeContext(
+  currentScene: NarrativeScene,
+  prevScene: NarrativeScene | null,
+  sceneNum: number,
+  total: number,
+  storyContext: NarrativeStoryContext
+): string {
+  const subjectLabel = currentScene.alternate_subject || "spectacle";
+  
+  // Build PREV_EVENT from previous scene's observable outcome (neutral terms)
+  let prevEvent: string | null = null;
+  if (prevScene) {
+    // Use end_state but strip protagonist references
+    const rawEnd = prevScene.end_state || prevScene.state_to || prevScene.action_summary || "";
+    prevEvent = stripProtagonistReferences(rawEnd);
+  }
+  
+  // Build THIS_EVENT from action_summary in neutral terms
+  const rawIntent = currentScene.action_summary || currentScene.narration_line || `${subjectLabel} action`;
+  const thisEvent = stripProtagonistReferences(rawIntent);
+  
+  // Build end_state in event terms
+  const endEvent = stripProtagonistReferences(currentScene.end_state || "");
+  
+  let block = `[SPECTACLE_CTX s=${sceneNum}/${total} focus=${subjectLabel}]\n`;
+  block += `NO_CHARACTER_IDENTITY_NEEDED\n`;
+  
+  // Previous event (what just happened)
+  if (prevEvent) {
+    block += `PREV_EVENT: ${prevEvent}\n`;
+  }
+  
+  // This event (what happens now)
+  block += `THIS_EVENT: "${thisEvent}"\n`;
+  
+  // End event (what should be true after)
+  if (endEvent) {
+    block += `END_EVENT: ${endEvent}\n`;
+  }
+  
+  block += "\n";
+  
+  return block;
+}
+
+/**
+ * Strip protagonist references from text to make it event-focused
+ * Replaces "the astronaut", "the knight", etc. with neutral terms
+ */
+function stripProtagonistReferences(text: string): string {
+  if (!text) return "";
+  
+  // Common protagonist patterns to strip/replace
+  const patterns: Array<[RegExp, string]> = [
+    // "The [role] does X" → "X happens"
+    [/\bthe\s+(astronaut|knight|hero|protagonist|character|figure|person|warrior|soldier|explorer|adventurer)\b/gi, ""],
+    [/\b(astronaut|knight|hero|protagonist|character|figure|warrior|soldier|explorer|adventurer)\s+(is|are|was|were|has|have|had)\b/gi, ""],
+    [/\b(astronaut|knight|hero|protagonist|character|figure|warrior|soldier|explorer|adventurer)'s\b/gi, ""],
+    // "watches as" → just the event
+    [/\bwatches as\b/gi, ""],
+    [/\bsees\b/gi, ""],
+    [/\breacts to\b/gi, ""],
+    // Clean up resulting double spaces
+    [/\s+/g, " "],
+  ];
+  
+  let result = text;
+  for (const [pattern, replacement] of patterns) {
+    result = result.replace(pattern, replacement);
+  }
+  
+  return result.trim();
 }
 
 /**
