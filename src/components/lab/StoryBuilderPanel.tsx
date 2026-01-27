@@ -254,6 +254,9 @@ export function StoryBuilderPanel({
   // Soft Continuity Mode - allow strategic T2V cuts for energy roles (hook, problem, reset, establish)
   const [softContinuity, setSoftContinuity] = useState(true);
   
+  // Film Mode - new film-first architecture (face-only I2V, minimal prompts, variety contract)
+  const [filmMode, setFilmMode] = useState(false);
+  
   // Story Spine (narrative structure from Director Brain)
   const [storySpine, setStorySpine] = useState<string>("");
   const [motifAnchors, setMotifAnchors] = useState<string[]>([]);
@@ -580,7 +583,33 @@ export function StoryBuilderPanel({
       setEnrichmentProgress(0);
       setEnrichmentStatus(null);
       
-      // Check if anchors need auto-inference (mostly empty)
+      // Film Mode: use the new film-first continuation engine
+      if (filmMode) {
+        setEnrichmentStatus("🎬 Film Mode: starting generation...");
+        setEnrichmentProgress(30);
+        
+        const { data, error } = await supabase.functions.invoke("continue-story-film-mode", {
+          body: {
+            story_job_id: targetStoryId,
+          },
+        });
+        
+        if (error) throw error;
+        if (!data?.success) throw new Error(data?.error || "Film mode generation failed");
+        
+        setEnrichmentStatus(null);
+        setEnrichmentProgress(100);
+        
+        return {
+          succeeded: data.summary?.queued || 0,
+          failed: 0,
+          total: data.summary?.total || scenes.length,
+          isChained: true,
+          filmMode: true,
+        };
+      }
+      
+      // Legacy path: Check if anchors need auto-inference (mostly empty)
       let workingAnchors = anchors;
       const needsInference = !anchors.character?.description && 
                             !anchors.environment?.location &&
@@ -676,8 +705,10 @@ export function StoryBuilderPanel({
       setIsGenerating(false);
       setEnrichmentProgress(0);
       toast({
-        title: "Chained generation complete",
-        description: `${result.succeeded}/${result.total} clips completed with frame continuity`,
+        title: result.filmMode ? "🎬 Film Mode generation started" : "Chained generation complete",
+        description: result.filmMode 
+          ? `Queued ${result.succeeded}/${result.total} clips with face-only I2V` 
+          : `${result.succeeded}/${result.total} clips completed with frame continuity`,
       });
       queryClient.invalidateQueries({ queryKey: ["story-clips", storyId] });
     },
@@ -833,6 +864,35 @@ export function StoryBuilderPanel({
       if (!concept.trim()) throw new Error("Enter a concept first");
       
       setIsGeneratingStory(true);
+      
+      // Film Mode uses the new film-first storyboard generator
+      if (filmMode) {
+        const { data, error } = await supabase.functions.invoke("create-story-film-mode", {
+          body: {
+            account_id: DEFAULT_ACCOUNT_ID,
+            premise: concept.trim(),
+            character_description: anchors.character?.description || "",
+            scene_count: STORY_TYPE_CONFIGS[storyType]?.typicalClipCount[1] || 6,
+          },
+        });
+        
+        if (error) throw error;
+        if (!data?.success) throw new Error(data?.error || "Film mode generation failed");
+        
+        // Return in the same format as legacy storyboard
+        return {
+          title: data.story?.title || `Film Story ${new Date().toLocaleDateString()}`,
+          story_spine: data.story?.storyboard_json?.story_spine || "",
+          motif_anchors: [],
+          palette_keywords: [],
+          anchors: data.story?.continuity_anchors || getDefaultAnchors(),
+          scenes: data.story?.storyboard_json?.scenes || [],
+          film_mode: true,
+          story_job_id: data.story?.id,
+        };
+      }
+      
+      // Legacy storyboard generation
       const { data, error } = await supabase.functions.invoke("generate-storyboard", {
         body: {
           concept: concept.trim(),
@@ -849,7 +909,34 @@ export function StoryBuilderPanel({
     onSuccess: async (data) => {
       setIsGeneratingStory(false);
       
-      // Capture Director Brain output
+      // Film Mode: story already created in DB, just update local state
+      if (data.film_mode && data.story_job_id) {
+        const newScenes = (data.scenes || []).map((s: StoryScene, i: number) => ({
+          ...s,
+          id: s.id || nanoid(8),
+          sequence_index: i,
+        }));
+        
+        setTitle(data.title || "");
+        setStorySpine(data.story_spine || "");
+        setMotifAnchors([]);
+        setPaletteKeywords([]);
+        setScenes(newScenes);
+        setAnchors(data.anchors || getDefaultAnchors());
+        setConcept("");
+        
+        queryClient.invalidateQueries({ queryKey: ["story-jobs"] });
+        queryClient.invalidateQueries({ queryKey: ["recent-story"] });
+        onStoryCreated?.(data.story_job_id);
+        
+        toast({
+          title: "🎬 Film Mode story ready!",
+          description: `Created ${newScenes.length} scenes with variety contract. Click Generate to start.`,
+        });
+        return;
+      }
+      
+      // Legacy: Capture Director Brain output
       const newTitle = data.title || `Story ${new Date().toLocaleDateString()}`;
       const newSpine = data.story_spine || "";
       const newMotifs = data.motif_anchors || [];
@@ -895,6 +982,7 @@ export function StoryBuilderPanel({
         character_continuity_mode: characterContinuityMode,
         locked_provider: lockedProvider,
         soft_continuity: softContinuity,
+        film_mode: filmMode,
       };
       
       console.log("[StoryBuilder] Saving full storyboard:", {
@@ -1277,60 +1365,90 @@ export function StoryBuilderPanel({
                 </Button>
               </div>
               
-              {/* Character Continuity Mode - for stories with consistent characters */}
-              <div className="pt-2 border-t border-border/50 space-y-2">
+              {/* Mode Selection */}
+              <div className="pt-2 border-t border-border/50 space-y-3">
+                {/* Film Mode - NEW film-first architecture */}
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Switch
-                      id="character-continuity"
-                      checked={characterContinuityMode}
-                      onCheckedChange={setCharacterContinuityMode}
+                      id="film-mode"
+                      checked={filmMode}
+                      onCheckedChange={(checked) => {
+                        setFilmMode(checked);
+                        // Disable character continuity mode when film mode is enabled
+                        if (checked) setCharacterContinuityMode(false);
+                      }}
                     />
-                    <Label htmlFor="character-continuity" className="text-xs cursor-pointer">
-                      Character Continuity Mode
+                    <Label htmlFor="film-mode" className="text-xs cursor-pointer font-medium">
+                      🎬 Film Mode
                     </Label>
+                    <Badge variant="secondary" className="text-[9px] bg-primary/20 text-primary">NEW</Badge>
                   </div>
-                  {characterContinuityMode && (
-                    <Select value={lockedProvider} onValueChange={(v) => setLockedProvider(v as "sora" | "runway" | "luma")}>
-                      <SelectTrigger className="h-7 text-[10px] w-24">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="sora" className="text-xs">
-                          <span>🎬 Sora</span>
-                        </SelectItem>
-                        <SelectItem value="runway" className="text-xs">
-                          <span>🚀 Runway</span>
-                        </SelectItem>
-                        <SelectItem value="luma" className="text-xs">
-                          <span>🌙 Luma</span>
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
-                  )}
                 </div>
-                {characterContinuityMode && (
-                  <div className="space-y-2">
-                    <p className="text-[10px] text-muted-foreground leading-relaxed">
-                      Keeps characters visually consistent across all scenes using a single AI model with I2V chaining.
-                    </p>
-                    {/* Soft Continuity Toggle - allows T2V for energy roles */}
-                    <div className="flex items-center gap-2 pl-6">
-                      <Switch
-                        id="soft-continuity"
-                        checked={softContinuity}
-                        onCheckedChange={setSoftContinuity}
-                      />
-                      <Label htmlFor="soft-continuity" className="text-[10px] cursor-pointer text-muted-foreground">
-                        Soft Continuity (allow T2V for hooks/resets)
-                      </Label>
+                {filmMode && (
+                  <p className="text-[10px] text-muted-foreground leading-relaxed pl-6">
+                    Film-first architecture: face-only I2V, variety contract enforced, minimal prompts. 
+                    No legacy guardrails. Best for action/cinematic content.
+                  </p>
+                )}
+                
+                {/* Character Continuity Mode - legacy, hidden when Film Mode is on */}
+                {!filmMode && (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Switch
+                          id="character-continuity"
+                          checked={characterContinuityMode}
+                          onCheckedChange={setCharacterContinuityMode}
+                        />
+                        <Label htmlFor="character-continuity" className="text-xs cursor-pointer">
+                          Character Continuity Mode
+                        </Label>
+                      </div>
+                      {characterContinuityMode && (
+                        <Select value={lockedProvider} onValueChange={(v) => setLockedProvider(v as "sora" | "runway" | "luma")}>
+                          <SelectTrigger className="h-7 text-[10px] w-24">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="sora" className="text-xs">
+                              <span>🎬 Sora</span>
+                            </SelectItem>
+                            <SelectItem value="runway" className="text-xs">
+                              <span>🚀 Runway</span>
+                            </SelectItem>
+                            <SelectItem value="luma" className="text-xs">
+                              <span>🌙 Luma</span>
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                      )}
                     </div>
-                    {softContinuity && (
-                      <p className="text-[9px] text-muted-foreground/70 pl-6 leading-relaxed">
-                        Injects visual energy by using T2V for hook, problem, reset, and establish roles while keeping I2V for story beats.
-                      </p>
+                    {characterContinuityMode && (
+                      <div className="space-y-2">
+                        <p className="text-[10px] text-muted-foreground leading-relaxed">
+                          Keeps characters visually consistent across all scenes using a single AI model with I2V chaining.
+                        </p>
+                        {/* Soft Continuity Toggle - allows T2V for energy roles */}
+                        <div className="flex items-center gap-2 pl-6">
+                          <Switch
+                            id="soft-continuity"
+                            checked={softContinuity}
+                            onCheckedChange={setSoftContinuity}
+                          />
+                          <Label htmlFor="soft-continuity" className="text-[10px] cursor-pointer text-muted-foreground">
+                            Soft Continuity (allow T2V for hooks/resets)
+                          </Label>
+                        </div>
+                        {softContinuity && (
+                          <p className="text-[9px] text-muted-foreground/70 pl-6 leading-relaxed">
+                            Injects visual energy by using T2V for hook, problem, reset, and establish roles while keeping I2V for story beats.
+                          </p>
+                        )}
+                      </div>
                     )}
-                  </div>
+                  </>
                 )}
               </div>
             </CardContent>
