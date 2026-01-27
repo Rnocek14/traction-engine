@@ -18,6 +18,12 @@ import {
   updateAnchorLibrary,
   buildFilmPrompt,
 } from "../_shared/film-continuity.ts";
+import {
+  buildForceEscalationBlock,
+  logForceEscalationInjection,
+  type ForceType,
+  type EscalationLevel,
+} from "../_shared/force-escalation.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -125,7 +131,31 @@ Deno.serve(async (req) => {
       }
 
       // Build minimal prompt (no legacy guardrails)
-      const prompt = buildFilmPrompt(nextScene, storyboard, isFirstScene);
+      let prompt = buildFilmPrompt(nextScene, storyboard, isFirstScene);
+      
+      // === FORCE/ESCALATION INJECTION (Phase 8) ===
+      // Even Film Mode injects force/escalation for intensity
+      const forceEscalationBlock = buildForceEscalationBlock(
+        {
+          force_present: nextScene.force_present,
+          force_type: nextScene.force_type as ForceType | undefined,
+          escalation_delta: nextScene.escalation_delta as EscalationLevel | undefined,
+          setpiece_delta: nextScene.setpiece_delta,
+        },
+        nextScene.index,
+        false // brutality_mode (could be read from storyboard settings)
+      );
+      
+      // Log force/escalation
+      logForceEscalationInjection(nextScene.index, {
+        force_present: nextScene.force_present,
+        force_type: nextScene.force_type as ForceType | undefined,
+        escalation_delta: nextScene.escalation_delta as EscalationLevel | undefined,
+        setpiece_delta: nextScene.setpiece_delta,
+      });
+      
+      // Prepend force/escalation to minimal prompt
+      prompt = forceEscalationBlock + prompt;
 
       console.log(`[film-chain] Scene ${nextScene.index}: coverage=${nextScene.coverage}, cut=${cutType}, i2v=${!!startingFrameUrl}`);
       console.log(`[film-chain] Prompt:\n${prompt}`);
