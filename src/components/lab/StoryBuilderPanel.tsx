@@ -85,6 +85,9 @@ import {
   type Storyboard,
   type SceneRole,
   STORY_TYPE_CONFIGS,
+  getScenePrompt,
+  getSceneDuration,
+  getSceneIndex,
 } from "@/lib/continuity-scoring";
 import { enrichPrompt, inferAnchorsFromScenes } from "@/lib/lab-engines";
 import type { Tables } from "@/integrations/supabase/types";
@@ -223,11 +226,7 @@ function getContinuityWarnings(_anchors: ContinuityAnchors, scenes: StoryScene[]
   const warnings: string[] = [];
   
   // Check for empty prompts - this is the only thing user MUST provide
-  // Film mode uses subject_action instead of prompt, so handle both
-  const emptyPrompts = scenes.filter(s => {
-    const prompt = s.prompt || ((s as unknown as { subject_action?: string }).subject_action) || "";
-    return !prompt.trim();
-  });
+  const emptyPrompts = scenes.filter(s => !getScenePrompt(s).trim());
   if (emptyPrompts.length > 0) {
     warnings.push(`${emptyPrompts.length} scene(s) have empty prompts`);
   }
@@ -235,13 +234,6 @@ function getContinuityWarnings(_anchors: ContinuityAnchors, scenes: StoryScene[]
   return warnings;
 }
 
-
-/**
- * Get the effective prompt from a scene (supports both standard and Film Mode)
- */
-function getScenePrompt(scene: StoryScene): string {
-  return scene.prompt || ((scene as unknown as { subject_action?: string }).subject_action) || "";
-}
 
 export function StoryBuilderPanel({
   storyId,
@@ -674,9 +666,9 @@ export function StoryBuilderPanel({
           story_job_id: targetStoryId,
           scenes: enrichedScenes.map(scene => ({
             id: scene.id,
-            prompt: scene.prompt,
+            prompt: getScenePrompt(scene),
             enriched_prompt: scene.enrichedPrompt,
-            duration_target: scene.duration_target,
+            duration_target: getSceneDuration(scene),
             camera_direction: scene.camera_direction,
             // Preserve Director Brain fields for progression injection
             role: (scene as StoryScene & { role?: SceneRole }).role,
@@ -842,27 +834,28 @@ export function StoryBuilderPanel({
             continuityContext,
             `=== SCENE POSITION ===`,
             `Position: ${scenePosition}`,
-            `Duration target: ${scene.duration_target}s`,
+            `Duration target: ${getSceneDuration(scene)}s`,
             scene.camera_direction ? `Camera direction: ${scene.camera_direction}` : "",
             // Add previous scene context for continuity
-            index > 0 ? `Previous scene: ${scenes[index - 1].prompt.substring(0, 100)}...` : "",
+            index > 0 ? `Previous scene: ${getScenePrompt(scenes[index - 1]).substring(0, 100)}...` : "",
           ].filter(Boolean).join("\n");
           
+          const scenePrompt = getScenePrompt(scene);
           const { enriched, error } = await enrichPrompt(
-            scene.prompt,
+            scenePrompt,
             "sora", // Default to sora optimization
             sceneContext
           );
           
           if (error) {
             console.warn(`Failed to enrich scene ${index + 1}:`, error);
-            return { ...scene, enrichedPrompt: scene.prompt };
+            return { ...scene, enrichedPrompt: scenePrompt };
           }
           
           return { ...scene, enrichedPrompt: enriched };
         } catch (err) {
           console.error(`Enrichment error for scene ${index + 1}:`, err);
-          return { ...scene, enrichedPrompt: scene.prompt };
+          return { ...scene, enrichedPrompt: getScenePrompt(scene) };
         }
       })
     );
@@ -1927,8 +1920,8 @@ function SortableScene({
           {/* Generation Status Badge */}
           {getStatusBadge()}
           <Textarea
-            value={scene.prompt}
-            onChange={(e) => onUpdate({ prompt: e.target.value })}
+            value={getScenePrompt(scene)}
+            onChange={(e) => onUpdate({ prompt: e.target.value, subject_action: e.target.value })}
             placeholder="Scene prompt..."
             className="h-14 text-xs flex-1"
           />
@@ -1954,8 +1947,8 @@ function SortableScene({
             </SelectContent>
           </Select>
           <Select
-            value={String(scene.duration_target)}
-            onValueChange={(v) => onUpdate({ duration_target: Number(v) })}
+            value={String(getSceneDuration(scene))}
+            onValueChange={(v) => onUpdate({ duration_target: Number(v), duration_seconds: Number(v) })}
           >
             <SelectTrigger className="h-7 text-xs w-16">
               <SelectValue />
