@@ -638,18 +638,27 @@ Generate a complete, filmable storyboard with vivid, specific visual prompts for
     }
     
     // === STORY FORCES VALIDATION (Escalation Contract) ===
+    // FIX: Clamp escalation_delta to 0-3 range before validation
+    for (const scene of storyboard.scenes) {
+      if (typeof scene.escalation_delta === 'number') {
+        scene.escalation_delta = Math.max(0, Math.min(3, Math.floor(scene.escalation_delta))) as 0 | 1 | 2 | 3;
+      }
+    }
+    
     const forceScenes = storyboard.scenes.filter(s => s.force_present === true);
     const highEscalationScenes = storyboard.scenes.filter(s => (s.escalation_delta ?? 0) >= 2);
     const peakScenes = storyboard.scenes.filter(s => (s.escalation_delta ?? 0) >= 3);
     
-    // FIX: Use setpiece_delta with proper fallback chain + logging
+    // FIX: Use setpiece_delta with proper fallback chain + normalization + logging
     const getSetpieceDelta = (s: GeneratedScene, i: number): string | null => {
       // Priority: setpiece_delta > state_to > action_summary (legacy)
-      const delta = s.setpiece_delta ?? s.state_to ?? s.action_summary ?? null;
-      if (delta && !s.setpiece_delta) {
+      const rawDelta = s.setpiece_delta ?? s.state_to ?? s.action_summary ?? null;
+      if (rawDelta && !s.setpiece_delta) {
         console.log(`[generate-storyboard] Scene ${i + 1}: using fallback for setpiece_delta (field used: ${s.state_to ? 'state_to' : 'action_summary'})`);
       }
-      return delta;
+      // Normalize: trim whitespace, lowercase, filter empty
+      const normalized = rawDelta ? rawDelta.trim().toLowerCase() : null;
+      return normalized && normalized.length > 0 ? normalized : null;
     };
     const uniqueSetpieceDeltas = new Set(
       storyboard.scenes.map((s, i) => getSetpieceDelta(s, i)).filter(Boolean)
@@ -659,7 +668,7 @@ Generate a complete, filmable storyboard with vivid, specific visual prompts for
     if (forceScenes.length < 2) {
       forceIssues.push(`force_present=${forceScenes.length}/2 (need more external pressure)`);
     }
-    // FIX: require 1 peak (escalation=3) + 2 high escalation
+    // Require 1 peak (escalation=3) + 2 high escalation
     if (peakScenes.length < 1) {
       forceIssues.push(`escalation_delta=3 count=${peakScenes.length}/1 (needs peak tension)`);
     }
@@ -716,9 +725,11 @@ Generate a complete, filmable storyboard with vivid, specific visual prompts for
         }
       }
       
-      // Ensure one peak scene (escalation=3) - prefer scene 4 or last mid-scene
-      const peakIndex = Math.min(4, storyboard.scenes.length - 2);
-      if (peakScenes.length === 0 && peakIndex >= 0 && peakIndex < storyboard.scenes.length) {
+      // FIX: Ensure one peak scene (escalation=3) with safe bounds
+      // For short stories (5 scenes), peakIndex = min(4, max(2, 3)) = 3 (scene 4, 0-indexed)
+      // Never point to CTA (last scene) or hook (first scene)
+      const peakIndex = Math.min(4, Math.max(2, storyboard.scenes.length - 2));
+      if (peakScenes.length === 0 && peakIndex >= 0 && peakIndex < storyboard.scenes.length - 1) {
         storyboard.scenes[peakIndex].escalation_delta = 3;
         console.log(`[generate-storyboard] Set peak escalation_delta=3 on scene ${peakIndex + 1}`);
       }
