@@ -261,6 +261,10 @@ export function StoryBuilderPanel({
   // Film Mode - new film-first architecture (face-only I2V, minimal prompts, variety contract)
   const [filmMode, setFilmMode] = useState(false);
   
+  // Brutality Mode - reduces sanitization for intense content (higher failure risk)
+  const [brutalityMode, setBrutalityMode] = useState(false);
+  const [sanitizationLevel, setSanitizationLevel] = useState<"soft" | "strict">("soft");
+  
   // Story Spine (narrative structure from Director Brain)
   const [storySpine, setStorySpine] = useState<string>("");
   const [motifAnchors, setMotifAnchors] = useState<string[]>([]);
@@ -1419,6 +1423,25 @@ export function StoryBuilderPanel({
                     Film-first architecture: face-only I2V, variety contract enforced, minimal prompts. 
                     No legacy guardrails. Best for action/cinematic content.
                   </p>
+                )}
+                
+                {/* Brutality Mode - reduces sanitization for intense content */}
+                {filmMode && (
+                  <div className="flex items-center justify-between pl-6">
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        id="brutality-mode"
+                        checked={brutalityMode}
+                        onCheckedChange={setBrutalityMode}
+                      />
+                      <Label htmlFor="brutality-mode" className="text-[10px] cursor-pointer text-muted-foreground">
+                        Brutality Mode
+                      </Label>
+                      <Badge variant="outline" className="text-[8px] h-4 bg-destructive/10 text-destructive border-destructive/30">
+                        ⚠️ Higher failure risk
+                      </Badge>
+                    </div>
+                  </div>
                 )}
                 
                 {/* Character Continuity Mode - legacy, hidden when Film Mode is on */}

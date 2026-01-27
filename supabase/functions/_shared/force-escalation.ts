@@ -1,20 +1,24 @@
 /**
- * Force & Escalation Injection System
+ * Force & Escalation Injection System (v2)
  * 
  * Transforms abstract story_forces metadata into concrete prompt directives
  * that video models can execute visually.
  * 
- * Key insight: "force_type: predator" means nothing to Sora.
- * "a predator closes distance, cornering the protagonist" → executable visual.
+ * Key fixes in v2:
+ * - Provider-aware injection (short for Runway, long for Sora/Luma)
+ * - No emoji/glyphs in prompts
+ * - Consequence tether integration
+ * - Tiered sanitization levels
  */
 
 // =============================================================================
 // TYPES
 // =============================================================================
 
-export type ForceType = "weather" | "predator" | "time" | "pursuit" | "hazard" | "social" | "resource";
+export type ForceType = "weather" | "predator" | "time" | "pursuit" | "hazard" | "social" | "resource" | "army" | "supernatural";
 export type EscalationLevel = 0 | 1 | 2 | 3;
 export type SanitizationLevel = "off" | "soft" | "strict";
+export type VideoProvider = "sora" | "runway" | "luma";
 
 export interface ForceScene {
   force_present?: boolean;
@@ -57,15 +61,15 @@ const FORCE_MANIFESTATIONS: Record<ForceType, string[]> = {
     "deadline pressure VISIBLE in environment (timer, countdown, closing door)",
     "window of opportunity SHRINKING visibly",
     "last chance urgency in every movement",
-    "time running out — environment reflects desperation",
-    "final seconds — now or never intensity",
+    "time running out, environment reflects desperation",
+    "final seconds, now or never intensity",
   ],
   pursuit: [
     "pursuit CLOSES IN from behind",
     "escape route NARROWS, options dwindling",
     "chaser GAINS GROUND relentlessly",
     "hunted desperation in every stride",
-    "no place to hide — must keep moving",
+    "no place to hide, must keep moving",
   ],
   hazard: [
     "ground COLLAPSES beneath, forcing a leap",
@@ -86,7 +90,21 @@ const FORCE_MANIFESTATIONS: Record<ForceType, string[]> = {
     "exhaustion SHOWING in movement (slower, heavier)",
     "last reserves BURNING, nothing left after this",
     "desperation of scarcity driving action",
-    "running on empty — the cost is visible",
+    "running on empty, the cost is visible",
+  ],
+  army: [
+    "overwhelming force ADVANCES, formation pressure",
+    "encirclement TIGHTENS, escape routes gone",
+    "mass of opposition SURGES forward",
+    "outnumbered desperation, backs to the wall",
+    "wave after wave PRESSING in",
+  ],
+  supernatural: [
+    "unseen force MOVES objects, environment warps",
+    "reality BENDS, physics failing",
+    "impossible geometry MANIFESTS around",
+    "shadows move INDEPENDENTLY, unnatural",
+    "otherworldly presence makes itself known",
   ],
 };
 
@@ -94,10 +112,10 @@ const FORCE_MANIFESTATIONS: Record<ForceType, string[]> = {
  * Get a concrete force manifestation directive for prompt injection
  */
 export function getForceManifestationDirective(forceType: ForceType, sceneIndex: number): string {
-  const options = FORCE_MANIFESTATIONS[forceType];
+  const options = FORCE_MANIFESTATIONS[forceType] || FORCE_MANIFESTATIONS.hazard;
   // Rotate through options based on scene index to avoid repetition
   const directive = options[sceneIndex % options.length];
-  return `[FORCE: ${forceType.toUpperCase()}] ${directive}`;
+  return directive;
 }
 
 // =============================================================================
@@ -147,10 +165,15 @@ const ESCALATION_BANDS: Record<EscalationLevel, EscalationBand> = {
   },
 };
 
+// =============================================================================
+// PROVIDER-AWARE INJECTION BLOCKS
+// =============================================================================
+
 /**
- * Build escalation injection block for prompt
+ * Build LONG form escalation directive (Sora/Luma)
+ * Multi-line, detailed, token-rich
  */
-export function buildEscalationDirective(escalation: EscalationLevel): string {
+function buildEscalationDirectiveLong(escalation: EscalationLevel): string {
   const band = ESCALATION_BANDS[escalation];
   
   let directive = `[ESCALATION ${escalation}: ${band.label}]\n`;
@@ -158,7 +181,7 @@ export function buildEscalationDirective(escalation: EscalationLevel): string {
   directive += `STAKES: ${band.stakesLanguage}\n`;
   
   if (band.consequenceRequired) {
-    directive += `⚠️ CONSEQUENCE REQUIRED: Something must VISIBLY CHANGE by clip end.\n`;
+    directive += `CONSEQUENCE REQUIRED: Something must VISIBLY CHANGE by clip end.\n`;
   }
   
   directive += `INTENSITY: ${band.intensityModifiers.join(", ")}\n`;
@@ -166,17 +189,20 @@ export function buildEscalationDirective(escalation: EscalationLevel): string {
   return directive;
 }
 
-// =============================================================================
-// COMBINED FORCE + ESCALATION BLOCK
-// =============================================================================
+/**
+ * Build SHORT form escalation directive (Runway)
+ * Single line, compact, no newlines
+ */
+function buildEscalationDirectiveShort(escalation: EscalationLevel): string {
+  const band = ESCALATION_BANDS[escalation];
+  const conseq = band.consequenceRequired ? " End frame CHANGED." : "";
+  return `ESC=${band.label}. ${band.motionGrammar}.${conseq}`;
+}
 
 /**
- * Build the complete force/escalation injection block
- * 
- * This is the KEY FIX: we take abstract metadata and transform it
- * into concrete visual directives that video models can execute.
+ * Build LONG form force/escalation block (Sora/Luma)
  */
-export function buildForceEscalationBlock(
+export function buildForceEscalationBlockLong(
   scene: ForceScene,
   sceneIndex: number,
   _brutalityMode: boolean = false
@@ -185,16 +211,17 @@ export function buildForceEscalationBlock(
   
   // Always include escalation (even if 0)
   const escalation = (scene.escalation_delta ?? 0) as EscalationLevel;
-  parts.push(buildEscalationDirective(escalation));
+  parts.push(buildEscalationDirectiveLong(escalation));
   
   // Add force manifestation if present
   if (scene.force_present && scene.force_type) {
-    parts.push(getForceManifestationDirective(scene.force_type, sceneIndex));
+    const manifestation = getForceManifestationDirective(scene.force_type, sceneIndex);
+    parts.push(`[FORCE: ${scene.force_type.toUpperCase()}] ${manifestation}`);
   }
   
   // Add setpiece delta as visual change requirement
   if (scene.setpiece_delta) {
-    parts.push(`[SETPIECE CHANGE: ${scene.setpiece_delta} — this must be VISIBLE in the clip]`);
+    parts.push(`[SETPIECE CHANGE: ${scene.setpiece_delta} - this must be VISIBLE in the clip]`);
   }
   
   // If escalation >= 2, add impact beat requirement
@@ -205,6 +232,61 @@ export function buildForceEscalationBlock(
   return parts.join("\n") + "\n\n";
 }
 
+/**
+ * Build SHORT form force/escalation block (Runway - single line)
+ */
+export function buildForceEscalationBlockShort(
+  scene: ForceScene,
+  sceneIndex: number,
+  _brutalityMode: boolean = false
+): string {
+  const parts: string[] = [];
+  
+  // Escalation (compact)
+  const escalation = (scene.escalation_delta ?? 0) as EscalationLevel;
+  parts.push(buildEscalationDirectiveShort(escalation));
+  
+  // Force manifestation (compact)
+  if (scene.force_present && scene.force_type) {
+    const manifestation = getForceManifestationDirective(scene.force_type, sceneIndex);
+    // Truncate to ~50 chars for Runway budget
+    const shortManifestation = manifestation.length > 60 
+      ? manifestation.slice(0, 57) + "..." 
+      : manifestation;
+    parts.push(`FORCE=${scene.force_type.toUpperCase()}: ${shortManifestation}`);
+  }
+  
+  // Setpiece delta (very compact)
+  if (scene.setpiece_delta) {
+    const shortDelta = scene.setpiece_delta.length > 30 
+      ? scene.setpiece_delta.slice(0, 27) + "..." 
+      : scene.setpiece_delta;
+    parts.push(`CHANGE: ${shortDelta}`);
+  }
+  
+  // Single line, space-separated
+  return parts.join(" ") + "\n";
+}
+
+/**
+ * Build the complete force/escalation injection block (PROVIDER-AWARE)
+ * 
+ * This is the KEY FIX: we take abstract metadata and transform it
+ * into concrete visual directives that video models can execute.
+ * Runway gets SHORT form, Sora/Luma get LONG form.
+ */
+export function buildForceEscalationBlock(
+  scene: ForceScene,
+  sceneIndex: number,
+  brutalityMode: boolean = false,
+  provider: VideoProvider = "sora"
+): string {
+  if (provider === "runway") {
+    return buildForceEscalationBlockShort(scene, sceneIndex, brutalityMode);
+  }
+  return buildForceEscalationBlockLong(scene, sceneIndex, brutalityMode);
+}
+
 // =============================================================================
 // PROVIDER-AWARE SANITIZATION
 // =============================================================================
@@ -213,11 +295,19 @@ export function buildForceEscalationBlock(
  * Get recommended sanitization level for a provider
  */
 export function getProviderSanitizationLevel(
-  provider: "sora" | "runway" | "luma",
-  storySanitization?: SanitizationLevel
+  provider: VideoProvider,
+  storySanitization?: SanitizationLevel,
+  brutalityMode?: boolean
 ): SanitizationLevel {
-  // Story-level override takes priority
-  if (storySanitization && storySanitization !== "soft") {
+  // Brutality mode forces "soft" (not "off" - that's dangerous)
+  if (brutalityMode) {
+    // Even in brutality mode, Runway needs strict
+    if (provider === "runway") return "soft"; // Reduced from strict, still safer
+    return "soft";
+  }
+  
+  // Story-level override takes priority (unless it's "off" which we don't honor in prod)
+  if (storySanitization && storySanitization !== "off") {
     return storySanitization;
   }
   
@@ -235,17 +325,20 @@ export function getProviderSanitizationLevel(
 }
 
 /**
- * Check if a scene should skip sanitization
- * (brutality_mode + provider that tolerates it)
+ * Check if a scene should skip sanitization entirely
+ * NOTE: This should almost never return true in production
  */
 export function shouldSkipSanitization(
   brutalityMode: boolean,
-  provider: "sora" | "runway" | "luma"
+  provider: VideoProvider,
+  _sanitizationLevel?: SanitizationLevel
 ): boolean {
-  if (!brutalityMode) return false;
+  // NEVER skip for Runway - it will just fail
+  if (provider === "runway") return false;
   
-  // Only Sora can handle brutality mode (Runway will reject)
-  return provider === "sora" || provider === "luma";
+  // Only skip in brutality mode + explicitly set to "off"
+  // This is dangerous and should only be used for internal testing
+  return false; // Disabled - too risky. Use "soft" instead.
 }
 
 // =============================================================================
@@ -269,7 +362,7 @@ export function buildConsequenceTether(
   
   const sceneChange = currentScene.setpiece_delta || 
     (currentScene.escalation_delta && currentScene.escalation_delta >= 2
-      ? "situation has ESCALATED — visible tension/damage"
+      ? "situation has ESCALATED - visible tension/damage"
       : "situation progressed");
   
   const nextConstraint = currentScene.force_present
@@ -277,6 +370,26 @@ export function buildConsequenceTether(
     : "Continue from new state";
   
   return { sceneChange, nextConstraint };
+}
+
+/**
+ * Build consequence tether block for prompt injection
+ */
+export function buildConsequenceTetherBlock(
+  currentScene: ForceScene,
+  nextScene?: ForceScene,
+  provider: VideoProvider = "sora"
+): string {
+  const tether = buildConsequenceTether(currentScene, nextScene);
+  if (!tether) return "";
+  
+  if (provider === "runway") {
+    // Short form for Runway
+    return `PREV: ${tether.sceneChange.slice(0, 40)}. NOW: ${tether.nextConstraint.slice(0, 30)}.\n`;
+  }
+  
+  // Long form for Sora/Luma
+  return `[NARRATIVE TETHER]\nPrevious scene result: ${tether.sceneChange}\nThis scene requirement: ${tether.nextConstraint}\n\n`;
 }
 
 // =============================================================================
@@ -319,17 +432,19 @@ export function validateForceFields(scene: ForceScene): {
 export function logForceEscalationInjection(
   sceneIndex: number,
   scene: ForceScene,
+  provider?: VideoProvider,
   jobId?: string
 ): void {
   const prefix = jobId ? `[force-esc job=${jobId}]` : "[force-esc]";
+  const provStr = provider ? ` provider=${provider}` : "";
   
-  console.log(`${prefix} Scene ${sceneIndex + 1}: ` +
+  console.log(`${prefix} Scene ${sceneIndex + 1}:${provStr} ` +
     `esc=${scene.escalation_delta ?? 0}, ` +
     `force=${scene.force_present ? scene.force_type : "none"}, ` +
     `delta="${scene.setpiece_delta || "-"}"`);
   
   const validation = validateForceFields(scene);
   if (!validation.isValid) {
-    validation.warnings.forEach(w => console.warn(`${prefix} ⚠️ ${w}`));
+    validation.warnings.forEach(w => console.warn(`${prefix} WARNING: ${w}`));
   }
 }

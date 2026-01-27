@@ -53,7 +53,14 @@ import {
   type ForceType,
   type EscalationLevel,
   type SanitizationLevel,
+  type VideoProvider as ForceVideoProvider,
 } from "../_shared/force-escalation.ts";
+import {
+  sanitizeForModeration,
+  logModerationSanitization,
+  getRetryPrompt,
+  type RetryContext,
+} from "../_shared/moderation-safety.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -736,24 +743,27 @@ Deno.serve(async (req) => {
       
       // === FORCE/ESCALATION INJECTION (Phase 8) ===
       // Transform abstract metadata (force_type, escalation_delta) into concrete visual directives
-      const forceEscalationBlock = buildForceEscalationBlock(
-        {
-          force_present: (nextScene as { force_present?: boolean }).force_present,
-          force_type: (nextScene as { force_type?: ForceType }).force_type,
-          escalation_delta: (nextScene as { escalation_delta?: EscalationLevel }).escalation_delta,
-          setpiece_delta: (nextScene as { setpiece_delta?: string }).setpiece_delta,
-        },
-        nextSceneIndex,
-        brutalityMode
-      );
-      
-      // Log force/escalation for debugging
-      logForceEscalationInjection(nextSceneIndex, {
+      // PROVIDER-AWARE: Runway gets short form, Sora/Luma get long form
+      const forceSceneData = {
         force_present: (nextScene as { force_present?: boolean }).force_present,
         force_type: (nextScene as { force_type?: ForceType }).force_type,
         escalation_delta: (nextScene as { escalation_delta?: EscalationLevel }).escalation_delta,
         setpiece_delta: (nextScene as { setpiece_delta?: string }).setpiece_delta,
-      });
+      };
+      
+      const forceEscalationBlock = buildForceEscalationBlock(
+        forceSceneData,
+        nextSceneIndex,
+        brutalityMode,
+        selectedProvider as "sora" | "runway" | "luma"
+      );
+      
+      // Log force/escalation for debugging (with provider context)
+      logForceEscalationInjection(
+        nextSceneIndex, 
+        forceSceneData, 
+        selectedProvider as "sora" | "runway" | "luma"
+      );
       
       if (isI2V) {
         // I2V ORDER: Motion first (breaks hold), then capture→force→cinematography→narrative

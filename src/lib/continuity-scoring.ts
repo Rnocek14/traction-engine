@@ -53,7 +53,13 @@ export type ChangeType = "info" | "emotion" | "goal" | "stakes" | "location";
 export type CutZone = "hook" | "setup" | "escalation" | "payoff" | "button";
 
 // Story Forces - external pressures acting on the protagonist
-export type ForceType = "weather" | "predator" | "time" | "pursuit" | "hazard" | "social" | "resource";
+export type ForceType = "weather" | "predator" | "time" | "pursuit" | "hazard" | "social" | "resource" | "army" | "supernatural";
+
+// Escalation level (0=neutral, 3=crisis peak)
+export type EscalationLevel = 0 | 1 | 2 | 3;
+
+// Sanitization level for moderation safety
+export type SanitizationLevel = "off" | "soft" | "strict";
 
 export interface StoryScene {
   id: string;
@@ -90,7 +96,7 @@ export interface StoryScene {
   // Story Forces (Phase 8) - external pressure/escalation
   force_present?: boolean;           // Is an external force acting in this scene?
   force_type?: ForceType;            // What kind of force?
-  escalation_delta?: 0 | 1 | 2 | 3;  // How much worse than previous? 0=neutral, 3=crisis
+  escalation_delta?: EscalationLevel;  // How much worse than previous? 0=neutral, 3=crisis
   // Legacy fields for transformation tracking
   action_summary?: string;
   state_from?: string;
