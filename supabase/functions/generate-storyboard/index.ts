@@ -746,11 +746,12 @@ Generate a complete, filmable storyboard with vivid, specific visual prompts for
     
     // === STORY FORCES SUMMARY LOG (proves system is working) ===
     const finalForces = storyboard.scenes.filter(s => s.force_present === true).length;
-    const finalPeak = storyboard.scenes.findIndex(s => (s.escalation_delta ?? 0) >= 3);
+    const finalPeakIdx = storyboard.scenes.findIndex(s => (s.escalation_delta ?? 0) >= 3);
     const finalHigh = storyboard.scenes.filter(s => (s.escalation_delta ?? 0) >= 2).length;
     const finalDeltas = new Set(storyboard.scenes.map((s, i) => getSetpieceDelta(s, i)).filter(Boolean)).size;
     
-    console.log(`[generate-storyboard] ✓ Story Forces: forces=${finalForces}/6, peak=${finalPeak >= 0 ? `scene ${finalPeak + 1}` : 'none'}, escalation≥2=${finalHigh}, unique_deltas=${finalDeltas}`);
+    // FIX: Use 1-based scene numbers everywhere for human readability
+    console.log(`[generate-storyboard] ✓ Story Forces: forces=${finalForces}/${storyboard.scenes.length}, peak=${finalPeakIdx >= 0 ? `scene ${finalPeakIdx + 1}` : 'none'}, escalation≥2=${finalHigh}, unique_deltas=${finalDeltas}`);
     console.log(`[generate-storyboard] Per-scene breakdown:`);
     storyboard.scenes.forEach((s, i) => {
       const isSpectacle = s.subject_required === false;
