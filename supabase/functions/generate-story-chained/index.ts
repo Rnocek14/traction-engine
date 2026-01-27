@@ -167,6 +167,10 @@ Deno.serve(async (req) => {
     // Extract motif anchors for injection (from request or settings)
     const motifAnchors = requestMotifs || [];
     
+    // Extract brutality_mode and sanitization_level from request body
+    const brutalityMode = (body as { brutality_mode?: boolean }).brutality_mode || false;
+    const sanitizationLevel = (body as { sanitization_level?: string }).sanitization_level || "soft";
+
     // Update story status and store storyboard WITH full narrative context for cron
     await supabase
       .from("story_jobs")
@@ -183,6 +187,8 @@ Deno.serve(async (req) => {
           character_continuity_mode: characterContinuityMode, // NEW: Persist for chain
           locked_provider: lockedProviderName, // NEW: Persist for chain
           soft_continuity: softContinuityMode, // NEW: Persist for chain
+          brutality_mode: brutalityMode, // PHASE 2: Persist for moderation ladder
+          sanitization_level: sanitizationLevel, // PHASE 2: Persist for moderation ladder
         },
         continuity_anchors: anchors,
       })

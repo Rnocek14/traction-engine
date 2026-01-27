@@ -245,65 +245,147 @@ Deno.serve(async (req) => {
         throw new Error(`Failed to create job: ${jobError.message}`);
       }
 
-      // Build API request for pre-built prompt
-      let runwayEndpoint: string;
-      let runwayBody: Record<string, unknown>;
+      // Build API request for pre-built prompt with retry ladder
+      const MAX_RETRIES = 3;
+      let lastError: string | undefined;
+      let runwayData: { id: string };
+      let finalPrompt = overridePrompt;
+      
+      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        let currentRefUrl = isI2V ? refImageUrl : undefined;
+        let currentEndpoint = isI2V && refImageUrl 
+          ? "https://api.dev.runwayml.com/v1/image_to_video"
+          : "https://api.dev.runwayml.com/v1/text_to_video";
+        let promptForAttempt = overridePrompt;
+        
+        if (attempt > 1) {
+          // Apply retry ladder
+          const retryCtx: RetryContext = {
+            attempt,
+            originalPrompt: overridePrompt,
+            provider: "runway",
+            brutalityMode: false, // Runway never uses brutality
+            lastError,
+          };
+          const retryResult = getRetryPrompt(retryCtx);
+          logRetryAttempt(retryCtx, retryResult, job.id);
+          promptForAttempt = retryResult.prompt;
+          
+          // On attempt 3, drop reference frame (force T2V)
+          if (retryResult.shouldDropReference && isI2V) {
+            console.log(`[queue-video-runway prebuilt] Attempt ${attempt}: Dropping reference, forcing T2V`);
+            currentRefUrl = undefined;
+            currentEndpoint = "https://api.dev.runwayml.com/v1/text_to_video";
+          }
+        } else {
+          // First attempt: apply strict sanitization (Runway always strict)
+          const { sanitized, wasModified, replacements } = sanitizeForModeration(overridePrompt, "strict");
+          if (wasModified) {
+            logModerationSanitization(overridePrompt, sanitized, replacements, "strict", job.id);
+            promptForAttempt = sanitized;
+          }
+        }
+        
+        let runwayBody: Record<string, unknown>;
+        let runwayModel = model;
+        let runwayDuration = duration;
+        
+        if (currentRefUrl) {
+          runwayBody = {
+            model: runwayModel,
+            promptImage: currentRefUrl,
+            promptText: promptForAttempt,
+            duration: runwayDuration,
+            ratio: runwaySize,
+            seed: settings?.seed,
+          };
+        } else {
+          // Forced T2V (either original T2V or dropped reference on retry)
+          runwayModel = getTextToVideoModel(settings?.model);
+          runwayDuration = mapDurationToRunwayTextToVideo(baseDuration);
+          runwayBody = {
+            model: runwayModel,
+            promptText: promptForAttempt,
+            duration: runwayDuration,
+            ratio: runwaySize,
+            seed: settings?.seed,
+          };
+        }
 
-      if (isI2V && refImageUrl) {
-        runwayEndpoint = "https://api.dev.runwayml.com/v1/image_to_video";
-        runwayBody = {
-          model,
-          promptImage: refImageUrl,
-          promptText: overridePrompt,
-          duration,
-          ratio: runwaySize,
-          seed: settings?.seed,
-        };
-      } else {
-        runwayEndpoint = "https://api.dev.runwayml.com/v1/text_to_video";
-        runwayBody = {
-          model,
-          promptText: overridePrompt,
-          duration,
-          ratio: runwaySize,
-          seed: settings?.seed,
-        };
-      }
+        // Call Runway API
+        const runwayResponse = await fetch(currentEndpoint, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${runwayApiKey}`,
+            "X-Runway-Version": RUNWAY_API_VERSION,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(runwayBody),
+        });
 
-      // Call Runway API
-      const runwayResponse = await fetch(runwayEndpoint, {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${runwayApiKey}`,
-          "X-Runway-Version": RUNWAY_API_VERSION,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(runwayBody),
-      });
-
-      if (!runwayResponse.ok) {
+        if (runwayResponse.ok) {
+          runwayData = await runwayResponse.json();
+          finalPrompt = promptForAttempt;
+          break; // Success!
+        }
+        
         const errorText = await runwayResponse.text();
+        lastError = errorText;
+        console.error(`[queue-video-runway prebuilt] Attempt ${attempt}/${MAX_RETRIES} failed:`, runwayResponse.status, errorText.slice(0, 200));
+        
+        // Check for quota error (don't retry)
         const isQuotaError = errorText.includes("credits") || errorText.includes("quota");
-        await supabase
-          .from("video_jobs")
-          .update({
-            status: "failed",
-            openai_status: "failed",
-            error: `Runway API error: ${runwayResponse.status} - ${errorText.slice(0, 200)}`,
-          })
-          .eq("id", job.id);
-        throw new Error(isQuotaError 
-          ? `Runway API error: ${runwayResponse.status} - no credits available`
-          : `Runway API error: ${runwayResponse.status}`);
+        if (isQuotaError) {
+          await supabase
+            .from("video_jobs")
+            .update({
+              status: "failed",
+              openai_status: "failed",
+              error: `Runway API error: ${runwayResponse.status} - no credits available`,
+            })
+            .eq("id", job.id);
+          throw new Error(`Runway API error: ${runwayResponse.status} - no credits available`);
+        }
+        
+        // Check if it's a moderation error worth retrying
+        if (!isModerationError(errorText) && attempt === 1) {
+          // Non-moderation error on first attempt - fail immediately
+          await supabase
+            .from("video_jobs")
+            .update({
+              status: "failed",
+              openai_status: "failed",
+              error: `Runway API error: ${runwayResponse.status} - ${errorText.slice(0, 200)}`,
+            })
+            .eq("id", job.id);
+          throw new Error(`Runway API error: ${runwayResponse.status}`);
+        }
+        
+        // If this was the last attempt, fail
+        if (attempt === MAX_RETRIES) {
+          await supabase
+            .from("video_jobs")
+            .update({
+              status: "failed",
+              openai_status: "failed",
+              error: `Runway API error after ${MAX_RETRIES} attempts: ${runwayResponse.status} - ${errorText.slice(0, 200)}`,
+            })
+            .eq("id", job.id);
+          throw new Error(`Runway API error: ${runwayResponse.status} - exhausted ${MAX_RETRIES} retry attempts`);
+        }
+        
+        // Wait briefly before retry (exponential backoff)
+        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
       }
 
-      const runwayData = await runwayResponse.json();
+      // Update job with final prompt used
       await supabase
         .from("video_jobs")
         .update({
           status: "running",
-          settings: { ...job.settings, provider_job_id: runwayData.id },
-          openai_video_id: runwayData.id,
+          enriched_prompt: finalPrompt,
+          settings: { ...job.settings, provider_job_id: runwayData!.id },
+          openai_video_id: runwayData!.id,
           openai_status: "PENDING",
         })
         .eq("id", job.id);
@@ -315,7 +397,7 @@ Deno.serve(async (req) => {
             id: job.id,
             status: "running",
             provider: "runway",
-            provider_job_id: runwayData.id,
+            provider_job_id: runwayData!.id,
             requested_seconds: requestedSeconds ?? legacySeconds ?? duration,
             provider_seconds: duration,
             clip_id: clip_id || null,

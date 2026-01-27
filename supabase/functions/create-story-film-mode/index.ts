@@ -284,6 +284,10 @@ Deno.serve(async (req) => {
     // Initialize empty anchor library
     const anchorLibrary: AnchorLibrary = {};
 
+    // Extract optional brutality and sanitization settings
+    const brutalityMode = (body as { brutality_mode?: boolean }).brutality_mode || false;
+    const sanitizationLevel = (body as { sanitization_level?: string }).sanitization_level || "soft";
+
     // Create story job in database
     const { data: storyJob, error: storyError } = await supabase
       .from("story_jobs")
@@ -298,6 +302,8 @@ Deno.serve(async (req) => {
           ...storyboard,
           mode: "film_continuity",
           anchor_library: anchorLibrary,
+          brutality_mode: brutalityMode, // PHASE 2: Persist for moderation
+          sanitization_level: sanitizationLevel, // PHASE 2: Persist for moderation
           generation_settings: {
             face_only_i2v: true,
             variety_contract: true,
