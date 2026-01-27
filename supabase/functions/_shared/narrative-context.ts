@@ -182,21 +182,29 @@ export function buildCoverageDirective(coverageType: CoverageType): string {
 /**
  * Build spectacle directive for scenes without protagonist
  * This frees the model from any character identity constraints
+ * 
+ * NEW: Includes IMPACT BEAT requirement for action-oriented spectacle
  */
 export function buildSpectacleDirective(alternateSubject?: AlternateSubject): string {
   if (!alternateSubject) {
-    return "[SPECTACLE SHOT: No protagonist needed. Focus on environment/spectacle. MAXIMIZE motion, scale, visual impact.]\n\n";
+    return `[SPECTACLE SHOT: No protagonist needed. Focus on environment/spectacle. MAXIMIZE motion, scale, visual impact.]
+[IMPACT BEAT REQUIRED: Something must COLLIDE/EXPLODE/SHATTER/SURGE by clip end. END FRAME MUST BE VISIBLY DIFFERENT from start.]
+
+`;
   }
   
   const subjectHints: Record<AlternateSubject, string> = {
-    environment: "Focus on landscape, weather, atmosphere, scale. No character needed. Show the WORLD.",
-    creature: "Focus on creature/monster/threat. Maximize menace, power, and motion. Show the BEAST.",
-    object: "Focus on artifact/portal/vehicle. Detail, mystery, and significance. Show the OBJECT.",
-    abstract: "Pure visual spectacle. Cosmic, surreal, overwhelming. Show the IMPOSSIBLE.",
-    threat: "Show the DANGER. Explosion, destruction, approaching doom. Make it visceral and immediate.",
+    environment: "Focus on landscape, weather, atmosphere, scale. No character needed. Show the WORLD CHANGING.",
+    creature: "Focus on creature/monster/threat. Maximize menace, power, and motion. Show the BEAST ATTACKING or MOVING AGGRESSIVELY.",
+    object: "Focus on artifact/portal/vehicle. Detail, mystery, and significance. Show it ACTIVATING, GLOWING, TRANSFORMING.",
+    abstract: "Pure visual spectacle. Cosmic, surreal, overwhelming. Show MASSIVE CHANGE - expansion, collapse, transformation.",
+    threat: "Show the DANGER. Explosion, destruction, approaching doom. Make it visceral and immediate. DESTRUCTION REQUIRED.",
   };
   
-  return `[SPECTACLE SHOT: ${subjectHints[alternateSubject]}]\n\n`;
+  return `[SPECTACLE SHOT: ${subjectHints[alternateSubject]}]
+[IMPACT BEAT REQUIRED: Something must COLLIDE/EXPLODE/SHATTER/SURGE by clip end. END FRAME MUST BE VISIBLY DIFFERENT from start.]
+
+`;
 }
 
 /**
