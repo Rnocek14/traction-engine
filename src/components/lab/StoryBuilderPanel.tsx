@@ -223,7 +223,11 @@ function getContinuityWarnings(_anchors: ContinuityAnchors, scenes: StoryScene[]
   const warnings: string[] = [];
   
   // Check for empty prompts - this is the only thing user MUST provide
-  const emptyPrompts = scenes.filter(s => !s.prompt.trim());
+  // Film mode uses subject_action instead of prompt, so handle both
+  const emptyPrompts = scenes.filter(s => {
+    const prompt = s.prompt || ((s as unknown as { subject_action?: string }).subject_action) || "";
+    return !prompt.trim();
+  });
   if (emptyPrompts.length > 0) {
     warnings.push(`${emptyPrompts.length} scene(s) have empty prompts`);
   }
