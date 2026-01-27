@@ -7,6 +7,10 @@ import {
 } from "../_shared/cinematic-prompts.ts";
 import { type MotifScene } from "../_shared/motif-injection.ts";
 import { type SceneRole } from "../_shared/scene-role-router.ts";
+import { 
+  sanitizeForModeration, 
+  logModerationSanitization 
+} from "../_shared/moderation-safety.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -241,9 +245,15 @@ Style: Professional, engaging, suitable for TikTok/Reels. Smooth transitions bet
       throw new Error(`Failed to create job: ${jobError.message}`);
     }
 
+    // Apply moderation safety sanitization before sending to Sora
+    const { sanitized: safePrompt, wasModified, replacements } = sanitizeForModeration(videoPrompt);
+    if (wasModified) {
+      logModerationSanitization(videoPrompt, safePrompt, replacements, job.id);
+    }
+    
     // Build FormData for OpenAI Sora API
     const form = new FormData();
-    form.set("prompt", videoPrompt);
+    form.set("prompt", safePrompt);
     form.set("model", model);
     form.set("size", size);
     form.set("seconds", String(providerSeconds));
