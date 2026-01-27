@@ -215,14 +215,17 @@ export function getProviderSanitizationLevel(
   provider: VideoProvider,
   brutalityMode: boolean = false
 ): SanitizationLevel {
+  // CRITICAL: Runway ALWAYS strict - non-negotiable for provider stability
+  if (provider === "runway") {
+    return "strict";
+  }
+  
   // Brutality mode reduces sanitization but never to "off"
   if (brutalityMode) {
-    return provider === "runway" ? "soft" : "soft";
+    return "soft";
   }
   
   switch (provider) {
-    case "runway":
-      return "strict";
     case "luma":
       return "soft";
     case "sora":
@@ -349,16 +352,27 @@ export function getRetryPrompt(ctx: RetryContext): RetryResult {
 
 /**
  * Detect if an error is a moderation-related failure
+ * NOTE: Be specific - not all 400 errors are moderation. Only retry on explicit signals.
  */
 export function isModerationError(error: string | undefined): boolean {
   if (!error) return false;
   const lower = error.toLowerCase();
-  return lower.includes("moderation") ||
-         lower.includes("content policy") ||
-         lower.includes("safety") ||
-         lower.includes("inappropriate") ||
-         lower.includes("400") ||
-         lower.includes("blocked");
+  
+  // Explicit moderation/safety signals (worth retrying)
+  const moderationSignals = [
+    "moderation",
+    "content policy",
+    "safety",
+    "inappropriate",
+    "blocked",
+    "prohibited",
+    "not allowed",
+    "violates",
+    "harmful",
+    "offensive",
+  ];
+  
+  return moderationSignals.some(signal => lower.includes(signal));
 }
 
 /**
