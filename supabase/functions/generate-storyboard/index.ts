@@ -312,6 +312,18 @@ SPECTACLE SCENE ENFORCEMENT:
 - Environment is allowed BUT IT MUST BE ACTIVE (storm SLAMS, ground CRACKS)
 - Passive environment shots will be REJECTED
 
+ALTERNATE_SUBJECT BIAS (CRITICAL FOR ACTION):
+When choosing alternate_subject for spectacle scenes, use this priority:
+- "threat" (50%): Dragon, enemy, monster, danger, attack - MOST COMMON
+- "environment" with CAUSE EVENT (25%): Storm HITS, ground CRACKS, structure COLLAPSES
+- "creature" (15%): Animal, beast, monster moving/attacking
+- "object" (5%): Artifact activating, portal opening
+- "abstract" (5%): Cosmic, surreal (rare, only for transitions)
+
+⚠️ DO NOT default to "environment" for passive scenery! 
+If the scene is "spectacle," it needs an ACTIVE THREAT or CAUSE EVENT.
+"environment" alone = boring. "threat" = action.
+
 RECOMMENDED 6-SCENE PATTERN (3 hero / 3 spectacle with CROSS-CUT RHYTHM):
 Scene 0 (hook): subject_required=FALSE, alternate_subject="threat" or "environment"
   → CAUSE EVENT: "What triggers the story? Show it exploding/appearing/attacking"
@@ -543,12 +555,89 @@ Generate a complete, filmable storyboard with vivid, specific visual prompts for
     if (invalidScenes.length > 0) {
       console.warn(`[generate-storyboard] Validation warnings for ${invalidScenes.length} scenes:`);
       invalidScenes.forEach(s => {
-        console.warn(`  Scene ${s.sceneIndex + 1}: ${
+      console.warn(`  Scene ${s.sceneIndex + 1}: ${
           s.bannedVerb ? `banned verb "${s.bannedVerb}"` : ""
         } ${!s.hasActionVerb ? "missing action verb in first 20 words" : ""}`);
       });
       // Log but don't fail - GPT sometimes still produces good content
       // Future: could retry with stronger prompt injection here
+    }
+    
+    // === SPECTACLE BUDGET VALIDATION ===
+    // Enforce cross-cut rhythm: 2-4 spectacle, 2-4 hero, 1-2 face max
+    const spectacleCount = storyboard.scenes.filter(s => s.subject_required === false).length;
+    const heroCount = storyboard.scenes.filter(s => s.subject_required !== false).length;
+    const faceCount = storyboard.scenes.filter(s => s.coverage_type === "face").length;
+    
+    // Calculate valid ranges based on scene count
+    const minSpectacle = Math.max(1, Math.floor(storyboard.scenes.length * 0.25)); // At least 25%
+    const maxSpectacle = Math.ceil(storyboard.scenes.length * 0.6); // At most 60%
+    const maxFace = Math.max(2, Math.ceil(storyboard.scenes.length * 0.35)); // At most 35%
+    
+    let budgetWarnings: string[] = [];
+    if (spectacleCount < minSpectacle) {
+      budgetWarnings.push(`spectacle_count=${spectacleCount} < min=${minSpectacle} (story may feel flat)`);
+    }
+    if (spectacleCount > maxSpectacle) {
+      budgetWarnings.push(`spectacle_count=${spectacleCount} > max=${maxSpectacle} (story loses emotional anchor)`);
+    }
+    if (faceCount > maxFace) {
+      budgetWarnings.push(`face_count=${faceCount} > max=${maxFace} (too much I2V, kills action freedom)`);
+    }
+    
+    if (budgetWarnings.length > 0) {
+      console.warn(`[generate-storyboard] Spectacle budget warnings:`);
+      budgetWarnings.forEach(w => console.warn(`  ⚠️ ${w}`));
+    } else {
+      console.log(`[generate-storyboard] ✓ Spectacle budget OK: spectacle=${spectacleCount}, hero=${heroCount}, face=${faceCount}`);
+    }
+    
+    // === NO-PROTAGONIST LANGUAGE CHECK (for spectacle scenes) ===
+    // Spectacle prompts should NOT mention the protagonist
+    const PROTAGONIST_PATTERNS = [
+      /\b(the\s+)?(astronaut|knight|hero|protagonist|character|figure|warrior|soldier|explorer|adventurer|person|man|woman)\b/gi,
+      /\b(he|she|they|him|her|them|his|hers|their)\s+(is|are|was|were|runs?|sprints?|dives?|grabs?|looks?|watches?|sees?|reacts?)/gi,
+    ];
+    
+    const spectacleLanguageIssues = storyboard.scenes
+      .filter(s => s.subject_required === false)
+      .map((scene, i) => {
+        const promptLower = scene.prompt.toLowerCase();
+        const foundPatterns = PROTAGONIST_PATTERNS.filter(p => p.test(scene.prompt));
+        // Reset lastIndex after each test
+        PROTAGONIST_PATTERNS.forEach(p => p.lastIndex = 0);
+        
+        if (foundPatterns.length > 0) {
+          return { sceneIndex: storyboard.scenes.indexOf(scene), prompt: scene.prompt.slice(0, 100) };
+        }
+        return null;
+      })
+      .filter(Boolean);
+    
+    if (spectacleLanguageIssues.length > 0) {
+      console.warn(`[generate-storyboard] ⚠️ Spectacle scenes contain protagonist language:`);
+      spectacleLanguageIssues.forEach((issue: { sceneIndex: number; prompt: string } | null) => {
+        if (issue) {
+          console.warn(`  Scene ${issue.sceneIndex + 1}: "${issue.prompt}..."`);
+        }
+      });
+      // Auto-fix: strip protagonist references from spectacle prompts
+      storyboard.scenes = storyboard.scenes.map(scene => {
+        if (scene.subject_required === false) {
+          let cleanedPrompt = scene.prompt;
+          PROTAGONIST_PATTERNS.forEach(pattern => {
+            cleanedPrompt = cleanedPrompt.replace(pattern, "");
+            pattern.lastIndex = 0;
+          });
+          // Clean up double spaces
+          cleanedPrompt = cleanedPrompt.replace(/\s+/g, " ").trim();
+          if (cleanedPrompt !== scene.prompt) {
+            console.log(`[generate-storyboard] Auto-cleaned scene ${storyboard.scenes.indexOf(scene) + 1}: "${cleanedPrompt.slice(0, 80)}..."`);
+            return { ...scene, prompt: cleanedPrompt };
+          }
+        }
+        return scene;
+      });
     }
 
     // Ensure negative_list always has base items
