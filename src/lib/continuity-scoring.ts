@@ -44,7 +44,7 @@ export interface RegenSuggestion {
   constraints?: Record<string, unknown>;
 }
 
-export type StoryType = "short_story" | "brainrot" | "info" | "hybrid";
+export type StoryType = "short_story" | "brainrot" | "info" | "hybrid" | "film_continuity";
 
 export type SceneRole = "hook" | "problem" | "story_a" | "reset" | "story_b" | "cta" | "atmosphere" | "establish";
 
@@ -392,6 +392,14 @@ export const STORY_TYPE_CONFIGS: Record<StoryType, StoryTypeConfig> = {
     typicalClipCount: [4, 10],
     continuityStrictness: "moderate",
     defaultDuration: 5,
+  },
+  film_continuity: {
+    name: "Film Mode",
+    description: "Film-first architecture with face-only I2V and variety contract",
+    clipPacing: "medium",
+    typicalClipCount: [6, 10],
+    continuityStrictness: "moderate",
+    defaultDuration: 4,
   },
 };
 

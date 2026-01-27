@@ -509,7 +509,16 @@ export function StoryBuilderPanel({
   useEffect(() => {
     if (forceNew || !existingStory) return;
     setTitle(existingStory.title || "");
-    setStoryType((existingStory.story_type as StoryType) || "short_story");
+    
+    // Handle Film Mode stories - auto-enable film mode and map to valid type
+    const rawStoryType = existingStory.story_type as string;
+    if (rawStoryType === "film_continuity") {
+      setFilmMode(true);
+      setStoryType("film_continuity");
+    } else {
+      setStoryType((rawStoryType as StoryType) || "short_story");
+    }
+    
     setAnchors((existingStory.continuity_anchors as unknown as ContinuityAnchors) || {});
     const storyboard = existingStory.storyboard_json as unknown as (Storyboard & { 
       tier?: "volume" | "hero";
@@ -1216,7 +1225,7 @@ export function StoryBuilderPanel({
     poll();
   };
 
-  const config = STORY_TYPE_CONFIGS[storyType];
+  const config = STORY_TYPE_CONFIGS[storyType] || STORY_TYPE_CONFIGS.short_story;
 
   if (storyLoading) {
     return (
