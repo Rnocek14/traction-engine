@@ -242,6 +242,10 @@ export function StoryBuilderPanel({
   const [anchors, setAnchors] = useState<ContinuityAnchors>(getDefaultAnchors());
   const [isGenerating, setIsGenerating] = useState(false);
   
+  // Character Continuity Mode - locks all scenes to single provider
+  const [characterContinuityMode, setCharacterContinuityMode] = useState(false);
+  const [lockedProvider, setLockedProvider] = useState<"sora" | "runway" | "luma">("sora");
+  
   // Story Spine (narrative structure from Director Brain)
   const [storySpine, setStorySpine] = useState<string>("");
   const [motifAnchors, setMotifAnchors] = useState<string[]>([]);
@@ -449,7 +453,7 @@ export function StoryBuilderPanel({
     }
   }, [forceNew]);
 
-  // Hydrate from existing story (including Story Spine)
+  // Hydrate from existing story (including Story Spine and Character Continuity Mode)
   useEffect(() => {
     if (forceNew || !existingStory) return;
     setTitle(existingStory.title || "");
@@ -460,6 +464,8 @@ export function StoryBuilderPanel({
       story_spine?: string;
       motif_anchors?: string[];
       palette_keywords?: string[];
+      character_continuity_mode?: boolean;
+      locked_provider?: "sora" | "runway" | "luma";
     }) | null;
     // Ensure cut_type is computed for legacy stories without it
     setScenes(ensureCutTypes(storyboard?.scenes || []));
@@ -468,6 +474,9 @@ export function StoryBuilderPanel({
     setStorySpine(storyboard?.story_spine || "");
     setMotifAnchors(storyboard?.motif_anchors || []);
     setPaletteKeywords(storyboard?.palette_keywords || []);
+    // Restore Character Continuity Mode
+    setCharacterContinuityMode(storyboard?.character_continuity_mode || false);
+    setLockedProvider(storyboard?.locked_provider || "sora");
   }, [existingStory, forceNew]);
 
   // Create story mutation (preserves full Story Spine)
@@ -476,13 +485,15 @@ export function StoryBuilderPanel({
       // Ensure cut_type is present on all scenes
       const scenesWithCutType = ensureCutTypes(scenes);
       
-      // Persist full narrative structure including Story Spine
+      // Persist full narrative structure including Story Spine and Character Continuity Mode
       const fullStoryboard = { 
         scenes: scenesWithCutType,
         tier,
         story_spine: storySpine,
         motif_anchors: motifAnchors,
         palette_keywords: paletteKeywords,
+        character_continuity_mode: characterContinuityMode,
+        locked_provider: lockedProvider,
       };
       
       const { data, error } = await supabase
@@ -587,9 +598,12 @@ export function StoryBuilderPanel({
           // Pass Story Spine for narrative context
           story_spine: storySpine,
           motif_anchors: motifAnchors,
+          // Character Continuity Mode settings
+          character_continuity_mode: characterContinuityMode,
+          locked_provider: lockedProvider,
           settings: {
             size: "1280x720", // 16:9 in pixels - must be valid dimension, not aspect ratio
-            provider: "smart", // Use intelligent per-scene provider selection
+            provider: characterContinuityMode ? lockedProvider : "smart", // Use locked provider or smart routing
             tier, // Pass actual tier for routing decisions
           },
         },
@@ -827,6 +841,8 @@ export function StoryBuilderPanel({
         story_spine: newSpine,
         motif_anchors: newMotifs,
         palette_keywords: newPalette,
+        character_continuity_mode: characterContinuityMode,
+        locked_provider: lockedProvider,
       };
       
       console.log("[StoryBuilder] Saving full storyboard:", {
@@ -937,13 +953,15 @@ export function StoryBuilderPanel({
     // Ensure cut_type is present on all scenes
     const scenesWithCutType = ensureCutTypes(scenes);
 
-    // Build full storyboard with Story Spine preserved
+    // Build full storyboard with Story Spine and Character Continuity Mode preserved
     const fullStoryboard = {
       scenes: scenesWithCutType,
       tier,
       story_spine: storySpine,
       motif_anchors: motifAnchors,
       palette_keywords: paletteKeywords,
+      character_continuity_mode: characterContinuityMode,
+      locked_provider: lockedProvider,
     };
 
     if (storyId) {
@@ -1205,6 +1223,45 @@ export function StoryBuilderPanel({
                   )}
                   {isGeneratingStory ? "Creating..." : "Build Story"}
                 </Button>
+              </div>
+              
+              {/* Character Continuity Mode - for stories with consistent characters */}
+              <div className="pt-2 border-t border-border/50 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      id="character-continuity"
+                      checked={characterContinuityMode}
+                      onCheckedChange={setCharacterContinuityMode}
+                    />
+                    <Label htmlFor="character-continuity" className="text-xs cursor-pointer">
+                      Character Continuity Mode
+                    </Label>
+                  </div>
+                  {characterContinuityMode && (
+                    <Select value={lockedProvider} onValueChange={(v) => setLockedProvider(v as "sora" | "runway" | "luma")}>
+                      <SelectTrigger className="h-7 text-[10px] w-24">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="sora" className="text-xs">
+                          <span>🎬 Sora</span>
+                        </SelectItem>
+                        <SelectItem value="runway" className="text-xs">
+                          <span>🚀 Runway</span>
+                        </SelectItem>
+                        <SelectItem value="luma" className="text-xs">
+                          <span>🌙 Luma</span>
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
+                {characterContinuityMode && (
+                  <p className="text-[10px] text-muted-foreground leading-relaxed">
+                    Keeps characters visually consistent across all scenes using a single AI model with I2V chaining.
+                  </p>
+                )}
               </div>
             </CardContent>
           </Card>

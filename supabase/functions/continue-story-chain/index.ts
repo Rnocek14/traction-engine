@@ -179,11 +179,17 @@ Deno.serve(async (req) => {
         motif_anchors?: string[];
         // Phase 1: Story Spine from Director Brain
         story_spine?: string;
+        // Character Continuity Mode (NEW)
+        character_continuity_mode?: boolean;
+        locked_provider?: "sora" | "runway" | "luma";
       };
       const scenes = storyboardData?.scenes || [];
       const storyTier = storyboardData?.tier || "volume"; // Read tier from storyboard
       const motifAnchors = storyboardData?.motif_anchors || []; // Read motifs for injection
       const storySpine = storyboardData?.story_spine || ""; // Phase 1: Read story spine
+      // Character Continuity Mode (NEW)
+      const characterContinuityMode = storyboardData?.character_continuity_mode || false;
+      const lockedProviderName = storyboardData?.locked_provider as VideoProvider | null;
       const totalScenes = scenes.length;
 
       if (totalScenes === 0) {
@@ -194,6 +200,10 @@ Deno.serve(async (req) => {
       // Phase 3: Log story spine for debugging narrative flow (once per story)
       if (storySpine) {
         console.log(`[chain-continue] Story ${story.id} spine: "${storySpine.slice(0, 100)}..."`);
+      }
+      // Log Character Continuity Mode if enabled
+      if (characterContinuityMode && lockedProviderName) {
+        console.log(`[chain-continue] Story ${story.id} Character Continuity Mode → ${lockedProviderName}`);
       }
 
       // Get all clips for this story (include thumbnail dimensions for resize logic)
@@ -338,20 +348,31 @@ Deno.serve(async (req) => {
       // (approximate: count completed Sora-routed scenes from the clips we fetched)
       const completedSoraCount = (clips || []).filter(c => c.status === "done" && c.provider === "sora").length;
       
-      // Route by scene role (deterministic, with tier/chaining/template awareness)
-      // Use the tier stored in storyboard_json (set during story creation)
-      const routingResult = routeBySceneRole(sceneRole, {
-        tier: storyTier, // Use persisted tier instead of hardcoded "volume"
-        isChained: !isFirstScene,
-        soraUsedCount: completedSoraCount,
-        templateRoles,
-      });
+      // === PROVIDER SELECTION ===
+      // Check for Character Continuity Mode - override routing if enabled
+      let selectedProvider: VideoProvider;
+      let routingReason: string;
       
-      const selectedProvider = routingResult.provider;
+      if (characterContinuityMode && lockedProviderName) {
+        // LOCKED: Use the specified provider for ALL scenes
+        selectedProvider = lockedProviderName;
+        routingReason = `Character Continuity Mode → locked to ${lockedProviderName}`;
+      } else {
+        // NORMAL: Use role-based routing with tier/chaining/template awareness
+        const routingResult = routeBySceneRole(sceneRole, {
+          tier: storyTier,
+          isChained: !isFirstScene,
+          soraUsedCount: completedSoraCount,
+          templateRoles,
+        });
+        selectedProvider = routingResult.provider;
+        routingReason = routingResult.routingReason;
+      }
+      
       // Process duration: clamp to role range first, then snap to provider
       const processedDuration = processDuration(nextScene.duration_target || 5, sceneRole, selectedProvider);
       
-      console.log(`[chain-continue] Role-based routing: ${sceneRole} → ${selectedProvider} (${routingResult.routingReason})`);
+      console.log(`[chain-continue] Provider routing: ${sceneRole} → ${selectedProvider} (${routingReason})`);
       
       // Queue to the selected provider directly (not "smart" - we've already made the decision)
       const providerEndpoint = {
@@ -378,7 +399,7 @@ Deno.serve(async (req) => {
         allScenes: allMotifScenes,
       } : undefined;
       
-      // === CUT TYPE RESOLUTION (the key fix) ===
+      // === CUT TYPE RESOLUTION ===
       // Read cut_type from storyboard, apply provider-switch override
       const prevClip = clipsByIndex.get(nextSceneIndex - 1);
       const prevProvider = prevClip?.provider as VideoProvider | null;
@@ -389,10 +410,17 @@ Deno.serve(async (req) => {
       let cutType: "hard" | "continuity" = nextScene.cut_type || "hard";
       let cutReason = nextScene.cut_type ? "from storyboard" : "default hard";
       
-      // CRITICAL: Provider switch ALWAYS forces hard cut
-      if (prevProvider && prevProvider !== selectedProvider) {
+      // Provider switch forces hard cut ONLY if NOT in Character Continuity Mode
+      // When locked to single provider, provider never switches, so I2V is always safe
+      if (!characterContinuityMode && prevProvider && prevProvider !== selectedProvider) {
         cutType = "hard";
         cutReason = `provider switch ${prevProvider}→${selectedProvider}`;
+      }
+      
+      // In Character Continuity Mode with scenes 2+, FORCE continuity cut for I2V chaining
+      if (characterContinuityMode && !isFirstScene && latestThumbnail) {
+        cutType = "continuity";
+        cutReason = "Character Continuity Mode forces I2V";
       }
       
       // Log the cut type decision (this is the key diagnostic)
