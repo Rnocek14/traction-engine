@@ -27,8 +27,12 @@ import {
   buildNarrativeContextBlock, 
   shouldForceNarrativeT2V,
   countHardCutsUsed,
+  inferCoverageFromPrompt,
+  getCutTypeFromCoverage,
+  buildCoverageDirective,
   type NarrativeScene,
   type NarrativeStoryContext,
+  type CoverageType,
 } from "../_shared/narrative-context.ts";
 
 const corsHeaders = {
@@ -234,6 +238,8 @@ Deno.serve(async (req) => {
           state_from?: string;
           state_to?: string;
           end_state?: string;
+          // Phase 6: Coverage type for action vs identity
+          coverage_type?: CoverageType;
         }>;
         tier?: "volume" | "hero";
         motif_anchors?: string[];
@@ -464,69 +470,52 @@ Deno.serve(async (req) => {
       } : undefined;
       
       // === CUT TYPE RESOLUTION ===
-      // Uses a multi-layer approach:
-      // 1. Read cut_type from storyboard (deterministic defaults)
-      // 2. Apply narrative cut budget (max 2 hard cuts to protect identity)
-      // 3. Handle provider switch override
-      // 4. Character Continuity Mode override (forces I2V)
+      // NEW PRIORITY ORDER (coverage is FINAL authority):
+      // 1. First scene always T2V
+      // 2. Resolve coverage_type (explicit → inferred from prompt → default by role)
+      // 3. Coverage determines cut type (face→I2V, back/wide/pov/obscured/none→T2V)
+      // 4. Provider switch forces T2V (only matters if coverage allowed I2V)
       
       const prevClip = clipsByIndex.get(nextSceneIndex - 1);
       const prevProvider = prevClip?.provider as VideoProvider | null;
-      const prevSceneData = nextSceneIndex > 0 ? scenes[nextSceneIndex - 1] : null;
-      const prevRole = prevSceneData?.role as SceneRole | null;
       
-      // Get cut_type from storyboard (already has deterministic defaults from generate-storyboard)
-      let cutType: "hard" | "continuity" = nextScene.cut_type || "hard";
-      let cutReason = nextScene.cut_type ? "from storyboard" : "default hard";
+      // === COVERAGE RESOLUTION (3-tier fallback) ===
+      // Tier 1: Use explicit coverage_type from storyboard
+      // Tier 2: Infer from prompt verbs
+      // Tier 3: Default by role
+      const resolvedCoverage = inferCoverageFromPrompt(
+        nextScene.prompt || basePrompt,
+        sceneRole,
+        (nextScene as { coverage_type?: CoverageType }).coverage_type
+      );
       
-      // === NARRATIVE CUT BUDGET ===
-      // Limit hard cuts to protect identity: max ~2 per 6-scene story
-      // This prevents the "character drift lottery" from too many T2V cuts
-      if (!characterContinuityMode && cutType === "continuity") {
-        // Check if narrative structure wants to override to hard cut
-        const hardCutsUsed = countHardCutsUsed(
-          scenes.map(s => ({ cut_type: s.cut_type, role: s.role })),
-          nextSceneIndex
-        );
-        
-        const narrativeOverride = shouldForceNarrativeT2V(
-          nextSceneIndex,
-          prevRole,
-          sceneRole,
-          totalScenes,
-          hardCutsUsed
-        );
-        
-        if (narrativeOverride.forceT2V) {
-          cutType = "hard";
-          cutReason = `narrative override: ${narrativeOverride.reason}`;
-          console.log(`[chain-continue] Narrative cut budget: ${narrativeOverride.reason}`);
-        }
-      }
+      console.log(`[chain-continue] Scene ${nextSceneIndex + 1} coverage_type="${resolvedCoverage}" (${
+        (nextScene as { coverage_type?: CoverageType }).coverage_type ? "explicit" : "inferred"
+      })`);
       
-      // Provider switch forces hard cut ONLY if NOT in Character Continuity Mode
-      // When locked to single provider, provider never switches, so I2V is always safe
-      if (!characterContinuityMode && prevProvider && prevProvider !== selectedProvider) {
+      // === CUT TYPE FROM COVERAGE (final authority) ===
+      let cutType: "hard" | "continuity" = "hard";
+      let cutReason = "default hard";
+      
+      if (isFirstScene) {
         cutType = "hard";
-        cutReason = `provider switch ${prevProvider}→${selectedProvider}`;
+        cutReason = "first scene always T2V";
+      } else {
+        // Coverage is the FINAL AUTHORITY on I2V vs T2V
+        const coverageResult = getCutTypeFromCoverage(
+          resolvedCoverage,
+          !!latestThumbnail, // hasGoodReference
+          characterContinuityMode
+        );
+        cutType = coverageResult.cutType;
+        cutReason = coverageResult.reason;
       }
       
-      // In Character Continuity Mode: handle I2V vs T2V based on soft continuity
-      if (characterContinuityMode && !isFirstScene && latestThumbnail) {
-        // Soft Continuity Mode: Allow strategic T2V cuts for energy roles
-        // These roles need fresh staging to inject visual energy
-        const FORCE_T2V_ROLES: SceneRole[] = ["hook", "problem", "reset", "establish"];
-        
-        if (softContinuityMode && FORCE_T2V_ROLES.includes(sceneRole)) {
-          cutType = "hard";
-          cutReason = `Soft Continuity: T2V for ${sceneRole} (energy role)`;
-          console.log(`[chain-continue] Soft Continuity: allowing T2V for ${sceneRole}`);
-        } else {
-          cutType = "continuity";
-          cutReason = softContinuityMode 
-            ? `Soft Continuity: I2V for ${sceneRole} (story beat)` 
-            : "Character Continuity Mode forces I2V";
-        }
+      // Provider switch forces T2V (only if coverage allowed I2V)
+      // When locked to single provider, provider never switches
+      if (!characterContinuityMode && cutType === "continuity" && prevProvider && prevProvider !== selectedProvider) {
+        cutType = "hard";
+        cutReason = `coverage wanted I2V but provider switch ${prevProvider}→${selectedProvider}`;
       }
       
       // Log the cut type decision (this is the key diagnostic)
@@ -604,6 +593,7 @@ Deno.serve(async (req) => {
         state_from: s.state_from,
         state_to: s.state_to,
         end_state: s.end_state,
+        coverage_type: (s as { coverage_type?: CoverageType }).coverage_type,
       }));
       
       const storyContext: NarrativeStoryContext = {
@@ -669,9 +659,10 @@ Deno.serve(async (req) => {
         
         console.log(`[narrative] ✓ I2V order: motion→narrative→visual for ${selectedProvider}`);
       } else {
-        // T2V ORDER: Narrative context at TOP
-        finalPrompt = narrativeBlock + finalPrompt;
-        console.log(`[narrative] ✓ T2V order: narrative→visual`);
+        // T2V ORDER: Coverage directive at TOP (if non-face), then narrative
+        const coverageDirective = buildCoverageDirective(resolvedCoverage);
+        finalPrompt = coverageDirective + narrativeBlock + finalPrompt;
+        console.log(`[narrative] ✓ T2V order: coverage=${resolvedCoverage}→narrative→visual`);
       }
       
       const response = await fetch(`${supabaseUrl}/functions/v1/${providerEndpoint}`, {

@@ -11,6 +11,164 @@
 
 import type { SceneRole } from "./scene-role-router.ts";
 
+// ============================================================================
+// Coverage Type System
+// ============================================================================
+
+/**
+ * Coverage type determines camera framing and whether face is visible.
+ * This is the final authority on I2V vs T2V.
+ */
+export type CoverageType = 
+  | "face" | "body" | "back" | "wide" | "pov" | "obscured" | "none";
+
+/**
+ * Coverage types that allow maximum motion freedom (T2V)
+ */
+const MOTION_FREE_COVERAGE: CoverageType[] = ["back", "wide", "pov", "obscured", "none"];
+
+/**
+ * Coverage types that require face preservation (I2V)
+ */
+const FACE_CRITICAL_COVERAGE: CoverageType[] = ["face"];
+
+/**
+ * Default coverage by scene role (fallback when not explicitly set)
+ */
+const DEFAULT_COVERAGE_BY_ROLE: Record<SceneRole, CoverageType> = {
+  hook: "wide",
+  problem: "obscured",
+  story_a: "body",
+  reset: "back",
+  story_b: "body",
+  cta: "face",
+  atmosphere: "wide",
+  establish: "wide",
+};
+
+/**
+ * Verb patterns that suggest back/silhouette shots
+ */
+const BACK_SHOT_TRIGGERS = [
+  "sprint away", "runs toward", "retreats", "escapes", "flees",
+  "walks away", "moves away", "heads toward", "runs away"
+];
+
+/**
+ * Verb patterns that suggest wide/establishing shots
+ */
+const WIDE_SHOT_TRIGGERS = [
+  "across the", "through the landscape", "establishing",
+  "environment", "vast", "panoramic", "overhead", "aerial"
+];
+
+/**
+ * Verb patterns that suggest POV shots
+ */
+const POV_TRIGGERS = [
+  "dives", "falls", "plunges", "tumbles", "first person",
+  "subjective", "pov", "helmet cam", "visor view", "rushes toward"
+];
+
+/**
+ * Patterns that suggest obscured face (environmental effects)
+ */
+const OBSCURED_TRIGGERS = [
+  "storm", "dust", "rain", "fog", "darkness", "blur", "smoke",
+  "sand", "debris", "particles", "mist", "shadow"
+];
+
+/**
+ * Infer coverage type from prompt text
+ * 3-tier fallback: provided → inferred from verbs → default by role
+ */
+export function inferCoverageFromPrompt(
+  prompt: string,
+  role: SceneRole,
+  explicitCoverage?: CoverageType
+): CoverageType {
+  // Tier 1: Use explicit coverage if provided
+  if (explicitCoverage) {
+    return explicitCoverage;
+  }
+  
+  // Tier 2: Infer from prompt text
+  const lower = prompt.toLowerCase();
+  
+  if (BACK_SHOT_TRIGGERS.some(t => lower.includes(t))) return "back";
+  if (WIDE_SHOT_TRIGGERS.some(t => lower.includes(t))) return "wide";
+  if (POV_TRIGGERS.some(t => lower.includes(t))) return "pov";
+  if (OBSCURED_TRIGGERS.some(t => lower.includes(t))) return "obscured";
+  
+  // Check for explicit face mentions (close-up, face, expression)
+  if (lower.includes("close-up") || lower.includes("closeup") || 
+      lower.includes("face") || lower.includes("expression")) {
+    return "face";
+  }
+  
+  // Tier 3: Default by role
+  return DEFAULT_COVERAGE_BY_ROLE[role] || "body";
+}
+
+/**
+ * Determine cut type from coverage (FINAL AUTHORITY)
+ * Coverage overrides soft continuity and character continuity mode
+ */
+export function getCutTypeFromCoverage(
+  coverageType: CoverageType,
+  hasGoodReference: boolean,
+  characterContinuityMode: boolean
+): { cutType: "hard" | "continuity"; reason: string } {
+  // Face-critical scenes: I2V when possible
+  if (FACE_CRITICAL_COVERAGE.includes(coverageType)) {
+    return hasGoodReference 
+      ? { cutType: "continuity", reason: `coverage=face → I2V (preserve identity)` }
+      : { cutType: "hard", reason: `coverage=face but no reference → T2V` };
+  }
+  
+  // Motion-free coverage: always T2V (face doesn't need preserving)
+  if (MOTION_FREE_COVERAGE.includes(coverageType)) {
+    return { cutType: "hard", reason: `coverage=${coverageType} → T2V (motion freedom)` };
+  }
+  
+  // Body coverage: I2V if character continuity mode AND good reference, else T2V
+  if (coverageType === "body") {
+    if (characterContinuityMode && hasGoodReference) {
+      return { cutType: "continuity", reason: `coverage=body + CCM → I2V (body continuity)` };
+    }
+    return { cutType: "hard", reason: `coverage=body → T2V (action freedom)` };
+  }
+  
+  // Default: T2V
+  return { cutType: "hard", reason: `coverage=${coverageType} → T2V (default)` };
+}
+
+/**
+ * Build coverage directive for prompt injection
+ * Non-face scenes get a "motion freedom" directive
+ */
+export function buildCoverageDirective(coverageType: CoverageType): string {
+  if (FACE_CRITICAL_COVERAGE.includes(coverageType)) {
+    return ""; // No override needed for face shots
+  }
+  
+  const directives: Record<CoverageType, string> = {
+    face: "", // Not used
+    back: "[COVERAGE: Back/silhouette shot. Face NOT visible. PRIORITIZE motion over identity.]\n",
+    wide: "[COVERAGE: Wide environmental shot. Figure is small. PRIORITIZE composition and motion.]\n",
+    pov: "[COVERAGE: POV/first-person. No face visible. FULL motion freedom - show the ACTION.]\n",
+    obscured: "[COVERAGE: Face obscured by elements (dust/rain/blur). Motion is priority.]\n",
+    body: "[COVERAGE: Full-body shot. Face secondary to motion. Body continuity only.]\n",
+    none: "[COVERAGE: Pure spectacle. No character identity needed. MAXIMIZE motion, scale, awe.]\n",
+  };
+  
+  return directives[coverageType] || "";
+}
+
+// ============================================================================
+// Narrative Scene Types
+// ============================================================================
+
 /**
  * Scene data required for narrative context injection
  */
@@ -25,6 +183,8 @@ export interface NarrativeScene {
   state_from?: string;
   state_to?: string;
   end_state?: string;
+  // NEW: Coverage type for action vs identity
+  coverage_type?: CoverageType;
 }
 
 /**
