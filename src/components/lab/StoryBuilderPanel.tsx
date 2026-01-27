@@ -245,6 +245,8 @@ export function StoryBuilderPanel({
   // Character Continuity Mode - locks all scenes to single provider
   const [characterContinuityMode, setCharacterContinuityMode] = useState(false);
   const [lockedProvider, setLockedProvider] = useState<"sora" | "runway" | "luma">("sora");
+  // Soft Continuity Mode - allow strategic T2V cuts for energy roles (hook, problem, reset, establish)
+  const [softContinuity, setSoftContinuity] = useState(true);
   
   // Story Spine (narrative structure from Director Brain)
   const [storySpine, setStorySpine] = useState<string>("");
@@ -503,6 +505,7 @@ export function StoryBuilderPanel({
       palette_keywords?: string[];
       character_continuity_mode?: boolean;
       locked_provider?: "sora" | "runway" | "luma";
+      soft_continuity?: boolean;
     }) | null;
     // Ensure cut_type is computed for legacy stories without it
     setScenes(ensureCutTypes(storyboard?.scenes || []));
@@ -514,6 +517,8 @@ export function StoryBuilderPanel({
     // Restore Character Continuity Mode
     setCharacterContinuityMode(storyboard?.character_continuity_mode || false);
     setLockedProvider(storyboard?.locked_provider || "sora");
+    // Restore Soft Continuity (default true for new stories)
+    setSoftContinuity(storyboard?.soft_continuity ?? true);
   }, [existingStory, forceNew]);
 
   // Create story mutation (preserves full Story Spine)
@@ -531,6 +536,7 @@ export function StoryBuilderPanel({
         palette_keywords: paletteKeywords,
         character_continuity_mode: characterContinuityMode,
         locked_provider: lockedProvider,
+        soft_continuity: softContinuity,
       };
       
       const { data, error } = await supabase
@@ -638,6 +644,8 @@ export function StoryBuilderPanel({
           // Character Continuity Mode settings
           character_continuity_mode: characterContinuityMode,
           locked_provider: lockedProvider,
+          // Soft Continuity: allow T2V for energy roles
+          soft_continuity: softContinuity,
           settings: {
             size: "1280x720", // 16:9 in pixels - must be valid dimension, not aspect ratio
             provider: characterContinuityMode ? lockedProvider : "smart", // Use locked provider or smart routing
@@ -880,6 +888,7 @@ export function StoryBuilderPanel({
         palette_keywords: newPalette,
         character_continuity_mode: characterContinuityMode,
         locked_provider: lockedProvider,
+        soft_continuity: softContinuity,
       };
       
       console.log("[StoryBuilder] Saving full storyboard:", {
@@ -1295,9 +1304,27 @@ export function StoryBuilderPanel({
                   )}
                 </div>
                 {characterContinuityMode && (
-                  <p className="text-[10px] text-muted-foreground leading-relaxed">
-                    Keeps characters visually consistent across all scenes using a single AI model with I2V chaining.
-                  </p>
+                  <div className="space-y-2">
+                    <p className="text-[10px] text-muted-foreground leading-relaxed">
+                      Keeps characters visually consistent across all scenes using a single AI model with I2V chaining.
+                    </p>
+                    {/* Soft Continuity Toggle - allows T2V for energy roles */}
+                    <div className="flex items-center gap-2 pl-6">
+                      <Switch
+                        id="soft-continuity"
+                        checked={softContinuity}
+                        onCheckedChange={setSoftContinuity}
+                      />
+                      <Label htmlFor="soft-continuity" className="text-[10px] cursor-pointer text-muted-foreground">
+                        Soft Continuity (allow T2V for hooks/resets)
+                      </Label>
+                    </div>
+                    {softContinuity && (
+                      <p className="text-[9px] text-muted-foreground/70 pl-6 leading-relaxed">
+                        Injects visual energy by using T2V for hook, problem, reset, and establish roles while keeping I2V for story beats.
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
             </CardContent>
