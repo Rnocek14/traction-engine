@@ -122,31 +122,55 @@ export function inferCoverageFromPrompt(
 
 /**
  * Determine cut type from coverage (FINAL AUTHORITY)
- * Coverage overrides soft continuity and character continuity mode
+ * 
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * FACE-ONLY I2V RULE (Critical for action variety)
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * 
+ * ONLY coverage=face gets I2V (Image-to-Video with previous frame anchor).
+ * ALL OTHER COVERAGE TYPES get T2V (Text-to-Video) for maximum motion freedom.
+ * 
+ * Why: I2V doesn't just preserve the character - it preserves:
+ * - Camera distance/angle
+ * - Staging and blocking
+ * - Lighting direction and contrast
+ * - Background composition
+ * 
+ * This causes scenes to look identical ("video game cutscene" effect).
+ * 
+ * The fix: Use Character Bible in prompts for identity (prompt continuity),
+ * not pixel chaining (I2V). Reserve I2V ONLY for face close-ups where
+ * identity fidelity is critical.
+ * ═══════════════════════════════════════════════════════════════════════════════
  */
 export function getCutTypeFromCoverage(
   coverageType: CoverageType,
   hasGoodReference: boolean,
-  characterContinuityMode: boolean
+  _characterContinuityMode: boolean // Kept for API compat but no longer affects decision
 ): { cutType: "hard" | "continuity"; reason: string } {
-  // Face-critical scenes: I2V when possible
-  if (FACE_CRITICAL_COVERAGE.includes(coverageType)) {
+  // ════════════════════════════════════════════════════════════════════════════
+  // FACE-ONLY I2V: Only face coverage preserves pixels
+  // ════════════════════════════════════════════════════════════════════════════
+  if (coverageType === "face") {
     return hasGoodReference 
       ? { cutType: "continuity", reason: `coverage=face → I2V (preserve identity)` }
       : { cutType: "hard", reason: `coverage=face but no reference → T2V` };
   }
   
-  // Motion-free coverage: always T2V (face doesn't need preserving)
-  if (MOTION_FREE_COVERAGE.includes(coverageType)) {
-    return { cutType: "hard", reason: `coverage=${coverageType} → T2V (motion freedom)` };
+  // ════════════════════════════════════════════════════════════════════════════
+  // ALL OTHER COVERAGE: T2V for motion freedom
+  // Identity maintained via Character Bible in prompt, not pixels
+  // ════════════════════════════════════════════════════════════════════════════
+  
+  // body: Used to allow I2V with CCM, now ALWAYS T2V
+  // This is the key fix for "scenes 4/5/6 identical" problem
+  if (coverageType === "body") {
+    return { cutType: "hard", reason: `coverage=body → T2V (Bible mode: identity via prompt, not pixels)` };
   }
   
-  // Body coverage: I2V if character continuity mode AND good reference, else T2V
-  if (coverageType === "body") {
-    if (characterContinuityMode && hasGoodReference) {
-      return { cutType: "continuity", reason: `coverage=body + CCM → I2V (body continuity)` };
-    }
-    return { cutType: "hard", reason: `coverage=body → T2V (action freedom)` };
+  // back, wide, pov, obscured, none: Always T2V (motion-free coverage)
+  if (MOTION_FREE_COVERAGE.includes(coverageType)) {
+    return { cutType: "hard", reason: `coverage=${coverageType} → T2V (motion freedom)` };
   }
   
   // Default: T2V
