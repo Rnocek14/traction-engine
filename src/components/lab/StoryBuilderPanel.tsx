@@ -235,6 +235,14 @@ function getContinuityWarnings(_anchors: ContinuityAnchors, scenes: StoryScene[]
   return warnings;
 }
 
+
+/**
+ * Get the effective prompt from a scene (supports both standard and Film Mode)
+ */
+function getScenePrompt(scene: StoryScene): string {
+  return scene.prompt || ((scene as unknown as { subject_action?: string }).subject_action) || "";
+}
+
 export function StoryBuilderPanel({
   storyId,
   forceNew = false,
@@ -326,7 +334,7 @@ export function StoryBuilderPanel({
   // Load clips for existing story - deduplicated to show best clip per sequence_index
   // Also filters out clips that don't match current storyboard prompts (from previous versions)
   const { data: storyClips = [], refetch: refetchClips } = useQuery({
-    queryKey: ["story-clips", effectiveStoryId, scenes.map(s => s.prompt.slice(0, 30)).join("|")],
+    queryKey: ["story-clips", effectiveStoryId, scenes.map(s => getScenePrompt(s).slice(0, 30)).join("|")],
     queryFn: async () => {
       if (!effectiveStoryId) return [];
       const { data, error } = await supabase
@@ -339,7 +347,7 @@ export function StoryBuilderPanel({
       
       // Build a map of expected prompts per scene index for filtering
       const scenePromptPrefixes = scenes.map(s => 
-        s.prompt.toLowerCase().trim().slice(0, 40)
+        getScenePrompt(s).toLowerCase().trim().slice(0, 40)
       );
       
       // Filter clips: only include those whose prompt matches the current scene
