@@ -211,7 +211,7 @@ Deno.serve(async (req) => {
     // Find stories that are generating
     const { data: activeStories, error: storiesError } = await supabase
       .from("story_jobs")
-      .select("id, storyboard_json, continuity_anchors, total_clips, completed_clips")
+      .select("id, storyboard_json, continuity_anchors, total_clips, completed_clips, story_type")
       .eq("status", "generating")
       .limit(5);
 
@@ -266,7 +266,9 @@ Deno.serve(async (req) => {
         soft_continuity?: boolean;
       };
       const scenes = storyboardData?.scenes || [];
-      const storyTier = storyboardData?.tier || "volume"; // Read tier from storyboard
+      // Film Mode stories automatically get "hero" tier (unlimited Sora)
+      const isFilmMode = (story as { story_type?: string }).story_type === "film_continuity";
+      const storyTier = isFilmMode ? "hero" : (storyboardData?.tier || "volume");
       const motifAnchors = storyboardData?.motif_anchors || []; // Read motifs for injection
       const storySpine = storyboardData?.story_spine || ""; // Phase 1: Read story spine
       // Character Continuity Mode (NEW)
