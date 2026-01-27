@@ -279,31 +279,45 @@ export interface RetryContext {
   attempt: number;
   originalPrompt: string;
   provider: VideoProvider;
+  brutalityMode?: boolean;
+  storySanitizationLevel?: SanitizationLevel;
   lastError?: string;
+}
+
+export interface RetryResult {
+  prompt: string;
+  level: SanitizationLevel;
+  shouldDropReference: boolean;
+  wasSimplified: boolean;
 }
 
 /**
  * Get sanitized prompt for retry attempt
  * Escalates sanitization level with each attempt
+ * 
+ * CRITICAL: Runway ALWAYS uses strict, even on attempt 1
  */
-export function getRetryPrompt(ctx: RetryContext): {
-  prompt: string;
-  level: SanitizationLevel;
-  shouldDropReference: boolean;
-} {
-  const { attempt, originalPrompt, provider } = ctx;
+export function getRetryPrompt(ctx: RetryContext): RetryResult {
+  const { attempt, originalPrompt, provider, brutalityMode, storySanitizationLevel } = ctx;
+  
+  // Runway ALWAYS strict - non-negotiable
+  const isRunway = provider === "runway";
   
   if (attempt <= 1) {
-    // First attempt: use provider default
-    const level = getProviderSanitizationLevel(provider);
+    // First attempt: use provider-aware level (Runway = strict, others = soft/story)
+    const level: SanitizationLevel = isRunway 
+      ? "strict" 
+      : (storySanitizationLevel && storySanitizationLevel !== "off" 
+          ? storySanitizationLevel 
+          : (brutalityMode ? "soft" : "soft"));
     const result = sanitizeForModeration(originalPrompt, level);
-    return { prompt: result.sanitized, level, shouldDropReference: false };
+    return { prompt: result.sanitized, level, shouldDropReference: false, wasSimplified: false };
   }
   
   if (attempt === 2) {
-    // Second attempt: strict sanitization
+    // Second attempt: strict sanitization for ALL providers
     const result = sanitizeStrict(originalPrompt);
-    return { prompt: result.sanitized, level: "strict", shouldDropReference: false };
+    return { prompt: result.sanitized, level: "strict", shouldDropReference: false, wasSimplified: false };
   }
   
   // Third+ attempt: strict + simplified + drop reference frame
@@ -316,12 +330,49 @@ export function getRetryPrompt(ctx: RetryContext): {
   simplified = simplified.replace(/\([^)]*\)/g, "");
   // Remove anything after a dash or em-dash
   simplified = simplified.replace(/\s*[-–—]\s*[^.]*\./g, ".");
-  // Truncate to first 400 chars
-  simplified = simplified.slice(0, 400).trim();
+  // Remove injection markers that might be confusing models
+  simplified = simplified.replace(/\[ESCALATION[^\]]*\]/g, "");
+  simplified = simplified.replace(/\[FORCE[^\]]*\]/g, "");
+  simplified = simplified.replace(/\[CAPTURE[^\]]*\]/g, "");
+  simplified = simplified.replace(/ESC=[A-Z]+\./g, "");
+  simplified = simplified.replace(/FORCE=[A-Z]+:/g, "");
+  // Truncate to first 350 chars for Runway safety margin
+  simplified = simplified.slice(0, isRunway ? 350 : 400).trim();
   
   return { 
     prompt: simplified, 
     level: "strict", 
-    shouldDropReference: true // Force T2V on 3rd attempt
+    shouldDropReference: true, // Force T2V on 3rd attempt
+    wasSimplified: true,
   };
+}
+
+/**
+ * Detect if an error is a moderation-related failure
+ */
+export function isModerationError(error: string | undefined): boolean {
+  if (!error) return false;
+  const lower = error.toLowerCase();
+  return lower.includes("moderation") ||
+         lower.includes("content policy") ||
+         lower.includes("safety") ||
+         lower.includes("inappropriate") ||
+         lower.includes("400") ||
+         lower.includes("blocked");
+}
+
+/**
+ * Log retry attempt for debugging
+ */
+export function logRetryAttempt(
+  ctx: RetryContext,
+  result: RetryResult,
+  jobId?: string
+): void {
+  const prefix = jobId ? `[moderation-retry job=${jobId}]` : "[moderation-retry]";
+  console.log(`${prefix} attempt=${ctx.attempt} provider=${ctx.provider} level=${result.level} ` +
+    `dropRef=${result.shouldDropReference} simplified=${result.wasSimplified}`);
+  if (result.wasSimplified) {
+    console.log(`${prefix} Simplified prompt: "${result.prompt.slice(0, 100)}..."`);
+  }
 }

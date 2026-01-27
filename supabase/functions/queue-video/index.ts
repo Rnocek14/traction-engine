@@ -9,7 +9,11 @@ import { type MotifScene } from "../_shared/motif-injection.ts";
 import { type SceneRole } from "../_shared/scene-role-router.ts";
 import { 
   sanitizeForModeration, 
-  logModerationSanitization 
+  logModerationSanitization,
+  getRetryPrompt,
+  isModerationError,
+  logRetryAttempt,
+  type RetryContext,
 } from "../_shared/moderation-safety.ts";
 
 const corsHeaders = {
@@ -265,70 +269,121 @@ Style: Professional, engaging, suitable for TikTok/Reels. Smooth transitions bet
       throw new Error(`Failed to create job: ${jobError.message}`);
     }
 
-    // Apply moderation safety sanitization before sending to Sora
-    const { sanitized: safePrompt, wasModified, replacements } = sanitizeForModeration(videoPrompt);
-    if (wasModified) {
-      logModerationSanitization(videoPrompt, safePrompt, replacements, job.id);
-    }
+    // Call OpenAI Sora API with retry ladder for moderation failures
+    const MAX_RETRIES = 3;
+    let lastError: string | undefined;
+    let openaiData: { id: string; status?: string };
+    let startingFrameBlob: Blob | undefined;
+    let startingFrameMime = "image/jpeg";
     
-    // Build FormData for OpenAI Sora API
-    const form = new FormData();
-    form.set("prompt", safePrompt);
-    form.set("model", model);
-    form.set("size", size);
-    form.set("seconds", String(providerSeconds));
-
-    // Add starting frame if provided (must be fetched and uploaded as file)
+    // Pre-fetch starting frame (if provided) so we can retry with/without it
     if (starting_frame_url) {
       try {
         const imgRes = await fetch(starting_frame_url);
-        if (!imgRes.ok) {
-          throw new Error(`Failed to fetch starting frame: ${imgRes.status}`);
+        if (imgRes.ok) {
+          startingFrameMime = imgRes.headers.get("content-type") || "image/jpeg";
+          startingFrameBlob = await imgRes.blob();
+          console.log(`Pre-fetched starting frame: ${starting_frame_url}, type: ${startingFrameMime}`);
         }
-
-        const mime = imgRes.headers.get("content-type") || "image/jpeg";
-        const blob = await imgRes.blob();
-        
-        // input_reference must be a File with the correct size matching the video
-        form.set("input_reference", new File([blob], "start-frame.jpg", { type: mime }));
-        
-        console.log(`Added starting frame: ${starting_frame_url}, type: ${mime}`);
       } catch (frameErr) {
-        console.error("Failed to add starting frame:", frameErr);
-        // Continue without starting frame rather than failing entirely
+        console.error("Failed to fetch starting frame:", frameErr);
       }
     }
-
-    // Call OpenAI Videos API with FormData
-    const openaiResponse = await fetch("https://api.openai.com/v1/videos", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${openaiApiKey}`,
-        // Do NOT set Content-Type - fetch will set it with boundary for FormData
-      },
-      body: form,
-    });
-
-    if (!openaiResponse.ok) {
-      const errorText = await openaiResponse.text();
-      console.error("OpenAI API error:", openaiResponse.status, errorText);
+    
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      // Get prompt for this attempt (escalating sanitization)
+      let promptForAttempt: string;
+      let useStartingFrame = !!startingFrameBlob;
       
-      // Update job with error
-      await supabase
-        .from("video_jobs")
-        .update({ 
-          status: "failed",
-          openai_status: "failed",
-          error: `OpenAI API error: ${openaiResponse.status} - ${errorText.slice(0, 200)}`,
-        })
-        .eq("id", job.id);
+      if (attempt === 1) {
+        // First attempt: apply soft sanitization
+        const { sanitized, wasModified, replacements } = sanitizeForModeration(videoPrompt, "soft");
+        if (wasModified) {
+          logModerationSanitization(videoPrompt, sanitized, replacements, "soft", job.id);
+        }
+        promptForAttempt = sanitized;
+      } else {
+        // Apply retry ladder
+        const retryCtx: RetryContext = {
+          attempt,
+          originalPrompt: videoPrompt,
+          provider: "sora",
+          brutalityMode: false,
+          lastError,
+        };
+        const retryResult = getRetryPrompt(retryCtx);
+        logRetryAttempt(retryCtx, retryResult, job.id);
+        
+        promptForAttempt = retryResult.prompt;
+        
+        // On attempt 3, drop reference frame (force T2V)
+        if (retryResult.shouldDropReference) {
+          console.log(`[queue-video] Attempt ${attempt}: Dropping reference frame, forcing T2V`);
+          useStartingFrame = false;
+        }
+      }
+      
+      // Build FormData for this attempt
+      const form = new FormData();
+      form.set("prompt", promptForAttempt);
+      form.set("model", model);
+      form.set("size", size);
+      form.set("seconds", String(providerSeconds));
+      
+      if (useStartingFrame && startingFrameBlob) {
+        form.set("input_reference", new File([startingFrameBlob], "start-frame.jpg", { type: startingFrameMime }));
+      }
+      
+      const openaiResponse = await fetch("https://api.openai.com/v1/videos", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${openaiApiKey}`,
+        },
+        body: form,
+      });
 
-      throw new Error(`OpenAI API error: ${openaiResponse.status}`);
+      if (openaiResponse.ok) {
+        openaiData = await openaiResponse.json();
+        break; // Success!
+      }
+      
+      const errorText = await openaiResponse.text();
+      lastError = errorText;
+      console.error(`[queue-video] Attempt ${attempt}/${MAX_RETRIES} failed:`, openaiResponse.status, errorText.slice(0, 200));
+      
+      // Check if it's a moderation error worth retrying
+      if (!isModerationError(errorText) && attempt === 1) {
+        // Non-moderation error on first attempt - fail immediately
+        await supabase
+          .from("video_jobs")
+          .update({ 
+            status: "failed",
+            openai_status: "failed",
+            error: `OpenAI API error: ${openaiResponse.status} - ${errorText.slice(0, 200)}`,
+          })
+          .eq("id", job.id);
+        throw new Error(`OpenAI API error: ${openaiResponse.status}`);
+      }
+      
+      // If this was the last attempt, fail
+      if (attempt === MAX_RETRIES) {
+        await supabase
+          .from("video_jobs")
+          .update({ 
+            status: "failed",
+            openai_status: "failed",
+            error: `OpenAI API error after ${MAX_RETRIES} attempts: ${openaiResponse.status} - ${errorText.slice(0, 200)}`,
+          })
+          .eq("id", job.id);
+        throw new Error(`OpenAI API error: ${openaiResponse.status} - exhausted ${MAX_RETRIES} retry attempts`);
+      }
+      
+      // Wait briefly before retry (exponential backoff)
+      await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
     }
 
-    const openaiData = await openaiResponse.json();
-    const openaiVideoId = openaiData.id;
-    const openaiStatus = openaiData.status || "queued";
+    const openaiVideoId = openaiData!.id;
+    const openaiStatus = openaiData!.status || "queued";
 
     // Update job with OpenAI video ID - store in both openai_video_id and settings.provider_job_id
     await supabase

@@ -3,6 +3,8 @@
  * 
  * Supports both text-to-video and image-to-video (for frame chaining).
  * Accepts same interface as queue-video for seamless provider switching.
+ * 
+ * v2: Added moderation retry ladder with escalating sanitization
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { 
@@ -13,6 +15,14 @@ import {
 } from "../_shared/cinematic-prompts.ts";
 import { type MotifScene } from "../_shared/motif-injection.ts";
 import { type SceneRole } from "../_shared/scene-role-router.ts";
+import {
+  sanitizeForModeration,
+  getRetryPrompt,
+  isModerationError,
+  logRetryAttempt,
+  logModerationSanitization,
+  type RetryContext,
+} from "../_shared/moderation-safety.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -446,45 +456,121 @@ Style: Professional short-form video, engaging, smooth transitions.
       console.log(`Using text-to-video with model: ${runwayModel}, duration: ${runwayDuration}`);
     }
 
-    // Call Runway API
-    const runwayResponse = await fetch(runwayEndpoint, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${runwayApiKey}`,
-        "X-Runway-Version": RUNWAY_API_VERSION,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(runwayBody),
-    });
+    // Call Runway API with retry ladder for moderation failures
+    const MAX_RETRIES = 3;
+    let lastError: string | undefined;
+    let runwayData: { id: string };
+    
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      // Get prompt for this attempt (escalating sanitization)
+      let promptForAttempt = videoPrompt;
+      let currentRefUrl = isImageToVideo ? referenceImageUrl : undefined;
+      let currentEndpoint = runwayEndpoint;
+      let currentBody = { ...runwayBody };
+      
+      if (attempt > 1) {
+        // Apply retry ladder
+        const retryCtx: RetryContext = {
+          attempt,
+          originalPrompt: videoPrompt,
+          provider: "runway",
+          brutalityMode: false, // Runway never uses brutality
+          lastError,
+        };
+        const retryResult = getRetryPrompt(retryCtx);
+        logRetryAttempt(retryCtx, retryResult, job.id);
+        
+        promptForAttempt = retryResult.prompt;
+        
+        // On attempt 3, drop reference frame (force T2V)
+        if (retryResult.shouldDropReference && isImageToVideo) {
+          console.log(`[queue-video-runway] Attempt ${attempt}: Dropping reference frame, forcing T2V`);
+          currentRefUrl = undefined;
+          currentEndpoint = "https://api.dev.runwayml.com/v1/text_to_video";
+          currentBody = {
+            model: getTextToVideoModel(settings?.model),
+            promptText: promptForAttempt,
+            duration: mapDurationToRunwayTextToVideo(baseDuration),
+            ratio: runwaySize,
+            seed: settings?.seed,
+          };
+        } else {
+          currentBody.promptText = promptForAttempt;
+        }
+      } else {
+        // First attempt: apply strict sanitization (Runway always strict)
+        const { sanitized, wasModified, replacements } = sanitizeForModeration(videoPrompt, "strict");
+        if (wasModified) {
+          logModerationSanitization(videoPrompt, sanitized, replacements, "strict", job.id);
+          currentBody.promptText = sanitized;
+        }
+      }
+      
+      const runwayResponse = await fetch(currentEndpoint, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${runwayApiKey}`,
+          "X-Runway-Version": RUNWAY_API_VERSION,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(currentBody),
+      });
 
-    if (!runwayResponse.ok) {
+      if (runwayResponse.ok) {
+        runwayData = await runwayResponse.json();
+        break; // Success!
+      }
+      
       const errorText = await runwayResponse.text();
-      console.error("Runway API error:", runwayResponse.status, errorText);
+      lastError = errorText;
+      console.error(`[queue-video-runway] Attempt ${attempt}/${MAX_RETRIES} failed:`, runwayResponse.status, errorText.slice(0, 200));
       
-      // Detect credits/quota error for clearer messaging
+      // Check for quota error (don't retry)
       const isQuotaError = errorText.includes("credits") || errorText.includes("quota");
-      const errorSummary = isQuotaError 
-        ? "No credits available" 
-        : `Runway API error: ${runwayResponse.status}`;
+      if (isQuotaError) {
+        await supabase
+          .from("video_jobs")
+          .update({
+            status: "failed",
+            openai_status: "failed",
+            error: `Runway API error: ${runwayResponse.status} - no credits available`,
+          })
+          .eq("id", job.id);
+        throw new Error(`Runway API error: ${runwayResponse.status} - no credits available`);
+      }
       
-      // Update job with error
-      await supabase
-        .from("video_jobs")
-        .update({
-          status: "failed",
-          openai_status: "failed",
-          error: `Runway API error: ${runwayResponse.status} - ${errorText.slice(0, 200)}`,
-        })
-        .eq("id", job.id);
-
-      // Include quota indicator in thrown error for continue-story-chain to detect
-      throw new Error(isQuotaError 
-        ? `Runway API error: ${runwayResponse.status} - no credits available`
-        : `Runway API error: ${runwayResponse.status}`);
+      // Check if it's a moderation error worth retrying
+      if (!isModerationError(errorText) && attempt === 1) {
+        // Non-moderation error on first attempt - fail immediately
+        await supabase
+          .from("video_jobs")
+          .update({
+            status: "failed",
+            openai_status: "failed",
+            error: `Runway API error: ${runwayResponse.status} - ${errorText.slice(0, 200)}`,
+          })
+          .eq("id", job.id);
+        throw new Error(`Runway API error: ${runwayResponse.status}`);
+      }
+      
+      // If this was the last attempt, fail
+      if (attempt === MAX_RETRIES) {
+        await supabase
+          .from("video_jobs")
+          .update({
+            status: "failed",
+            openai_status: "failed",
+            error: `Runway API error after ${MAX_RETRIES} attempts: ${runwayResponse.status} - ${errorText.slice(0, 200)}`,
+          })
+          .eq("id", job.id);
+        throw new Error(`Runway API error: ${runwayResponse.status} - exhausted ${MAX_RETRIES} retry attempts`);
+      }
+      
+      // Wait briefly before retry (exponential backoff)
+      await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
     }
-
-    const runwayData = await runwayResponse.json();
-    const runwayTaskId = runwayData.id;
+    
+    const runwayTaskId = runwayData!.id;
 
     // Update job with Runway task ID - store in settings.provider_job_id (provider-neutral)
     await supabase
