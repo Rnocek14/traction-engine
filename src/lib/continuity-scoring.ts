@@ -52,6 +52,9 @@ export type ChangeType = "info" | "emotion" | "goal" | "stakes" | "location";
 
 export type CutZone = "hook" | "setup" | "escalation" | "payoff" | "button";
 
+// Story Forces - external pressures acting on the protagonist
+export type ForceType = "weather" | "predator" | "time" | "pursuit" | "hazard" | "social" | "resource";
+
 export interface StoryScene {
   id: string;
   prompt?: string; // Standard mode prompt
@@ -84,6 +87,15 @@ export interface StoryScene {
   realism_hints?: string[];
   timing_beats?: string;
   setpiece_delta?: string;
+  // Story Forces (Phase 8) - external pressure/escalation
+  force_present?: boolean;           // Is an external force acting in this scene?
+  force_type?: ForceType;            // What kind of force?
+  escalation_delta?: 0 | 1 | 2 | 3;  // How much worse than previous? 0=neutral, 3=crisis
+  // Legacy fields for transformation tracking
+  action_summary?: string;
+  state_from?: string;
+  state_to?: string;
+  alternate_subject?: string;
 }
 
 /**
