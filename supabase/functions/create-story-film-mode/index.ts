@@ -140,6 +140,68 @@ Deno.serve(async (req) => {
       }
     }
 
+    // === STORY FORCES VALIDATION (Escalation Contract) ===
+    const forceScenes = storyboard.scenes.filter(s => s.force_present === true);
+    const highEscalationScenes = storyboard.scenes.filter(s => (s.escalation_delta ?? 0) >= 2);
+    const uniqueSetpieceDeltas = new Set(
+      storyboard.scenes.map(s => s.setpiece_delta).filter(Boolean)
+    );
+
+    const forceIssues: string[] = [];
+    if (forceScenes.length < 2) {
+      forceIssues.push(`force_present=${forceScenes.length}/2 (need more external pressure)`);
+    }
+    if (highEscalationScenes.length < 3) {
+      forceIssues.push(`escalation_delta≥2 count=${highEscalationScenes.length}/3 (needs more tension)`);
+    }
+    if (uniqueSetpieceDeltas.size < 2) {
+      forceIssues.push(`setpiece_deltas=${uniqueSetpieceDeltas.size}/2 (need location/state changes)`);
+    }
+
+    if (forceIssues.length > 0) {
+      console.warn("[film-mode] ⚠️ Escalation Contract not met:");
+      forceIssues.forEach(issue => console.warn(`  - ${issue}`));
+      
+      // Auto-fix: inject forces into scenes that are missing them
+      let forcesAdded = 0;
+      const FORCE_TYPES = ["weather", "predator", "hazard", "pursuit", "time", "resource", "social"] as const;
+      
+      for (let i = 0; i < storyboard.scenes.length && forceScenes.length + forcesAdded < 2; i++) {
+        const scene = storyboard.scenes[i];
+        if (!scene.force_present && !scene.subject_required) {
+          // Spectacle scenes are natural force carriers
+          scene.force_present = true;
+          scene.force_type = FORCE_TYPES[i % FORCE_TYPES.length];
+          scene.escalation_delta = 2;
+          console.log(`[film-mode] Auto-injected force into spectacle scene ${i}`);
+          forcesAdded++;
+        }
+      }
+      
+      // If still not enough, add to hero scenes
+      for (let i = 0; i < storyboard.scenes.length && forceScenes.length + forcesAdded < 2; i++) {
+        const scene = storyboard.scenes[i];
+        if (!scene.force_present && scene.subject_required && i > 0) {
+          scene.force_present = true;
+          scene.force_type = "hazard";
+          scene.escalation_delta = scene.escalation_delta ?? 2;
+          console.log(`[film-mode] Auto-injected force into hero scene ${i}`);
+          forcesAdded++;
+        }
+      }
+      
+      // Boost escalation on middle scenes
+      for (let i = 2; i < storyboard.scenes.length - 1; i++) {
+        const scene = storyboard.scenes[i];
+        if ((scene.escalation_delta ?? 0) < 2) {
+          scene.escalation_delta = 2;
+          console.log(`[film-mode] Boosted escalation_delta on scene ${i}`);
+        }
+      }
+    } else {
+      console.log(`[film-mode] ✓ Escalation Contract met: forces=${forceScenes.length}, escalation≥2=${highEscalationScenes.length}, deltas=${uniqueSetpieceDeltas.size}`);
+    }
+
     // Validate coverage distribution
     const coverages = storyboard.scenes.map(s => s.coverage);
     const hasFace = coverages.includes("face");
@@ -159,6 +221,10 @@ Deno.serve(async (req) => {
         storyboard.scenes[1].subject_required = false;
         storyboard.scenes[1].coverage = "none";
         storyboard.scenes[1].alternate_subject = "environment threat";
+        // Also make it a force carrier
+        storyboard.scenes[1].force_present = true;
+        storyboard.scenes[1].force_type = "hazard";
+        storyboard.scenes[1].escalation_delta = 2;
       }
     }
 

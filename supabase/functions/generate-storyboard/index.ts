@@ -40,6 +40,9 @@ type CoverageType = "face" | "body" | "back" | "wide" | "pov" | "obscured" | "no
 // Spectacle scene alternate subjects (when protagonist not required)
 type AlternateSubject = "environment" | "creature" | "object" | "abstract" | "threat";
 
+// Story Forces - external pressures acting on the protagonist
+type ForceType = "weather" | "predator" | "time" | "pursuit" | "hazard" | "social" | "resource";
+
 interface GeneratedScene {
   prompt: string;
   duration_target: number;
@@ -67,6 +70,10 @@ interface GeneratedScene {
   // Phase 7: Spectacle scene system (subject freedom)
   subject_required?: boolean;
   alternate_subject?: AlternateSubject;
+  // Phase 8: Story Forces (external pressure/escalation)
+  force_present?: boolean;           // Is an external force acting in this scene?
+  force_type?: ForceType;            // What kind of force?
+  escalation_delta?: 0 | 1 | 2 | 3;  // How much worse than previous? 0=neutral, 3=crisis
 }
 
 interface GeneratedStoryboard {
@@ -254,6 +261,37 @@ For each scene, provide:
 15. coverage_type: Camera coverage for action vs identity trade-off (CRITICAL)
 16. subject_required: Does the protagonist need to appear in this scene? (CRITICAL)
 17. alternate_subject: If subject_required=false, what's the focus? (environment/creature/object/abstract/threat)
+18. force_present: Is an external FORCE acting in this scene? (CRITICAL FOR TENSION)
+19. force_type: Type of force if present (weather/predator/time/pursuit/hazard/social/resource)
+20. escalation_delta: How much worse than previous? (0=neutral, 1=minor, 2=significant, 3=crisis)
+
+═══════════════════════════════════════════════════════════════════════════════
+🎯 STORY FORCES (CRITICAL FOR TENSION!)
+═══════════════════════════════════════════════════════════════════════════════
+
+Every good story has EXTERNAL PRESSURE acting on the protagonist.
+Without forces, you get activity sequences, not stories.
+
+FORCE TYPES:
+- "weather": Rain, storm, flood, cold, heat (environment threatens)
+- "predator": Spider, bird, mantis, enemy (something hunts/attacks)
+- "time": Deadline, countdown, closing window (urgency)
+- "pursuit": Being chased, followed, tracked (escape pressure)
+- "hazard": Falling debris, fire, collapse, trap (danger)
+- "social": Crowd, rejection, rivals (interpersonal pressure)
+- "resource": Running out of food, air, energy (depletion)
+
+ESCALATION DELTA (each scene):
+- 0: Neutral beat (setup, breathing room, transition)
+- 1: Minor escalation (tension rises slightly)
+- 2: Significant escalation (things get notably worse)  
+- 3: Crisis point (maximum tension, something must break)
+
+ESCALATION CONTRACT (MUST meet these minimums):
+- At least 2 scenes with force_present=true
+- At least 3 scenes with escalation_delta >= 2
+- At least 2 distinct setpiece_deltas (location/state transitions)
+- Scenes 3-5 should typically have the highest escalation
 
 ═══════════════════════════════════════════════════════════════════════════════
 📷 COVERAGE TYPE (CRITICAL FOR ACTION SCENES)
@@ -407,6 +445,9 @@ Respond ONLY with valid JSON in this exact format:
       "coverage_type": "wide",
       "subject_required": false,
       "alternate_subject": "creature",
+      "force_present": true,
+      "force_type": "predator",
+      "escalation_delta": 2,
       "narration_line": "Optional TTS line for this beat",
       "onscreen_text": "Optional text overlay"
     },
@@ -425,6 +466,9 @@ Respond ONLY with valid JSON in this exact format:
       "change_type": "goal",
       "coverage_type": "back",
       "subject_required": true,
+      "force_present": true,
+      "force_type": "pursuit",
+      "escalation_delta": 3,
       "narration_line": "Optional TTS line",
       "onscreen_text": "Optional overlay"
     }
@@ -590,6 +634,56 @@ Generate a complete, filmable storyboard with vivid, specific visual prompts for
       budgetWarnings.forEach(w => console.warn(`  ⚠️ ${w}`));
     } else {
       console.log(`[generate-storyboard] ✓ Spectacle budget OK: spectacle=${spectacleCount}, hero=${heroCount}, face=${faceCount}`);
+    }
+    
+    // === STORY FORCES VALIDATION (Escalation Contract) ===
+    const forceScenes = storyboard.scenes.filter(s => s.force_present === true);
+    const highEscalationScenes = storyboard.scenes.filter(s => (s.escalation_delta ?? 0) >= 2);
+    const uniqueSetpieceDeltas = new Set(
+      storyboard.scenes.map(s => s.action_summary || s.state_to).filter(Boolean)
+    );
+
+    const forceIssues: string[] = [];
+    if (forceScenes.length < 2) {
+      forceIssues.push(`force_present=${forceScenes.length}/2 (need more external pressure)`);
+    }
+    if (highEscalationScenes.length < 3) {
+      forceIssues.push(`escalation_delta≥2 count=${highEscalationScenes.length}/3 (needs more tension)`);
+    }
+    if (uniqueSetpieceDeltas.size < 2) {
+      forceIssues.push(`state_deltas=${uniqueSetpieceDeltas.size}/2 (need visible state changes)`);
+    }
+
+    if (forceIssues.length > 0) {
+      console.warn(`[generate-storyboard] ⚠️ Escalation Contract not met:`);
+      forceIssues.forEach(issue => console.warn(`  - ${issue}`));
+      
+      // Auto-fix: inject forces into spectacle scenes first
+      const FORCE_TYPES: ("weather" | "predator" | "hazard" | "pursuit" | "time" | "resource" | "social")[] = 
+        ["hazard", "predator", "pursuit", "weather", "time", "resource", "social"];
+      let forcesAdded = 0;
+      
+      for (let i = 0; i < storyboard.scenes.length && forceScenes.length + forcesAdded < 2; i++) {
+        const scene = storyboard.scenes[i];
+        if (!scene.force_present && scene.subject_required === false) {
+          scene.force_present = true;
+          scene.force_type = FORCE_TYPES[i % FORCE_TYPES.length];
+          scene.escalation_delta = 2;
+          console.log(`[generate-storyboard] Auto-injected force into spectacle scene ${i + 1}`);
+          forcesAdded++;
+        }
+      }
+      
+      // Boost escalation on middle scenes
+      for (let i = Math.floor(storyboard.scenes.length * 0.3); i < storyboard.scenes.length - 1; i++) {
+        const scene = storyboard.scenes[i];
+        if ((scene.escalation_delta ?? 0) < 2) {
+          scene.escalation_delta = 2;
+          console.log(`[generate-storyboard] Boosted escalation_delta on scene ${i + 1}`);
+        }
+      }
+    } else {
+      console.log(`[generate-storyboard] ✓ Escalation Contract met: forces=${forceScenes.length}, escalation≥2=${highEscalationScenes.length}, deltas=${uniqueSetpieceDeltas.size}`);
     }
     
     // === NO-PROTAGONIST LANGUAGE CHECK (for spectacle scenes) ===
