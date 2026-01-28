@@ -69,6 +69,60 @@ interface ClipData {
 // Runway API version header
 const RUNWAY_API_VERSION = "2024-11-06";
 
+// Runway has a strict 1000 character limit on promptText
+const RUNWAY_MAX_PROMPT_LENGTH = 1000;
+
+/**
+ * Intelligently truncate a prompt for Runway's 1000 char limit.
+ * Strategy:
+ * 1. Keep ESC/FORCE blocks at head (most important for injection)
+ * 2. Keep core action description
+ * 3. Strip verbose cinematography blocks if over limit
+ * 4. Final hard truncate if still over
+ */
+function truncatePromptForRunway(prompt: string): string {
+  if (prompt.length <= RUNWAY_MAX_PROMPT_LENGTH) return prompt;
+  
+  console.log(`[queue-video-runway] Truncating prompt from ${prompt.length} to ${RUNWAY_MAX_PROMPT_LENGTH} chars`);
+  
+  let truncated = prompt;
+  
+  // Strategy 1: Remove verbose [CINEMATOGRAPHY ...] blocks (usually 300-400 chars)
+  const cinematographyPattern = /\[CINEMATOGRAPHY[^\]]*\][\s\S]*?(?=\[|$)/gi;
+  if (truncated.length > RUNWAY_MAX_PROMPT_LENGTH) {
+    truncated = truncated.replace(cinematographyPattern, "");
+  }
+  
+  // Strategy 2: Remove [COVERAGE: ...] blocks
+  const coveragePattern = /\[COVERAGE:[^\]]*\]/gi;
+  if (truncated.length > RUNWAY_MAX_PROMPT_LENGTH) {
+    truncated = truncated.replace(coveragePattern, "");
+  }
+  
+  // Strategy 3: Remove [CAPTURE: ...] blocks (less critical for Runway)
+  const capturePattern = /\[CAPTURE:[^\]]*\]/gi;
+  if (truncated.length > RUNWAY_MAX_PROMPT_LENGTH) {
+    truncated = truncated.replace(capturePattern, "");
+  }
+  
+  // Strategy 4: Simplify LENS/MOTION/LIGHTING lines
+  const lensMotionPattern = /LENS:.*\n|MOTION:.*\n|LIGHTING:.*\n/gi;
+  if (truncated.length > RUNWAY_MAX_PROMPT_LENGTH) {
+    truncated = truncated.replace(lensMotionPattern, "");
+  }
+  
+  // Clean up excessive whitespace from removals
+  truncated = truncated.replace(/\n{3,}/g, "\n\n").trim();
+  
+  // Final hard truncate if still over (preserve head where ESC/FORCE are)
+  if (truncated.length > RUNWAY_MAX_PROMPT_LENGTH) {
+    truncated = truncated.slice(0, RUNWAY_MAX_PROMPT_LENGTH - 3) + "...";
+  }
+  
+  console.log(`[queue-video-runway] Truncated result: ${truncated.length} chars`);
+  return truncated;
+}
+
 // Map Sora sizes to Runway aspect ratios
 function mapSizeToRunway(soraSize: string): string {
   const mapping: Record<string, string> = {
@@ -285,6 +339,9 @@ Deno.serve(async (req) => {
             promptForAttempt = sanitized;
           }
         }
+        
+        // CRITICAL: Truncate to Runway's 1000 char limit after all processing
+        promptForAttempt = truncatePromptForRunway(promptForAttempt);
         
         let runwayBody: Record<string, unknown>;
         let runwayModel = model;
@@ -512,6 +569,9 @@ Style: Professional short-form video, engaging, smooth transitions.
     // Build Runway API request
     let runwayEndpoint: string;
     let runwayBody: Record<string, unknown>;
+    
+    // CRITICAL: Truncate to Runway's 1000 char limit
+    const truncatedPrompt = truncatePromptForRunway(videoPrompt);
 
     if (isImageToVideo && referenceImageUrl) {
       // Image-to-video endpoint
@@ -519,7 +579,7 @@ Style: Professional short-form video, engaging, smooth transitions.
       runwayBody = {
         model: runwayModel,
         promptImage: referenceImageUrl,
-        promptText: videoPrompt,
+        promptText: truncatedPrompt,
         duration: runwayDuration,
         ratio: runwaySize,
         seed: settings?.seed,
@@ -530,7 +590,7 @@ Style: Professional short-form video, engaging, smooth transitions.
       runwayEndpoint = "https://api.dev.runwayml.com/v1/text_to_video";
       runwayBody = {
         model: runwayModel,
-        promptText: videoPrompt,
+        promptText: truncatedPrompt,
         duration: runwayDuration,
         ratio: runwaySize,
         seed: settings?.seed,
