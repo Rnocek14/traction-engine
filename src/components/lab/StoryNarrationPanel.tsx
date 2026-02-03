@@ -44,6 +44,8 @@ export function StoryNarrationPanel({
     voiceName,
     compileAndGenerate,
     findCurrentWord,
+    hasWordTimestamps,
+    alignmentDebug,
   } = useStoryNarration(storyJobId, storyType);
 
   // Audio playback sync with proper lifecycle management
@@ -220,6 +222,17 @@ export function StoryNarrationPanel({
                     </div>
                   </div>
                 </div>
+                
+                {/* Word sync status indicator */}
+                {!hasWordTimestamps && (
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/50 rounded px-2 py-1">
+                    <Clock className="h-3 w-3" />
+                    <span>Word sync unavailable — using estimated scene timing</span>
+                    {alignmentDebug?.fallback_reason && (
+                      <span className="text-[10px] text-muted-foreground/70">({alignmentDebug.fallback_reason})</span>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
