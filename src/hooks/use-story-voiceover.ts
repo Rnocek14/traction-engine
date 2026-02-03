@@ -8,8 +8,11 @@ import { toast } from "sonner";
 
 export type VoiceoverStatus = "pending" | "compiling" | "compiled" | "generating" | "processing" | "done" | "failed";
 
+// Word timing with char spans for reliable highlighting
 export interface WordTiming {
   word: string;
+  char_start: number;
+  char_end: number;
   start_ms: number;
   end_ms: number;
 }
@@ -270,6 +273,26 @@ export function useStoryNarration(storyJobId: string | undefined, storyType?: st
     }
   };
 
+  // Find current word based on time using char spans (not string matching)
+  const findCurrentWord = (currentTimeMs: number): { word: WordTiming | null; sceneIndex: number | null } => {
+    const timing = voiceover?.actual_timing;
+    if (!timing) return { word: null, sceneIndex: null };
+
+    for (const scene of timing) {
+      if (currentTimeMs >= scene.start_ms && currentTimeMs <= scene.end_ms) {
+        if (scene.words?.length) {
+          const word = scene.words.find(
+            (w) => currentTimeMs >= w.start_ms && currentTimeMs <= w.end_ms
+          );
+          return { word: word || null, sceneIndex: scene.scene_index };
+        }
+        return { word: null, sceneIndex: scene.scene_index };
+      }
+    }
+
+    return { word: null, sceneIndex: null };
+  };
+
   return {
     // Data
     voiceover,
@@ -298,6 +321,7 @@ export function useStoryNarration(storyJobId: string | undefined, storyType?: st
     compile,
     generate,
     compileAndGenerate,
+    findCurrentWord,
     refetch: voiceoverQuery.refetch,
   };
 }

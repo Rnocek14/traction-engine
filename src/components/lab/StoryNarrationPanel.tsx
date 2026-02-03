@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -6,8 +6,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Progress } from "@/components/ui/progress";
-import { Loader2, ChevronDown, Volume2, VolumeX, Play, Pause, Mic, FileText, Clock, RefreshCw } from "lucide-react";
-import { useStoryNarration, VOICE_PRESETS, type SceneTiming, type WordTiming } from "@/hooks/use-story-voiceover";
+import { Loader2, ChevronDown, Volume2, Play, Pause, Mic, FileText, Clock, RefreshCw } from "lucide-react";
+import { useStoryNarration, VOICE_PRESETS, type WordTiming } from "@/hooks/use-story-voiceover";
 import { cn } from "@/lib/utils";
 
 interface StoryNarrationPanelProps {
@@ -25,11 +25,10 @@ export function StoryNarrationPanel({
   const [selectedVoice, setSelectedVoice] = useState<string>(storyType);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTimeMs, setCurrentTimeMs] = useState(0);
-  const [highlightedWord, setHighlightedWord] = useState<string | null>(null);
+  const [currentWord, setCurrentWord] = useState<WordTiming | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const {
-    voiceover,
     compiledScript,
     sceneSegments,
     audioUrl,
@@ -44,6 +43,7 @@ export function StoryNarrationPanel({
     hasAudio,
     voiceName,
     compileAndGenerate,
+    findCurrentWord,
   } = useStoryNarration(storyJobId, storyType);
 
   // Audio playback sync
@@ -57,28 +57,19 @@ export function StoryNarrationPanel({
       const currentMs = audio.currentTime * 1000;
       setCurrentTimeMs(currentMs);
 
-      // Find current scene based on timing
-      const currentScene = actualTiming.find(
-        (t) => currentMs >= t.start_ms && currentMs <= t.end_ms
-      );
+      // Find current word and scene using char spans
+      const { word, sceneIndex } = findCurrentWord(currentMs);
+      setCurrentWord(word);
 
-      if (currentScene) {
-        onTimingUpdate?.(currentMs, currentScene.scene_index);
-
-        // Find current word for karaoke highlighting
-        if (currentScene.words?.length) {
-          const currentWord = currentScene.words.find(
-            (w) => currentMs >= w.start_ms && currentMs <= w.end_ms
-          );
-          setHighlightedWord(currentWord?.word || null);
-        }
+      if (sceneIndex !== null) {
+        onTimingUpdate?.(currentMs, sceneIndex);
       }
     };
 
     const handleEnded = () => {
       setIsPlaying(false);
       setCurrentTimeMs(0);
-      setHighlightedWord(null);
+      setCurrentWord(null);
     };
 
     audio.addEventListener("timeupdate", handleTimeUpdate);
@@ -89,7 +80,7 @@ export function StoryNarrationPanel({
       audio.removeEventListener("ended", handleEnded);
       audio.pause();
     };
-  }, [audioUrl, actualTiming, onTimingUpdate]);
+  }, [audioUrl, findCurrentWord, onTimingUpdate]);
 
   const togglePlayback = () => {
     if (!audioRef.current) return;
@@ -226,7 +217,7 @@ export function StoryNarrationPanel({
               </div>
             )}
 
-            {/* Compiled Script Display */}
+            {/* Compiled Script Display with char-span highlighting */}
             {hasScript && compiledScript && (
               <div className="space-y-2">
                 <div className="flex items-center gap-2 text-sm font-medium">
@@ -235,7 +226,10 @@ export function StoryNarrationPanel({
                 </div>
                 <ScrollArea className="h-32 rounded-md border p-3 bg-muted/30">
                   <p className="text-sm leading-relaxed">
-                    {renderScriptWithHighlight(compiledScript, highlightedWord, actualTiming, currentTimeMs)}
+                    <ScriptWithHighlight 
+                      script={compiledScript} 
+                      currentWord={currentWord} 
+                    />
                   </p>
                 </ScrollArea>
               </div>
@@ -295,43 +289,40 @@ export function StoryNarrationPanel({
   );
 }
 
-// Helper to render script with word highlighting
-function renderScriptWithHighlight(
-  script: string,
-  highlightedWord: string | null,
-  timing: SceneTiming[],
-  currentTimeMs: number
-): React.ReactNode {
-  if (!highlightedWord) {
-    return script;
-  }
+// Component to render script with reliable char-span based highlighting
+interface ScriptWithHighlightProps {
+  script: string;
+  currentWord: WordTiming | null;
+}
 
-  // Find all occurrences of the highlighted word and highlight the one matching current time
-  const words = script.split(/(\s+)/);
-  let charIndex = 0;
-
-  return words.map((word, idx) => {
-    const wordStart = charIndex;
-    charIndex += word.length;
-
-    // Check if this word matches timing
-    for (const scene of timing) {
-      if (!scene.words) continue;
-      for (const w of scene.words) {
-        if (
-          w.word === word.trim() &&
-          currentTimeMs >= w.start_ms &&
-          currentTimeMs <= w.end_ms
-        ) {
-          return (
-            <span key={idx} className="bg-primary text-primary-foreground px-0.5 rounded">
-              {word}
-            </span>
-          );
-        }
-      }
+function ScriptWithHighlight({ script, currentWord }: ScriptWithHighlightProps) {
+  // Memoize the highlighted text to avoid unnecessary re-renders
+  const highlightedContent = useMemo(() => {
+    if (!currentWord) {
+      return script;
     }
 
-    return word;
-  });
+    const { char_start, char_end } = currentWord;
+    
+    // Validate indices
+    if (char_start < 0 || char_end > script.length || char_start >= char_end) {
+      return script;
+    }
+
+    const before = script.slice(0, char_start);
+    const highlighted = script.slice(char_start, char_end);
+    const after = script.slice(char_end);
+
+    return (
+      <>
+        {before}
+        <span className="bg-primary text-primary-foreground px-0.5 rounded">
+          {highlighted}
+        </span>
+        {after}
+      </>
+    );
+  }, [script, currentWord]);
+
+  return <>{highlightedContent}</>;
 }

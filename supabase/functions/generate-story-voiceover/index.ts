@@ -2,10 +2,13 @@
  * Generate Story Voiceover
  * 
  * Takes a compiled script and generates voiceover audio via ElevenLabs.
- * Supports word-level timestamps for karaoke captions.
+ * Uses the /with-timestamps endpoint for word-level timing.
+ * 
+ * CRITICAL: This function uses compiled_script (canonical_text) exactly as stored.
+ * The char spans in scene_segments are computed against this exact text.
  * 
  * Input: voiceover_id (from compile-story-script)
- * Output: audio_url with actual_timing including word-level timestamps
+ * Output: audio_url with actual_timing including word-level timestamps (char spans)
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -29,6 +32,8 @@ interface SceneSegment {
 
 interface WordTiming {
   word: string;
+  char_start: number;
+  char_end: number;
   start_ms: number;
   end_ms: number;
 }
@@ -38,43 +43,6 @@ interface ActualTiming {
   start_ms: number;
   end_ms: number;
   words: WordTiming[];
-}
-
-// ElevenLabs voice presets by story type
-const VOICE_PRESETS: Record<string, { voice_id: string; voice_name: string; settings: Record<string, number> }> = {
-  myth: {
-    voice_id: "JBFqnCBsd6RMkjVDRZzb", // George - British, refined
-    voice_name: "George",
-    settings: { stability: 0.7, similarity_boost: 0.75, style: 0.5 },
-  },
-  film_continuity: {
-    voice_id: "CwhRBWXzGAHq8TQ4Fs17", // Roger - documentary
-    voice_name: "Roger",
-    settings: { stability: 0.65, similarity_boost: 0.75, style: 0.4 },
-  },
-  short_story: {
-    voice_id: "nPczCjzI2devNBz1zQrb", // Brian - dramatic
-    voice_name: "Brian",
-    settings: { stability: 0.6, similarity_boost: 0.8, style: 0.6 },
-  },
-};
-
-function buildSSML(compiledScript: string, sceneSegments: SceneSegment[]): string {
-  // Insert pauses between scenes using SSML
-  let ssml = "<speak>";
-  
-  for (let i = 0; i < sceneSegments.length; i++) {
-    const segment = sceneSegments[i];
-    ssml += segment.text;
-    
-    // Add pause after each scene except the last
-    if (i < sceneSegments.length - 1) {
-      ssml += ' <break time="1.5s"/> ';
-    }
-  }
-  
-  ssml += "</speak>";
-  return ssml;
 }
 
 Deno.serve(async (req) => {
@@ -118,15 +86,15 @@ Deno.serve(async (req) => {
     const sceneSegments = voiceover.scene_segments as SceneSegment[];
     const voiceId = voiceover.voice_id;
     const voiceSettings = voiceover.voice_settings as Record<string, number>;
-
-    // Build SSML with scene pauses
-    const ssmlContent = buildSSML(voiceover.compiled_script, sceneSegments);
+    
+    // Use compiled_script as the canonical text - this is what char offsets are computed against
+    const canonicalText = voiceover.compiled_script as string;
 
     console.log(`[generate-voiceover] Generating for voiceover ${voiceover.id}`);
-    console.log(`[generate-voiceover] Voice: ${voiceId}, Script length: ${voiceover.compiled_script.length} chars`);
+    console.log(`[generate-voiceover] Voice: ${voiceId}, Canonical text length: ${canonicalText.length} chars`);
 
     // Call ElevenLabs TTS with timestamps
-    // Using the streaming endpoint with alignment for word-level timing
+    // Using plain text (not SSML) to ensure alignment works correctly
     const ttsResponse = await fetch(
       `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/with-timestamps`,
       {
@@ -136,7 +104,7 @@ Deno.serve(async (req) => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          text: voiceover.compiled_script,
+          text: canonicalText, // Use the exact canonical text
           model_id: "eleven_multilingual_v2",
           voice_settings: {
             stability: voiceSettings.stability ?? 0.7,
@@ -171,46 +139,50 @@ Deno.serve(async (req) => {
     // Decode base64 audio
     const audioBytes = Uint8Array.from(atob(ttsData.audio_base64), c => c.charCodeAt(0));
 
-    // Extract word-level alignment
+    // Extract character-level alignment
     const alignment = ttsData.alignment as {
       characters: string[];
       character_start_times_seconds: number[];
       character_end_times_seconds: number[];
     } | undefined;
 
-    // Calculate actual timing from alignment
+    // Build actual timing with word-level char spans
     let actualTiming: ActualTiming[] = [];
     let totalDurationMs = 0;
 
-    if (alignment) {
+    if (alignment && alignment.characters.length > 0) {
       console.log(`[generate-voiceover] Got alignment: ${alignment.characters.length} characters`);
       
-      // Map character-level timing to scene segments
+      // For each scene segment, find words and their timing based on char positions
       for (const segment of sceneSegments) {
         const segmentWords: WordTiming[] = [];
         let segmentStartMs = Infinity;
         let segmentEndMs = 0;
         
-        // Find character indices for this segment
+        // Parse words from the segment text with their positions
         const text = segment.text;
-        let wordStart = 0;
-        const words = text.split(/\s+/);
+        const wordRegex = /\S+/g;
+        let match: RegExpExecArray | null;
         
-        for (const word of words) {
-          const wordCharStart = segment.char_start + text.indexOf(word, wordStart);
+        while ((match = wordRegex.exec(text)) !== null) {
+          const word = match[0];
+          // Calculate absolute char positions in canonical text
+          const wordCharStart = segment.char_start + match.index;
           const wordCharEnd = wordCharStart + word.length;
-          wordStart = text.indexOf(word, wordStart) + word.length;
           
-          // Find timing for first and last character of word
-          const startIdx = Math.min(wordCharStart, alignment.characters.length - 1);
-          const endIdx = Math.min(wordCharEnd - 1, alignment.characters.length - 1);
+          // Get timing from alignment using char positions
+          // Ensure indices are within bounds
+          const alignStartIdx = Math.min(wordCharStart, alignment.character_start_times_seconds.length - 1);
+          const alignEndIdx = Math.min(wordCharEnd - 1, alignment.character_end_times_seconds.length - 1);
           
-          if (startIdx >= 0 && startIdx < alignment.character_start_times_seconds.length) {
-            const wordStartMs = Math.floor(alignment.character_start_times_seconds[startIdx] * 1000);
-            const wordEndMs = Math.floor(alignment.character_end_times_seconds[endIdx] * 1000);
+          if (alignStartIdx >= 0 && alignEndIdx >= 0) {
+            const wordStartMs = Math.floor(alignment.character_start_times_seconds[alignStartIdx] * 1000);
+            const wordEndMs = Math.floor(alignment.character_end_times_seconds[alignEndIdx] * 1000);
             
             segmentWords.push({
               word,
+              char_start: wordCharStart,
+              char_end: wordCharEnd,
               start_ms: wordStartMs,
               end_ms: wordEndMs,
             });
@@ -232,10 +204,19 @@ Deno.serve(async (req) => {
     } else {
       // Fallback: use predicted timing if no alignment available
       console.log(`[generate-voiceover] No alignment data, using predicted timing`);
-      actualTiming = (voiceover.predicted_timing as ActualTiming[]).map(t => ({
-        ...t,
-        words: [],
+      const predictedTiming = voiceover.predicted_timing as Array<{
+        scene_index: number;
+        start_ms: number;
+        end_ms: number;
+      }>;
+      
+      actualTiming = predictedTiming.map(t => ({
+        scene_index: t.scene_index,
+        start_ms: t.start_ms,
+        end_ms: t.end_ms,
+        words: [], // No word-level timing available
       }));
+      
       totalDurationMs = actualTiming.length > 0 
         ? actualTiming[actualTiming.length - 1].end_ms 
         : 0;
@@ -270,7 +251,6 @@ Deno.serve(async (req) => {
       .from("story_voiceovers")
       .update({
         audio_url: audioUrl,
-        ssml_content: ssmlContent,
         actual_timing: actualTiming,
         total_duration_ms: totalDurationMs,
         status: "done",
@@ -290,7 +270,7 @@ Deno.serve(async (req) => {
         audio_url: audioUrl,
         total_duration_ms: totalDurationMs,
         actual_timing: actualTiming,
-        has_word_timestamps: alignment !== undefined,
+        has_word_timestamps: alignment !== undefined && alignment.characters.length > 0,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

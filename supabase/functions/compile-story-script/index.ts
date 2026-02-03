@@ -4,8 +4,11 @@
  * Takes scene narrations and rewrites them into a cohesive narrative script
  * using GPT-4o. Ensures consistent POV, tense, pacing, and flow.
  * 
+ * CRITICAL: This function builds a canonical_text that MUST be used exactly
+ * by generate-story-voiceover for alignment to work correctly.
+ * 
  * Input: story_job_id
- * Output: compiled_script with scene_segments for timing alignment
+ * Output: compiled_script (canonical_text) with scene_segments for timing alignment
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -36,6 +39,9 @@ interface CompileRequest {
   voice_name?: string;
   voice_settings?: Record<string, unknown>;
 }
+
+// Separator used between scenes in canonical text - must be consistent
+const SCENE_SEPARATOR = " ... ";
 
 // Story type to narrative style mapping
 const NARRATIVE_STYLES: Record<string, string> = {
@@ -105,24 +111,61 @@ ${sceneList}
 
 YOUR TASK:
 1. Rewrite these into a unified narrative that flows naturally
-2. Maintain the scene structure (same number of segments, similar lengths)
-3. Ensure consistent voice, tense, and style throughout
-4. Add brief pauses between scenes (marked with "...")
-5. The total should be speakable in roughly the same time as the originals
+2. You MUST return EXACTLY ${scenes.length} segments - one per scene, in order
+3. Even if a scene has minimal narration, return a segment for it (can be a short pause phrase like "...")
+4. Ensure consistent voice, tense, and style throughout
+5. Each segment should be roughly similar in length to the original scene narration
 
 OUTPUT FORMAT:
 Return a JSON object with:
 {
-  "compiled_script": "The full narration text...",
   "segments": [
     {"scene_index": 0, "text": "Segment for scene 1..."},
     {"scene_index": 1, "text": "Segment for scene 2..."}
   ]
 }
 
-The segments array must have exactly ${scenes.length} items, one per scene.
-Each segment's text should be roughly similar in length to the original scene narration.
+CRITICAL: The segments array MUST have exactly ${scenes.length} items, in order from 0 to ${scenes.length - 1}.
 `;
+}
+
+/**
+ * Build canonical text from segments with consistent separator.
+ * This exact text will be sent to ElevenLabs for TTS.
+ * char_start/char_end are computed against this canonical string.
+ */
+function buildCanonicalTextFromSegments(
+  segments: Array<{ scene_index: number; text: string }>
+): { canonicalText: string; sceneSegments: SceneSegment[] } {
+  const sceneSegments: SceneSegment[] = [];
+  let canonicalText = "";
+  
+  for (let i = 0; i < segments.length; i++) {
+    const segment = segments[i];
+    const text = segment.text.trim() || "(pause)"; // Never empty - use placeholder
+    const wordCount = text.split(/\s+/).filter(w => w.length > 0).length;
+    // ~2.5 words/sec for calm narration
+    const estimatedDurationMs = Math.max(500, Math.ceil((wordCount / 2.5) * 1000));
+    
+    const charStart = canonicalText.length;
+    canonicalText += text;
+    const charEnd = canonicalText.length;
+    
+    sceneSegments.push({
+      scene_index: segment.scene_index,
+      text,
+      char_start: charStart,
+      char_end: charEnd,
+      estimated_duration_ms: estimatedDurationMs,
+    });
+    
+    // Add separator after each segment except the last
+    if (i < segments.length - 1) {
+      canonicalText += SCENE_SEPARATOR;
+    }
+  }
+  
+  return { canonicalText, sceneSegments };
 }
 
 Deno.serve(async (req) => {
@@ -166,24 +209,20 @@ Deno.serve(async (req) => {
       throw new Error("Story has no scenes");
     }
 
-    // Extract scene narrations
-    const sceneNarrations: SceneNarration[] = storyboard.scenes
-      .map((scene, idx) => ({
-        scene_index: scene.index ?? idx,
-        narration: scene.narration || "",
-        beat_type: scene.beat_type,
-        duration_seconds: scene.duration_seconds,
-      }))
-      .filter(s => s.narration.trim().length > 0);
-
-    if (sceneNarrations.length === 0) {
-      throw new Error("No narrations found in scenes");
-    }
+    // Extract ALL scene narrations - DO NOT filter out empty ones
+    // This ensures segment count === scene count
+    const sceneNarrations: SceneNarration[] = storyboard.scenes.map((scene, idx) => ({
+      scene_index: scene.index ?? idx,
+      narration: scene.narration || "(pause)", // Use placeholder for empty
+      beat_type: scene.beat_type,
+      duration_seconds: scene.duration_seconds,
+    }));
 
     // Concatenate raw narration for storage
     const rawNarration = sceneNarrations.map(s => s.narration).join(" ");
 
     // Create voiceover record in pending state
+    // Note: The trigger ensure_single_active_voiceover_trigger will deactivate previous active voiceovers
     const { data: voiceover, error: voiceoverError } = await supabase
       .from("story_voiceovers")
       .insert({
@@ -228,7 +267,7 @@ Deno.serve(async (req) => {
         messages: [
           {
             role: "system",
-            content: "You compile scene narrations into cohesive scripts. Output valid JSON only.",
+            content: "You compile scene narrations into cohesive scripts. Output valid JSON only. You MUST return exactly one segment per scene.",
           },
           { role: "user", content: compilationPrompt },
         ],
@@ -239,7 +278,6 @@ Deno.serve(async (req) => {
 
     if (!llmResponse.ok) {
       const errText = await llmResponse.text();
-      // Update voiceover with error
       await supabase
         .from("story_voiceovers")
         .update({ status: "failed", error: `OpenAI error: ${errText}` })
@@ -258,7 +296,7 @@ Deno.serve(async (req) => {
       throw new Error("No content from LLM");
     }
 
-    let compiledResult: { compiled_script: string; segments: Array<{ scene_index: number; text: string }> };
+    let compiledResult: { segments: Array<{ scene_index: number; text: string }> };
     try {
       compiledResult = JSON.parse(rawContent);
     } catch {
@@ -269,42 +307,38 @@ Deno.serve(async (req) => {
       throw new Error(`Invalid JSON from LLM: ${rawContent.slice(0, 200)}`);
     }
 
-    // Build scene segments with character positions and timing estimates
-    const sceneSegments: SceneSegment[] = [];
-    let charPosition = 0;
-
-    for (const segment of compiledResult.segments) {
-      const text = segment.text.trim();
-      const wordCount = text.split(/\s+/).length;
-      // ~2.5 words/sec for calm narration
-      const estimatedDurationMs = Math.ceil((wordCount / 2.5) * 1000);
-
-      sceneSegments.push({
-        scene_index: segment.scene_index,
-        text,
-        char_start: charPosition,
-        char_end: charPosition + text.length,
-        estimated_duration_ms: estimatedDurationMs,
-      });
-
-      charPosition += text.length + 1; // +1 for space
+    // Validate segment count matches scene count
+    if (!compiledResult.segments || compiledResult.segments.length !== sceneNarrations.length) {
+      const errorMsg = `Segment count mismatch: expected ${sceneNarrations.length}, got ${compiledResult.segments?.length || 0}`;
+      await supabase
+        .from("story_voiceovers")
+        .update({ status: "failed", error: errorMsg })
+        .eq("id", voiceover.id);
+      throw new Error(errorMsg);
     }
 
-    // Build predicted timing
-    const predictedTiming = sceneSegments.map((seg, idx) => {
-      const startMs = sceneSegments.slice(0, idx).reduce((sum, s) => sum + s.estimated_duration_ms + 1500, 0);
+    // Build canonical text from segments
+    // This is the EXACT text that will be sent to ElevenLabs
+    const { canonicalText, sceneSegments } = buildCanonicalTextFromSegments(compiledResult.segments);
+
+    // Build predicted timing with rolling accumulator (O(n) instead of O(n²))
+    let accumulatedMs = 0;
+    const predictedTiming = sceneSegments.map((seg) => {
+      const startMs = accumulatedMs;
+      const endMs = startMs + seg.estimated_duration_ms;
+      accumulatedMs = endMs + 1500; // 1.5s pause between scenes
       return {
         scene_index: seg.scene_index,
         start_ms: startMs,
-        end_ms: startMs + seg.estimated_duration_ms,
+        end_ms: endMs,
       };
     });
 
-    // Update voiceover with compiled script
+    // Update voiceover with compiled script (canonical text)
     const { error: updateError } = await supabase
       .from("story_voiceovers")
       .update({
-        compiled_script: compiledResult.compiled_script,
+        compiled_script: canonicalText, // This is the canonical text to send to TTS
         scene_segments: sceneSegments,
         predicted_timing: predictedTiming,
         status: "compiled", // Ready for TTS generation
@@ -321,13 +355,13 @@ Deno.serve(async (req) => {
       .update({ active_voiceover_id: voiceover.id })
       .eq("id", body.story_job_id);
 
-    console.log(`[compile-script] Compiled script: ${compiledResult.compiled_script.length} chars, ${sceneSegments.length} segments`);
+    console.log(`[compile-script] Canonical text: ${canonicalText.length} chars, ${sceneSegments.length} segments`);
 
     return new Response(
       JSON.stringify({
         success: true,
         voiceover_id: voiceover.id,
-        compiled_script: compiledResult.compiled_script,
+        compiled_script: canonicalText,
         scene_segments: sceneSegments,
         predicted_timing: predictedTiming,
         total_estimated_duration_ms: predictedTiming.length > 0 
