@@ -1236,8 +1236,8 @@ export function StoryBuilderPanel({
     });
   };
 
-  // Retry a failed scene clip
-  const handleRetryScene = async (sceneIndex: number) => {
+  // Retry a failed scene clip (with optional AI sanitization)
+  const handleRetryScene = async (sceneIndex: number, useAiSanitize: boolean = false) => {
     if (!effectiveStoryId) {
       toast({ title: "No story to retry", variant: "destructive" });
       return;
@@ -1252,6 +1252,52 @@ export function StoryBuilderPanel({
     // Get the failed clip for this scene
     const failedClip = storyClips.find(c => c.sequence_index === sceneIndex && c.status === "failed");
     
+    let sanitizedPrompt: string | undefined;
+    
+    // If AI sanitization requested, call the sanitizer first
+    if (useAiSanitize) {
+      toast({ title: "AI rewriting prompt...", description: "Making it moderation-safe" });
+      
+      try {
+        const { data, error } = await supabase.functions.invoke("sanitize-prompt-ai", {
+          body: {
+            prompt: getScenePrompt(scene),
+            provider: lockedProvider || "sora",
+            style: storyType === "myth" ? "myth" : "film",
+            error_message: failedClip?.error,
+            context: storySpine || undefined,
+          },
+        });
+        
+        if (error) throw error;
+        
+        if (data?.success && data?.sanitized_prompt) {
+          sanitizedPrompt = data.sanitized_prompt;
+          const changes = data.changes_made?.slice(0, 3).join(", ") || "AI rewrote prompt";
+          toast({ 
+            title: "Prompt sanitized", 
+            description: `Changes: ${changes}`,
+          });
+          
+          // Update the scene with the sanitized prompt
+          updateScene(scene.id, { 
+            prompt: sanitizedPrompt,
+            subject_action: sanitizedPrompt,
+          });
+        } else {
+          throw new Error(data?.error || "AI sanitization failed");
+        }
+      } catch (err) {
+        console.error("AI sanitization failed:", err);
+        toast({ 
+          title: "AI sanitization failed", 
+          description: String(err), 
+          variant: "destructive" 
+        });
+        return;
+      }
+    }
+    
     toast({ title: "Retrying scene...", description: `Re-queueing scene ${sceneIndex + 1}` });
     
     try {
@@ -1263,6 +1309,8 @@ export function StoryBuilderPanel({
           scene_index: sceneIndex,
           // Pass the failed clip id so it can be marked for replacement
           replace_job_id: failedClip?.id,
+          // Pass sanitized prompt override if AI was used
+          prompt_override: sanitizedPrompt,
         },
       });
       
@@ -2037,7 +2085,17 @@ interface SortableSceneProps {
   clipStatus?: ClipStatus;
   onUpdate: (updates: Partial<StoryScene>) => void;
   onRemove: () => void;
-  onRetry?: (sceneIndex: number) => void;
+  onRetry?: (sceneIndex: number, useAiSanitize?: boolean) => void;
+}
+
+/** Check if an error is moderation-related */
+function isModerationError(error?: string | null): boolean {
+  if (!error) return false;
+  const lower = error.toLowerCase();
+  return [
+    "moderation", "content policy", "safety", "blocked", 
+    "prohibited", "not allowed", "violates", "harmful", "inappropriate"
+  ].some(signal => lower.includes(signal));
 }
 
 function SortableScene({ 
@@ -2108,13 +2166,14 @@ function SortableScene({
     }
     
     if (status === "failed") {
+      const isModBlocked = isModerationError(error);
       return (
         <div className="flex items-center gap-1">
           <Tooltip>
             <TooltipTrigger asChild>
               <Badge variant="outline" className="text-[9px] h-5 px-1.5 gap-1 bg-destructive/10 text-destructive border-destructive/30">
                 <XCircle className="h-3 w-3" />
-                Failed
+                {isModBlocked ? "Blocked" : "Failed"}
               </Badge>
             </TooltipTrigger>
             <TooltipContent side="top" className="text-xs max-w-[200px]">
@@ -2122,15 +2181,35 @@ function SortableScene({
             </TooltipContent>
           </Tooltip>
           {onRetry && (
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-5 px-1.5 text-[9px] text-primary hover:bg-primary/10"
-              onClick={() => onRetry(index)}
-            >
-              <Play className="h-3 w-3 mr-0.5" />
-              Retry
-            </Button>
+            <>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-5 px-1.5 text-[9px] text-primary hover:bg-primary/10"
+                onClick={() => onRetry(index, false)}
+              >
+                <Play className="h-3 w-3 mr-0.5" />
+                Retry
+              </Button>
+              {isModBlocked && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-5 px-1.5 text-[9px] text-warning hover:bg-warning/10"
+                      onClick={() => onRetry(index, true)}
+                    >
+                      <Wand2 className="h-3 w-3 mr-0.5" />
+                      AI Fix
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="text-xs max-w-[200px]">
+                    Use AI to rewrite prompt to pass moderation
+                  </TooltipContent>
+                </Tooltip>
+              )}
+            </>
           )}
         </div>
       );

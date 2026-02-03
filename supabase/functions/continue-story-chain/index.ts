@@ -221,6 +221,8 @@ interface RetryRequest {
   story_job_id?: string;
   scene_index?: number;
   replace_job_id?: string;
+  /** Optional AI-sanitized prompt override */
+  prompt_override?: string;
 }
 
 Deno.serve(async (req) => {
@@ -242,11 +244,11 @@ Deno.serve(async (req) => {
       // No body or invalid JSON - that's fine, run normal cron mode
     }
 
-    const { story_job_id, scene_index, replace_job_id } = retryRequest;
+    const { story_job_id, scene_index, replace_job_id, prompt_override } = retryRequest;
     const isManualRetry = story_job_id !== undefined && scene_index !== undefined;
 
     if (isManualRetry) {
-      console.log(`[chain-continue] Manual retry: story=${story_job_id} scene=${scene_index} replace=${replace_job_id || "none"}`);
+      console.log(`[chain-continue] Manual retry: story=${story_job_id} scene=${scene_index} replace=${replace_job_id || "none"} ai_sanitized=${!!prompt_override}`);
     }
 
     // Find stories that are generating (or specific story for retry)
@@ -504,7 +506,14 @@ Deno.serve(async (req) => {
       
       // Use enriched prompt for the actual generation (has camera directions, etc.)
       // Fall back to subject_action for Film Mode stories
-      const basePrompt = nextScene.enriched_prompt || nextScene.prompt || nextScene.subject_action || "";
+      // AI prompt_override takes priority if provided (from AI sanitization)
+      const basePrompt = (isManualRetry && prompt_override) 
+        ? prompt_override 
+        : (nextScene.enriched_prompt || nextScene.prompt || nextScene.subject_action || "");
+      
+      if (isManualRetry && prompt_override) {
+        console.log(`[chain-continue] Using AI-sanitized prompt override (${prompt_override.length} chars)`);
+      }
 
       // For I2V scenes, we need a reference image (unless manually forced to T2V)
       if (!isFirstScene && !latestThumbnail && useReferenceFromPrevious) {
