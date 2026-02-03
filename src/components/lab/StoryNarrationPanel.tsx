@@ -1,0 +1,337 @@
+import { useState, useRef, useEffect } from "react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Progress } from "@/components/ui/progress";
+import { Loader2, ChevronDown, Volume2, VolumeX, Play, Pause, Mic, FileText, Clock, RefreshCw } from "lucide-react";
+import { useStoryNarration, VOICE_PRESETS, type SceneTiming, type WordTiming } from "@/hooks/use-story-voiceover";
+import { cn } from "@/lib/utils";
+
+interface StoryNarrationPanelProps {
+  storyJobId: string;
+  storyType?: string;
+  onTimingUpdate?: (currentMs: number, sceneIndex: number) => void;
+}
+
+export function StoryNarrationPanel({
+  storyJobId,
+  storyType = "myth",
+  onTimingUpdate,
+}: StoryNarrationPanelProps) {
+  const [isOpen, setIsOpen] = useState(true);
+  const [selectedVoice, setSelectedVoice] = useState<string>(storyType);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTimeMs, setCurrentTimeMs] = useState(0);
+  const [highlightedWord, setHighlightedWord] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const {
+    voiceover,
+    compiledScript,
+    sceneSegments,
+    audioUrl,
+    actualTiming,
+    totalDurationMs,
+    status,
+    error,
+    isCompiling,
+    isGenerating,
+    isProcessing,
+    hasScript,
+    hasAudio,
+    voiceName,
+    compileAndGenerate,
+  } = useStoryNarration(storyJobId, storyType);
+
+  // Audio playback sync
+  useEffect(() => {
+    if (!audioUrl) return;
+
+    const audio = new Audio(audioUrl);
+    audioRef.current = audio;
+
+    const handleTimeUpdate = () => {
+      const currentMs = audio.currentTime * 1000;
+      setCurrentTimeMs(currentMs);
+
+      // Find current scene based on timing
+      const currentScene = actualTiming.find(
+        (t) => currentMs >= t.start_ms && currentMs <= t.end_ms
+      );
+
+      if (currentScene) {
+        onTimingUpdate?.(currentMs, currentScene.scene_index);
+
+        // Find current word for karaoke highlighting
+        if (currentScene.words?.length) {
+          const currentWord = currentScene.words.find(
+            (w) => currentMs >= w.start_ms && currentMs <= w.end_ms
+          );
+          setHighlightedWord(currentWord?.word || null);
+        }
+      }
+    };
+
+    const handleEnded = () => {
+      setIsPlaying(false);
+      setCurrentTimeMs(0);
+      setHighlightedWord(null);
+    };
+
+    audio.addEventListener("timeupdate", handleTimeUpdate);
+    audio.addEventListener("ended", handleEnded);
+
+    return () => {
+      audio.removeEventListener("timeupdate", handleTimeUpdate);
+      audio.removeEventListener("ended", handleEnded);
+      audio.pause();
+    };
+  }, [audioUrl, actualTiming, onTimingUpdate]);
+
+  const togglePlayback = () => {
+    if (!audioRef.current) return;
+
+    if (isPlaying) {
+      audioRef.current.pause();
+    } else {
+      audioRef.current.play();
+    }
+    setIsPlaying(!isPlaying);
+  };
+
+  const handleGenerate = async () => {
+    const preset = VOICE_PRESETS[selectedVoice as keyof typeof VOICE_PRESETS] || VOICE_PRESETS.myth;
+    await compileAndGenerate({
+      voice_id: preset.voice_id,
+      voice_name: preset.voice_name,
+    });
+  };
+
+  const formatDuration = (ms: number) => {
+    const seconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${minutes}:${remainingSeconds.toString().padStart(2, "0")}`;
+  };
+
+  const progress = totalDurationMs ? (currentTimeMs / totalDurationMs) * 100 : 0;
+
+  return (
+    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+      <Card className="border-primary/20">
+        <CollapsibleTrigger asChild>
+          <CardHeader className="cursor-pointer hover:bg-muted/50 transition-colors py-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Mic className="h-4 w-4 text-primary" />
+                <CardTitle className="text-sm font-medium">Narration</CardTitle>
+                {hasAudio && (
+                  <Badge variant="secondary" className="text-xs tabular-nums">
+                    {formatDuration(totalDurationMs || 0)}
+                  </Badge>
+                )}
+                {status === "done" && <Badge className="bg-green-500/20 text-green-500 text-xs">Ready</Badge>}
+                {status === "failed" && <Badge variant="destructive" className="text-xs">Failed</Badge>}
+                {isProcessing && (
+                  <Badge variant="outline" className="text-xs">
+                    <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                    {isCompiling ? "Compiling..." : "Generating..."}
+                  </Badge>
+                )}
+              </div>
+              <ChevronDown className={cn("h-4 w-4 transition-transform", isOpen && "rotate-180")} />
+            </div>
+          </CardHeader>
+        </CollapsibleTrigger>
+
+        <CollapsibleContent>
+          <CardContent className="pt-0 space-y-4">
+            {/* Voice Selection */}
+            <div className="flex items-center gap-2">
+              <Select value={selectedVoice} onValueChange={setSelectedVoice} disabled={isProcessing}>
+                <SelectTrigger className="w-48">
+                  <SelectValue placeholder="Select voice" />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(VOICE_PRESETS).map(([key, preset]) => (
+                    <SelectItem key={key} value={key}>
+                      <div className="flex flex-col">
+                        <span>{preset.voice_name}</span>
+                        <span className="text-xs text-muted-foreground">{preset.description}</span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Button
+                onClick={handleGenerate}
+                disabled={isProcessing}
+                size="sm"
+                className="flex-1"
+              >
+                {isProcessing ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    {isCompiling ? "Compiling Script..." : "Generating Audio..."}
+                  </>
+                ) : hasAudio ? (
+                  <>
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Regenerate
+                  </>
+                ) : (
+                  <>
+                    <Volume2 className="h-4 w-4 mr-2" />
+                    Generate Voiceover
+                  </>
+                )}
+              </Button>
+            </div>
+
+            {/* Error Display */}
+            {error && (
+              <div className="p-2 bg-destructive/10 text-destructive text-sm rounded-md">
+                {error}
+              </div>
+            )}
+
+            {/* Audio Player */}
+            {hasAudio && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={togglePlayback}
+                    className="w-10 h-10 p-0"
+                  >
+                    {isPlaying ? (
+                      <Pause className="h-4 w-4" />
+                    ) : (
+                      <Play className="h-4 w-4" />
+                    )}
+                  </Button>
+                  <div className="flex-1 space-y-1">
+                    <Progress value={progress} className="h-2" />
+                    <div className="flex justify-between text-xs text-muted-foreground">
+                      <span>{formatDuration(currentTimeMs)}</span>
+                      <span>{formatDuration(totalDurationMs || 0)}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Compiled Script Display */}
+            {hasScript && compiledScript && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <FileText className="h-4 w-4" />
+                  Compiled Script
+                </div>
+                <ScrollArea className="h-32 rounded-md border p-3 bg-muted/30">
+                  <p className="text-sm leading-relaxed">
+                    {renderScriptWithHighlight(compiledScript, highlightedWord, actualTiming, currentTimeMs)}
+                  </p>
+                </ScrollArea>
+              </div>
+            )}
+
+            {/* Scene Segments with Timing */}
+            {sceneSegments.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <Clock className="h-4 w-4" />
+                  Scene Timing
+                </div>
+                <div className="space-y-1">
+                  {sceneSegments.map((segment, idx) => {
+                    const timing = actualTiming.find((t) => t.scene_index === segment.scene_index);
+                    const isActive =
+                      timing &&
+                      currentTimeMs >= timing.start_ms &&
+                      currentTimeMs <= timing.end_ms;
+
+                    return (
+                      <div
+                        key={idx}
+                        className={cn(
+                          "flex items-center gap-2 p-2 rounded-md text-xs transition-colors",
+                          isActive ? "bg-primary/20" : "bg-muted/30"
+                        )}
+                      >
+                        <Badge variant="outline" className="w-8 justify-center">
+                          {segment.scene_index + 1}
+                        </Badge>
+                        <span className="flex-1 truncate">{segment.text.slice(0, 50)}...</span>
+                        <span className="text-muted-foreground tabular-nums">
+                          {timing
+                            ? `${formatDuration(timing.start_ms)} - ${formatDuration(timing.end_ms)}`
+                            : `~${Math.round(segment.estimated_duration_ms / 1000)}s`}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Empty State */}
+            {!hasScript && !isProcessing && (
+              <div className="text-center py-4 text-muted-foreground text-sm">
+                <Mic className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p>No voiceover yet.</p>
+                <p className="text-xs">Click "Generate Voiceover" to create narration from your scene scripts.</p>
+              </div>
+            )}
+          </CardContent>
+        </CollapsibleContent>
+      </Card>
+    </Collapsible>
+  );
+}
+
+// Helper to render script with word highlighting
+function renderScriptWithHighlight(
+  script: string,
+  highlightedWord: string | null,
+  timing: SceneTiming[],
+  currentTimeMs: number
+): React.ReactNode {
+  if (!highlightedWord) {
+    return script;
+  }
+
+  // Find all occurrences of the highlighted word and highlight the one matching current time
+  const words = script.split(/(\s+)/);
+  let charIndex = 0;
+
+  return words.map((word, idx) => {
+    const wordStart = charIndex;
+    charIndex += word.length;
+
+    // Check if this word matches timing
+    for (const scene of timing) {
+      if (!scene.words) continue;
+      for (const w of scene.words) {
+        if (
+          w.word === word.trim() &&
+          currentTimeMs >= w.start_ms &&
+          currentTimeMs <= w.end_ms
+        ) {
+          return (
+            <span key={idx} className="bg-primary text-primary-foreground px-0.5 rounded">
+              {word}
+            </span>
+          );
+        }
+      }
+    }
+
+    return word;
+  });
+}
