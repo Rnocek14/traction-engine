@@ -186,6 +186,15 @@ Deno.serve(async (req) => {
           const errorText = await statusResponse.text();
           console.error(`OpenAI status check failed for ${job.id}:`, errorText);
           
+          // 500 errors are transient - OpenAI server issues, don't fail the job
+          // Just skip this cycle and let the next poll retry
+          if (statusResponse.status >= 500 && statusResponse.status < 600) {
+            console.log(`Job ${job.id}: Transient 5xx error from OpenAI, will retry on next poll`);
+            results.push({ id: job.id, status: "running", error: `Transient 5xx: ${statusResponse.status}` });
+            continue;
+          }
+          
+          // 4xx errors are permanent failures
           await supabase
             .from("video_jobs")
             .update({ 
