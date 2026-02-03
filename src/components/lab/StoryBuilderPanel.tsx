@@ -1236,6 +1236,51 @@ export function StoryBuilderPanel({
     });
   };
 
+  // Retry a failed scene clip
+  const handleRetryScene = async (sceneIndex: number) => {
+    if (!effectiveStoryId) {
+      toast({ title: "No story to retry", variant: "destructive" });
+      return;
+    }
+    
+    const scene = scenes[sceneIndex];
+    if (!scene) {
+      toast({ title: "Scene not found", variant: "destructive" });
+      return;
+    }
+    
+    // Get the failed clip for this scene
+    const failedClip = storyClips.find(c => c.sequence_index === sceneIndex && c.status === "failed");
+    
+    toast({ title: "Retrying scene...", description: `Re-queueing scene ${sceneIndex + 1}` });
+    
+    try {
+      // Use continue-story-chain to regenerate just this one scene
+      // This re-uses the existing story context and picks up from the previous frame if available
+      const { error } = await supabase.functions.invoke("continue-story-chain", {
+        body: {
+          story_job_id: effectiveStoryId,
+          scene_index: sceneIndex,
+          force_regenerate: true,
+          // Pass the failed clip id so it can be marked for replacement
+          replace_job_id: failedClip?.id,
+        },
+      });
+      
+      if (error) throw error;
+      
+      toast({ title: "Scene queued", description: `Scene ${sceneIndex + 1} will regenerate shortly` });
+      refetchClips();
+    } catch (err) {
+      console.error("Retry failed:", err);
+      toast({ 
+        title: "Retry failed", 
+        description: String(err), 
+        variant: "destructive" 
+      });
+    }
+  };
+
   const handleGenerate = async () => {
     if (scenes.length === 0) {
       toast({ title: "Add at least one scene", variant: "destructive" });
@@ -1785,6 +1830,7 @@ export function StoryBuilderPanel({
                         const idx = clip.sequence_index ?? -1;
                         if (idx >= 0) {
                           clipStatusByIndex.set(idx, {
+                            id: clip.id,
                             status: clip.status,
                             progress: clip.progress,
                             provider: clip.provider,
@@ -1806,6 +1852,7 @@ export function StoryBuilderPanel({
                           clipStatus={clipStatusByIndex.get(index)}
                           onUpdate={(updates) => updateScene(scene.id, updates)}
                           onRemove={() => removeScene(scene.id)}
+                          onRetry={handleRetryScene}
                         />
                       ));
                     })()}
@@ -1953,6 +2000,7 @@ export function StoryBuilderPanel({
 // ============================================================================
 
 interface ClipStatus {
+  id: string;
   status: string;
   progress: number | null;
   provider: string;
@@ -1970,6 +2018,7 @@ interface SortableSceneProps {
   clipStatus?: ClipStatus;
   onUpdate: (updates: Partial<StoryScene>) => void;
   onRemove: () => void;
+  onRetry?: (sceneIndex: number) => void;
 }
 
 function SortableScene({ 
@@ -1982,7 +2031,8 @@ function SortableScene({
   soraUsedBeforeThis,
   clipStatus,
   onUpdate, 
-  onRemove
+  onRemove,
+  onRetry,
 }: SortableSceneProps) {
   const {
     attributes,
@@ -2040,17 +2090,30 @@ function SortableScene({
     
     if (status === "failed") {
       return (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Badge variant="outline" className="text-[9px] h-5 px-1.5 gap-1 bg-destructive/10 text-destructive border-destructive/30">
-              <XCircle className="h-3 w-3" />
-              Failed
-            </Badge>
-          </TooltipTrigger>
-          <TooltipContent side="top" className="text-xs max-w-[200px]">
-            {error || "Generation failed"}
-          </TooltipContent>
-        </Tooltip>
+        <div className="flex items-center gap-1">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Badge variant="outline" className="text-[9px] h-5 px-1.5 gap-1 bg-destructive/10 text-destructive border-destructive/30">
+                <XCircle className="h-3 w-3" />
+                Failed
+              </Badge>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="text-xs max-w-[200px]">
+              {error || "Generation failed"}
+            </TooltipContent>
+          </Tooltip>
+          {onRetry && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-5 px-1.5 text-[9px] text-primary hover:bg-primary/10"
+              onClick={() => onRetry(index)}
+            >
+              <Play className="h-3 w-3 mr-0.5" />
+              Retry
+            </Button>
+          )}
+        </div>
       );
     }
     
