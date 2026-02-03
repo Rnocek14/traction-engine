@@ -32,6 +32,17 @@ export interface SceneSegment {
   estimated_duration_ms: number;
 }
 
+export interface AlignmentDebug {
+  canonical_length: number;
+  alignment_length: number;
+  mismatch_pct: number;
+  alignment_ok: boolean;
+  separator: string;
+  prefix_match?: boolean;
+  suffix_match?: boolean;
+  fallback_reason?: string;
+}
+
 export interface StoryVoiceover {
   id: string;
   story_job_id: string;
@@ -54,6 +65,10 @@ export interface StoryVoiceover {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  // Alignment debug fields (persisted in DB)
+  has_word_timestamps?: boolean;
+  alignment_ok?: boolean;
+  alignment_debug?: AlignmentDebug;
 }
 
 export interface CompileScriptParams {
@@ -311,6 +326,11 @@ export function useStoryNarration(storyJobId: string | undefined, storyType?: st
     isProcessing: isCompiling || isGenerating,
     hasScript,
     hasAudio,
+    
+    // Alignment quality (for UI to show "Word sync unavailable" etc.)
+    hasWordTimestamps: voiceover?.has_word_timestamps ?? false,
+    alignmentOk: voiceover?.alignment_ok ?? false,
+    alignmentDebug: voiceover?.alignment_debug,
     
     // Voice
     voiceId: voiceover?.voice_id || recommendedVoice.voice_id,

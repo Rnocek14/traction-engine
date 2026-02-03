@@ -985,11 +985,14 @@ export type Database = {
       story_voiceovers: {
         Row: {
           actual_timing: Json | null
+          alignment_debug: Json | null
+          alignment_ok: boolean | null
           audio_format: string | null
           audio_url: string | null
           compiled_script: string | null
           created_at: string
           error: string | null
+          has_word_timestamps: boolean | null
           id: string
           is_active: boolean
           predicted_timing: Json | null
@@ -1009,11 +1012,14 @@ export type Database = {
         }
         Insert: {
           actual_timing?: Json | null
+          alignment_debug?: Json | null
+          alignment_ok?: boolean | null
           audio_format?: string | null
           audio_url?: string | null
           compiled_script?: string | null
           created_at?: string
           error?: string | null
+          has_word_timestamps?: boolean | null
           id?: string
           is_active?: boolean
           predicted_timing?: Json | null
@@ -1033,11 +1039,14 @@ export type Database = {
         }
         Update: {
           actual_timing?: Json | null
+          alignment_debug?: Json | null
+          alignment_ok?: boolean | null
           audio_format?: string | null
           audio_url?: string | null
           compiled_script?: string | null
           created_at?: string
           error?: string | null
+          has_word_timestamps?: boolean | null
           id?: string
           is_active?: boolean
           predicted_timing?: Json | null

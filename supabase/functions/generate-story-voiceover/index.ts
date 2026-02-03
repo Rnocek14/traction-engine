@@ -48,12 +48,63 @@ interface ActualTiming {
 // Alignment mismatch threshold - if alignment differs by more than this %, fall back
 const ALIGNMENT_MISMATCH_THRESHOLD = 0.1; // 10%
 
+// Minimum canonical length for alignment to be meaningful
+const MIN_CANONICAL_LENGTH = 20;
+
+// Minimum character similarity for prefix/suffix check
+const MIN_CHAR_SIMILARITY = 0.8; // 80%
+
 interface AlignmentDebug {
   canonical_length: number;
   alignment_length: number;
   mismatch_pct: number;
   alignment_ok: boolean;
   separator: string;
+  prefix_match?: boolean;
+  suffix_match?: boolean;
+  fallback_reason?: string;
+}
+
+/**
+ * Normalize text for comparison: collapse whitespace, normalize quotes/dashes
+ */
+function normalizeForComparison(text: string): string {
+  return text
+    .replace(/[\u2018\u2019\u201C\u201D]/g, "'") // Smart quotes to straight
+    .replace(/[\u2013\u2014]/g, "-")              // Em/en dashes to hyphen
+    .replace(/\s+/g, " ")                          // Collapse whitespace
+    .replace(/\.\.\./g, "…")                       // Normalize ellipsis
+    .trim();
+}
+
+/**
+ * Check if two strings have similar characters at prefix/suffix
+ */
+function checkPrefixSuffixSimilarity(a: string, b: string, checkLen: number = 100): { prefixMatch: boolean; suffixMatch: boolean } {
+  const normalizedA = normalizeForComparison(a);
+  const normalizedB = normalizeForComparison(b);
+  
+  // Check prefix
+  const prefixA = normalizedA.slice(0, Math.min(checkLen, normalizedA.length));
+  const prefixB = normalizedB.slice(0, Math.min(checkLen, normalizedB.length));
+  const minPrefixLen = Math.min(prefixA.length, prefixB.length);
+  let prefixMatches = 0;
+  for (let i = 0; i < minPrefixLen; i++) {
+    if (prefixA[i] === prefixB[i]) prefixMatches++;
+  }
+  const prefixMatch = minPrefixLen > 0 && (prefixMatches / minPrefixLen) >= MIN_CHAR_SIMILARITY;
+  
+  // Check suffix
+  const suffixA = normalizedA.slice(-Math.min(checkLen, normalizedA.length));
+  const suffixB = normalizedB.slice(-Math.min(checkLen, normalizedB.length));
+  const minSuffixLen = Math.min(suffixA.length, suffixB.length);
+  let suffixMatches = 0;
+  for (let i = 0; i < minSuffixLen; i++) {
+    if (suffixA[suffixA.length - 1 - i] === suffixB[suffixB.length - 1 - i]) suffixMatches++;
+  }
+  const suffixMatch = minSuffixLen > 0 && (suffixMatches / minSuffixLen) >= MIN_CHAR_SIMILARITY;
+  
+  return { prefixMatch, suffixMatch };
 }
 
 Deno.serve(async (req) => {
@@ -174,20 +225,43 @@ Deno.serve(async (req) => {
     if (alignment && alignment.characters.length > 0) {
       const alignLen = alignment.characters.length;
       const canonLen = canonicalText.length;
-      const mismatchPct = Math.abs(alignLen - canonLen) / canonLen;
       
-      alignmentDebug.mismatch_pct = Math.round(mismatchPct * 100);
-      
-      console.log(`[generate-voiceover] Alignment: ${alignLen} chars vs canonical ${canonLen} chars (mismatch: ${(mismatchPct * 100).toFixed(1)}%)`);
-      
-      // Check if alignment is usable
-      if (mismatchPct > ALIGNMENT_MISMATCH_THRESHOLD) {
-        console.warn(`[generate-voiceover] Alignment mismatch too high (${(mismatchPct * 100).toFixed(1)}% > ${ALIGNMENT_MISMATCH_THRESHOLD * 100}%), falling back to predicted timing`);
+      // Guard against tiny/empty canonical text (avoid divide-by-zero)
+      if (canonLen < MIN_CANONICAL_LENGTH) {
+        console.warn(`[generate-voiceover] Canonical text too short (${canonLen} chars), falling back to predicted timing`);
+        alignmentDebug.fallback_reason = `canonical_too_short_${canonLen}`;
         alignmentOk = false;
       } else {
-        alignmentOk = true;
-        alignmentDebug.alignment_ok = true;
+        const mismatchPct = Math.abs(alignLen - canonLen) / canonLen;
+        alignmentDebug.mismatch_pct = Math.round(mismatchPct * 100);
         
+        console.log(`[generate-voiceover] Alignment: ${alignLen} chars vs canonical ${canonLen} chars (mismatch: ${(mismatchPct * 100).toFixed(1)}%)`);
+        
+        // Check 1: Length mismatch threshold
+        if (mismatchPct > ALIGNMENT_MISMATCH_THRESHOLD) {
+          console.warn(`[generate-voiceover] Alignment mismatch too high (${(mismatchPct * 100).toFixed(1)}% > ${ALIGNMENT_MISMATCH_THRESHOLD * 100}%), falling back to predicted timing`);
+          alignmentDebug.fallback_reason = `length_mismatch_${alignmentDebug.mismatch_pct}pct`;
+          alignmentOk = false;
+        } else {
+          // Check 2: Unicode normalization - verify prefix/suffix character similarity
+          const alignedText = alignment.characters.join("");
+          const { prefixMatch, suffixMatch } = checkPrefixSuffixSimilarity(canonicalText, alignedText);
+          alignmentDebug.prefix_match = prefixMatch;
+          alignmentDebug.suffix_match = suffixMatch;
+          
+          if (!prefixMatch || !suffixMatch) {
+            console.warn(`[generate-voiceover] Character drift detected (prefix: ${prefixMatch}, suffix: ${suffixMatch}), falling back to predicted timing`);
+            alignmentDebug.fallback_reason = `char_drift_p${prefixMatch ? 1 : 0}_s${suffixMatch ? 1 : 0}`;
+            alignmentOk = false;
+          } else {
+            alignmentOk = true;
+            alignmentDebug.alignment_ok = true;
+          }
+        }
+      }
+      
+      // Only process word timing if alignment passed all checks
+      if (alignmentOk) {
         // For each scene segment, find words and their timing based on char positions
         for (const segment of sceneSegments) {
           const segmentWords: WordTiming[] = [];
@@ -284,7 +358,7 @@ Deno.serve(async (req) => {
 
     const audioUrl = urlData.publicUrl;
 
-    // Update voiceover with audio URL and actual timing
+    // Update voiceover with audio URL, timing, and alignment debug info (persisted for diagnostics)
     const { error: updateError } = await supabase
       .from("story_voiceovers")
       .update({
@@ -292,6 +366,10 @@ Deno.serve(async (req) => {
         actual_timing: actualTiming,
         total_duration_ms: totalDurationMs,
         status: "done",
+        // Persist alignment debug for diagnostics (UI can show "Word sync unavailable" if false)
+        has_word_timestamps: alignmentOk,
+        alignment_ok: alignmentOk,
+        alignment_debug: alignmentDebug,
       })
       .eq("id", voiceover.id);
 
