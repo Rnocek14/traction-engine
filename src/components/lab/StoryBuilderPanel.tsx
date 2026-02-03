@@ -1257,17 +1257,36 @@ export function StoryBuilderPanel({
     try {
       // Use continue-story-chain to regenerate just this one scene
       // This re-uses the existing story context and picks up from the previous frame if available
-      const { error } = await supabase.functions.invoke("continue-story-chain", {
+      const { data, error } = await supabase.functions.invoke("continue-story-chain", {
         body: {
           story_job_id: effectiveStoryId,
           scene_index: sceneIndex,
-          force_regenerate: true,
           // Pass the failed clip id so it can be marked for replacement
           replace_job_id: failedClip?.id,
         },
       });
       
       if (error) throw error;
+      
+      // Check the response for quota/credit errors
+      const result = data?.results?.[0];
+      if (result?.action === "quota_failed") {
+        toast({ 
+          title: "Credits exhausted", 
+          description: "Video provider has no credits remaining. Try again later.",
+          variant: "destructive" 
+        });
+        return;
+      }
+      
+      if (result?.action === "failed_no_reference") {
+        toast({ 
+          title: "No reference available", 
+          description: "Previous scene must complete first.",
+          variant: "destructive" 
+        });
+        return;
+      }
       
       toast({ title: "Scene queued", description: `Scene ${sceneIndex + 1} will regenerate shortly` });
       refetchClips();

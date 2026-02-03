@@ -214,6 +214,15 @@ function insertNarrativeAfterMotion(prompt: string, narrativeBlock: string): str
   return narrativeBlock + prompt;
 }
 
+/**
+ * Request body interface for manual retry
+ */
+interface RetryRequest {
+  story_job_id?: string;
+  scene_index?: number;
+  replace_job_id?: string;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -224,22 +233,72 @@ Deno.serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Find stories that are generating
-    const { data: activeStories, error: storiesError } = await supabase
+    // Parse optional request body for targeted retry
+    let retryRequest: RetryRequest = {};
+    try {
+      const body = await req.json();
+      retryRequest = body || {};
+    } catch {
+      // No body or invalid JSON - that's fine, run normal cron mode
+    }
+
+    const { story_job_id, scene_index, replace_job_id } = retryRequest;
+    const isManualRetry = story_job_id !== undefined && scene_index !== undefined;
+
+    if (isManualRetry) {
+      console.log(`[chain-continue] Manual retry: story=${story_job_id} scene=${scene_index} replace=${replace_job_id || "none"}`);
+    }
+
+    // Find stories that are generating (or specific story for retry)
+    let query = supabase
       .from("story_jobs")
-      .select("id, storyboard_json, continuity_anchors, total_clips, completed_clips, story_type")
-      .eq("status", "generating")
-      .limit(5);
+      .select("id, storyboard_json, continuity_anchors, total_clips, completed_clips, story_type");
+    
+    if (isManualRetry) {
+      // For manual retry, get the specific story (regardless of status)
+      query = query.eq("id", story_job_id);
+    } else {
+      // Normal cron mode: only get actively generating stories
+      query = query.eq("status", "generating");
+    }
+    
+    const { data: activeStories, error: storiesError } = await query.limit(5);
 
     if (storiesError) {
       throw new Error(`Failed to fetch stories: ${storiesError.message}`);
     }
 
     if (!activeStories?.length) {
+      const message = isManualRetry 
+        ? `Story ${story_job_id} not found` 
+        : "No active stories";
       return new Response(
-        JSON.stringify({ success: true, message: "No active stories" }),
+        JSON.stringify({ success: true, message }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
+    }
+    
+    // For manual retry, if story is not generating, put it back to generating status
+    if (isManualRetry && activeStories[0].id === story_job_id) {
+      const story = activeStories[0] as { status?: string; id: string };
+      // Note: status isn't in our select, so we need to update anyway for retry
+      await supabase
+        .from("story_jobs")
+        .update({ status: "generating" })
+        .eq("id", story_job_id);
+      console.log(`[chain-continue] Set story ${story_job_id} back to generating status`);
+      
+      // Mark the old failed job as replaced (if provided)
+      if (replace_job_id) {
+        await supabase
+          .from("video_jobs")
+          .update({ 
+            status: "failed",
+            error: "Replaced by retry" 
+          })
+          .eq("id", replace_job_id);
+        console.log(`[chain-continue] Marked job ${replace_job_id} as replaced`);
+      }
     }
 
     console.log(`[chain-continue] Found ${activeStories.length} active stories`);
@@ -363,17 +422,46 @@ Deno.serve(async (req) => {
         }
       }
 
-      // If there's a running job, wait for it
-      if (hasRunningJob) {
+      // If there's a running job, wait for it (unless manual retry targeting a specific scene)
+      const isTargetedRetry = isManualRetry && story.id === story_job_id && scene_index !== undefined;
+      
+      if (hasRunningJob && !isTargetedRetry) {
         console.log(`[chain-continue] Story ${story.id} has running job, waiting`);
         results.push({ storyId: story.id, action: "waiting" });
         continue;
       }
+      
+      // For manual retry, use the specified scene_index; otherwise use next scene after highest done
+      let nextSceneIndex: number;
+      let useReferenceFromPrevious = true;
+      
+      if (isTargetedRetry) {
+        nextSceneIndex = scene_index;
+        console.log(`[chain-continue] Manual retry targeting scene ${nextSceneIndex}`);
+        
+        // For retry of scene 0, no reference needed (T2V)
+        // For retry of later scenes, find the best reference from the scene BEFORE the target
+        if (nextSceneIndex > 0) {
+          // Look for a completed clip at scene_index - 1 to use as reference
+          const prevClip = clipsByIndex.get(nextSceneIndex - 1);
+          if (prevClip?.status === "done" && prevClip.thumbnail_url) {
+            latestThumbnail = prevClip.thumbnail_url;
+            latestThumbnailWidth = prevClip.thumbnail_width ?? null;
+            latestThumbnailHeight = prevClip.thumbnail_height ?? null;
+            latestScriptRunId = prevClip.script_run_id;
+            console.log(`[chain-continue] Using scene ${nextSceneIndex - 1} as reference for retry`);
+          } else {
+            // No valid reference - force T2V for this scene
+            useReferenceFromPrevious = false;
+            console.warn(`[chain-continue] No reference available for scene ${nextSceneIndex}, will use T2V`);
+          }
+        }
+      } else {
+        nextSceneIndex = highestDoneIndex + 1;
+      }
 
-      const nextSceneIndex = highestDoneIndex + 1;
-
-      // Check if all scenes are done
-      if (nextSceneIndex >= totalScenes) {
+      // Check if all scenes are done (skip for targeted retry - we're explicitly re-generating a scene)
+      if (nextSceneIndex >= totalScenes && !isTargetedRetry) {
         console.log(`[chain-continue] Story ${story.id} complete! ${totalScenes} scenes done`);
         await supabase
           .from("story_jobs")
@@ -418,8 +506,8 @@ Deno.serve(async (req) => {
       // Fall back to subject_action for Film Mode stories
       const basePrompt = nextScene.enriched_prompt || nextScene.prompt || nextScene.subject_action || "";
 
-      // For I2V scenes, we need a reference image
-      if (!isFirstScene && !latestThumbnail) {
+      // For I2V scenes, we need a reference image (unless manually forced to T2V)
+      if (!isFirstScene && !latestThumbnail && useReferenceFromPrevious) {
         console.error(`[chain-continue] Story ${story.id} scene ${nextSceneIndex} needs reference but none available`);
         await supabase
           .from("story_jobs")
@@ -427,6 +515,12 @@ Deno.serve(async (req) => {
           .eq("id", story.id);
         results.push({ storyId: story.id, action: "failed_no_reference", nextScene: nextSceneIndex });
         continue;
+      }
+      
+      // If we're retrying without a reference, clear the thumbnail to force T2V
+      if (!useReferenceFromPrevious) {
+        latestThumbnail = null;
+        console.log(`[chain-continue] Forcing T2V for scene ${nextSceneIndex} (no reference available)`);
       }
 
       // Get or create script_run_id
