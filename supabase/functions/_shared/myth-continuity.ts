@@ -105,26 +105,37 @@ export const MYTH_NEGATIVE_ANCHORS = [
  */
 export function buildMythPrompt(
   scene: MythScene,
-  storyboard: MythStoryboard
+  storyboard: Partial<MythStoryboard>
 ): string {
   const parts: string[] = [];
   
   // 1. STYLE ANCHOR (always first - most important for model priming)
   parts.push("[STYLE: flat silhouette animation, shadow-puppet, parchment texture, 2D cutout, high contrast, storybook illustration]");
   
-  // 2. PALETTE (muted, earth tones)
-  if (storyboard.setting.palette.length > 0) {
-    parts.push(`[PALETTE: ${storyboard.setting.palette.join(", ")}]`);
+  // 2. PALETTE (muted, earth tones) - with defensive check
+  const palette = storyboard.setting?.palette;
+  if (palette && palette.length > 0) {
+    parts.push(`[PALETTE: ${palette.join(", ")}]`);
+  } else {
+    // Default palette if not specified
+    parts.push("[PALETTE: amber, charcoal, parchment, gold]");
   }
   
-  // 3. SETTING (symbolic realm)
-  parts.push(`REALM: ${storyboard.setting.realm}, ${storyboard.setting.texture} texture`);
+  // 3. SETTING (symbolic realm) - with defensive check
+  const setting = storyboard.setting;
+  if (setting?.realm) {
+    parts.push(`REALM: ${setting.realm}, ${setting.texture || "parchment"} texture`);
+  } else {
+    parts.push("REALM: timeless realm, parchment texture");
+  }
   
-  // 4. SILHOUETTE (if present)
+  // 4. SILHOUETTE (if present) - with defensive check
+  const character = storyboard.character;
   if (scene.has_silhouette && scene.silhouette_action) {
-    parts.push(`SILHOUETTE: ${storyboard.character.archetype} — ${scene.silhouette_action}`);
-    if (storyboard.character.symbol) {
-      parts.push(`SYMBOL: ${storyboard.character.symbol}`);
+    const archetype = character?.archetype || "wanderer";
+    parts.push(`SILHOUETTE: ${archetype} — ${scene.silhouette_action}`);
+    if (character?.symbol) {
+      parts.push(`SYMBOL: ${character.symbol}`);
     }
   }
   
@@ -132,7 +143,7 @@ export function buildMythPrompt(
   parts.push(`SCENE: ${scene.visual_description}`);
   
   // 6. SYMBOLIC ELEMENTS
-  if (scene.symbolic_elements.length > 0) {
+  if (scene.symbolic_elements && scene.symbolic_elements.length > 0) {
     parts.push(`ELEMENTS: ${scene.symbolic_elements.join(", ")}`);
   }
   
