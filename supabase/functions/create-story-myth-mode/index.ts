@@ -94,31 +94,41 @@ Deno.serve(async (req) => {
       throw new Error(`Invalid JSON from LLM: ${rawContent.slice(0, 200)}`);
     }
 
-    // === VALIDATION & FALLBACKS ===
+    // === VALIDATION & FALLBACKS (varied to prevent repetition) ===
+    
+    const fallbackArchetypes = ["the keeper", "the lost one", "the dreamer", "the maker", "the watcher"];
+    const fallbackSymbols = ["broken key", "empty vessel", "fading ember", "silver thread", "cracked mirror"];
+    const fallbackRealms = ["the realm where echoes live", "lands beyond the last sunset", "the garden of stone", "shores of forgotten seas"];
+    const fallbackMorals = [
+      "And so the lesson was etched in silence, waiting for those wise enough to hear.",
+      "What was lost taught more than what was found.",
+      "The truth, like all truths, revealed itself only to those who stopped searching.",
+      "In the end, the answer had been there all along, hidden in plain sight.",
+    ];
 
-    // Ensure character exists
+    // Ensure character exists (with variety)
     if (!storyboard.character) {
-      console.warn("[myth-mode] Missing character, synthesizing defaults...");
+      console.warn("[myth-mode] Missing character, synthesizing varied defaults...");
       storyboard.character = {
-        archetype: "the wanderer",
-        silhouette: "cloaked figure with walking staff",
-        symbol: "lantern",
+        archetype: fallbackArchetypes[Math.floor(Math.random() * fallbackArchetypes.length)],
+        silhouette: "solitary figure against the horizon",
+        symbol: fallbackSymbols[Math.floor(Math.random() * fallbackSymbols.length)],
       };
     }
 
-    // Ensure setting exists
+    // Ensure setting exists (with variety)
     if (!storyboard.setting) {
-      console.warn("[myth-mode] Missing setting, synthesizing defaults...");
+      console.warn("[myth-mode] Missing setting, synthesizing varied defaults...");
       storyboard.setting = {
-        realm: "ancient forest at twilight",
+        realm: fallbackRealms[Math.floor(Math.random() * fallbackRealms.length)],
         palette: ["amber", "charcoal", "parchment", "gold"],
         texture: "parchment",
       };
     }
 
-    // Ensure moral exists
+    // Ensure moral exists (with variety)
     if (!storyboard.moral) {
-      storyboard.moral = "And so it was that wisdom comes not from the journey's end, but from the paths we choose.";
+      storyboard.moral = fallbackMorals[Math.floor(Math.random() * fallbackMorals.length)];
     }
 
     // Process scenes
