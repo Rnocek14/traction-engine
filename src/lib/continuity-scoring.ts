@@ -65,8 +65,9 @@ export interface StoryScene {
   id: string;
   prompt?: string; // Standard mode prompt
   subject_action?: string; // Film mode action (alternative to prompt)
+  visual_description?: string; // Myth mode visual description
   duration_target?: number; // Standard mode
-  duration_seconds?: number; // Film mode (alternative to duration_target)
+  duration_seconds?: number; // Film mode / Myth mode (alternative to duration_target)
   sequence_index?: number;
   index?: number; // Film mode uses 'index' instead of 'sequence_index'
   camera_direction?: string;
@@ -97,6 +98,12 @@ export interface StoryScene {
   force_present?: boolean;           // Is an external force acting in this scene?
   force_type?: ForceType;            // What kind of force?
   escalation_delta?: EscalationLevel;  // How much worse than previous? 0=neutral, 3=crisis
+  // Myth mode specific
+  beat_type?: string; // "introduction" | "journey" | "trial" | "revelation" | "moral"
+  has_silhouette?: boolean;
+  silhouette_action?: string;
+  symbolic_elements?: string[];
+  narration?: string; // Myth mode narration (different from narration_line)
   // Legacy fields for transformation tracking
   action_summary?: string;
   state_from?: string;
@@ -105,10 +112,17 @@ export interface StoryScene {
 }
 
 /**
- * Get the effective prompt from a scene (supports both standard and Film Mode)
+ * Get the effective prompt from a scene (supports standard, Film Mode, and Myth Mode)
+ * 
+ * Priority:
+ * 1. prompt (standard mode)
+ * 2. subject_action (Film Mode)
+ * 3. visual_description (Myth Mode)
  */
 export function getScenePrompt(scene: StoryScene): string {
-  return scene.prompt || scene.subject_action || "";
+  // Myth mode scenes use visual_description instead of prompt
+  const mythScene = scene as StoryScene & { visual_description?: string };
+  return scene.prompt || scene.subject_action || mythScene.visual_description || "";
 }
 
 /**
