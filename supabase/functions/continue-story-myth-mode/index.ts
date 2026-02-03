@@ -22,6 +22,15 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+/**
+ * Snap duration to Sora-valid values (4, 8, or 12 seconds)
+ */
+function snapDurationForSora(seconds: number): number {
+  if (seconds <= 6) return 4;
+  if (seconds <= 10) return 8;
+  return 12;
+}
+
 interface ContinueMythStoryRequest {
   story_job_id: string;
 }
@@ -82,16 +91,36 @@ Deno.serve(async (req) => {
     }
 
     // Get existing video jobs to find what's already generated
+    // Only consider jobs with openai_video_id as "properly queued"
     const { data: existingJobs } = await supabase
       .from("video_jobs")
-      .select("sequence_index, status")
+      .select("id, sequence_index, status, openai_video_id")
       .eq("story_job_id", body.story_job_id);
 
+    // Jobs are "complete" if they have an openai_video_id (properly submitted)
+    // or are in done/running status
     const completedIndices = new Set(
       (existingJobs || [])
-        .filter(j => j.status !== "failed")
+        .filter(j => 
+          j.status === "done" || 
+          j.status === "running" || 
+          (j.status === "queued" && j.openai_video_id)
+        )
         .map(j => j.sequence_index)
     );
+    
+    // Delete stale jobs (queued but no openai_video_id)
+    const staleJobIds = (existingJobs || [])
+      .filter(j => j.status === "queued" && !j.openai_video_id)
+      .map(j => j.id);
+    
+    if (staleJobIds.length > 0) {
+      console.log(`[myth-mode] Deleting ${staleJobIds.length} stale jobs without openai_video_id`);
+      await supabase
+        .from("video_jobs")
+        .delete()
+        .in("id", staleJobIds);
+    }
 
     // Update story status to generating
     await supabase
@@ -146,39 +175,59 @@ Deno.serve(async (req) => {
       console.log(`[myth-mode] Prompt preview: ${mythPrompt.slice(0, 200)}...`);
 
       // Myth Mode always uses T2V (no I2V - we want abstraction, not identity)
-      // Use Sora as primary provider for best 2D animation handling
-      const { error: queueError } = await supabase
-        .from("video_jobs")
-        .insert({
-          script_run_id: scriptRunId,
-          story_job_id: body.story_job_id,
-          sequence_index: i,
-          provider: "sora", // Sora handles stylized/2D better
-          status: "queued",
-          original_prompt: scene.visual_description || scene.narration,
-          enriched_prompt: mythPrompt,
-          style_hints: JSON.stringify({
-            mode: "myth",
-            beat_type: scene.beat_type,
-            silhouette: scene.has_silhouette,
-            style_anchors: MYTH_STYLE_ANCHORS.slice(0, 5),
-          }),
-          settings: {
-            size: "1280x720",
-            duration: scene.duration_seconds || 7,
-            style: "myth",
-            no_faces: true,
-            silhouette_only: true,
+      // Call queue-video to properly submit to Sora API
+      try {
+        const response = await fetch(`${supabaseUrl}/functions/v1/queue-video`, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${supabaseKey}`,
+            "Content-Type": "application/json",
           },
+          body: JSON.stringify({
+            script_run_id: scriptRunId,
+            prompt: mythPrompt,
+            original_prompt: scene.visual_description || scene.narration,
+            settings: {
+              size: "1280x720",
+              seconds: snapDurationForSora(scene.duration_seconds || 7),
+            },
+            skip_enrichment: true, // Already enriched with mythic style
+          }),
         });
 
-      if (queueError) {
-        console.error(`[myth-mode] Failed to queue scene ${i}:`, queueError);
+        const result = await response.json();
+        
+        if (!response.ok || !result.success) {
+          console.error(`[myth-mode] Failed to queue scene ${i}:`, result.error);
+          continue;
+        }
+
+        const jobId = result.job?.id;
+        
+        // Link job to story
+        if (jobId) {
+          await supabase
+            .from("video_jobs")
+            .update({
+              story_job_id: body.story_job_id,
+              sequence_index: i,
+              style_hints: JSON.stringify({
+                mode: "myth",
+                beat_type: scene.beat_type,
+                silhouette: scene.has_silhouette,
+                style_anchors: MYTH_STYLE_ANCHORS.slice(0, 5),
+              }),
+            })
+            .eq("id", jobId);
+        }
+
+        console.log(`[myth-mode] ✓ Queued scene ${i} as job ${jobId}`);
+        queuedScenes.push(i);
+        queuedCount++;
+      } catch (err) {
+        console.error(`[myth-mode] Failed to queue scene ${i}:`, err);
         continue;
       }
-
-      queuedScenes.push(i);
-      queuedCount++;
     }
 
     // Update story with progress
