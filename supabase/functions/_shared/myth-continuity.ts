@@ -164,11 +164,51 @@ export function buildMythStoryboardPrompt(
   premise: string,
   sceneCount: number = 3
 ): string {
-  return `Generate a ${sceneCount}-scene mythic fable storyboard in the style of "The Tale of the Three Brothers" from Harry Potter.
+  // Inject variety - pick random archetype and opening style
+  const archetypes = [
+    "a young shepherd", "an old king", "a clever merchant", "a grieving mother",
+    "a blind oracle", "a humble potter", "a proud knight", "a curious child",
+    "a banished prince", "a weary soldier", "a starving artist", "a silent monk",
+    "a defiant queen", "a forgotten god", "a dying tree", "a river that remembered",
+  ];
+  const openings = [
+    "In the days when shadows still spoke",
+    "Before the moon forgot its name",
+    "Long ago, in a land swallowed by silence",
+    "When the world was young and hungry",
+    "In the twilight of an age now forgotten",
+    "There lived, in the hollows of the earth",
+    "Once, beneath stars that have since burned out",
+    "In a time when choices left scars",
+  ];
+  const titlePatterns = [
+    "The [Character]'s Bargain",
+    "What the [Object] Remembered", 
+    "The Last [Object] of [Place]",
+    "[Character] and the [Challenge]",
+    "The [Object] That Could Not [Verb]",
+    "How [Character] Found [Abstract]",
+    "The Price of [Abstract]",
+    "When [Character] Met [Entity]",
+  ];
+  
+  const suggestedArchetype = archetypes[Math.floor(Math.random() * archetypes.length)];
+  const suggestedOpening = openings[Math.floor(Math.random() * openings.length)];
+  const suggestedTitlePattern = titlePatterns[Math.floor(Math.random() * titlePatterns.length)];
+
+  return `Generate a ${sceneCount}-scene mythic fable storyboard in the style of ancient oral traditions.
 
 PREMISE: ${premise}
 
-STYLE RULES (STRICT):
+VARIETY REQUIREMENT (CRITICAL):
+- Do NOT start with "There once was a traveler who sought..."
+- Do NOT use "wanderer" as the archetype unless the premise explicitly calls for it
+- Suggested archetype (use or invent your own): "${suggestedArchetype}"
+- Suggested opening phrase: "${suggestedOpening}..."
+- Suggested title pattern: "${suggestedTitlePattern}"
+- Make this story feel UNIQUE - different character, different moral, different journey
+
+STYLE RULES:
 1. This is a FABLE told through symbolic silhouette animation
 2. NO realistic faces - only silhouettes and shadows
 3. Third-person omniscient narration (like a legend being told)
@@ -185,44 +225,41 @@ BEAT TYPES:
 - "moral": The wisdom distilled (final scene only)
 
 NARRATIVE CONSTRAINTS:
-- No modern slang
-- No direct advice ("you should...")
-- No numbered steps
-- Use timeless language ("There once was...", "And so it was...")
+- No modern slang or "you should..." advice
+- Use timeless language but VARY your openings
 - End with implied wisdom, not explicit instruction
 
 VISUAL CONSTRAINTS:
 - Silhouettes only (no facial features)
-- Symbolic elements (winding path, looming shadow, distant light)
+- Symbolic elements (not literal)
 - Muted palette (amber, shadow, parchment, gold, charcoal)
-- Paper/parchment texture
-- Minimal backgrounds
+- Paper/parchment texture, minimal backgrounds
 - Slow, deliberate motion
 
 OUTPUT JSON:
 {
-  "title": "The [Character] and the [Object/Challenge]",
+  "title": "unique evocative title",
   "premise": "one sentence fable premise",
-  "moral": "the wisdom/insight this story teaches",
+  "moral": "the wisdom this story teaches",
   "character": {
-    "archetype": "the wanderer / the seeker / the fool / the wise one",
-    "silhouette": "cloaked figure with staff / small traveler with pack",
-    "symbol": "associated symbol (lantern, key, feather)"
+    "archetype": "specific character (NOT 'the wanderer' unless premise requires it)",
+    "silhouette": "distinct visual description",
+    "symbol": "unique associated symbol"
   },
   "setting": {
-    "realm": "ancient forest / realm of shadows / timeless crossroads",
-    "palette": ["amber", "charcoal", "parchment", "gold"],
+    "realm": "specific evocative place",
+    "palette": ["color1", "color2", "color3", "color4"],
     "texture": "parchment / woodcut / ink wash"
   },
   "scenes": [
     {
       "index": 0,
       "beat_type": "introduction",
-      "narration": "There once was a traveler who sought...",
-      "visual_description": "silhouette stands at crossroads, three paths ahead",
+      "narration": "opening narration (DO NOT start with 'There once was a traveler')",
+      "visual_description": "symbolic visual scene",
       "has_silhouette": true,
-      "silhouette_action": "pauses at crossroads, looks at each path",
-      "symbolic_elements": ["winding paths", "distant mountains", "setting sun"],
+      "silhouette_action": "what the character does",
+      "symbolic_elements": ["element1", "element2"],
       "duration_seconds": 7
     }
   ]
