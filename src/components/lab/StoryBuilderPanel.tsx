@@ -2000,10 +2000,13 @@ export function StoryBuilderPanel({
           )}
 
           {/* Voiceover Panel - for myth mode and any story with scenes */}
-          {effectiveStoryId && scenes.length > 0 && (mythMode || existingStory?.story_type === "myth") && (
+          {/* Gate on DB storyboard scenes, not local state, so panel shows for loaded stories */}
+          {effectiveStoryId && (
+            ((existingStory?.storyboard_json as unknown as Storyboard | null)?.scenes?.length ?? scenes.length) > 0
+          ) && (mythMode || existingStory?.story_type === "myth") && (
             <StoryNarrationPanel
               storyJobId={effectiveStoryId}
-              storyType="myth"
+              storyType={existingStory?.story_type || "myth"}
             />
           )}
         </div>
