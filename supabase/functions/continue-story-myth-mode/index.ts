@@ -57,9 +57,24 @@ Deno.serve(async (req) => {
       throw new Error(`Story is not myth mode: ${storyJob.story_type}`);
     }
 
-    const storyboard = storyJob.storyboard_json as unknown as MythStoryboard & {
+    const rawStoryboard = storyJob.storyboard_json as Record<string, unknown>;
+    const continuityAnchors = storyJob.continuity_anchors as Record<string, unknown> || {};
+    
+    // Merge continuity_anchors into storyboard for buildMythPrompt
+    // (create-story-myth-mode stores character/setting in continuity_anchors)
+    const storyboard: Partial<MythStoryboard> & { 
+      scenes: MythScene[];
       style_anchors?: string[];
       negative_anchors?: string[];
+    } = {
+      title: rawStoryboard.title as string,
+      premise: rawStoryboard.premise as string,
+      moral: (continuityAnchors.moral || rawStoryboard.moral) as string,
+      character: (continuityAnchors.character || rawStoryboard.character) as MythStoryboard["character"],
+      setting: (continuityAnchors.setting || rawStoryboard.setting) as MythStoryboard["setting"],
+      scenes: rawStoryboard.scenes as MythScene[],
+      style_anchors: rawStoryboard.style_anchors as string[],
+      negative_anchors: rawStoryboard.negative_anchors as string[],
     };
 
     if (!storyboard?.scenes?.length) {
