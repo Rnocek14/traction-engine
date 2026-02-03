@@ -1396,7 +1396,9 @@ export function StoryBuilderPanel({
 
   // Assemble clips into a single video
   const handleAssemble = async () => {
-    if (!storyId || storyClips.length === 0) return;
+    // Use effectiveStoryId which includes both provided storyId and loaded recent story
+    const targetStoryId = effectiveStoryId;
+    if (!targetStoryId || storyClips.length === 0) return;
     
     const completedClips = storyClips.filter(c => c.status === "done" && c.output_url);
     if (completedClips.length === 0) {
@@ -1407,12 +1409,10 @@ export function StoryBuilderPanel({
     setIsAssembling(true);
     
     try {
-      // Get or create a script_run_id for assembly (reuse first clip's)
-      const scriptRunId = completedClips[0].script_run_id;
-      
+      // Use story_job_id for story mode assembly (fetches voiceover from story_voiceovers)
       const response = await supabase.functions.invoke("assemble-reel", {
         body: {
-          script_run_id: scriptRunId,
+          story_job_id: targetStoryId,
           transition_type: "crossfade",
           transition_duration: 0.3,
           output_width: 720,
@@ -1432,8 +1432,8 @@ export function StoryBuilderPanel({
           title: "Assembly started", 
           description: "Video is being rendered. This may take a minute." 
         });
-        // Poll for completion
-        pollAssemblyStatus(scriptRunId);
+        // Poll for completion - use story_job_id
+        pollAssemblyStatus(targetStoryId);
       }
     } catch (err) {
       console.error("Assembly error:", err);

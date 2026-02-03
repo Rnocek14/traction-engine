@@ -124,10 +124,11 @@ Deno.serve(async (req) => {
       throw new Error("voiceover_id is required");
     }
 
-    // Fetch voiceover record
+    // Fetch voiceover record - use explicit FK name to avoid ambiguity
+    // (story_jobs has both story_voiceovers.story_job_id and story_jobs.active_voiceover_id)
     const { data: voiceover, error: voiceoverError } = await supabase
       .from("story_voiceovers")
-      .select("*, story_jobs!inner(story_type, title)")
+      .select("*, story_jobs!story_voiceovers_story_job_id_fkey(story_type, title)")
       .eq("id", body.voiceover_id)
       .single();
 
