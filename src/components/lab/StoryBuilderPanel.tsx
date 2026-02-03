@@ -2084,12 +2084,14 @@ interface ClipStatus {
   error?: string | null;
   /** Moderation telemetry from style_hints */
   moderation_ladder?: {
-    attempt: number;
+    stage: number;
     original_provider: string;
     final_provider: string;
     sanitized: boolean;
     fallback_used: boolean;
     style_preserved: boolean;
+    dropped_reference?: boolean;
+    failure_reason?: string;
   };
 }
 

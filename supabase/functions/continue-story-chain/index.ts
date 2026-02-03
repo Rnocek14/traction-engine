@@ -69,7 +69,9 @@ import {
   logModerationLadderDecision,
   isModerationRelatedError,
   buildModerationTelemetryForDb,
+  mergeStyleHints,
   type StoryMode,
+  type LadderStage,
   type ModerationLadderContext,
 } from "../_shared/moderation-ladder.ts";
 
@@ -930,13 +932,19 @@ Deno.serve(async (req) => {
         }
       }
       
-      // === MODERATION LADDER RETRY LOOP ===
-      // Implements "AI sanitize first, then fallback" strategy for Myth Mode and locked providers
-      // Max 3 attempts: 1) sanitize+retry on locked, 2) fallback with style preserved, 3) fail
+      // === MODERATION LADDER RETRY LOOP (v2 - FIXED) ===
+      // Implements "AI sanitize first, then fallback" strategy for story-aware recovery
+      // Uses explicit stages: 0=raw, 1=sanitize, 2=fallback, 3=fail
+      // 
+      // FIX #3: locked_provider comes from story settings, not character continuity mode
+      // FIX #4: Chain layer owns retry - queue functions should skip their internal retry for story_mode
       
       const storyMode: StoryMode = (story as { story_type?: string }).story_type === "myth" ? "myth" : 
         isFilmMode ? "film" : "short_story";
-      const MAX_MODERATION_ATTEMPTS = 3;
+      
+      // FIX #3: locked_provider is a story-level setting, independent from character continuity
+      // Read from storyboard_json.locked_provider OR story_jobs.locked_provider if we add that column
+      const storyLockedProvider = lockedProviderName; // Already read from storyboard_json.locked_provider
       
       let queueSuccess = false;
       let data: { success: boolean; job?: { id: string }; error?: string } = { success: false };
@@ -945,17 +953,25 @@ Deno.serve(async (req) => {
       let currentProviderEndpoint = providerEndpoint;
       let currentStartingFrame = startingFrameUrl;
       let moderationTelemetry: Record<string, unknown> | null = null;
+      let currentStage: LadderStage = 0; // Start at stage 0 (raw)
       
-      for (let attempt = 1; attempt <= MAX_MODERATION_ATTEMPTS && !queueSuccess; attempt++) {
-        // First attempt: use as-is (queue-video has its own retry ladder)
-        // Subsequent attempts: use moderation ladder for story-aware recovery
+      // Max iterations = 4 (stages 0, 1, 2, then fail at 3)
+      const MAX_LADDER_ITERATIONS = 4;
+      
+      for (let iteration = 0; iteration < MAX_LADDER_ITERATIONS && !queueSuccess; iteration++) {
+        // Stage 0: Use prompt as-is (queue-video has its own retry, but we'll skip it for stories)
+        // Stage 1+: Use moderation ladder for story-aware recovery
         
-        if (attempt > 1) {
+        if (currentStage > 0) {
           const ladderCtx: ModerationLadderContext = {
             storyMode,
-            lockedProvider: characterContinuityMode ? lockedProviderName : null,
+            // FIX #3: Use story-level locked provider, not character continuity gated
+            lockedProvider: storyLockedProvider,
             currentProvider,
-            attempt: attempt - 1, // Ladder counts from 1 for first RETRY
+            // FIX #2: Pass original provider for correct fallback chain lookup
+            originalProvider: selectedProvider,
+            // FIX #1: Use explicit stage instead of attempt math
+            stage: currentStage,
             originalPrompt: finalPrompt,
             lastError: data.error,
             sceneRole,
@@ -988,7 +1004,7 @@ Deno.serve(async (req) => {
           // Track telemetry for DB
           moderationTelemetry = buildModerationTelemetryForDb(ladderResult.telemetry);
           
-          console.log(`[chain-continue] Moderation retry ${attempt}/${MAX_MODERATION_ATTEMPTS}: ${ladderResult.action} on ${currentProvider}`);
+          console.log(`[chain-continue] Moderation stage ${currentStage}: ${ladderResult.action} on ${currentProvider}`);
         }
         
         // Recalculate duration for potentially new provider
@@ -1009,6 +1025,9 @@ Deno.serve(async (req) => {
             },
             starting_frame_url: currentStartingFrame,
             motif_context: motifContext,
+            // FIX #4: Tell queue-video to skip its internal retry for story mode
+            // (chain layer owns the moderation ladder for stories)
+            skip_internal_retry: storyMode !== "default",
           }),
         });
 
@@ -1016,10 +1035,10 @@ Deno.serve(async (req) => {
 
         if (response.ok && data.success) {
           queueSuccess = true;
-          console.log(`[chain-continue] ✓ Queue success on attempt ${attempt}`);
+          console.log(`[chain-continue] ✓ Queue success at stage ${currentStage}`);
         } else {
           const errorMsg = data.error || `HTTP ${response.status}`;
-          console.error(`[chain-continue] Queue attempt ${attempt} failed: ${errorMsg}`);
+          console.error(`[chain-continue] Queue stage ${currentStage} failed: ${errorMsg}`);
           
           // Check if this is a credits/quota error - stop immediately
           const isQuotaError = errorMsg.includes("credits") || 
@@ -1041,12 +1060,16 @@ Deno.serve(async (req) => {
             console.log(`[chain-continue] Non-moderation error, not retrying via ladder: ${errorMsg}`);
             break;
           }
+          
+          // Advance to next stage for moderation retry
+          currentStage = (currentStage + 1) as LadderStage;
+          console.log(`[chain-continue] Advancing to moderation stage ${currentStage}`);
         }
       }
       
       // Handle final failure
       if (!queueSuccess) {
-        console.error(`[chain-continue] Failed to queue scene ${nextSceneIndex + 1} after ${MAX_MODERATION_ATTEMPTS} attempts`);
+        console.error(`[chain-continue] Failed to queue scene ${nextSceneIndex + 1} after exhausting moderation ladder (stage ${currentStage})`);
         results.push({ storyId: story.id, action: "queue_failed", nextScene: nextSceneIndex });
         continue;
       }
