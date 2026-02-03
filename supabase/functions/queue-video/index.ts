@@ -55,6 +55,8 @@ interface VideoRequest {
   skip_enrichment?: boolean;
   /** Original prompt before any enrichment (for audit) */
   original_prompt?: string;
+  /** Skip internal retry ladder - chain layer owns retry for story mode (FIX #4) */
+  skip_internal_retry?: boolean;
 }
 
 interface ClipData {
@@ -80,7 +82,7 @@ Deno.serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     const body: VideoRequest = await req.json();
-    const { script_run_id, clip_id, prompt: overridePrompt, settings, starting_frame_url, provider: reqProvider, skip_enrichment, original_prompt: explicitOriginalPrompt } = body;
+    const { script_run_id, clip_id, prompt: overridePrompt, settings, starting_frame_url, provider: reqProvider, skip_enrichment, original_prompt: explicitOriginalPrompt, skip_internal_retry } = body;
 
     if (!script_run_id) {
       throw new Error("script_run_id is required");
@@ -275,7 +277,8 @@ Style: Professional, engaging, suitable for TikTok/Reels. Smooth transitions bet
     }
 
     // Call OpenAI Sora API with retry ladder for moderation failures
-    const MAX_RETRIES = 3;
+    // FIX #4: If skip_internal_retry is true, chain layer owns retry - single attempt only
+    const MAX_RETRIES = skip_internal_retry ? 1 : 3;
     let lastError: string | undefined;
     let openaiData: { id: string; status?: string };
     let startingFrameBlob: Blob | undefined;

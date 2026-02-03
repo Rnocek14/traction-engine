@@ -1,29 +1,40 @@
 /**
- * Moderation Ladder for Story Mode
+ * Moderation Ladder for Story Mode (v2 - FIXED)
  * 
  * Implements "AI sanitize first, then fallback" strategy:
- * 1. Auto-sanitize + retry on locked provider
- * 2. If still fails, fallback to alternate provider with style constraints preserved
- * 3. Log everything for observability
+ * 1. Stage 0: Raw prompt (no modification)
+ * 2. Stage 1: Auto-sanitize + retry on LOCKED provider
+ * 3. Stage 2: Fallback to alternate provider with style constraints preserved
+ * 4. Stage 3: Fail (surface AI Fix button)
+ * 
+ * FIX: Uses stage-based system instead of numeric attempts to avoid math bugs
+ * FIX: Fallback chain uses ORIGINAL provider, not current provider
+ * FIX: locked_provider comes from story settings, not character continuity mode
  * 
  * Key insight: For Myth Mode, we must inject style anchors even on fallback
  * to prevent "style drift" (suddenly looking realistic instead of silhouette)
  */
 
-import { type VideoProvider, type SceneRole } from "./scene-role-router.ts";
+import { type SceneRole } from "./scene-role-router.ts";
 
 // =============================================================================
 // TYPES
 // =============================================================================
 
 export type StoryMode = "myth" | "film" | "short_story" | "default";
+export type VideoProvider = "sora" | "runway" | "luma";
+export type LadderStage = 0 | 1 | 2 | 3;
 
 export interface ModerationLadderContext {
   storyMode: StoryMode;
+  /** Provider locked at story level (from storyboard_json.locked_provider) */
   lockedProvider: VideoProvider | null;
+  /** Current provider being used for this attempt */
   currentProvider: VideoProvider;
-  attempt: number;
-  maxAttempts?: number;
+  /** Original provider before any fallback (used for fallback chain lookup) */
+  originalProvider: VideoProvider;
+  /** Stage in the ladder (0=raw, 1=sanitize, 2=fallback, 3=fail) */
+  stage: LadderStage;
   originalPrompt: string;
   lastError?: string;
   sceneRole?: SceneRole;
@@ -40,7 +51,7 @@ export interface ModerationLadderResult {
 }
 
 export interface ModerationTelemetry {
-  attempt: number;
+  stage: LadderStage;
   originalProvider: VideoProvider;
   finalProvider: VideoProvider;
   sanitized: boolean;
@@ -59,29 +70,35 @@ const MYTH_STYLE_INJECTION = `[STYLE: flat silhouette animation, shadow-puppet, 
 [PALETTE: amber, charcoal, parchment, gold, muted earth tones]
 `;
 
+// FIX #7: Scoped sanitization - only transform when in violent context
+// "death" alone is kept (philosophical), but "death by sword" transforms
 const MYTH_SANITIZATION_RULES: Array<[RegExp, string]> = [
-  // Violence to symbolism
-  [/\b(kill|slay|slaughter|murder)\b/gi, "overcome"],
-  [/\b(blood|gore|bleeding)\b/gi, "shadows"],
-  [/\b(death|dying|dead)\b/gi, "fading"],
-  [/\b(attack|strike|stab)\b/gi, "confront"],
-  [/\b(sword|blade|knife|dagger)\b/gi, "staff"],
-  [/\b(gun|pistol|rifle|weapon)\b/gi, "iron shape"],
-  [/\b(army|soldiers|troops)\b/gi, "mass of figures"],
-  [/\b(battle|combat|warfare)\b/gi, "confrontation"],
-  [/\b(enemy|enemies|foe)\b/gi, "challenger"],
-  [/\b(war|conflict)\b/gi, "struggle"],
+  // Violence actions to symbolism (contextual)
+  [/\b(kill|slay|slaughter|murder)\s+(the\s+)?(enemy|foe|opponent|warrior|soldier|knight)(s)?\b/gi, "overcome $3$4"],
+  [/\battack(s|ing)?\s+(the\s+)?(enemy|foe|opponent|warrior)(s)?\b/gi, "confront$1 $3$4"],
+  [/\bstab(s|bing)?\s+(through|into)\b/gi, "thrust$1 toward"],
   
-  // Bodies to silhouettes
-  [/\bface\b/gi, "silhouette"],
-  [/\beyes\b/gi, "form"],
-  [/\bmouth\b/gi, "shape"],
-  [/\bbody\b/gi, "figure"],
-  [/\bflesh\b/gi, "shadow"],
+  // Blood/gore to shadows (always transform)
+  [/\b(blood|gore|bleeding|bloody)\b/gi, "shadows"],
+  
+  // Combat to confrontation
+  [/\b(sword|blade|knife|dagger)\s+(strike|slash|cut)(s|ing)?\b/gi, "shadow movement$3"],
+  [/\b(battle|war|warfare)\b/gi, "confrontation"],
+  [/\b(army|armies|soldiers|troops)\b/gi, "mass of figures"],
+  
+  // Death only when graphic
+  [/\bdeath\s+by\b/gi, "fall from"],
+  [/\bdead\s+bodies?\b/gi, "fallen forms"],
+  [/\bdying\s+(in\s+)?agony\b/gi, "fading slowly"],
+  
+  // Weapons to symbolic shapes (contextual)
+  [/\b(gun|pistol|rifle)\b/gi, "iron shape"],
+  [/\b(bow|arrow)(s)?\s+(aimed|flying|shot)\b/gi, "arc$2 sweeping"],
 ];
 
 // =============================================================================
 // FALLBACK PROVIDER CHAIN
+// FIX #2: Always use the ORIGINAL provider to determine fallback chain
 // =============================================================================
 
 const FALLBACK_CHAIN: Record<VideoProvider, VideoProvider[]> = {
@@ -90,13 +107,38 @@ const FALLBACK_CHAIN: Record<VideoProvider, VideoProvider[]> = {
   runway: ["luma", "sora"],
 };
 
+/**
+ * Get the next fallback provider based on the ORIGINAL locked provider
+ * FIX #2: Uses originalProvider for chain lookup, tracks position via currentProvider
+ */
+export function getNextFallbackProvider(
+  originalProvider: VideoProvider,
+  currentProvider: VideoProvider
+): VideoProvider | null {
+  const chain = FALLBACK_CHAIN[originalProvider];
+  
+  // If we're still on original, return first fallback
+  if (currentProvider === originalProvider) {
+    return chain[0];
+  }
+  
+  // If we're already on a fallback, find next in chain
+  const currentIndex = chain.indexOf(currentProvider);
+  if (currentIndex >= 0 && currentIndex < chain.length - 1) {
+    return chain[currentIndex + 1];
+  }
+  
+  // Exhausted fallback chain
+  return null;
+}
+
 // =============================================================================
 // CORE FUNCTIONS
 // =============================================================================
 
 /**
  * Apply Myth-specific sanitization to a prompt
- * Transforms violent/explicit content to symbolic/abstract equivalents
+ * FIX #7: Only transforms violent ACTIONS, keeps philosophical terms
  */
 export function sanitizeForMythMode(prompt: string): { sanitized: string; changes: string[] } {
   let result = prompt;
@@ -105,19 +147,16 @@ export function sanitizeForMythMode(prompt: string): { sanitized: string; change
   for (const [pattern, replacement] of MYTH_SANITIZATION_RULES) {
     const matches = result.match(pattern);
     if (matches) {
-      changes.push(`"${matches[0]}" → "${replacement}"`);
+      changes.push(`"${matches[0]}" → "${replacement.replace(/\$\d/g, '...')}"`);
       result = result.replace(pattern, replacement);
     }
   }
   
-  // Always add symbolic language hints
+  // Only add symbolic reinforcement if we made changes
   if (changes.length > 0) {
     // Add abstraction reinforcement
-    if (!result.includes("symbolic")) {
-      result = result.replace(/\.$/, ", depicted symbolically.");
-    }
-    if (!result.includes("silhouette") && !result.includes("shadow")) {
-      result += " [Render as silhouette only, no facial features]";
+    if (!result.includes("symbolic") && !result.includes("silhouette")) {
+      result += " [Render as silhouette only, no facial features, symbolic depiction]";
     }
   }
   
@@ -137,60 +176,51 @@ export function injectMythStyleAnchors(prompt: string): string {
   return MYTH_STYLE_INJECTION + prompt;
 }
 
-/**
- * Get the next fallback provider
- */
-export function getNextFallbackProvider(
-  currentProvider: VideoProvider,
-  lockedProvider: VideoProvider | null
-): VideoProvider | null {
-  const chain = FALLBACK_CHAIN[currentProvider];
-  
-  // If locked, only fallback after exhausting retries on locked
-  // This function is called AFTER sanitization retry failed
-  if (lockedProvider && currentProvider === lockedProvider) {
-    return chain[0]; // First fallback option
-  }
-  
-  // If already on fallback, try next in chain
-  const currentIndex = chain.indexOf(currentProvider);
-  if (currentIndex >= 0 && currentIndex < chain.length - 1) {
-    return chain[currentIndex + 1];
-  }
-  
-  return null;
-}
+// =============================================================================
+// MAIN LADDER LOGIC (Stage-based)
+// =============================================================================
 
 /**
  * Main moderation ladder logic
  * 
- * Strategy:
- * - Attempt 1: Sanitize + retry on same provider
- * - Attempt 2: Fallback to next provider with style anchors
- * - Attempt 3: Fail (surface AI Fix button)
+ * FIX #1: Uses explicit stages instead of numeric math:
+ * - Stage 0: Raw prompt (first attempt, before ladder is called)
+ * - Stage 1: Sanitize + retry on locked/original provider
+ * - Stage 2: Fallback to next provider with style anchors
+ * - Stage 3: Fail (surface AI Fix button)
  */
 export function processModerationLadder(ctx: ModerationLadderContext): ModerationLadderResult {
-  const maxAttempts = ctx.maxAttempts ?? 3;
-  const isMythMode = ctx.storyMode === "myth";
+  const { 
+    storyMode, 
+    lockedProvider, 
+    currentProvider, 
+    originalProvider,
+    stage, 
+    originalPrompt, 
+    brutalityMode 
+  } = ctx;
+  
+  const isMythMode = storyMode === "myth";
+  const effectiveOriginalProvider = originalProvider || lockedProvider || currentProvider;
   
   // Base telemetry
   const telemetry: ModerationTelemetry = {
-    attempt: ctx.attempt,
-    originalProvider: ctx.lockedProvider || ctx.currentProvider,
-    finalProvider: ctx.currentProvider,
+    stage,
+    originalProvider: effectiveOriginalProvider,
+    finalProvider: currentProvider,
     sanitized: false,
     fallbackUsed: false,
     droppedReference: false,
     stylePreserved: true,
   };
   
-  // ATTEMPT 1: Sanitize + retry on same provider
-  if (ctx.attempt === 1) {
-    let sanitizedPrompt = ctx.originalPrompt;
+  // STAGE 1: Sanitize + retry on same provider
+  if (stage === 1) {
+    let sanitizedPrompt = originalPrompt;
     let sanitized = false;
     
     if (isMythMode) {
-      const { sanitized: mythSanitized, changes } = sanitizeForMythMode(ctx.originalPrompt);
+      const { sanitized: mythSanitized, changes } = sanitizeForMythMode(originalPrompt);
       if (changes.length > 0) {
         sanitizedPrompt = mythSanitized;
         sanitized = true;
@@ -198,15 +228,12 @@ export function processModerationLadder(ctx: ModerationLadderContext): Moderatio
       }
     }
     
-    // Even if not Myth, apply basic moderation-safe transforms
-    // (The existing moderation-safety.ts handles this, so we just mark as sanitized)
-    
     telemetry.sanitized = sanitized;
-    telemetry.finalProvider = ctx.lockedProvider || ctx.currentProvider;
+    telemetry.finalProvider = lockedProvider || currentProvider;
     
     return {
       action: "retry_sanitized",
-      provider: ctx.lockedProvider || ctx.currentProvider,
+      provider: lockedProvider || currentProvider,
       prompt: sanitizedPrompt,
       dropReference: false,
       styleAnchorsInjected: false,
@@ -214,24 +241,25 @@ export function processModerationLadder(ctx: ModerationLadderContext): Moderatio
     };
   }
   
-  // ATTEMPT 2: Fallback to alternate provider with style preservation
-  if (ctx.attempt === 2) {
-    const fallbackProvider = getNextFallbackProvider(ctx.currentProvider, ctx.lockedProvider);
+  // STAGE 2: Fallback to alternate provider with style preservation
+  if (stage === 2) {
+    // FIX #2: Use originalProvider for fallback chain lookup
+    const fallbackProvider = getNextFallbackProvider(effectiveOriginalProvider, currentProvider);
     
     if (!fallbackProvider) {
-      // No fallback available - fail
       telemetry.failureReason = "No fallback provider available";
+      telemetry.stage = 3;
       return {
         action: "fail",
-        provider: ctx.currentProvider,
-        prompt: ctx.originalPrompt,
+        provider: currentProvider,
+        prompt: originalPrompt,
         dropReference: false,
         styleAnchorsInjected: false,
         telemetry,
       };
     }
     
-    let fallbackPrompt = ctx.originalPrompt;
+    let fallbackPrompt = originalPrompt;
     
     // For Myth Mode, inject style anchors to preserve aesthetic
     if (isMythMode) {
@@ -239,7 +267,7 @@ export function processModerationLadder(ctx: ModerationLadderContext): Moderatio
       // Also apply Myth sanitization
       const { sanitized } = sanitizeForMythMode(fallbackPrompt);
       fallbackPrompt = sanitized;
-      console.log(`[moderation-ladder] Myth fallback: ${ctx.currentProvider} → ${fallbackProvider} with style anchors`);
+      console.log(`[moderation-ladder] Myth fallback: ${currentProvider} → ${fallbackProvider} with style anchors`);
     }
     
     telemetry.fallbackUsed = true;
@@ -256,28 +284,16 @@ export function processModerationLadder(ctx: ModerationLadderContext): Moderatio
     };
   }
   
-  // ATTEMPT 3+: Nuclear option - drop reference, simplify prompt, then fail
-  if (ctx.attempt >= maxAttempts) {
-    telemetry.failureReason = `Exhausted ${maxAttempts} attempts`;
-    telemetry.droppedReference = true;
-    
-    return {
-      action: "fail",
-      provider: ctx.currentProvider,
-      prompt: ctx.originalPrompt,
-      dropReference: true,
-      styleAnchorsInjected: false,
-      telemetry,
-    };
-  }
+  // STAGE 3+: Fail - surface AI Fix button
+  telemetry.failureReason = "Exhausted moderation ladder";
+  telemetry.droppedReference = true;
+  telemetry.stage = 3;
   
-  // Default: fail
-  telemetry.failureReason = "Unexpected attempt state";
   return {
     action: "fail",
-    provider: ctx.currentProvider,
-    prompt: ctx.originalPrompt,
-    dropReference: false,
+    provider: currentProvider,
+    prompt: originalPrompt,
+    dropReference: true,
     styleAnchorsInjected: false,
     telemetry,
   };
@@ -297,45 +313,56 @@ export function logModerationLadderDecision(
   
   switch (action) {
     case "retry_sanitized":
-      console.log(`${prefix}: RETRY on ${provider} (sanitized=${telemetry.sanitized})`);
+      console.log(`${prefix}: RETRY on ${provider} (stage=1, sanitized=${telemetry.sanitized})`);
       break;
     case "fallback":
-      console.log(`${prefix}: FALLBACK ${telemetry.originalProvider} → ${provider} (style=${telemetry.stylePreserved})`);
+      console.log(`${prefix}: FALLBACK ${telemetry.originalProvider} → ${provider} (stage=2, style=${telemetry.stylePreserved})`);
       break;
     case "fail":
-      console.log(`${prefix}: FAIL after ${telemetry.attempt} attempts (reason=${telemetry.failureReason})`);
+      console.log(`${prefix}: FAIL at stage=${telemetry.stage} (reason=${telemetry.failureReason})`);
       break;
   }
 }
 
 /**
  * Check if an error is a moderation/content policy error
+ * FIX #6: Removed generic 403 - now requires explicit moderation signals
  */
 export function isModerationRelatedError(error: string): boolean {
-  const moderationPatterns = [
-    /content.*policy/i,
-    /safety.*filter/i,
-    /moderation/i,
-    /blocked/i,
-    /inappropriate/i,
-    /violat/i,
-    /prohibited/i,
-    /not allowed/i,
-    /unsafe/i,
-    /400.*content/i,
-    /403/i,
+  const lower = error.toLowerCase();
+  
+  // FIX #6: Be specific - require BOTH status code context AND moderation keywords
+  // Generic 403 alone could be auth issues
+  const moderationKeywords = [
+    "content policy",
+    "safety filter",
+    "moderation",
+    "blocked by",
+    "inappropriate content",
+    "violat", // violates, violation
+    "prohibited",
+    "not allowed content",
+    "unsafe content",
+    "harmful content",
   ];
   
-  return moderationPatterns.some(p => p.test(error));
+  // Status codes alone are NOT enough - must have keyword
+  const hasKeyword = moderationKeywords.some(kw => lower.includes(kw));
+  
+  // Special case: 400 with "content" in message
+  const is400ContentError = lower.includes("400") && lower.includes("content");
+  
+  return hasKeyword || is400ContentError;
 }
 
 /**
  * Build telemetry object for video_jobs.style_hints
+ * Returns object that should be MERGED with existing style_hints
  */
 export function buildModerationTelemetryForDb(telemetry: ModerationTelemetry): Record<string, unknown> {
   return {
     moderation_ladder: {
-      attempt: telemetry.attempt,
+      stage: telemetry.stage,
       original_provider: telemetry.originalProvider,
       final_provider: telemetry.finalProvider,
       sanitized: telemetry.sanitized,
@@ -345,4 +372,36 @@ export function buildModerationTelemetryForDb(telemetry: ModerationTelemetry): R
       failure_reason: telemetry.failureReason,
     },
   };
+}
+
+/**
+ * Helper to safely merge moderation telemetry with existing style_hints
+ * FIX #5: Always merge, never overwrite
+ */
+export function mergeStyleHints(
+  existing: Record<string, unknown> | string | null,
+  moderationTelemetry: Record<string, unknown> | null
+): Record<string, unknown> {
+  // Parse existing if string
+  let parsed: Record<string, unknown> = {};
+  if (typeof existing === "string") {
+    try {
+      const obj = JSON.parse(existing);
+      if (obj && typeof obj === "object" && !Array.isArray(obj)) {
+        parsed = obj as Record<string, unknown>;
+      }
+    } catch {
+      // Invalid JSON - start fresh but log
+      console.warn("[moderation-ladder] Could not parse existing style_hints as object");
+    }
+  } else if (existing && typeof existing === "object" && !Array.isArray(existing)) {
+    parsed = existing;
+  }
+  
+  // Merge moderation telemetry
+  if (moderationTelemetry) {
+    return { ...parsed, ...moderationTelemetry };
+  }
+  
+  return parsed;
 }
