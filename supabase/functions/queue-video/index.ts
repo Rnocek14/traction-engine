@@ -51,6 +51,10 @@ interface VideoRequest {
   starting_frame_url?: string;
   /** Optional motif context for story generation */
   motif_context?: MotifContext;
+  /** Skip prompt enrichment - prompt is already fully built (Myth Mode, Film Mode, etc.) */
+  skip_enrichment?: boolean;
+  /** Original prompt before any enrichment (for audit) */
+  original_prompt?: string;
 }
 
 interface ClipData {
@@ -76,7 +80,7 @@ Deno.serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     const body: VideoRequest = await req.json();
-    const { script_run_id, clip_id, prompt: overridePrompt, settings, starting_frame_url, provider: reqProvider } = body;
+    const { script_run_id, clip_id, prompt: overridePrompt, settings, starting_frame_url, provider: reqProvider, skip_enrichment, original_prompt: explicitOriginalPrompt } = body;
 
     if (!script_run_id) {
       throw new Error("script_run_id is required");
@@ -164,19 +168,20 @@ Deno.serve(async (req) => {
     let videoPrompt: string;
     let scenePrompt: string;
 
-    // Helper: detect if prompt was pre-built by continue-story-chain
+    // Helper: detect if prompt was pre-built by continue-story-chain or mode-specific generators
     // These prompts already have cinematography, capture contracts, and narrative context
     const isPreBuiltPrompt = (prompt: string): boolean => {
       return prompt.includes("[CAPTURE:") || 
              prompt.includes("[CINEMATOGRAPHY role=") ||
-             prompt.includes("=== DIRECTOR'S BRIEF ===");
+             prompt.includes("=== DIRECTOR'S BRIEF ===") ||
+             prompt.includes("[STYLE:");  // Myth Mode prompts start with [STYLE:
     };
 
-    if (overridePrompt && isPreBuiltPrompt(overridePrompt)) {
-      // PASS-THROUGH MODE: Prompt already has cinematography, capture contract, etc.
-      // Do NOT rebuild - this preserves role-based variety and realism anchors
-      videoPrompt = overridePrompt;
-      scenePrompt = overridePrompt; // For logging
+    // PASS-THROUGH MODE: Skip enrichment if explicitly requested OR if prompt is pre-built
+    if (skip_enrichment || (overridePrompt && isPreBuiltPrompt(overridePrompt))) {
+      // Prompt already has everything needed - use as-is
+      videoPrompt = overridePrompt || "";
+      scenePrompt = explicitOriginalPrompt || overridePrompt || "";
       console.log("[queue-video] Using pre-built prompt (pass-through mode)");
     } else {
       // Determine the raw scene prompt first
