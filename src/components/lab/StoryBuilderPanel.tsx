@@ -355,13 +355,17 @@ export function StoryBuilderPanel({
         const idx = clip.sequence_index ?? -1;
         if (idx < 0 || idx >= scenePromptPrefixes.length) return true; // Keep if we can't verify
         
-        const clipPrompt = (clip.original_prompt || "").toLowerCase().trim().slice(0, 40);
+        const clipPrompt = (clip.original_prompt || "").toLowerCase().trim();
         const expectedPrefix = scenePromptPrefixes[idx];
         
         // Allow if prompt is empty (can't verify) or matches the expected scene
         if (!expectedPrefix || !clipPrompt) return true;
         
-        // Check if prompts share significant overlap (at least 20 chars matching)
+        // For myth mode clips that start with style prefix, check if prompt CONTAINS the scene description
+        // This handles cases like "[STYLE: ...] silhouette stands..." vs "silhouette stands..."
+        if (clipPrompt.includes(expectedPrefix.slice(0, 20))) return true;
+        
+        // Check if prompts share significant overlap (at least 20 chars matching from start)
         const minLen = Math.min(clipPrompt.length, expectedPrefix.length, 20);
         return clipPrompt.slice(0, minLen) === expectedPrefix.slice(0, minLen);
       });
