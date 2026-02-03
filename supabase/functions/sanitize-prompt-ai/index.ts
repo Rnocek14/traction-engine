@@ -33,32 +33,90 @@ interface SanitizeResponse {
   error?: string;
 }
 
-const SYSTEM_PROMPT = `You are a video prompt sanitizer. Your job is to rewrite prompts that were blocked by AI video generation moderation systems.
+// Myth Mode specific word mappings for symbolic transformation
+const MYTH_WORD_MAP: Record<string, string> = {
+  // Violence → Symbolism
+  "kill": "overcome",
+  "slay": "vanquish symbolically",
+  "slaughter": "the crowd scatters",
+  "murder": "a shadow falls",
+  "blood": "shadows",
+  "gore": "darkness spreads",
+  "death": "the light fades",
+  "dying": "fading into shadow",
+  "dead": "still as stone",
+  "attack": "approach",
+  "strike": "confront",
+  "stab": "gesture toward",
+  
+  // Weapons → Symbolic Objects
+  "sword": "staff",
+  "blade": "iron shape",
+  "knife": "shadow edge",
+  "dagger": "pointed silhouette",
+  "gun": "iron shape",
+  "pistol": "mechanical shadow",
+  "rifle": "long iron form",
+  "weapon": "symbolic tool",
+  
+  // Military → Abstract
+  "army": "mass of figures",
+  "soldiers": "faceless silhouettes",
+  "troops": "marching forms",
+  "battle": "confrontation",
+  "combat": "struggle",
+  "warfare": "great struggle",
+  "war": "conflict of shadows",
+  "enemy": "challenger",
+  "enemies": "challengers",
+  "foe": "opposing figure",
+  
+  // Body → Silhouette
+  "face": "silhouette form",
+  "eyes": "dark hollows",
+  "mouth": "shadowed opening",
+  "flesh": "form",
+};
 
-RULES:
-1. Preserve the core creative intent and visual description
-2. Remove or rephrase any content that could trigger moderation:
-   - Violence, weapons, combat → dramatic tension, conflict, confrontation
-   - Blood, gore, death → aftermath, impact, fall, dramatic moments
-   - Explicit actions → implied or symbolic actions
-3. Keep the visual style descriptors intact (silhouette, shadow-puppet, cinematic, etc.)
-4. Maintain the same approximate length
-5. Keep camera/motion directions (slow zoom, pan, dolly, etc.)
-6. For myth/fable style: emphasize symbolism and abstraction
+const SYSTEM_PROMPT = `You are a video prompt sanitizer for AI video generation. Your job is to rewrite prompts that were blocked by moderation systems.
 
-OUTPUT FORMAT:
-Return a JSON object with:
-- sanitized_prompt: The rewritten prompt
-- changes_made: Array of what you changed (e.g., "sword → staff", "battle → confrontation")
-- confidence: 0-1 score of how likely this will pass moderation
+CORE RULES:
+1. Preserve the core creative intent and visual mood
+2. Transform blocked content to moderation-safe alternatives:
+   - Violence, weapons, combat → dramatic tension, symbolic conflict, confrontation
+   - Blood, gore, death → shadows falling, light fading, dramatic moments
+   - Explicit actions → implied or symbolic gestures
+3. Keep ALL visual style descriptors (silhouette, shadow-puppet, cinematic, etc.)
+4. Keep camera/motion directions (slow zoom, pan, dolly, etc.)
+5. Maintain approximate length
 
-Example:
-Input: "A warrior draws his sword and charges into battle, slaying enemies"
-Output: {
-  "sanitized_prompt": "A warrior raises a staff and rushes into confrontation, overcoming challengers",
-  "changes_made": ["sword → staff", "charges into battle → rushes into confrontation", "slaying enemies → overcoming challengers"],
-  "confidence": 0.85
+MYTH MODE RULES (when style="myth"):
+You MUST transform to symbolic/abstract language:
+- "kill/slay" → "overcome", "the shadows fall"
+- "blood/gore" → "shadows", "darkness spreads"
+- "sword/weapon" → "staff", "iron shape", "symbolic tool"
+- "army/soldiers" → "mass of figures", "faceless silhouettes"
+- "battle/combat" → "confrontation", "struggle"
+- Any face/body detail → "silhouette", "form", "shadow"
+- ALWAYS add: "silhouette only, no facial features, symbolic representation"
+- ALWAYS keep: "parchment", "shadow-puppet", "2D", "high contrast"
+
+FILM MODE RULES (when style="film"):
+- Prefer dramatic tension over explicit violence
+- Use cinematic language: "impact", "aftermath", "confrontation"
+- Keep cinematography terms intact
+
+OUTPUT FORMAT (JSON):
+{
+  "sanitized_prompt": "The rewritten prompt",
+  "changes_made": ["original → replacement", ...],
+  "confidence": 0.0-1.0,
+  "myth_transforms_applied": true/false
 }`;
+
+const MYTH_STYLE_REINFORCEMENT = `
+
+[CRITICAL STYLE CONSTRAINT: This is a Myth Mode scene - silhouette animation only, no realistic faces, no detailed eyes, shadow-puppet aesthetic, parchment texture, symbolic representation]`;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -77,20 +135,43 @@ Deno.serve(async (req) => {
       throw new Error("prompt is required");
     }
 
+    const isMythMode = body.style === "myth";
+    
+    // For Myth Mode, apply programmatic transforms FIRST before AI
+    let preProcessedPrompt = body.prompt;
+    const programmaticChanges: string[] = [];
+    
+    if (isMythMode) {
+      for (const [original, replacement] of Object.entries(MYTH_WORD_MAP)) {
+        const regex = new RegExp(`\\b${original}\\b`, "gi");
+        if (regex.test(preProcessedPrompt)) {
+          programmaticChanges.push(`${original} → ${replacement}`);
+          preProcessedPrompt = preProcessedPrompt.replace(regex, replacement);
+        }
+      }
+      
+      // Add Myth style reinforcement if not present
+      if (!preProcessedPrompt.includes("silhouette") && !preProcessedPrompt.includes("[STYLE:")) {
+        preProcessedPrompt += MYTH_STYLE_REINFORCEMENT;
+      }
+      
+      console.log(`[sanitize-prompt-ai] Myth pre-processing: ${programmaticChanges.length} transforms`);
+    }
+
     // Build the user prompt with context
-    let userPrompt = `Rewrite this video generation prompt to be moderation-safe:\n\n"${body.prompt}"`;
+    let userPrompt = `Rewrite this video generation prompt to be moderation-safe:\n\n"${preProcessedPrompt}"`;
     
     if (body.provider) {
       userPrompt += `\n\nProvider: ${body.provider} (${
-        body.provider === "runway" ? "stricter moderation - be more aggressive with changes" :
-        body.provider === "sora" ? "OpenAI moderation - avoid violence and weapons" :
+        body.provider === "runway" ? "STRICT moderation - be very aggressive, remove all violent/weapon terms" :
+        body.provider === "sora" ? "OpenAI moderation - avoid violence, weapons, explicit content" :
         "Luma moderation - moderate strictness"
       })`;
     }
     
     if (body.style) {
       userPrompt += `\n\nVisual style to preserve: ${
-        body.style === "myth" ? "Myth mode - silhouette, shadow-puppet, symbolic, fable-like" :
+        body.style === "myth" ? "MYTH MODE - silhouette animation, shadow-puppet aesthetic, symbolic/abstract representation, parchment texture, NO realistic faces, NO detailed eyes. Transform all violence to symbolic gestures." :
         body.style === "film" ? "Film mode - cinematic, dramatic, narrative-focused" :
         "Standard cinematic video"
       }`;
@@ -102,6 +183,11 @@ Deno.serve(async (req) => {
     
     if (body.context) {
       userPrompt += `\n\nStory context to maintain: ${body.context}`;
+    }
+    
+    // For Myth Mode, explicitly list what was already transformed
+    if (programmaticChanges.length > 0) {
+      userPrompt += `\n\nAlready transformed (verify these are in the output): ${programmaticChanges.join(", ")}`;
     }
 
     console.log(`[sanitize-prompt-ai] Processing prompt (${body.prompt.length} chars) for ${body.provider || "unknown"}`);
