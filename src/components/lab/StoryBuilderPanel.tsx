@@ -261,6 +261,9 @@ export function StoryBuilderPanel({
   // Film Mode - new film-first architecture (face-only I2V, minimal prompts, variety contract)
   const [filmMode, setFilmMode] = useState(false);
   
+  // Myth Mode - storybook fable style (silhouettes, symbolic, no faces)
+  const [mythMode, setMythMode] = useState(false);
+  
   // Brutality Mode - reduces sanitization for intense content (higher failure risk)
   const [brutalityMode, setBrutalityMode] = useState(false);
   const [sanitizationLevel, setSanitizationLevel] = useState<"soft" | "strict">("soft");
@@ -514,12 +517,19 @@ export function StoryBuilderPanel({
     if (forceNew || !existingStory) return;
     setTitle(existingStory.title || "");
     
-    // Handle Film Mode stories - auto-enable film mode and map to valid type
+    // Handle Film Mode and Myth Mode stories - auto-enable mode and map to valid type
     const rawStoryType = existingStory.story_type as string;
     if (rawStoryType === "film_continuity") {
       setFilmMode(true);
+      setMythMode(false);
       setStoryType("film_continuity");
+    } else if (rawStoryType === "myth") {
+      setMythMode(true);
+      setFilmMode(false);
+      setStoryType("myth");
     } else {
+      setFilmMode(false);
+      setMythMode(false);
       setStoryType((rawStoryType as StoryType) || "short_story");
     }
     
@@ -606,6 +616,32 @@ export function StoryBuilderPanel({
       setIsGenerating(true);
       setEnrichmentProgress(0);
       setEnrichmentStatus(null);
+      
+      // Myth Mode: use the storybook continuation engine
+      if (mythMode) {
+        setEnrichmentStatus("📜 Myth Mode: generating symbolic scenes...");
+        setEnrichmentProgress(30);
+        
+        const { data, error } = await supabase.functions.invoke("continue-story-myth-mode", {
+          body: {
+            story_job_id: targetStoryId,
+          },
+        });
+        
+        if (error) throw error;
+        if (!data?.success) throw new Error(data?.error || "Myth mode generation failed");
+        
+        setEnrichmentStatus(null);
+        setEnrichmentProgress(100);
+        
+        return {
+          succeeded: data.summary?.queued || 0,
+          failed: 0,
+          total: data.summary?.total || scenes.length,
+          isChained: true,
+          mythMode: true,
+        };
+      }
       
       // Film Mode: use the new film-first continuation engine
       if (filmMode) {
@@ -731,9 +767,12 @@ export function StoryBuilderPanel({
     onSuccess: (result) => {
       setIsGenerating(false);
       setEnrichmentProgress(0);
+      const modeLabel = result.mythMode ? "📜 Myth Mode" : result.filmMode ? "🎬 Film Mode" : "Chained";
       toast({
-        title: result.filmMode ? "🎬 Film Mode generation started" : "Chained generation complete",
-        description: result.filmMode 
+        title: `${modeLabel} generation started`,
+        description: result.mythMode 
+          ? `Queued ${result.succeeded}/${result.total} mythic scenes with silhouette style`
+          : result.filmMode 
           ? `Queued ${result.succeeded}/${result.total} clips with face-only I2V` 
           : `${result.succeeded}/${result.total} clips completed with frame continuity`,
       });
@@ -893,6 +932,39 @@ export function StoryBuilderPanel({
       
       setIsGeneratingStory(true);
       
+      // Myth Mode uses the storybook-style generator
+      if (mythMode) {
+        const { data, error } = await supabase.functions.invoke("create-story-myth-mode", {
+          body: {
+            account_id: DEFAULT_ACCOUNT_ID,
+            premise: concept.trim(),
+            scene_count: 3, // Myth mode is always 3-5 scenes
+          },
+        });
+        
+        if (error) throw error;
+        if (!data?.success) throw new Error(data?.error || "Myth mode generation failed");
+        
+        // Return in the same format as legacy storyboard
+        return {
+          title: data.story?.title || `Mythic Tale ${new Date().toLocaleDateString()}`,
+          story_spine: data.storyboard?.premise || "",
+          motif_anchors: [],
+          palette_keywords: data.storyboard?.setting?.palette || [],
+          anchors: data.story?.continuity_anchors || getDefaultAnchors(),
+          scenes: (data.storyboard?.scenes || []).map((s: { id: string; index: number; visual_description?: string; narration?: string; duration_seconds?: number; beat_type?: string }) => ({
+            id: s.id,
+            sequence_index: s.index,
+            prompt: s.visual_description || s.narration || "",
+            duration_target: s.duration_seconds || 7,
+            role: s.beat_type === "introduction" ? "hook" : s.beat_type === "moral" ? "cta" : "story_a",
+          })),
+          myth_mode: true,
+          moral: data.storyboard?.moral,
+          story_job_id: data.story?.id,
+        };
+      }
+      
       // Film Mode uses the new film-first storyboard generator
       if (filmMode) {
         const { data, error } = await supabase.functions.invoke("create-story-film-mode", {
@@ -939,6 +1011,34 @@ export function StoryBuilderPanel({
     },
     onSuccess: async (data) => {
       setIsGeneratingStory(false);
+      
+      // Myth Mode: story already created in DB, just update local state
+      if (data.myth_mode && data.story_job_id) {
+        const newScenes = (data.scenes || []).map((s: StoryScene, i: number) => ({
+          ...s,
+          id: s.id || nanoid(8),
+          sequence_index: i,
+        }));
+        
+        setTitle(data.title || "");
+        setStorySpine(data.story_spine || "");
+        setMotifAnchors([]);
+        setPaletteKeywords(data.palette_keywords || []);
+        setScenes(newScenes);
+        setAnchors(data.anchors || getDefaultAnchors());
+        setConcept("");
+        setStoryType("myth");
+        
+        queryClient.invalidateQueries({ queryKey: ["story-jobs"] });
+        queryClient.invalidateQueries({ queryKey: ["recent-story"] });
+        onStoryCreated?.(data.story_job_id);
+        
+        toast({
+          title: "📜 Myth Mode story ready!",
+          description: `Created ${newScenes.length} mythic scenes. Moral: "${(data.moral || "").slice(0, 50)}..."`,
+        });
+        return;
+      }
       
       // Film Mode: story already created in DB, just update local state
       if (data.film_mode && data.story_job_id) {
@@ -1418,6 +1518,33 @@ export function StoryBuilderPanel({
               
               {/* Mode Selection */}
               <div className="pt-2 border-t border-border/50 space-y-3">
+                {/* Myth Mode - Storybook/fable style */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      id="myth-mode"
+                      checked={mythMode}
+                      onCheckedChange={(checked) => {
+                        setMythMode(checked);
+                        if (checked) {
+                          setFilmMode(false);
+                          setCharacterContinuityMode(false);
+                          setStoryType("myth");
+                        }
+                      }}
+                    />
+                    <Label htmlFor="myth-mode" className="text-xs cursor-pointer font-medium">
+                      📜 Myth Mode
+                    </Label>
+                    <Badge variant="secondary" className="text-[9px] bg-secondary text-secondary-foreground">NEW</Badge>
+                  </div>
+                </div>
+                {mythMode && (
+                  <p className="text-[10px] text-muted-foreground leading-relaxed pl-6">
+                    Storybook fables: silhouettes, symbolic visuals, no faces. 3 scenes, slow pacing, moral ending.
+                  </p>
+                )}
+                
                 {/* Film Mode - NEW film-first architecture */}
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -1426,8 +1553,10 @@ export function StoryBuilderPanel({
                       checked={filmMode}
                       onCheckedChange={(checked) => {
                         setFilmMode(checked);
-                        // Disable character continuity mode when film mode is enabled
-                        if (checked) setCharacterContinuityMode(false);
+                        if (checked) {
+                          setMythMode(false);
+                          setCharacterContinuityMode(false);
+                        }
                       }}
                     />
                     <Label htmlFor="film-mode" className="text-xs cursor-pointer font-medium">
@@ -1436,12 +1565,6 @@ export function StoryBuilderPanel({
                     <Badge variant="secondary" className="text-[9px] bg-primary/20 text-primary">NEW</Badge>
                   </div>
                 </div>
-                {filmMode && (
-                  <p className="text-[10px] text-muted-foreground leading-relaxed pl-6">
-                    Film-first architecture: face-only I2V, variety contract enforced, minimal prompts. 
-                    No legacy guardrails. Best for action/cinematic content.
-                  </p>
-                )}
                 
                 {/* Brutality Mode - reduces sanitization for intense content */}
                 {filmMode && (

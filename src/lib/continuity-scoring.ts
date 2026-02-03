@@ -44,7 +44,7 @@ export interface RegenSuggestion {
   constraints?: Record<string, unknown>;
 }
 
-export type StoryType = "short_story" | "brainrot" | "info" | "hybrid" | "film_continuity";
+export type StoryType = "short_story" | "brainrot" | "info" | "hybrid" | "film_continuity" | "myth";
 
 export type SceneRole = "hook" | "problem" | "story_a" | "reset" | "story_b" | "cta" | "atmosphere" | "establish";
 
@@ -418,6 +418,14 @@ export const STORY_TYPE_CONFIGS: Record<StoryType, StoryTypeConfig> = {
     typicalClipCount: [6, 10],
     continuityStrictness: "moderate",
     defaultDuration: 4,
+  },
+  myth: {
+    name: "Myth Mode",
+    description: "Storybook style with silhouettes, fables, and symbolic abstraction",
+    clipPacing: "slow",
+    typicalClipCount: [3, 5],
+    continuityStrictness: "loose",
+    defaultDuration: 7,
   },
 };
 
