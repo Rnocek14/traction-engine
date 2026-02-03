@@ -48,6 +48,18 @@ export function StoryNarrationPanel({
     alignmentDebug,
   } = useStoryNarration(storyJobId, storyType);
 
+  // Store callbacks in refs to avoid re-creating audio element
+  const findCurrentWordRef = useRef(findCurrentWord);
+  const onTimingUpdateRef = useRef(onTimingUpdate);
+  
+  useEffect(() => {
+    findCurrentWordRef.current = findCurrentWord;
+  }, [findCurrentWord]);
+  
+  useEffect(() => {
+    onTimingUpdateRef.current = onTimingUpdate;
+  }, [onTimingUpdate]);
+
   // Audio playback sync with proper lifecycle management
   useEffect(() => {
     if (!audioUrl) {
@@ -55,6 +67,7 @@ export function StoryNarrationPanel({
       return;
     }
 
+    console.log("[NarrationPanel] Creating audio element for:", audioUrl);
     const audio = new Audio(audioUrl);
     audio.preload = "auto";
     audioRef.current = audio;
@@ -64,11 +77,11 @@ export function StoryNarrationPanel({
       setCurrentTimeMs(currentMs);
 
       // Find current word and scene using char spans
-      const { word, sceneIndex } = findCurrentWord(currentMs);
+      const { word, sceneIndex } = findCurrentWordRef.current(currentMs);
       setCurrentWord(word);
 
       if (sceneIndex !== null) {
-        onTimingUpdate?.(currentMs, sceneIndex);
+        onTimingUpdateRef.current?.(currentMs, sceneIndex);
       }
     };
 
@@ -77,18 +90,31 @@ export function StoryNarrationPanel({
       setCurrentTimeMs(0);
       setCurrentWord(null);
     };
+    
+    const handleError = (e: Event) => {
+      console.error("[NarrationPanel] Audio error:", e);
+    };
+    
+    const handleCanPlay = () => {
+      console.log("[NarrationPanel] Audio can play");
+    };
 
     audio.addEventListener("timeupdate", handleTimeUpdate);
     audio.addEventListener("ended", handleEnded);
+    audio.addEventListener("error", handleError);
+    audio.addEventListener("canplaythrough", handleCanPlay);
 
     return () => {
+      console.log("[NarrationPanel] Cleaning up audio element");
       audio.removeEventListener("timeupdate", handleTimeUpdate);
       audio.removeEventListener("ended", handleEnded);
+      audio.removeEventListener("error", handleError);
+      audio.removeEventListener("canplaythrough", handleCanPlay);
       audio.pause();
       audio.src = ""; // Release resources
       audioRef.current = null;
     };
-  }, [audioUrl, findCurrentWord, onTimingUpdate]);
+  }, [audioUrl]); // Only recreate when audioUrl changes
 
   const togglePlayback = async () => {
     if (!audioRef.current) {
