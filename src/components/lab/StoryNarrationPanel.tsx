@@ -90,15 +90,31 @@ export function StoryNarrationPanel({
     };
   }, [audioUrl, findCurrentWord, onTimingUpdate]);
 
-  const togglePlayback = () => {
-    if (!audioRef.current) return;
+  const togglePlayback = async () => {
+    if (!audioRef.current) {
+      console.error("[NarrationPanel] No audio element available");
+      return;
+    }
 
     if (isPlaying) {
       audioRef.current.pause();
+      setIsPlaying(false);
     } else {
-      audioRef.current.play();
+      try {
+        await audioRef.current.play();
+        setIsPlaying(true);
+      } catch (err) {
+        console.error("[NarrationPanel] Play failed:", err);
+        // Attempt to reload and play
+        audioRef.current.load();
+        try {
+          await audioRef.current.play();
+          setIsPlaying(true);
+        } catch (retryErr) {
+          console.error("[NarrationPanel] Retry play failed:", retryErr);
+        }
+      }
     }
-    setIsPlaying(!isPlaying);
   };
 
   const handleGenerate = async () => {
