@@ -78,6 +78,7 @@ import { ContinuityAnchorsEditor } from "./ContinuityAnchorsEditor";
 import { ContinuityMonitor } from "./ContinuityMonitor";
 import { StoryVideoPlayer } from "./StoryVideoPlayer";
 import { StoryAnalysisPanel } from "./StoryAnalysisPanel";
+import { StoryNarrationPanel } from "./StoryNarrationPanel";
 import {
   type ContinuityAnchors,
   type StoryType,
@@ -1996,6 +1997,14 @@ export function StoryBuilderPanel({
                 />
               </CardContent>
             </Card>
+          )}
+
+          {/* Voiceover Panel - for myth mode and any story with scenes */}
+          {effectiveStoryId && scenes.length > 0 && (mythMode || existingStory?.story_type === "myth") && (
+            <StoryNarrationPanel
+              storyJobId={effectiveStoryId}
+              storyType="myth"
+            />
           )}
         </div>
       </ScrollArea>
