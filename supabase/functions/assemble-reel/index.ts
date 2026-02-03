@@ -26,7 +26,8 @@ interface ClipInput {
 }
 
 interface AssembleRequest {
-  script_run_id: string;
+  script_run_id?: string;
+  story_job_id?: string; // Alternative: assemble clips by story_job_id (uses story_voiceovers for audio)
   transition_type?: "cut" | "crossfade" | "fade" | "wipe";
   transition_duration?: number; // 0.1 - 0.5 seconds
   output_width?: number;
@@ -216,6 +217,7 @@ Deno.serve(async (req) => {
     const body: AssembleRequest = await req.json();
     const {
       script_run_id,
+      story_job_id,
       transition_type = "crossfade",
       transition_duration: requestedTransitionDuration = 0.2,
       output_width = 1080,
@@ -223,76 +225,163 @@ Deno.serve(async (req) => {
       output_fps = 30,
     } = body;
 
-    if (!script_run_id) {
-      throw new Error("script_run_id is required");
+    // Require at least one identifier
+    if (!script_run_id && !story_job_id) {
+      throw new Error("Either script_run_id or story_job_id is required");
     }
 
-    // Check if already rendering
-    const { data: existingRun } = await supabase
-      .from("script_runs")
-      .select("assembled_status, assembled_meta")
-      .eq("id", script_run_id)
-      .single();
+    // Determine mode: story mode vs script mode
+    const isStoryMode = !!story_job_id;
 
-    if (existingRun?.assembled_status === "rendering") {
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: "Assembly already in progress",
-          status: "rendering",
-          job_id: (existingRun.assembled_meta as AssembledMeta)?.ffmpeg_job_id,
-        }),
-        { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    // Type for video jobs used in both modes
+    interface VideoJobRecord {
+      id: string;
+      output_url: string | null;
+      created_at: string;
+      settings: Record<string, unknown> | null;
+      sequence_index?: number;
     }
-
-    // Fetch script run with voiceover
-    const { data: scriptRun, error: scriptError } = await supabase
-      .from("script_runs")
-      .select("*")
-      .eq("id", script_run_id)
-      .single();
-
-    if (scriptError || !scriptRun) {
-      throw new Error(`Script not found: ${scriptError?.message}`);
-    }
-
-    // Fetch timeline for ordered clips with durations
-    const { data: timeline } = await supabase
-      .from("studio_timelines")
-      .select("timeline_json, version")
-      .eq("script_run_id", script_run_id)
-      .order("version", { ascending: false })
-      .limit(1)
-      .single();
-
-    // Get clips from timeline or fall back to video_jobs order
+    
+    // Variables we need for both modes
+    let voiceoverUrl: string | null = null;
     let orderedClipIds: string[] = [];
     let clipDurations: Map<string, number> = new Map();
+    let videoJobs: VideoJobRecord[] = [];
+    let primaryId: string; // For idempotency key and status tracking
 
-    if (timeline?.timeline_json) {
-      const timelineData = timeline.timeline_json as TimelineData;
-      const enabledClips = timelineData.clips
-        .filter(c => c.type === "video" && !c.disabled && c.source?.video_job_id)
-        .sort((a, b) => a.start - b.start);
-      
-      for (const clip of enabledClips) {
-        if (clip.source?.video_job_id) {
-          orderedClipIds.push(clip.source.video_job_id);
-          clipDurations.set(clip.source.video_job_id, clip.end - clip.start);
+    if (isStoryMode) {
+      // ============================================
+      // STORY MODE: Fetch clips by story_job_id, voiceover from story_voiceovers
+      // ============================================
+      primaryId = story_job_id!;
+
+      // Check if story already assembling (use story_jobs for status)
+      const { data: existingStory } = await supabase
+        .from("story_jobs")
+        .select("status, active_voiceover_id")
+        .eq("id", story_job_id)
+        .single();
+
+      if (existingStory?.status === "assembling") {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: "Assembly already in progress",
+            status: "assembling",
+          }),
+          { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Fetch active voiceover for this story
+      if (existingStory?.active_voiceover_id) {
+        const { data: voiceover } = await supabase
+          .from("story_voiceovers")
+          .select("audio_url, status")
+          .eq("id", existingStory.active_voiceover_id)
+          .single();
+
+        if (voiceover?.status === "done" && voiceover.audio_url) {
+          voiceoverUrl = voiceover.audio_url;
+          console.log(`[story-mode] Using voiceover: ${voiceoverUrl}`);
         }
       }
-    }
 
-    // Fetch completed video jobs
-    const { data: videoJobs, error: jobsError } = await supabase
-      .from("video_jobs")
-      .select("*")
-      .eq("script_run_id", script_run_id)
-      .in("status", ["done", "succeeded"]);
+      // Fetch completed video jobs for this story
+      const { data: storyJobs, error: jobsError } = await supabase
+        .from("video_jobs")
+        .select("*")
+        .eq("story_job_id", story_job_id)
+        .in("status", ["done", "succeeded"])
+        .order("sequence_index", { ascending: true });
 
-    if (jobsError) {
-      throw new Error(`Failed to fetch video jobs: ${jobsError.message}`);
+      if (jobsError) {
+        throw new Error(`Failed to fetch video jobs: ${jobsError.message}`);
+      }
+
+      videoJobs = (storyJobs || []) as VideoJobRecord[];
+
+      // For stories, use sequence_index order
+      for (const job of videoJobs) {
+        orderedClipIds.push(job.id);
+        // Stories don't have explicit timeline, use job settings
+        const duration = (job.settings?.seconds as number) || (job.settings?.requested_seconds as number) || 5;
+        clipDurations.set(job.id, duration);
+      }
+
+    } else {
+      // ============================================
+      // SCRIPT MODE: Original behavior
+      // ============================================
+      primaryId = script_run_id!;
+
+      // Check if already rendering
+      const { data: existingRun } = await supabase
+        .from("script_runs")
+        .select("assembled_status, assembled_meta")
+        .eq("id", script_run_id)
+        .single();
+
+      if (existingRun?.assembled_status === "rendering") {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: "Assembly already in progress",
+            status: "rendering",
+            job_id: (existingRun.assembled_meta as AssembledMeta)?.ffmpeg_job_id,
+          }),
+          { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Fetch script run with voiceover
+      const { data: scriptRun, error: scriptError } = await supabase
+        .from("script_runs")
+        .select("*")
+        .eq("id", script_run_id)
+        .single();
+
+      if (scriptError || !scriptRun) {
+        throw new Error(`Script not found: ${scriptError?.message}`);
+      }
+
+      voiceoverUrl = scriptRun.voiceover_audio_url as string | null;
+
+      // Fetch timeline for ordered clips with durations
+      const { data: timeline } = await supabase
+        .from("studio_timelines")
+        .select("timeline_json, version")
+        .eq("script_run_id", script_run_id)
+        .order("version", { ascending: false })
+        .limit(1)
+        .single();
+
+      if (timeline?.timeline_json) {
+        const timelineData = timeline.timeline_json as TimelineData;
+        const enabledClips = timelineData.clips
+          .filter(c => c.type === "video" && !c.disabled && c.source?.video_job_id)
+          .sort((a, b) => a.start - b.start);
+        
+        for (const clip of enabledClips) {
+          if (clip.source?.video_job_id) {
+            orderedClipIds.push(clip.source.video_job_id);
+            clipDurations.set(clip.source.video_job_id, clip.end - clip.start);
+          }
+        }
+      }
+
+      // Fetch completed video jobs
+      const { data: scriptJobs, error: jobsError } = await supabase
+        .from("video_jobs")
+        .select("*")
+        .eq("script_run_id", script_run_id)
+        .in("status", ["done", "succeeded"]);
+
+      if (jobsError) {
+        throw new Error(`Failed to fetch video jobs: ${jobsError.message}`);
+      }
+
+      videoJobs = (scriptJobs || []) as VideoJobRecord[];
     }
 
     if (!videoJobs?.length) {
@@ -391,7 +480,7 @@ Deno.serve(async (req) => {
       throw new Error("Need at least 2 clips to assemble a reel");
     }
 
-    const voiceoverUrl = scriptRun.voiceover_audio_url as string | null;
+    // voiceoverUrl is already set above based on mode
 
     // Enforce minimum clip duration for safe xfade
     const transition_duration = safeTransitionDuration(clips, requestedTransitionDuration);
@@ -404,7 +493,7 @@ Deno.serve(async (req) => {
 
     // Compute idempotency hash from actual inputs (not just version)
     const inputHash = await computeIdempotencyHash(clips, voiceoverUrl, transitionSettings, outputSettings);
-    const idempotencyKey = `${script_run_id}:${inputHash}`;
+    const idempotencyKey = `${primaryId}:${inputHash}`;
 
     // Calculate expected duration using trim_seconds (effective duration after clamping)
     const totalClipDuration = clips.reduce((sum, c) => sum + c.trim_seconds, 0);
@@ -415,7 +504,8 @@ Deno.serve(async (req) => {
     console.log(
       JSON.stringify({
         at: "assemble-reel:prepared",
-        script_run_id,
+        primary_id: primaryId,
+        is_story_mode: isStoryMode,
         clip_count: clips.length,
         clips: clips.map(c => ({
           i: c.index,
