@@ -45,6 +45,8 @@ interface VideoRequest {
   starting_frame_url?: string;
   /** Optional motif context for story generation */
   motif_context?: MotifContext;
+  /** Skip internal retry ladder - chain layer owns retry for story mode (FIX #4) */
+  skip_internal_retry?: boolean;
 }
 
 interface ClipData {

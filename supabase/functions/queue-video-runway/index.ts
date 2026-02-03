@@ -58,6 +58,8 @@ interface VideoRequest {
   starting_frame_url?: string;
   /** Optional motif context for story generation */
   motif_context?: MotifContext;
+  /** Skip internal retry ladder - chain layer owns retry for story mode (FIX #4) */
+  skip_internal_retry?: boolean;
 }
 
 interface ClipData {
@@ -177,7 +179,7 @@ Deno.serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     const body: VideoRequest = await req.json();
-    const { script_run_id, clip_id, prompt: overridePrompt, settings, starting_frame_url } = body;
+    const { script_run_id, clip_id, prompt: overridePrompt, settings, starting_frame_url, skip_internal_retry } = body;
 
     if (!script_run_id) {
       throw new Error("script_run_id is required");
@@ -300,7 +302,8 @@ Deno.serve(async (req) => {
       }
 
       // Build API request for pre-built prompt with retry ladder
-      const MAX_RETRIES = 3;
+      // FIX #4: If skip_internal_retry is true, chain layer owns retry - single attempt only
+      const MAX_RETRIES = skip_internal_retry ? 1 : 3;
       let lastError: string | undefined;
       let runwayData: { id: string };
       let finalPrompt = overridePrompt;
@@ -599,7 +602,8 @@ Style: Professional short-form video, engaging, smooth transitions.
     }
 
     // Call Runway API with retry ladder for moderation failures
-    const MAX_RETRIES = 3;
+    // FIX #4: If skip_internal_retry is true, chain layer owns retry - single attempt only
+    const MAX_RETRIES = skip_internal_retry ? 1 : 3;
     let lastError: string | undefined;
     let runwayData: { id: string };
     
