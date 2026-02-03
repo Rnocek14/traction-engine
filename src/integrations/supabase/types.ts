@@ -926,6 +926,7 @@ export type Database = {
       story_jobs: {
         Row: {
           account_id: string
+          active_voiceover_id: string | null
           completed_clips: number | null
           continuity_anchors: Json | null
           continuity_score: number | null
@@ -941,6 +942,7 @@ export type Database = {
         }
         Insert: {
           account_id: string
+          active_voiceover_id?: string | null
           completed_clips?: number | null
           continuity_anchors?: Json | null
           continuity_score?: number | null
@@ -956,6 +958,7 @@ export type Database = {
         }
         Update: {
           account_id?: string
+          active_voiceover_id?: string | null
           completed_clips?: number | null
           continuity_anchors?: Json | null
           continuity_score?: number | null
@@ -969,7 +972,98 @@ export type Database = {
           updated_at?: string
           weakest_clip_id?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "story_jobs_active_voiceover_id_fkey"
+            columns: ["active_voiceover_id"]
+            isOneToOne: false
+            referencedRelation: "story_voiceovers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      story_voiceovers: {
+        Row: {
+          actual_timing: Json | null
+          audio_format: string | null
+          audio_url: string | null
+          compiled_script: string | null
+          created_at: string
+          error: string | null
+          id: string
+          is_active: boolean
+          predicted_timing: Json | null
+          provider: string
+          provider_request_id: string | null
+          raw_narration: string
+          scene_segments: Json | null
+          ssml_content: string | null
+          status: string
+          story_job_id: string
+          total_duration_ms: number | null
+          updated_at: string
+          version: number
+          voice_id: string
+          voice_name: string | null
+          voice_settings: Json | null
+        }
+        Insert: {
+          actual_timing?: Json | null
+          audio_format?: string | null
+          audio_url?: string | null
+          compiled_script?: string | null
+          created_at?: string
+          error?: string | null
+          id?: string
+          is_active?: boolean
+          predicted_timing?: Json | null
+          provider?: string
+          provider_request_id?: string | null
+          raw_narration: string
+          scene_segments?: Json | null
+          ssml_content?: string | null
+          status?: string
+          story_job_id: string
+          total_duration_ms?: number | null
+          updated_at?: string
+          version?: number
+          voice_id: string
+          voice_name?: string | null
+          voice_settings?: Json | null
+        }
+        Update: {
+          actual_timing?: Json | null
+          audio_format?: string | null
+          audio_url?: string | null
+          compiled_script?: string | null
+          created_at?: string
+          error?: string | null
+          id?: string
+          is_active?: boolean
+          predicted_timing?: Json | null
+          provider?: string
+          provider_request_id?: string | null
+          raw_narration?: string
+          scene_segments?: Json | null
+          ssml_content?: string | null
+          status?: string
+          story_job_id?: string
+          total_duration_ms?: number | null
+          updated_at?: string
+          version?: number
+          voice_id?: string
+          voice_name?: string | null
+          voice_settings?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "story_voiceovers_story_job_id_fkey"
+            columns: ["story_job_id"]
+            isOneToOne: false
+            referencedRelation: "story_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       studio_timelines: {
         Row: {

@@ -74,3 +74,9 @@ verify_jwt = false
 
 [functions.continue-story-film-mode]
 verify_jwt = false
+
+[functions.compile-story-script]
+verify_jwt = false
+
+[functions.generate-story-voiceover]
+verify_jwt = false
