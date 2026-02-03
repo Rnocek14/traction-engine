@@ -70,6 +70,25 @@ const MYTH_STYLE_INJECTION = `[STYLE: flat silhouette animation, shadow-puppet, 
 [PALETTE: amber, charcoal, parchment, gold, muted earth tones]
 `;
 
+// Patterns to strip from prompts when doing Myth Mode fallback
+// These realistic cinematography blocks cause style drift
+const REALISTIC_CINEMATOGRAPHY_PATTERNS = [
+  // Capture contract blocks
+  /\[CAPTURE:[^\]]*\]\n?/gi,
+  /\[TEXTURE:[^\]]*\]\n?/gi,
+  /\[LIGHTING:[^\]]*\]\n?/gi,
+  // On-location language
+  /on-location shoot/gi,
+  /practical lighting/gi,
+  /shot on film/gi,
+  /physical surfaces/gi,
+  /real materials/gi,
+  // 3D/realistic terms
+  /photorealistic/gi,
+  /3D render/gi,
+  /realistic faces?/gi,
+];
+
 // FIX #7: Scoped sanitization - only transform when in violent context
 // "death" alone is kept (philosophical), but "death by sword" transforms
 const MYTH_SANITIZATION_RULES: Array<[RegExp, string]> = [
@@ -161,6 +180,28 @@ export function sanitizeForMythMode(prompt: string): { sanitized: string; change
   }
   
   return { sanitized: result, changes };
+}
+
+/**
+ * Strip realistic cinematography blocks from a prompt
+ * Used during Myth Mode fallback to remove conflicting style directives
+ */
+export function stripRealisticCinematography(prompt: string): { cleaned: string; strippedCount: number } {
+  let result = prompt;
+  let strippedCount = 0;
+  
+  for (const pattern of REALISTIC_CINEMATOGRAPHY_PATTERNS) {
+    const matches = result.match(pattern);
+    if (matches) {
+      strippedCount += matches.length;
+      result = result.replace(pattern, "");
+    }
+  }
+  
+  // Clean up any double newlines left behind
+  result = result.replace(/\n{3,}/g, "\n\n").trim();
+  
+  return { cleaned: result, strippedCount };
 }
 
 /**
@@ -263,6 +304,15 @@ export function processModerationLadder(ctx: ModerationLadderContext): Moderatio
     
     // For Myth Mode, inject style anchors to preserve aesthetic
     if (isMythMode) {
+      // CRITICAL FIX: Strip realistic cinematography FIRST to prevent style drift
+      // This removes [CAPTURE:], [TEXTURE:], "on-location shoot", etc.
+      const { cleaned, strippedCount } = stripRealisticCinematography(fallbackPrompt);
+      fallbackPrompt = cleaned;
+      if (strippedCount > 0) {
+        console.log(`[moderation-ladder] Myth fallback: stripped ${strippedCount} realistic cinematography patterns`);
+      }
+      
+      // Then inject Myth style anchors at the top
       fallbackPrompt = injectMythStyleAnchors(fallbackPrompt);
       // Also apply Myth sanitization
       const { sanitized } = sanitizeForMythMode(fallbackPrompt);

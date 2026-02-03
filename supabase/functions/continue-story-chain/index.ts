@@ -853,9 +853,16 @@ Deno.serve(async (req) => {
       // === CAPTURE CONTRACT (Film Realism Prior) ===
       // Score scene difficulty and build appropriate capture contract
       // This shifts the model from "render this scene" to "this was captured on-location"
+      // FIX: Myth Mode should NOT get realistic capture contracts - they conflict with silhouette style
+      const isMythModeStory = (story as { story_type?: string }).story_type === "myth";
       const { difficulty, isInterior, hasMetalArmor } = autoScoreDifficulty(basePrompt, resolvedCoverage);
-      const captureContract = buildCaptureContract(difficulty);
-      console.log(`[capture] Scene ${nextSceneIndex + 1} difficulty=${difficulty} (interior=${isInterior}, metal=${hasMetalArmor}) → ${describeCaptureContract(difficulty)}`);
+      const captureContract = isMythModeStory ? "" : buildCaptureContract(difficulty);
+      
+      if (isMythModeStory) {
+        console.log(`[capture] Scene ${nextSceneIndex + 1} SKIPPED for Myth Mode (no realistic cinematography)`);
+      } else {
+        console.log(`[capture] Scene ${nextSceneIndex + 1} difficulty=${difficulty} (interior=${isInterior}, metal=${hasMetalArmor}) → ${describeCaptureContract(difficulty)}`);
+      }
       
       // === FORCE/ESCALATION INJECTION (Phase 8) ===
       // Transform abstract metadata (force_type, escalation_delta) into concrete visual directives
