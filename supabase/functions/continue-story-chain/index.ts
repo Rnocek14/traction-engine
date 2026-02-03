@@ -59,8 +59,19 @@ import {
   sanitizeForModeration,
   logModerationSanitization,
   getRetryPrompt,
+  isModerationError,
   type RetryContext,
 } from "../_shared/moderation-safety.ts";
+import {
+  processModerationLadder,
+  sanitizeForMythMode,
+  injectMythStyleAnchors,
+  logModerationLadderDecision,
+  isModerationRelatedError,
+  buildModerationTelemetryForDb,
+  type StoryMode,
+  type ModerationLadderContext,
+} from "../_shared/moderation-ladder.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -919,45 +930,123 @@ Deno.serve(async (req) => {
         }
       }
       
-      const response = await fetch(`${supabaseUrl}/functions/v1/${providerEndpoint}`, {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${supabaseServiceKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          script_run_id: scriptRunId,
-          prompt: finalPrompt,
-          settings: {
-            size: "720x1280",
-            seconds: processedDuration,
-          },
-          starting_frame_url: startingFrameUrl,
-          motif_context: motifContext,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok || !data.success) {
-        const errorMsg = data.error || `HTTP ${response.status}`;
-        console.error(`[chain-continue] Failed to queue: ${errorMsg}`);
+      // === MODERATION LADDER RETRY LOOP ===
+      // Implements "AI sanitize first, then fallback" strategy for Myth Mode and locked providers
+      // Max 3 attempts: 1) sanitize+retry on locked, 2) fallback with style preserved, 3) fail
+      
+      const storyMode: StoryMode = (story as { story_type?: string }).story_type === "myth" ? "myth" : 
+        isFilmMode ? "film" : "short_story";
+      const MAX_MODERATION_ATTEMPTS = 3;
+      
+      let queueSuccess = false;
+      let data: { success: boolean; job?: { id: string }; error?: string } = { success: false };
+      let currentPrompt = finalPrompt;
+      let currentProvider = selectedProvider;
+      let currentProviderEndpoint = providerEndpoint;
+      let currentStartingFrame = startingFrameUrl;
+      let moderationTelemetry: Record<string, unknown> | null = null;
+      
+      for (let attempt = 1; attempt <= MAX_MODERATION_ATTEMPTS && !queueSuccess; attempt++) {
+        // First attempt: use as-is (queue-video has its own retry ladder)
+        // Subsequent attempts: use moderation ladder for story-aware recovery
         
-        // Check if this is a credits/quota error - mark as partial to stop infinite retries
-        const isQuotaError = errorMsg.includes("credits") || 
-                             errorMsg.includes("quota") || 
-                             errorMsg.includes("rate limit");
-        
-        if (isQuotaError) {
-          console.error(`[chain-continue] Quota/credits error detected - marking story as partial to stop retries`);
-          await supabase
-            .from("story_jobs")
-            .update({ status: "partial" })
-            .eq("id", story.id);
-          results.push({ storyId: story.id, action: "quota_failed", nextScene: nextSceneIndex });
-          continue;
+        if (attempt > 1) {
+          const ladderCtx: ModerationLadderContext = {
+            storyMode,
+            lockedProvider: characterContinuityMode ? lockedProviderName : null,
+            currentProvider,
+            attempt: attempt - 1, // Ladder counts from 1 for first RETRY
+            originalPrompt: finalPrompt,
+            lastError: data.error,
+            sceneRole,
+            brutalityMode,
+          };
+          
+          const ladderResult = processModerationLadder(ladderCtx);
+          logModerationLadderDecision(nextSceneIndex, story.id, ladderResult);
+          
+          if (ladderResult.action === "fail") {
+            console.log(`[chain-continue] Moderation ladder exhausted for scene ${nextSceneIndex + 1}`);
+            moderationTelemetry = buildModerationTelemetryForDb(ladderResult.telemetry);
+            break;
+          }
+          
+          currentPrompt = ladderResult.prompt;
+          currentProvider = ladderResult.provider;
+          currentProviderEndpoint = {
+            sora: "queue-video",
+            runway: "queue-video-runway",
+            luma: "queue-video-luma",
+          }[currentProvider];
+          
+          // Drop reference frame if ladder says so (nuclear option)
+          if (ladderResult.dropReference) {
+            currentStartingFrame = undefined;
+            console.log(`[chain-continue] Moderation ladder: dropping reference frame for scene ${nextSceneIndex + 1}`);
+          }
+          
+          // Track telemetry for DB
+          moderationTelemetry = buildModerationTelemetryForDb(ladderResult.telemetry);
+          
+          console.log(`[chain-continue] Moderation retry ${attempt}/${MAX_MODERATION_ATTEMPTS}: ${ladderResult.action} on ${currentProvider}`);
         }
         
+        // Recalculate duration for potentially new provider
+        const attemptDuration = processDuration(nextScene.duration_target || 5, sceneRole, currentProvider);
+        
+        const response = await fetch(`${supabaseUrl}/functions/v1/${currentProviderEndpoint}`, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${supabaseServiceKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            script_run_id: scriptRunId,
+            prompt: currentPrompt,
+            settings: {
+              size: "720x1280",
+              seconds: attemptDuration,
+            },
+            starting_frame_url: currentStartingFrame,
+            motif_context: motifContext,
+          }),
+        });
+
+        data = await response.json();
+
+        if (response.ok && data.success) {
+          queueSuccess = true;
+          console.log(`[chain-continue] ✓ Queue success on attempt ${attempt}`);
+        } else {
+          const errorMsg = data.error || `HTTP ${response.status}`;
+          console.error(`[chain-continue] Queue attempt ${attempt} failed: ${errorMsg}`);
+          
+          // Check if this is a credits/quota error - stop immediately
+          const isQuotaError = errorMsg.includes("credits") || 
+                               errorMsg.includes("quota") || 
+                               errorMsg.includes("rate limit");
+          
+          if (isQuotaError) {
+            console.error(`[chain-continue] Quota/credits error detected - marking story as partial`);
+            await supabase
+              .from("story_jobs")
+              .update({ status: "partial" })
+              .eq("id", story.id);
+            results.push({ storyId: story.id, action: "quota_failed", nextScene: nextSceneIndex });
+            break;
+          }
+          
+          // Check if this is a moderation error worth retrying
+          if (!isModerationRelatedError(errorMsg)) {
+            console.log(`[chain-continue] Non-moderation error, not retrying via ladder: ${errorMsg}`);
+            break;
+          }
+        }
+      }
+      
+      // Handle final failure
+      if (!queueSuccess) {
+        console.error(`[chain-continue] Failed to queue scene ${nextSceneIndex + 1} after ${MAX_MODERATION_ATTEMPTS} attempts`);
         results.push({ storyId: story.id, action: "queue_failed", nextScene: nextSceneIndex });
         continue;
       }
@@ -968,8 +1057,9 @@ Deno.serve(async (req) => {
         const auditData = {
           ...(story.continuity_anchors || {}),
           resolved_cut_type: cutType,
-          had_starting_frame: !!startingFrameUrl,
-          provider_selected: selectedProvider,
+          had_starting_frame: !!currentStartingFrame,
+          provider_selected: currentProvider,
+          provider_original: selectedProvider,
           scene_role: sceneRole,
           // Spectacle and coverage audit fields
           is_spectacle: spectacleHandling.isSpectacle,
@@ -984,6 +1074,8 @@ Deno.serve(async (req) => {
           capture_difficulty: difficulty,
           capture_is_interior: isInterior,
           capture_has_metal: hasMetalArmor,
+          // Moderation ladder telemetry (NEW)
+          ...(moderationTelemetry || {}),
         };
         await supabase
           .from("video_jobs")
@@ -992,6 +1084,8 @@ Deno.serve(async (req) => {
             sequence_index: nextSceneIndex,
             original_prompt: nextRawPrompt,
             style_hints: JSON.stringify(auditData),
+            // Track final provider used (may differ from selected if fallback occurred)
+            provider: currentProvider,
           })
           .eq("id", jobId);
       }

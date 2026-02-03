@@ -1896,12 +1896,22 @@ export function StoryBuilderPanel({
                       storyClips.forEach(clip => {
                         const idx = clip.sequence_index ?? -1;
                         if (idx >= 0) {
+                          // Parse moderation telemetry from style_hints
+                          let moderationLadder: ClipStatus["moderation_ladder"];
+                          try {
+                            const hints = clip.style_hints ? JSON.parse(clip.style_hints) : {};
+                            if (hints.moderation_ladder) {
+                              moderationLadder = hints.moderation_ladder;
+                            }
+                          } catch { /* ignore parse errors */ }
+                          
                           clipStatusByIndex.set(idx, {
                             id: clip.id,
                             status: clip.status,
                             progress: clip.progress,
                             provider: clip.provider,
                             error: clip.error,
+                            moderation_ladder: moderationLadder,
                           });
                         }
                       });
@@ -2072,6 +2082,15 @@ interface ClipStatus {
   progress: number | null;
   provider: string;
   error?: string | null;
+  /** Moderation telemetry from style_hints */
+  moderation_ladder?: {
+    attempt: number;
+    original_provider: string;
+    final_provider: string;
+    sanitized: boolean;
+    fallback_used: boolean;
+    style_preserved: boolean;
+  };
 }
 
 interface SortableSceneProps {
@@ -2133,18 +2152,48 @@ function SortableScene({
     const { status, progress, provider, error } = clipStatus;
     
     if (status === "done" || status === "rendered") {
+      const ml = clipStatus.moderation_ladder;
+      const wasFallback = ml?.fallback_used;
+      const wasSanitized = ml?.sanitized && !wasFallback;
+      
       return (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Badge variant="outline" className="text-[9px] h-5 px-1.5 gap-1 bg-success/10 text-success border-success/30">
-              <CheckCircle2 className="h-3 w-3" />
-              100%
-            </Badge>
-          </TooltipTrigger>
-          <TooltipContent side="top" className="text-xs">
-            Completed via {provider}
-          </TooltipContent>
-        </Tooltip>
+        <div className="flex items-center gap-1">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Badge variant="outline" className="text-[9px] h-5 px-1.5 gap-1 bg-success/10 text-success border-success/30">
+                <CheckCircle2 className="h-3 w-3" />
+                100%
+              </Badge>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="text-xs">
+              Completed via {provider}
+              {wasFallback && ` (fallback from ${ml?.original_provider})`}
+            </TooltipContent>
+          </Tooltip>
+          {wasSanitized && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge variant="outline" className="text-[9px] h-5 px-1.5 bg-warning/10 text-warning border-warning/30">
+                  ✨ Sanitized
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="text-xs">Auto-sanitized for moderation</TooltipContent>
+            </Tooltip>
+          )}
+          {wasFallback && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge variant="outline" className="text-[9px] h-5 px-1.5 bg-accent text-accent-foreground border-border">
+                  🔄 Fallback
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="text-xs">
+                Switched {ml?.original_provider} → {ml?.final_provider}
+                {ml?.style_preserved && " (style preserved)"}
+              </TooltipContent>
+            </Tooltip>
+          )}
+        </div>
       );
     }
     
