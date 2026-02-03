@@ -45,6 +45,17 @@ interface ActualTiming {
   words: WordTiming[];
 }
 
+// Alignment mismatch threshold - if alignment differs by more than this %, fall back
+const ALIGNMENT_MISMATCH_THRESHOLD = 0.1; // 10%
+
+interface AlignmentDebug {
+  canonical_length: number;
+  alignment_length: number;
+  mismatch_pct: number;
+  alignment_ok: boolean;
+  separator: string;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -149,61 +160,88 @@ Deno.serve(async (req) => {
     // Build actual timing with word-level char spans
     let actualTiming: ActualTiming[] = [];
     let totalDurationMs = 0;
+    let alignmentOk = false;
+    
+    // Debug info for diagnosing alignment issues
+    const alignmentDebug: AlignmentDebug = {
+      canonical_length: canonicalText.length,
+      alignment_length: alignment?.characters?.length || 0,
+      mismatch_pct: 0,
+      alignment_ok: false,
+      separator: " ... ",
+    };
 
     if (alignment && alignment.characters.length > 0) {
-      console.log(`[generate-voiceover] Got alignment: ${alignment.characters.length} characters`);
+      const alignLen = alignment.characters.length;
+      const canonLen = canonicalText.length;
+      const mismatchPct = Math.abs(alignLen - canonLen) / canonLen;
       
-      // For each scene segment, find words and their timing based on char positions
-      for (const segment of sceneSegments) {
-        const segmentWords: WordTiming[] = [];
-        let segmentStartMs = Infinity;
-        let segmentEndMs = 0;
+      alignmentDebug.mismatch_pct = Math.round(mismatchPct * 100);
+      
+      console.log(`[generate-voiceover] Alignment: ${alignLen} chars vs canonical ${canonLen} chars (mismatch: ${(mismatchPct * 100).toFixed(1)}%)`);
+      
+      // Check if alignment is usable
+      if (mismatchPct > ALIGNMENT_MISMATCH_THRESHOLD) {
+        console.warn(`[generate-voiceover] Alignment mismatch too high (${(mismatchPct * 100).toFixed(1)}% > ${ALIGNMENT_MISMATCH_THRESHOLD * 100}%), falling back to predicted timing`);
+        alignmentOk = false;
+      } else {
+        alignmentOk = true;
+        alignmentDebug.alignment_ok = true;
         
-        // Parse words from the segment text with their positions
-        const text = segment.text;
-        const wordRegex = /\S+/g;
-        let match: RegExpExecArray | null;
-        
-        while ((match = wordRegex.exec(text)) !== null) {
-          const word = match[0];
-          // Calculate absolute char positions in canonical text
-          const wordCharStart = segment.char_start + match.index;
-          const wordCharEnd = wordCharStart + word.length;
+        // For each scene segment, find words and their timing based on char positions
+        for (const segment of sceneSegments) {
+          const segmentWords: WordTiming[] = [];
+          let segmentStartMs = Infinity;
+          let segmentEndMs = 0;
           
-          // Get timing from alignment using char positions
-          // Ensure indices are within bounds
-          const alignStartIdx = Math.min(wordCharStart, alignment.character_start_times_seconds.length - 1);
-          const alignEndIdx = Math.min(wordCharEnd - 1, alignment.character_end_times_seconds.length - 1);
+          // Parse words from the segment text with their positions
+          const text = segment.text;
+          const wordRegex = /\S+/g;
+          let match: RegExpExecArray | null;
           
-          if (alignStartIdx >= 0 && alignEndIdx >= 0) {
-            const wordStartMs = Math.floor(alignment.character_start_times_seconds[alignStartIdx] * 1000);
-            const wordEndMs = Math.floor(alignment.character_end_times_seconds[alignEndIdx] * 1000);
+          while ((match = wordRegex.exec(text)) !== null) {
+            const word = match[0];
+            // Calculate absolute char positions in canonical text
+            const wordCharStart = segment.char_start + match.index;
+            const wordCharEnd = wordCharStart + word.length;
             
-            segmentWords.push({
-              word,
-              char_start: wordCharStart,
-              char_end: wordCharEnd,
-              start_ms: wordStartMs,
-              end_ms: wordEndMs,
-            });
+            // Get timing from alignment using char positions
+            // Ensure indices are within bounds
+            const alignStartIdx = Math.min(wordCharStart, alignment.character_start_times_seconds.length - 1);
+            const alignEndIdx = Math.min(wordCharEnd - 1, alignment.character_end_times_seconds.length - 1);
             
-            segmentStartMs = Math.min(segmentStartMs, wordStartMs);
-            segmentEndMs = Math.max(segmentEndMs, wordEndMs);
+            if (alignStartIdx >= 0 && alignEndIdx >= 0 && alignStartIdx < alignment.character_start_times_seconds.length) {
+              const wordStartMs = Math.floor(alignment.character_start_times_seconds[alignStartIdx] * 1000);
+              const wordEndMs = Math.floor(alignment.character_end_times_seconds[alignEndIdx] * 1000);
+              
+              segmentWords.push({
+                word,
+                char_start: wordCharStart,
+                char_end: wordCharEnd,
+                start_ms: wordStartMs,
+                end_ms: wordEndMs,
+              });
+              
+              segmentStartMs = Math.min(segmentStartMs, wordStartMs);
+              segmentEndMs = Math.max(segmentEndMs, wordEndMs);
+            }
           }
+          
+          actualTiming.push({
+            scene_index: segment.scene_index,
+            start_ms: segmentStartMs === Infinity ? 0 : segmentStartMs,
+            end_ms: segmentEndMs,
+            words: segmentWords,
+          });
+          
+          totalDurationMs = Math.max(totalDurationMs, segmentEndMs);
         }
-        
-        actualTiming.push({
-          scene_index: segment.scene_index,
-          start_ms: segmentStartMs === Infinity ? 0 : segmentStartMs,
-          end_ms: segmentEndMs,
-          words: segmentWords,
-        });
-        
-        totalDurationMs = Math.max(totalDurationMs, segmentEndMs);
       }
-    } else {
-      // Fallback: use predicted timing if no alignment available
-      console.log(`[generate-voiceover] No alignment data, using predicted timing`);
+    }
+    
+    // Fallback to predicted timing if alignment failed or wasn't usable
+    if (!alignmentOk) {
+      console.log(`[generate-voiceover] Using predicted timing (no word-level alignment)`);
       const predictedTiming = voiceover.predicted_timing as Array<{
         scene_index: number;
         start_ms: number;
@@ -270,7 +308,8 @@ Deno.serve(async (req) => {
         audio_url: audioUrl,
         total_duration_ms: totalDurationMs,
         actual_timing: actualTiming,
-        has_word_timestamps: alignment !== undefined && alignment.characters.length > 0,
+        has_word_timestamps: alignmentOk,
+        alignment_debug: alignmentDebug,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

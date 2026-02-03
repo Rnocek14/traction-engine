@@ -46,11 +46,15 @@ export function StoryNarrationPanel({
     findCurrentWord,
   } = useStoryNarration(storyJobId, storyType);
 
-  // Audio playback sync
+  // Audio playback sync with proper lifecycle management
   useEffect(() => {
-    if (!audioUrl) return;
+    if (!audioUrl) {
+      audioRef.current = null;
+      return;
+    }
 
     const audio = new Audio(audioUrl);
+    audio.preload = "auto";
     audioRef.current = audio;
 
     const handleTimeUpdate = () => {
@@ -79,6 +83,8 @@ export function StoryNarrationPanel({
       audio.removeEventListener("timeupdate", handleTimeUpdate);
       audio.removeEventListener("ended", handleEnded);
       audio.pause();
+      audio.src = ""; // Release resources
+      audioRef.current = null;
     };
   }, [audioUrl, findCurrentWord, onTimingUpdate]);
 
