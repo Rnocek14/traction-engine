@@ -396,7 +396,7 @@ function StoryCard({
           </Button>
 
           <Link
-            to={`/studio/lab/story/${story.id}`}
+            to={`/story/${story.id}`}
             className="flex-1 min-w-0"
             onClick={onSelect}
           >
