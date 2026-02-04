@@ -79,6 +79,8 @@ import { ContinuityMonitor } from "./ContinuityMonitor";
 import { StoryVideoPlayer } from "./StoryVideoPlayer";
 import { StoryAnalysisPanel } from "./StoryAnalysisPanel";
 import { StoryNarrationPanel } from "./StoryNarrationPanel";
+import { StorySyncPreview } from "./StorySyncPreview";
+import { useStoryVoiceover } from "@/hooks/use-story-voiceover";
 import {
   type ContinuityAnchors,
   type StoryType,
@@ -412,6 +414,9 @@ export function StoryBuilderPanel({
     enabled: !!effectiveStoryId,
     refetchInterval: effectiveStoryId ? 5000 : false, // Backup polling
   });
+
+  // Fetch active voiceover for unified preview
+  const { data: activeVoiceover } = useStoryVoiceover(effectiveStoryId);
 
   // Real-time subscription for instant progress updates
   useEffect(() => {
@@ -1978,36 +1983,75 @@ export function StoryBuilderPanel({
             />
           )}
 
-          {/* Video Player - shows when clips are available */}
-          {storyClips.some(c => c.status === "done" && c.output_url) && (
-            <Card>
-              <CardHeader className="py-2 px-3">
-                <CardTitle className="text-xs font-medium flex items-center gap-2">
-                  <Film className="h-3.5 w-3.5" />
-                  Preview Story
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-3 pt-0">
-                <StoryVideoPlayer
-                  clips={storyClips}
-                  onAssemble={handleAssemble}
-                  isAssembling={isAssembling}
-                  assembledUrl={assembledUrl}
-                  className="aspect-[9/16] max-h-[400px]"
-                />
-              </CardContent>
-            </Card>
-          )}
+          {/* Unified Sync Preview - shows when BOTH clips AND voiceover exist */}
+          {(() => {
+            const hasCompletedClips = storyClips.some(c => c.status === "done" && c.output_url);
+            const hasVoiceover = activeVoiceover?.audio_url && activeVoiceover?.status === "done";
+            const isMythOrFilm = mythMode || existingStory?.story_type === "myth" || existingStory?.story_type === "film_continuity";
+            
+            // Show unified sync preview when we have both clips and voiceover
+            if (hasCompletedClips && hasVoiceover && isMythOrFilm) {
+              return (
+                <Card>
+                  <CardHeader className="py-2 px-3">
+                    <CardTitle className="text-xs font-medium flex items-center gap-2">
+                      <Film className="h-3.5 w-3.5" />
+                      Sync Preview
+                      <Badge variant="outline" className="text-[9px] ml-auto">Audio + Video</Badge>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-3 pt-0">
+                    <StorySyncPreview
+                      clips={storyClips}
+                      voiceover={activeVoiceover}
+                      onAssemble={handleAssemble}
+                      isAssembling={isAssembling}
+                      assembledUrl={assembledUrl}
+                      className="aspect-[9/16] max-h-[400px]"
+                    />
+                  </CardContent>
+                </Card>
+              );
+            }
+            
+            // Fallback: Show video-only player when clips exist but no voiceover
+            if (hasCompletedClips) {
+              return (
+                <Card>
+                  <CardHeader className="py-2 px-3">
+                    <CardTitle className="text-xs font-medium flex items-center gap-2">
+                      <Film className="h-3.5 w-3.5" />
+                      Preview Story
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-3 pt-0">
+                    <StoryVideoPlayer
+                      clips={storyClips}
+                      onAssemble={handleAssemble}
+                      isAssembling={isAssembling}
+                      assembledUrl={assembledUrl}
+                      className="aspect-[9/16] max-h-[400px]"
+                    />
+                  </CardContent>
+                </Card>
+              );
+            }
+            
+            return null;
+          })()}
 
-          {/* Voiceover Panel - for myth mode and any story with scenes */}
-          {/* Gate on DB storyboard scenes, not local state, so panel shows for loaded stories */}
+          {/* Voiceover Panel - shows as standalone when NO completed clips yet */}
+          {/* This allows generating voiceover before clips are done */}
           {effectiveStoryId && (
             ((existingStory?.storyboard_json as unknown as Storyboard | null)?.scenes?.length ?? scenes.length) > 0
-          ) && (mythMode || existingStory?.story_type === "myth") && (
-            <StoryNarrationPanel
-              storyJobId={effectiveStoryId}
-              storyType={existingStory?.story_type || "myth"}
-            />
+          ) && (mythMode || existingStory?.story_type === "myth" || existingStory?.story_type === "film_continuity") && (
+            // Hide standalone narration panel if unified preview is showing
+            !(storyClips.some(c => c.status === "done" && c.output_url) && activeVoiceover?.audio_url && activeVoiceover?.status === "done") && (
+              <StoryNarrationPanel
+                storyJobId={effectiveStoryId}
+                storyType={existingStory?.story_type || "myth"}
+              />
+            )
           )}
         </div>
       </ScrollArea>
