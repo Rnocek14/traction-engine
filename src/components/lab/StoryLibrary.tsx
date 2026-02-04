@@ -295,6 +295,7 @@ export function StoryLibrary({
             className="h-7 px-2 gap-1"
             onClick={(e) => {
               e.stopPropagation();
+              // Navigate to new story wizard (still in Lab for creation)
               navigate("/studio/lab/story?new=true");
             }}
           >

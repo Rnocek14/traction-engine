@@ -326,7 +326,7 @@ export default function Lab() {
             <div className="w-72 h-full border-r border-border/50 overflow-y-auto p-2">
               <StoryLibrary
                 activeStoryId={storyId}
-                onSelectStory={(id) => navigate(`/studio/lab/story/${id}`)}
+                onSelectStory={(id) => navigate(`/story/${id}`)}
               />
             </div>
             
@@ -335,7 +335,7 @@ export default function Lab() {
               <StoryBuilderPanel
                 storyId={storyId}
                 forceNew={forceNewStory && !storyId}
-                onStoryCreated={(newStoryId) => navigate(`/studio/lab/story/${newStoryId}`)}
+                onStoryCreated={(newStoryId) => navigate(`/story/${newStoryId}`)}
               />
             </div>
           </TabsContent>

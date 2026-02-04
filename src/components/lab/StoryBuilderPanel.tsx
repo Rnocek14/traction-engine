@@ -1045,7 +1045,7 @@ export function StoryBuilderPanel({
         
         toast({
           title: "📜 Myth Mode story ready!",
-          description: `Created ${newScenes.length} mythic scenes. Moral: "${(data.moral || "").slice(0, 50)}..."`,
+          description: `Opening Story Studio with ${newScenes.length} mythic scenes. Edit and generate there.`,
         });
         return;
       }
@@ -1072,7 +1072,7 @@ export function StoryBuilderPanel({
         
         toast({
           title: "🎬 Film Mode story ready!",
-          description: `Created ${newScenes.length} scenes with variety contract. Click Generate to start.`,
+          description: `Opening Story Studio with ${newScenes.length} scenes. Edit and generate there.`,
         });
         return;
       }
@@ -1191,8 +1191,8 @@ export function StoryBuilderPanel({
       }
       
       toast({
-        title: "Story saved!",
-        description: `Created ${newScenes.length} scenes with narrative spine. Click Generate to start.`,
+        title: "Story ready!",
+        description: `Opening Story Studio with ${newScenes.length} scenes. You can edit scenes, choose generators, and preview sync there.`,
       });
     },
     onError: (error) => {
@@ -1638,134 +1638,152 @@ export function StoryBuilderPanel({
                 </Button>
               </div>
               
-              {/* Mode Selection */}
-              <div className="pt-2 border-t border-border/50 space-y-3">
-                {/* Myth Mode - Storybook/fable style */}
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Switch
-                      id="myth-mode"
-                      checked={mythMode}
-                      onCheckedChange={(checked) => {
-                        setMythMode(checked);
-                        if (checked) {
-                          setFilmMode(false);
-                          setCharacterContinuityMode(false);
-                          setStoryType("myth");
-                        }
-                      }}
-                    />
-                    <Label htmlFor="myth-mode" className="text-xs cursor-pointer font-medium">
-                      📜 Myth Mode
-                    </Label>
-                    <Badge variant="secondary" className="text-[9px] bg-secondary text-secondary-foreground">NEW</Badge>
-                  </div>
-                </div>
-                {mythMode && (
-                  <p className="text-[10px] text-muted-foreground leading-relaxed pl-6">
-                    Storybook fables: silhouettes, symbolic visuals, no faces. 3 scenes, slow pacing, moral ending.
-                  </p>
-                )}
-                
-                {/* Film Mode - NEW film-first architecture */}
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Switch
-                      id="film-mode"
-                      checked={filmMode}
-                      onCheckedChange={(checked) => {
-                        setFilmMode(checked);
-                        if (checked) {
-                          setMythMode(false);
-                          setCharacterContinuityMode(false);
-                        }
-                      }}
-                    />
-                    <Label htmlFor="film-mode" className="text-xs cursor-pointer font-medium">
-                      🎬 Film Mode
-                    </Label>
-                    <Badge variant="secondary" className="text-[9px] bg-primary/20 text-primary">NEW</Badge>
-                  </div>
-                </div>
-                
-                {/* Brutality Mode - reduces sanitization for intense content */}
-                {filmMode && (
-                  <div className="flex items-center justify-between pl-6">
+              {/* Next step hint */}
+              <p className="text-[10px] text-muted-foreground text-center">
+                After building, you'll edit scenes and choose generators in Story Studio
+              </p>
+              
+              {/* Advanced Settings Collapsible - Mode Selection */}
+              <Collapsible>
+                <CollapsibleTrigger asChild>
+                  <button className="flex items-center gap-2 w-full pt-2 border-t border-border/50 text-xs text-muted-foreground hover:text-foreground transition-colors">
+                    <ChevronDown className="h-3 w-3 transition-transform" />
+                    <span>Advanced Settings</span>
+                    {(mythMode || filmMode || characterContinuityMode) && (
+                      <Badge variant="secondary" className="text-[9px] h-4 ml-1">
+                        {mythMode ? "📜 Myth" : filmMode ? "🎬 Film" : "🔗 Continuity"}
+                      </Badge>
+                    )}
+                  </button>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="pt-3 space-y-3">
+                  {/* Myth Mode - Storybook/fable style */}
+                  <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <Switch
-                        id="brutality-mode"
-                        checked={brutalityMode}
-                        onCheckedChange={setBrutalityMode}
+                        id="myth-mode"
+                        checked={mythMode}
+                        onCheckedChange={(checked) => {
+                          setMythMode(checked);
+                          if (checked) {
+                            setFilmMode(false);
+                            setCharacterContinuityMode(false);
+                            setStoryType("myth");
+                          }
+                        }}
                       />
-                      <Label htmlFor="brutality-mode" className="text-[10px] cursor-pointer text-muted-foreground">
-                        Brutality Mode
+                      <Label htmlFor="myth-mode" className="text-xs cursor-pointer font-medium">
+                        📜 Myth Mode
                       </Label>
-                      <Badge variant="outline" className="text-[8px] h-4 bg-destructive/10 text-destructive border-destructive/30">
-                        ⚠️ Higher failure risk
-                      </Badge>
+                      <Badge variant="secondary" className="text-[9px] bg-secondary text-secondary-foreground">NEW</Badge>
                     </div>
                   </div>
-                )}
-                
-                {/* Character Continuity Mode - legacy, hidden when Film Mode is on */}
-                {!filmMode && (
-                  <>
-                    <div className="flex items-center justify-between">
+                  {mythMode && (
+                    <p className="text-[10px] text-muted-foreground leading-relaxed pl-6">
+                      Storybook fables: silhouettes, symbolic visuals, no faces. 3 scenes, slow pacing, moral ending.
+                    </p>
+                  )}
+                  
+                  {/* Film Mode - NEW film-first architecture */}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        id="film-mode"
+                        checked={filmMode}
+                        onCheckedChange={(checked) => {
+                          setFilmMode(checked);
+                          if (checked) {
+                            setMythMode(false);
+                            setCharacterContinuityMode(false);
+                          }
+                        }}
+                      />
+                      <Label htmlFor="film-mode" className="text-xs cursor-pointer font-medium">
+                        🎬 Film Mode
+                      </Label>
+                      <Badge variant="secondary" className="text-[9px] bg-primary/20 text-primary">NEW</Badge>
+                    </div>
+                  </div>
+                  
+                  {/* Brutality Mode - reduces sanitization for intense content */}
+                  {filmMode && (
+                    <div className="flex items-center justify-between pl-6">
                       <div className="flex items-center gap-2">
                         <Switch
-                          id="character-continuity"
-                          checked={characterContinuityMode}
-                          onCheckedChange={setCharacterContinuityMode}
+                          id="brutality-mode"
+                          checked={brutalityMode}
+                          onCheckedChange={setBrutalityMode}
                         />
-                        <Label htmlFor="character-continuity" className="text-xs cursor-pointer">
-                          Character Continuity Mode
+                        <Label htmlFor="brutality-mode" className="text-[10px] cursor-pointer text-muted-foreground">
+                          Brutality Mode
                         </Label>
+                        <Badge variant="outline" className="text-[8px] h-4 bg-destructive/10 text-destructive border-destructive/30">
+                          ⚠️ Higher failure risk
+                        </Badge>
                       </div>
-                      {characterContinuityMode && (
-                        <Select value={lockedProvider} onValueChange={(v) => setLockedProvider(v as "sora" | "runway" | "luma")}>
-                          <SelectTrigger className="h-7 text-[10px] w-24">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="sora" className="text-xs">
-                              <span>🎬 Sora</span>
-                            </SelectItem>
-                            <SelectItem value="runway" className="text-xs">
-                              <span>🚀 Runway</span>
-                            </SelectItem>
-                            <SelectItem value="luma" className="text-xs">
-                              <span>🌙 Luma</span>
-                            </SelectItem>
-                          </SelectContent>
-                        </Select>
-                      )}
                     </div>
-                    {characterContinuityMode && (
-                      <div className="space-y-2">
-                        <p className="text-[10px] text-muted-foreground leading-relaxed">
-                          Keeps characters visually consistent across all scenes using a single AI model with I2V chaining.
-                        </p>
-                        {/* Soft Continuity Toggle - allows T2V for energy roles */}
-                        <div className="flex items-center gap-2 pl-6">
+                  )}
+                  
+                  {/* Character Continuity Mode - legacy, hidden when Film Mode is on */}
+                  {!filmMode && (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
                           <Switch
-                            id="soft-continuity"
-                            checked={softContinuity}
-                            onCheckedChange={setSoftContinuity}
+                            id="character-continuity"
+                            checked={characterContinuityMode}
+                            onCheckedChange={setCharacterContinuityMode}
                           />
-                          <Label htmlFor="soft-continuity" className="text-[10px] cursor-pointer text-muted-foreground">
-                            Soft Continuity (allow T2V for hooks/resets)
+                          <Label htmlFor="character-continuity" className="text-xs cursor-pointer">
+                            Character Continuity Mode
                           </Label>
                         </div>
-                        {softContinuity && (
-                          <p className="text-[9px] text-muted-foreground/70 pl-6 leading-relaxed">
-                            Injects visual energy by using T2V for hook, problem, reset, and establish roles while keeping I2V for story beats.
-                          </p>
+                        {characterContinuityMode && (
+                          <Select value={lockedProvider} onValueChange={(v) => setLockedProvider(v as "sora" | "runway" | "luma")}>
+                            <SelectTrigger className="h-7 text-[10px] w-24">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="sora" className="text-xs">
+                                <span>🎬 Sora</span>
+                              </SelectItem>
+                              <SelectItem value="runway" className="text-xs">
+                                <span>🚀 Runway</span>
+                              </SelectItem>
+                              <SelectItem value="luma" className="text-xs">
+                                <span>🌙 Luma</span>
+                              </SelectItem>
+                            </SelectContent>
+                          </Select>
                         )}
                       </div>
-                    )}
-                  </>
-                )}
-              </div>
+                      {characterContinuityMode && (
+                        <div className="space-y-2">
+                          <p className="text-[10px] text-muted-foreground leading-relaxed">
+                            Keeps characters visually consistent across all scenes using a single AI model with I2V chaining.
+                          </p>
+                          {/* Soft Continuity Toggle - allows T2V for energy roles */}
+                          <div className="flex items-center gap-2 pl-6">
+                            <Switch
+                              id="soft-continuity"
+                              checked={softContinuity}
+                              onCheckedChange={setSoftContinuity}
+                            />
+                            <Label htmlFor="soft-continuity" className="text-[10px] cursor-pointer text-muted-foreground">
+                              Soft Continuity (allow T2V for hooks/resets)
+                            </Label>
+                          </div>
+                          {softContinuity && (
+                            <p className="text-[9px] text-muted-foreground/70 pl-6 leading-relaxed">
+                              Injects visual energy by using T2V for hook, problem, reset, and establish roles while keeping I2V for story beats.
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </CollapsibleContent>
+              </Collapsible>
             </CardContent>
           </Card>
 
