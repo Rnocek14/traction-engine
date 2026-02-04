@@ -75,6 +75,7 @@ Deno.serve(async (req) => {
       scenes: MythScene[];
       style_anchors?: string[];
       negative_anchors?: string[];
+      symbol_arc?: string[];
     } = {
       title: rawStoryboard.title as string,
       premise: rawStoryboard.premise as string,
@@ -84,6 +85,7 @@ Deno.serve(async (req) => {
       scenes: rawStoryboard.scenes as MythScene[],
       style_anchors: rawStoryboard.style_anchors as string[],
       negative_anchors: rawStoryboard.negative_anchors as string[],
+      symbol_arc: (continuityAnchors.symbol_arc || rawStoryboard.symbol_arc) as string[],
     };
 
     if (!storyboard?.scenes?.length) {
@@ -214,6 +216,7 @@ Deno.serve(async (req) => {
             .eq("scene_id", scene.id);
           
           // Set the new job as primary with stable scene linkage
+          // Include enhanced style hints with new Myth Mode features
           await supabase
             .from("video_jobs")
             .update({
@@ -225,7 +228,12 @@ Deno.serve(async (req) => {
                 mode: "myth",
                 beat_type: scene.beat_type,
                 silhouette: scene.has_silhouette,
+                silhouette_pose: scene.silhouette_pose,
                 style_anchors: MYTH_STYLE_ANCHORS.slice(0, 5),
+                symbol_arc_state: storyboard.symbol_arc?.[i],
+                start_state: scene.start_state,
+                end_state: scene.end_state,
+                features: ["parallax_layers", "dynamic_lighting", "atmosphere", "motion_pools"],
               }),
             })
             .eq("id", jobId);

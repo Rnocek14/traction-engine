@@ -17,6 +17,9 @@ import {
   MYTH_STYLE_ANCHORS,
   MYTH_NEGATIVE_ANCHORS,
   MYTH_BEAT_CONFIGS,
+  SILHOUETTE_POSES,
+  validatePoseVariety,
+  generateFallbackStates,
 } from "../_shared/myth-continuity.ts";
 
 const corsHeaders = {
@@ -131,6 +134,16 @@ Deno.serve(async (req) => {
       storyboard.moral = fallbackMorals[Math.floor(Math.random() * fallbackMorals.length)];
     }
 
+    // Ensure symbol_arc exists
+    if (!storyboard.symbol_arc || storyboard.symbol_arc.length < storyboard.scenes.length) {
+      console.log("[myth-mode] Generating fallback symbol_arc...");
+      const symbol = storyboard.character?.symbol || "object";
+      storyboard.symbol_arc = storyboard.scenes.map((scene, i) => {
+        const states = ["intact and gleaming", "beginning to change", "transforming", "scattered/broken", "released/transcended"];
+        return `Scene ${i}: ${symbol} ${states[i % states.length]}`;
+      });
+    }
+
     // Process scenes
     for (let i = 0; i < storyboard.scenes.length; i++) {
       const scene = storyboard.scenes[i];
@@ -157,9 +170,44 @@ Deno.serve(async (req) => {
         scene.symbolic_elements = ["distant horizon", "winding path"];
       }
 
+      // Ensure environment_motion exists (Phase 2)
+      if (!scene.environment_motion || scene.environment_motion.length === 0) {
+        scene.environment_motion = [
+          `${scene.symbolic_elements[0] || "shadows"} shift slowly`,
+          "background elements drift with purpose",
+        ];
+      }
+
+      // Ensure start/end states exist (Phase 2)
+      if (!scene.start_state || !scene.end_state) {
+        const fallbackStates = generateFallbackStates(scene, storyboard);
+        scene.start_state = scene.start_state || fallbackStates.start_state;
+        scene.end_state = scene.end_state || fallbackStates.end_state;
+      }
+
+      // Ensure silhouette_pose exists and varies (Phase 2)
+      if (!scene.silhouette_pose) {
+        // Assign different poses to adjacent scenes
+        const poseIndex = i % SILHOUETTE_POSES.length;
+        scene.silhouette_pose = SILHOUETTE_POSES[poseIndex];
+      }
+
       // Default silhouette presence
       if (scene.has_silhouette === undefined) {
         scene.has_silhouette = true;
+      }
+    }
+
+    // Validate pose variety
+    const poseValidation = validatePoseVariety(storyboard.scenes);
+    if (!poseValidation.valid) {
+      console.warn("[myth-mode] Pose variety issues:", poseValidation.issues);
+      // Fix adjacent same poses by rotating
+      for (let i = 1; i < storyboard.scenes.length; i++) {
+        if (storyboard.scenes[i].silhouette_pose === storyboard.scenes[i - 1].silhouette_pose) {
+          const nextIndex = (SILHOUETTE_POSES.indexOf(storyboard.scenes[i].silhouette_pose!) + 2) % SILHOUETTE_POSES.length;
+          storyboard.scenes[i].silhouette_pose = SILHOUETTE_POSES[nextIndex];
+        }
       }
     }
 
@@ -187,18 +235,23 @@ Deno.serve(async (req) => {
           mode: "myth",
           style_anchors: MYTH_STYLE_ANCHORS,
           negative_anchors: MYTH_NEGATIVE_ANCHORS,
+          symbol_arc: storyboard.symbol_arc,
           generation_settings: {
             silhouette_only: true,
             no_faces: true,
             slow_pacing: true,
             symbolic_visuals: true,
             fade_transitions: true,
+            parallax_layers: true,
+            dynamic_lighting: true,
+            atmosphere_effects: true,
           },
         },
         continuity_anchors: {
           character: storyboard.character,
           setting: storyboard.setting,
           moral: storyboard.moral,
+          symbol_arc: storyboard.symbol_arc,
         },
       })
       .select()
