@@ -109,6 +109,9 @@ export function buildMythPrompt(
 ): string {
   const parts: string[] = [];
   
+  // Get beat-specific config for motion variety
+  const beatConfig = MYTH_BEAT_CONFIGS[scene.beat_type] || MYTH_BEAT_CONFIGS.journey;
+  
   // 1. STYLE ANCHOR (always first - most important for model priming)
   parts.push("[STYLE: flat silhouette animation, shadow-puppet, parchment texture, 2D cutout, high contrast, storybook illustration]");
   
@@ -117,7 +120,6 @@ export function buildMythPrompt(
   if (palette && palette.length > 0) {
     parts.push(`[PALETTE: ${palette.join(", ")}]`);
   } else {
-    // Default palette if not specified
     parts.push("[PALETTE: amber, charcoal, parchment, gold]");
   }
   
@@ -129,31 +131,55 @@ export function buildMythPrompt(
     parts.push("REALM: timeless realm, parchment texture");
   }
   
-  // 4. SILHOUETTE (if present) - with defensive check
+  // 4. CAMERA (beat-specific movement)
+  parts.push(`[CAMERA: ${beatConfig.camera}]`);
+  
+  // 5. SILHOUETTE WITH ACTION (if present) - with defensive check
   const character = storyboard.character;
   if (scene.has_silhouette && scene.silhouette_action) {
-    const archetype = character?.archetype || "wanderer";
+    const archetype = character?.archetype || "figure";
     parts.push(`SILHOUETTE: ${archetype} — ${scene.silhouette_action}`);
     if (character?.symbol) {
       parts.push(`SYMBOL: ${character.symbol}`);
     }
   }
   
-  // 5. VISUAL DESCRIPTION (symbolic, not literal)
+  // 6. VISUAL DESCRIPTION (symbolic, not literal)
   parts.push(`SCENE: ${scene.visual_description}`);
   
-  // 6. SYMBOLIC ELEMENTS
+  // 7. SYMBOLIC ELEMENTS
   if (scene.symbolic_elements && scene.symbolic_elements.length > 0) {
     parts.push(`ELEMENTS: ${scene.symbolic_elements.join(", ")}`);
   }
   
-  // 7. MOTION (slow, deliberate)
-  parts.push("[MOTION: slow, deliberate, symbolic gesture, minimal movement]");
+  // 8. MOTION (beat-specific - this is the key fix for "boring" videos)
+  parts.push(beatConfig.motion_anchor);
   
-  // 8. NEGATIVE (what to avoid)
-  parts.push("[AVOID: photorealistic, detailed face, eyes, 3D, modern elements]");
+  // 9. TRANSFORMATION (what visibly changes during this scene)
+  const transformHint = getTransformationHint(scene.beat_type);
+  if (transformHint) {
+    parts.push(`[TRANSFORMATION: ${transformHint}]`);
+  }
+  
+  // 10. NEGATIVE (what to avoid)
+  parts.push("[AVOID: photorealistic, detailed face, eyes, 3D, modern elements, static poses]");
   
   return parts.join("\n");
+}
+
+/**
+ * Get a transformation hint based on beat type to ensure visible change
+ */
+function getTransformationHint(beatType: string): string {
+  const hints: Record<string, string> = {
+    introduction: "scene starts dark/empty, figure/elements gradually revealed",
+    journey: "figure moves from point A to B, environment scrolls or shifts",
+    trial: "start hopeful, end defeated — posture and environment both change",
+    revelation: "darkness to light, confusion to clarity, closed to open gesture",
+    consequence: "full to empty, present to absent, together to scattered",
+    moral: "tension to peace, chaos to stillness, small figure against vast backdrop",
+  };
+  return hints[beatType] || "visible change from start to end of scene";
 }
 
 // =============================================================================
@@ -164,7 +190,7 @@ export function buildMythStoryboardPrompt(
   premise: string,
   sceneCount: number = 3
 ): string {
-  return `You are creating a ${sceneCount}-scene mythic fable. Your ONLY job is to transform the user's premise into a symbolic, shadow-puppet story.
+  return `You are creating a ${sceneCount}-scene mythic fable. Transform the premise into a VISUALLY DYNAMIC shadow-puppet story.
 
 ═══════════════════════════════════════════════════════════════════════════════
 THE USER'S PREMISE (THIS IS THE STORY - DO NOT IGNORE)
@@ -174,33 +200,52 @@ THE USER'S PREMISE (THIS IS THE STORY - DO NOT IGNORE)
 
 ═══════════════════════════════════════════════════════════════════════════════
 
-CRITICAL: The story MUST be about the premise above. Extract:
-1. WHO is the main character? (from the premise, NOT a generic "wanderer")
-2. WHAT do they want or fear? (from the premise)
-3. WHAT happens to them? (from the premise)
-4. WHAT is the lesson? (derive from the premise's theme)
+CRITICAL - EXTRACT FROM PREMISE:
+1. WHO is the main character? (from the premise, NOT generic "wanderer")
+2. WHAT do they want or fear?
+3. WHAT happens to them?
+4. WHAT is the lesson?
 
-If the premise says "a king who loses his crown" → the character is A KING, not a wanderer.
-If the premise says "a child learning to fly" → the character is A CHILD, not a traveler.
-If the premise says "greed destroys a merchant" → the character is A MERCHANT.
+═══════════════════════════════════════════════════════════════════════════════
+⚠️ ANTI-BORING RULES (MOST IMPORTANT)
+═══════════════════════════════════════════════════════════════════════════════
 
-DO NOT DEFAULT TO GENERIC ARCHETYPES. USE WHAT THE PREMISE GIVES YOU.
+Each scene MUST have VISIBLE PHYSICAL ACTION that creates CHANGE:
+
+❌ BORING: "The figure stands contemplating the coins"
+✅ DYNAMIC: "The figure lunges forward, grasping — coins slip through fingers, scatter across the floor"
+
+❌ BORING: "The marketplace grows dim around the figure"  
+✅ DYNAMIC: "Coins rain from above, the figure catches them frantically, then watches helplessly as they transform to dust mid-air"
+
+❌ BORING: "The figure sits with the empty ledger"
+✅ DYNAMIC: "The figure hurls the ledger — pages explode outward like startled birds, flutter, fall silent"
+
+EVERY silhouette_action MUST:
+- Use PHYSICAL VERBS: lunges, grasps, hurls, catches, drops, crumbles, scatters, reaches, falls, rises, turns, runs, climbs
+- Show TRANSFORMATION: "A becomes B" — coins to dust, full to empty, standing to fallen, darkness to light
+- Create VISUAL CHANGE: the end-frame must look DIFFERENT from the start-frame
+
+EVERY visual_description MUST include:
+- Something MOVING (figure, objects, environment elements)
+- A CHANGE happening (light shifting, objects transforming, space expanding/contracting)
+- CONTRAST (high to low, hope to despair, full to empty)
+
+═══════════════════════════════════════════════════════════════════════════════
 
 VISUAL STYLE (shadow-puppet / silhouette):
 - 2D flat animation, parchment texture, high contrast
 - NO realistic faces - silhouettes only
-- Symbolic elements (paths, shadows, light, objects)
+- Symbolic elements with PHYSICAL PRESENCE (they can move, fall, shatter)
 - Muted palette: amber, charcoal, gold, deep blue, parchment
 
-NARRATIVE STYLE:
-- Third-person omniscient ("There once was...", "And so the king...", "In those days...")
-- Timeless language, no modern slang
-- Each scene is a narrative beat leading to a moral
-
 SCENE STRUCTURE (${sceneCount} scenes):
-- Scene 1: Introduction - establish WHO and WHAT THEY WANT
-- Middle scenes: Journey/Trial - obstacles, choices, consequences  
-- Final scene: Moral - the wisdom revealed
+Beat types: introduction, journey, trial, consequence, moral
+- Introduction: figure ENTERS/EMERGES, desire made visible
+- Journey: figure MOVES toward goal, reaches, climbs, pursues
+- Trial: STRUGGLE visible — grasping, losing, failing
+- Consequence: AFTERMATH — things fall, scatter, vanish, empty
+- Moral: TRANSFORMATION complete — final posture shift, acceptance
 
 OUTPUT FORMAT (JSON):
 {
@@ -208,9 +253,9 @@ OUTPUT FORMAT (JSON):
   "premise": "${premise}",
   "moral": "the lesson this specific story teaches",
   "character": {
-    "archetype": "specific character FROM THE PREMISE (king/child/merchant/etc)",
-    "silhouette": "visual description of their silhouette",
-    "symbol": "object associated with their journey"
+    "archetype": "specific character FROM THE PREMISE (king/child/merchant/financier/etc)",
+    "silhouette": "visual description of their distinctive silhouette",
+    "symbol": "object that will MOVE/TRANSFORM during the story"
   },
   "setting": {
     "realm": "where this story takes place (derived from premise)",
@@ -220,18 +265,18 @@ OUTPUT FORMAT (JSON):
   "scenes": [
     {
       "index": 0,
-      "beat_type": "introduction",
-      "narration": "opening line that introduces THIS character and THIS story",
-      "visual_description": "what we see (silhouette + symbolic environment)",
+      "beat_type": "introduction|journey|trial|consequence|moral",
+      "narration": "third-person omniscient line for this moment",
+      "visual_description": "WHAT HAPPENS VISUALLY — must include movement and transformation",
       "has_silhouette": true,
-      "silhouette_action": "what the character physically does",
-      "symbolic_elements": ["relevant symbols from the premise"],
-      "duration_seconds": 7
+      "silhouette_action": "PHYSICAL VERB + what changes (e.g., 'lunges forward, grasps at falling coins')",
+      "symbolic_elements": ["element1 that MOVES", "element2 that TRANSFORMS"],
+      "duration_seconds": 6-8
     }
   ]
 }
 
-Remember: The premise "${premise}" IS the story. Don't invent a different story.`;
+Remember: The premise "${premise}" IS the story. Make it MOVE.`;
 }
 
 // =============================================================================
@@ -241,28 +286,45 @@ Remember: The premise "${premise}" IS the story. Don't invent a different story.
 export const MYTH_BEAT_CONFIGS = {
   introduction: {
     typical_duration: 7,
-    camera: "slow push in",
-    motion: "minimal, establishing",
+    camera: "slow push in from wide to medium",
+    motion: "figure emerges from shadow, first movement reveals form",
+    action_verbs: ["emerges", "rises", "steps forward", "awakens"],
+    motion_anchor: "[MOTION: figure enters frame, emerging from darkness, deliberate first step]",
   },
   journey: {
     typical_duration: 6,
-    camera: "slow track",
-    motion: "walking, traveling",
+    camera: "slow tracking shot following movement",
+    motion: "traveling, reaching, grasping",
+    action_verbs: ["reaches", "climbs", "crosses", "pursues", "chases"],
+    motion_anchor: "[MOTION: continuous forward movement, silhouette traveling through space, visible progress]",
   },
   trial: {
     typical_duration: 8,
-    camera: "static with tension",
-    motion: "confrontation, hesitation",
+    camera: "handheld tension, slight push",
+    motion: "struggle, grasping, failing, falling",
+    action_verbs: ["grasps", "fails", "falls", "loses", "breaks", "shatters"],
+    motion_anchor: "[MOTION: dynamic struggle, physical effort visible, body language shifts from hope to despair]",
   },
   revelation: {
     typical_duration: 7,
-    camera: "slow crane up",
-    motion: "realization gesture",
+    camera: "slow crane up revealing scope",
+    motion: "sudden stillness, then understanding gesture",
+    action_verbs: ["realizes", "discovers", "sees", "understands"],
+    motion_anchor: "[MOTION: stillness breaking into gesture of understanding, head lifts, posture transforms]",
+  },
+  consequence: {
+    typical_duration: 6,
+    camera: "slow push in on aftermath",
+    motion: "aftermath, weight of loss visible",
+    action_verbs: ["crumbles", "fades", "vanishes", "empties"],
+    motion_anchor: "[MOTION: visible transformation of environment, things falling/fading/vanishing around figure]",
   },
   moral: {
     typical_duration: 8,
-    camera: "slow pull back",
-    motion: "settling, completion",
+    camera: "slow pull back to wide, revealing journey's end",
+    motion: "final posture shift, acceptance or resolve",
+    action_verbs: ["accepts", "releases", "stands renewed", "walks away"],
+    motion_anchor: "[MOTION: final gesture of completion, figure's silhouette transforms - smaller yet resolute, or turns to leave]",
   },
 };
 
