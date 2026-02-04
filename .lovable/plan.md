@@ -1,192 +1,242 @@
 
-# Simplifying Myth Mode Prompts: "Less is More"
 
-## The Core Problem
+# Lotte Reiniger Style Anchoring: Technique-Based Prompts
 
-We're sending **1,400+ character prompts with 16+ directive blocks** to Sora, but research shows:
-- **The first 500 characters carry 80% of the weight** — Sora prioritizes the beginning
-- After ~1,000 characters, models experience **"semantic drift"** and start forgetting earlier instructions
-- We're giving equal weight to everything, so **nothing stands out**
+## The Problem
 
-Meanwhile, the actual "Tale of Three Brothers" that inspired Myth Mode used an **extremely focused aesthetic**:
-- Silhouettes expressing emotion through body pose only
-- "Pulsing light" — the single most distinctive visual element
-- Layers of paper with independent motion (parallax)
-- Naive, graphical, simple — NOT instruction-dense
+Current prompts describe the **aesthetic** ("shadow-puppet silhouette, parchment texture") but Sora interprets this as:
+- A backlit 3D figure (not an articulated 2D puppet)
+- Smooth, cinematic motion (not handcrafted puppet animation)
+- Generic "silhouette look" (not the distinctive Reiniger style)
 
-## Current Prompt Structure (Too Complex)
+## The Insight from Reiniger's Own Words (1936)
 
-```text
-[STYLE: ...] 
-[PALETTE: ...]
-REALM: ...
-[LAYERS: ...]
-[LIGHT: ...]
-[CAMERA: ...]
-[TEMPO: ...]
-SILHOUETTE: ...
-SYMBOL: ...
-SCENE: ...
-[DELTA: ...]
-[ENVIRONMENT: ...]
-[SYMBOL STATE: ...]
-[MOTION: ...]
-[ATMOSPHERE: ...]
-[AVOID: ...]
+From BFI's archive of Lotte Reiniger explaining her technique:
+
+> "Instead of using drawings, **silhouette marionettes** are used. These marionettes are cut out of black cardboard and thin lead, **every limb being cut separately and joined with wire hinges**."
+
+> "Figures and backgrounds are laid out on a glass table. A strong light from underneath makes **the wire hinges disappear** and throws up the black figures in relief, while the background appears as a more or less **fantastic landscape in keeping with the story**."
+
+> "The **backgrounds for the characters are cut out with scissors** as well, and designed to give a unified style to the whole picture. They are **cut from layers of transparent paper**."
+
+**Key technical traits:**
+1. **Articulated limbs** with visible joints (even if hinges are hidden, the movement is joint-based)
+2. **Multiple paper layers** at different depths
+3. **Backlighting** from below (not side-lighting)
+4. **Frame-by-frame jerky motion** (not smooth)
+5. **Flat 2D figures** moving in a 2.5D layered space
+
+## The Technical Pivot
+
+Instead of describing the *look*, describe the *animation technique*. This triggers different model behaviors:
+
+| Current (Aesthetic) | New (Technique) |
+|---------------------|-----------------|
+| "Shadow-puppet silhouette" | "Lotte Reiniger articulated cutout animation" |
+| "Parchment texture" | "Layered transparent paper backgrounds lit from below" |
+| "High contrast black and gold" | "Black cardboard figures against backlit colored gels" |
+| "Warm pulsing light" | "Light intensity breathes slowly, shadows deepen and lift" |
+
+## Proposed New Style Anchor (V2)
+
+```
+STYLE: Lotte Reiniger articulated paper cutout animation, 1920s German silhouette film style. Black cardboard figures with jointed limbs moving against layered transparent paper backgrounds. Backlit from below. Handcrafted frame-by-frame motion.
 ```
 
-That's **16 competing directive blocks**. Sora can't prioritize when everything screams "important."
+**Key additions:**
+1. **"Lotte Reiniger"** - Named style trigger (like "Studio Ghibli")
+2. **"articulated"** - Forces joint-based movement
+3. **"1920s German silhouette film"** - Historical/technique anchor
+4. **"jointed limbs"** - Explicit body articulation
+5. **"layered transparent paper"** - Parallax depth structure
+6. **"backlit from below"** - Correct lighting direction
+7. **"frame-by-frame motion"** - Stop-motion cadence, not smooth
 
-## The Fix: Radical Simplification
-
-### New "Essence First" Prompt Structure
-
-Put the **single most important visual idea** in the first 150 characters. Everything else is supporting context.
-
-```text
-SINGLE SHOT: [One vivid sentence describing the action]
-
-STYLE: Shadow-puppet silhouette, parchment texture, pulsing warm light
-
-[Then 2-3 supporting details if needed]
-```
-
-### What to Keep (High-Impact)
-
-| Directive | Why It Matters |
-|-----------|----------------|
-| **The Scene Action** | This IS the video — what happens |
-| **STYLE anchor** | "Shadow-puppet silhouette" is the aesthetic |
-| **Light behavior** | "Pulsing warm light" = the Three Brothers magic |
-| **One motion verb** | A single physical action the figure performs |
-
-### What to Consolidate or Remove
-
-| Current Block | Problem | Solution |
-|---------------|---------|----------|
-| `[LAYERS]` + `[ATMOSPHERE]` | Competing parallax instructions | Merge into STYLE |
-| `[TEMPO]` + `[MOTION]` | Both describe pacing | Pick one, remove other |
-| `[DELTA]` + `[SYMBOL STATE]` | Redundant with scene description | Fold into action line |
-| `[CAMERA]` | Often ignored by model | Move to end or remove |
-| `[AVOID]` | 50+ characters of negatives | Keep minimal or drop |
-
-## Proposed New Prompt Builder
-
-### Phase 1: The "Essence First" Format
+## Updated Prompt Structure (V2)
 
 ```typescript
-export function buildMythPromptSimplified(
-  scene: MythScene,
-  storyboard: Partial<MythStoryboard>
-): string {
-  // 1. THE ACTION (first 200 chars — highest priority)
-  const action = buildActionLine(scene, storyboard);
+function buildMythPromptV2(scene: MythScene, storyboard: Partial<MythStoryboard>): string {
+  // 1. ACTION FIRST (200 chars max)
+  const actionLine = buildActionLine(scene, storyboard);
   
-  // 2. STYLE ANCHOR (next 100 chars)
-  const style = "STYLE: Shadow-puppet silhouette, parchment texture, pulsing warm light, high contrast";
+  // 2. TECHNIQUE ANCHOR (not aesthetic)
+  const techniqueLine = "STYLE: Lotte Reiniger articulated paper cutout animation. " +
+    "Black cardboard jointed figures against layered transparent paper. " +
+    "Backlit from below. Frame-by-frame handcrafted motion.";
   
-  // 3. ONE MOTION DIRECTIVE (optional, 50 chars)
-  const motion = getSimpleMotion(scene.beat_type);
+  // 3. LIGHT BEHAVIOR (breathing, not static)
+  const lightLine = getLightBehavior(scene.beat_type);
   
-  // 4. AVOID (minimal, end of prompt)
-  const avoid = "No faces, no 3D, no modern elements";
+  // 4. MINIMAL NEGATIVES
+  const avoid = "No 3D rendering, no smooth interpolation, no realistic faces.";
   
-  return `${action}\n\n${style}\n\n${motion}\n\n${avoid}`;
-}
-
-function buildActionLine(scene: MythScene, storyboard: Partial<MythStoryboard>): string {
-  const character = storyboard.character?.archetype || "figure";
-  const symbol = storyboard.character?.symbol || "";
-  
-  // Combine scene action + transformation into ONE vivid sentence
-  // Example: "A financier lunges for scattering coins as golden light fades to shadow"
-  return `${character} ${scene.silhouette_action}. ${scene.start_state} transforms to ${scene.end_state}.`;
+  return `${actionLine}\n\n${techniqueLine}\n\n${lightLine}\n\n${avoid}`;
 }
 ```
 
-### Example: Old vs New
+## Light Behavior Per Beat
 
-**Old (1,400 chars):**
-```text
-[STYLE: flat silhouette animation, shadow-puppet, parchment texture, 2D cutout, high contrast, storybook illustration]
-[PALETTE: amber, charcoal, parchment, gold]
-REALM: ancient market city, parchment texture
-[LAYERS:
-  FOREGROUND: scattered coins drift slowly past camera
-  MIDGROUND: silhouette figure performing action
-  BACKGROUND: ancient market city with slow independent motion...]
-[LIGHT: light gradually intensifies from darkness...]
-[CAMERA: slow push in from wide to medium...]
-[TEMPO: Measured and slow. Each action has weight...]
-SILHOUETTE: financier — enters center stage, raising pouch high...
-SYMBOL: pouch of coins
-SCENE: The financier enters, his pouch gleaming...
-[DELTA: Start with "figure enters, pouch full" → End with "figure stands, pouch held aloft"]
-[ENVIRONMENT: market stalls BUZZ around; light SHIFTS...]
-[SYMBOL STATE: Scene 0: Pouch full, coins glinting...]
-[MOTION: figure emerges from shadow, first movement reveals form...]
-[ATMOSPHERE: parchment texture subtly crinkles and shifts]
-[AVOID: photorealistic, detailed face, eyes, 3D, modern elements, static poses, frozen figures]
+| Beat | Light Directive |
+|------|-----------------|
+| introduction | "Light breathes from darkness, intensity slowly rises" |
+| journey | "Shadows shift as unseen light source travels across" |
+| trial | "Light flickers erratically, contrast sharpens" |
+| revelation | "Sudden light bloom, illumination spreads outward" |
+| consequence | "Light drains away, figure dissolves at edges" |
+| moral | "Soft glow settles, peace in final stillness" |
+
+## Example: Old vs New
+
+**Current (V1) ~500 chars:**
 ```
+A clockmaker silhouette with brass gear reaches into mechanisms. Ancient workshop stretches behind in paper layers.
 
-**New (~400 chars):**
-```text
-A financier silhouette emerges from shadow, raising a pouch of coins high as golden light intensifies. Market stalls hum in background layers. He stands triumphant, coins gleaming — then begins to lower his arm as the first coin slips free.
+STYLE: Shadow-puppet silhouette, parchment paper texture, warm pulsing light, high contrast black and gold.
 
-STYLE: Shadow-puppet silhouette, parchment paper layers, warm pulsing light, high contrast black and gold
+Figure emerges slowly from darkness, first movement deliberate.
 
 No faces, no 3D, no modern elements.
 ```
 
-## Technical Changes
+**Proposed (V2) ~450 chars:**
+```
+A clockmaker with jointed articulated limbs reaches into a great clock's mechanisms. Gears turn in separate paper layers behind. His arm bends at elbow and wrist joints as fingers grasp a spinning cog.
 
-### File: `supabase/functions/_shared/myth-continuity.ts`
+STYLE: Lotte Reiniger articulated paper cutout animation. Black cardboard jointed figures against layered transparent paper. Backlit from below. Frame-by-frame handcrafted motion.
 
-1. Create new `buildMythPromptSimplified()` function
-2. Keep old `buildMythPrompt()` for A/B testing comparison
-3. Add flag in `create-story-myth-mode` to choose version
+Light breathes slowly brighter as the clock awakens.
 
-### File: `supabase/functions/continue-story-myth-mode/index.ts`
+No 3D, no smooth motion, no faces.
+```
 
-1. Use simplified prompt builder by default
-2. Log prompt length to verify reduction
+## Implementation Files
 
-### Testing Strategy
+### File 1: `supabase/functions/_shared/myth-continuity.ts`
 
-1. Create new Myth Mode story with simplified prompts
-2. Compare side-by-side with existing "Shadow of Vanishing Wealth"
+1. Create new `buildMythPromptV2()` function with Reiniger technique anchors
+2. Add `LIGHT_BEHAVIOR_SIMPLE` map for beat-specific light phrases
+3. Keep `buildMythPromptSimplified()` for comparison/fallback
+4. Export both for A/B testing capability
+
+### File 2: `supabase/functions/continue-story-myth-mode/index.ts`
+
+1. Switch from `buildMythPromptSimplified` to `buildMythPromptV2`
+2. Log version identifier in console for tracking
+3. Update `style_hints` to include `prompt_version: "v2_reiniger"`
+
+### File 3: `supabase/functions/create-story-myth-mode/index.ts`
+
+1. Update `generation_settings` to include `prompt_version: "v2"`
+2. Add `technique_style: "reiniger"` flag
+
+## Testing Strategy
+
+1. Create a new Myth Mode story with the clockmaker premise
+2. Compare side-by-side with existing Clockmaker's Paradox (V1)
 3. Metrics to evaluate:
-   - Does light actually pulse/change?
-   - Are silhouette poses distinct?
-   - Is there visible parallax?
-   - Does the scene have transformation (start ≠ end)?
+   - Are limbs visibly articulated (bending at joints)?
+   - Is there multi-layer parallax?
+   - Is motion jerky/handcrafted vs smooth?
+   - Does light breathe/pulse visibly?
 
-## Expected Outcome
+## Expected Improvements
 
-| Metric | Before | After |
-|--------|--------|-------|
-| Prompt length | 1,400 chars | ~400 chars |
-| Directive blocks | 16 | 3-4 |
-| First 500 chars | Fragmented | Complete action + style |
-| Model focus | Scattered | Unified on action + aesthetic |
+| Aspect | V1 (Current) | V2 (Reiniger) |
+|--------|--------------|---------------|
+| Style anchor | Aesthetic description | Technique + named artist |
+| Limb articulation | "silhouette" (smooth) | "jointed limbs" (articulated) |
+| Lighting direction | Unspecified | "Backlit from below" |
+| Motion quality | Smooth/cinematic | "Frame-by-frame handcrafted" |
+| Layer behavior | Implicit | "Layered transparent paper" |
 
-## The "Tale of Three Brothers" Lesson
+## Technical Details
 
-Ben Hibon (the director) said the magic was:
-> "Expressing everything with hands, heads, and body positions... pulsing light... the quality and texture of the canvas"
+### New Constants
 
-Three things. Not sixteen. We need to **trust the model** to interpret a vivid scene description rather than micromanaging every technical parameter.
+```typescript
+const REINIGER_TECHNIQUE_ANCHOR = 
+  "STYLE: Lotte Reiniger articulated paper cutout animation. " +
+  "Black cardboard jointed figures against layered transparent paper. " +
+  "Backlit from below. Frame-by-frame handcrafted motion.";
 
----
+const LIGHT_BEHAVIOR_SIMPLE: Record<string, string> = {
+  introduction: "Light breathes from darkness, intensity slowly rises.",
+  journey: "Shadows shift as unseen light source travels across scene.",
+  trial: "Light flickers erratically, contrast sharpens and softens.",
+  revelation: "Sudden light bloom, illumination spreads outward.",
+  consequence: "Light drains slowly away, figure dissolves at edges.",
+  moral: "Soft golden glow settles, peace in final stillness.",
+};
+```
+
+### buildMythPromptV2 Function
+
+```typescript
+export function buildMythPromptV2(
+  scene: MythScene,
+  storyboard: Partial<MythStoryboard>
+): string {
+  const character = storyboard.character;
+  const setting = storyboard.setting;
+  
+  // 1. ACTION with articulation hints
+  const archetype = character?.archetype || "solitary figure";
+  const action = scene.silhouette_action || scene.visual_description || "moves through the scene";
+  
+  // Add articulation hint to action
+  const articulatedAction = addArticulationHints(action);
+  
+  let transformPhrase = "";
+  if (scene.start_state && scene.end_state) {
+    const truncateClean = (s: string, max: number) => {
+      if (s.length <= max) return s;
+      const cut = s.slice(0, max);
+      const lastSpace = cut.lastIndexOf(' ');
+      return lastSpace > max * 0.6 ? cut.slice(0, lastSpace) : cut;
+    };
+    transformPhrase = `. From ${truncateClean(scene.start_state, 45)} to ${truncateClean(scene.end_state, 45)}`;
+  }
+  
+  const actionLine = `A ${archetype} with jointed articulated limbs ${articulatedAction}${transformPhrase}.`;
+  
+  // 2. SETTING with layer language
+  const realm = setting?.realm || "timeless realm";
+  const settingLine = `${realm} rendered in separate paper layers behind.`;
+  
+  // 3. TECHNIQUE ANCHOR (Reiniger-specific)
+  const techniqueLine = REINIGER_TECHNIQUE_ANCHOR;
+  
+  // 4. LIGHT BEHAVIOR (breathing, per beat)
+  const lightLine = LIGHT_BEHAVIOR_SIMPLE[scene.beat_type] || LIGHT_BEHAVIOR_SIMPLE.journey;
+  
+  // 5. MINIMAL NEGATIVES (technique-focused)
+  const avoidLine = "No 3D rendering, no smooth interpolation, no realistic faces.";
+  
+  return `${actionLine} ${settingLine}
+
+${techniqueLine}
+
+${lightLine}
+
+${avoidLine}`;
+}
+
+function addArticulationHints(action: string): string {
+  // Add body-part-specific motion hints if not present
+  if (action.includes("reaches") && !action.includes("arm") && !action.includes("hand")) {
+    return action.replace("reaches", "reaches with jointed arm");
+  }
+  if (action.includes("walks") && !action.includes("leg")) {
+    return action.replace("walks", "walks with articulated legs stepping");
+  }
+  if (action.includes("turns") && !action.includes("head") && !action.includes("body")) {
+    return action.replace("turns", "turns at the waist, head following");
+  }
+  return action;
+}
+```
 
 ## Summary
 
-**Problem**: We over-engineered the prompts. 16 directive blocks = nothing stands out.
+The V1 prompts describe what the video *looks like*. The V2 prompts describe *how it was made*. By invoking Lotte Reiniger by name and describing the actual physical technique (cardboard cutouts, wire hinges, backlit table), we trigger the model's knowledge of this specific animation style rather than generic "silhouette" interpretation.
 
-**Solution**: Radically simplify to 3-4 elements:
-1. One vivid action sentence (first 200 chars)
-2. Core style anchor (shadow-puppet, pulsing light)
-3. One motion/transformation hint
-4. Minimal negative constraints
-
-**Inspiration**: The actual Three Brothers animation was simple, naïve, graphical — and magical precisely because of its constraints, not its complexity.
