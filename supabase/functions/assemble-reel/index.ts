@@ -20,6 +20,8 @@ interface ClipInput {
   trim_seconds: number;
   /** Whether trim was clamped because requested > generated */
   trim_clamped: boolean;
+  /** If true, freeze last frame to match requested_seconds (for audio-master story mode) */
+  freeze_extend: boolean;
   /** For backwards compat - same as requested_seconds */
   duration: number;
   index: number;
@@ -47,6 +49,8 @@ interface FFmpegServiceRequest {
     generated_seconds: number;
     /** Effective trim duration - FFmpeg trims to this (min of requested/generated) */
     trim_seconds: number;
+    /** If true, freeze last frame to reach requested_seconds (for audio-master mode) */
+    freeze_extend?: boolean;
   }[];
   voiceover_url?: string;
   output: {
@@ -462,6 +466,8 @@ Deno.serve(async (req) => {
             generated_seconds,
             trim_seconds,
             trim_clamped,
+            // Story mode: freeze last frame if narration is longer than clip
+            freeze_extend: isStoryMode && trim_clamped,
             duration: trim_seconds, // backwards compat uses effective trim
             index: i,
           });
@@ -499,6 +505,8 @@ Deno.serve(async (req) => {
           generated_seconds,
           trim_seconds,
           trim_clamped,
+          // Script mode fallback: no freeze extend (clip duration driven)
+          freeze_extend: false,
           duration: trim_seconds,
           index: i,
         });
@@ -620,12 +628,13 @@ Deno.serve(async (req) => {
     const ffmpegRequest: FFmpegServiceRequest = {
       job_id: jobId,
       idempotency_key: idempotencyKey,
-      // Pass trim_seconds for FFmpeg to use directly (already clamped)
+      // Pass trim_seconds + freeze_extend for FFmpeg to use (story mode freezes last frame)
       clips: clips.map(c => ({ 
         url: c.url, 
         requested_seconds: c.requested_seconds,
         generated_seconds: c.generated_seconds,
         trim_seconds: c.trim_seconds,
+        freeze_extend: c.freeze_extend,
       })),
       voiceover_url: voiceoverUrl || undefined,
       output: {
