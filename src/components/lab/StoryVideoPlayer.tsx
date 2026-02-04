@@ -211,7 +211,7 @@ export function StoryVideoPlayer({
   return (
     <div 
       ref={containerRef}
-      className={cn("relative bg-black rounded-lg overflow-hidden", className)}
+      className={cn("relative bg-black rounded-lg overflow-hidden group", className)}
     >
       {/* Video element */}
       <video
@@ -224,8 +224,20 @@ export function StoryVideoPlayer({
         playsInline
       />
 
+      {/* Big centered play button - shown when paused */}
+      {!isPlaying && (
+        <button
+          onClick={togglePlay}
+          className="absolute inset-0 flex items-center justify-center bg-black/30 transition-opacity hover:bg-black/40 z-30"
+        >
+          <div className="w-16 h-16 rounded-full bg-primary/90 flex items-center justify-center shadow-lg hover:scale-105 transition-transform">
+            <Play className="h-8 w-8 text-primary-foreground ml-1" />
+          </div>
+        </button>
+      )}
+
       {/* Clip indicator */}
-      <div className="absolute top-2 left-2 right-2 flex items-center justify-between">
+      <div className="absolute top-2 left-2 right-2 flex items-center justify-between z-20">
         <Badge variant="secondary" className="text-[10px]">
           Scene {currentIndex + 1} / {completedClips.length}
         </Badge>
