@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Link, useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Beaker, Brain, Scale, BarChart3, Film } from "lucide-react";
+import { ArrowLeft, Beaker, Brain, Scale, BarChart3, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -14,7 +14,7 @@ import { LabGeneratePanel, LabResult } from "@/components/lab/LabGeneratePanel";
 import { LabPreviewPanel } from "@/components/lab/LabPreviewPanel";
 import { LearningInspector } from "@/components/lab/LearningInspector";
 import { ComparePanel } from "@/components/lab/ComparePanel";
-import { StoryBuilderPanel } from "@/components/lab/StoryBuilderPanel";
+import { StoryCreationWizard } from "@/components/lab/StoryCreationWizard";
 import { StoryLibrary } from "@/components/lab/StoryLibrary";
 import { getVideoJobStatus } from "@/lib/lab-engines";
 import { supabase } from "@/integrations/supabase/client";
@@ -265,8 +265,8 @@ export default function Lab() {
               Generate
             </TabsTrigger>
             <TabsTrigger value="story" className="gap-1.5 text-xs h-7">
-              <Film className="h-3.5 w-3.5" />
-              Story
+              <Plus className="h-3.5 w-3.5" />
+              Create Story
             </TabsTrigger>
             <TabsTrigger value="compare" className="gap-1.5 text-xs h-7">
               <Scale className="h-3.5 w-3.5" />
@@ -322,19 +322,17 @@ export default function Lab() {
           </TabsContent>
 
           <TabsContent value="story" className="h-full m-0 data-[state=active]:flex">
-            {/* Story Library sidebar */}
-            <div className="w-72 h-full border-r border-border/50 overflow-y-auto p-2">
+            {/* Story Library sidebar - compact list of existing stories */}
+            <div className="w-64 h-full border-r border-border/50 overflow-y-auto p-2 bg-card/30">
               <StoryLibrary
                 activeStoryId={storyId}
                 onSelectStory={(id) => navigate(`/story/${id}`)}
               />
             </div>
             
-            {/* Story Builder main panel */}
-            <div className="flex-1 h-full overflow-hidden">
-              <StoryBuilderPanel
-                storyId={storyId}
-                forceNew={forceNewStory && !storyId}
+            {/* Creation Wizard - simplified, focused on building new stories */}
+            <div className="flex-1 h-full overflow-y-auto">
+              <StoryCreationWizard
                 onStoryCreated={(newStoryId) => navigate(`/story/${newStoryId}`)}
               />
             </div>
