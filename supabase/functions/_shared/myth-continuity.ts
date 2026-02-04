@@ -623,7 +623,7 @@ export function generateFallbackStates(scene: MythScene, storyboard: Partial<Myt
 }
 
 // =============================================================================
-// SIMPLIFIED PROMPT BUILDER - "Essence First" Format
+// SIMPLIFIED PROMPT BUILDER - "Essence First" Format (V1)
 // =============================================================================
 
 /**
@@ -660,51 +660,171 @@ export function buildMythPromptSimplified(
   const setting = storyboard.setting;
   
   // 1. THE ACTION (first 200 chars - highest priority)
-  // Combine character, action, and transformation into ONE vivid sentence
   const archetype = character?.archetype || "solitary figure";
   const symbol = character?.symbol || "";
   const symbolPhrase = symbol ? ` with ${symbol}` : "";
   
-  // Build action from scene data
   const action = scene.silhouette_action || scene.visual_description || "moves through the scene";
   
-  // Build transformation phrase if we have start/end states
   let transformPhrase = "";
   if (scene.start_state && scene.end_state) {
-    // Smarter truncation: find last space before limit to avoid mid-word cuts
-    const truncateClean = (s: string, max: number) => {
-      if (s.length <= max) return s;
-      const cut = s.slice(0, max);
-      const lastSpace = cut.lastIndexOf(' ');
-      return lastSpace > max * 0.6 ? cut.slice(0, lastSpace) : cut;
-    };
     const startClean = truncateClean(scene.start_state, 50);
     const endClean = truncateClean(scene.end_state, 50);
     transformPhrase = `. From ${startClean} to ${endClean}`;
   }
   
-  // Combine into one vivid opening
   const actionLine = `A ${archetype} silhouette${symbolPhrase} ${action}${transformPhrase}.`;
   
-  // 2. SETTING CONTEXT (brief, ~50 chars)
+  // 2. SETTING CONTEXT
   const realm = setting?.realm || "timeless realm";
   const settingLine = `${realm} stretches behind in paper layers.`;
   
-  // 3. STYLE ANCHOR (core aesthetic - ~100 chars)
+  // 3. STYLE ANCHOR
   const styleLine = "STYLE: Shadow-puppet silhouette, parchment paper texture, warm pulsing light, high contrast black and gold.";
   
-  // 4. ONE MOTION HINT (optional, ~60 chars)
+  // 4. ONE MOTION HINT
   const motionHint = SIMPLE_MOTION_HINTS[scene.beat_type] || SIMPLE_MOTION_HINTS.journey;
   
-  // 5. MINIMAL NEGATIVES (end of prompt, ~40 chars)
+  // 5. MINIMAL NEGATIVES
   const avoidLine = "No faces, no 3D, no modern elements.";
   
-  // Combine all parts with clean line breaks
   return `${actionLine} ${settingLine}
 
 ${styleLine}
 
 ${motionHint}
+
+${avoidLine}`;
+}
+
+// =============================================================================
+// V2 PROMPT BUILDER - Lotte Reiniger Technique-Based Style
+// =============================================================================
+
+/**
+ * Reiniger technique anchor - describes HOW it was made, not how it looks.
+ * Triggers model's knowledge of this specific animation technique.
+ */
+const REINIGER_TECHNIQUE_ANCHOR = 
+  "STYLE: Lotte Reiniger articulated paper cutout animation. " +
+  "Black cardboard jointed figures against layered transparent paper. " +
+  "Backlit from below. Frame-by-frame handcrafted motion.";
+
+/**
+ * Light behavior per beat - breathing, pulsing, dynamic (not static descriptions)
+ */
+export const LIGHT_BEHAVIOR_V2: Record<string, string> = {
+  introduction: "Light breathes from darkness, intensity slowly rises.",
+  journey: "Shadows shift as unseen light source travels across scene.",
+  trial: "Light flickers erratically, contrast sharpens and softens.",
+  revelation: "Sudden light bloom, illumination spreads outward.",
+  consequence: "Light drains slowly away, figure dissolves at edges.",
+  moral: "Soft golden glow settles, peace in final stillness.",
+};
+
+/**
+ * Helper: Smart truncation that avoids mid-word cuts
+ */
+function truncateClean(s: string, max: number): string {
+  if (s.length <= max) return s;
+  const cut = s.slice(0, max);
+  const lastSpace = cut.lastIndexOf(' ');
+  return lastSpace > max * 0.6 ? cut.slice(0, lastSpace) : cut;
+}
+
+/**
+ * Helper: Add articulation hints to action descriptions.
+ * Makes limb movement explicit when verbs imply it.
+ */
+function addArticulationHints(action: string): string {
+  // Add body-part-specific motion hints if not present
+  if (action.includes("reaches") && !action.includes("arm") && !action.includes("hand")) {
+    return action.replace("reaches", "reaches with jointed arm");
+  }
+  if (action.includes("walks") && !action.includes("leg")) {
+    return action.replace("walks", "walks with articulated legs stepping");
+  }
+  if (action.includes("turns") && !action.includes("head") && !action.includes("body")) {
+    return action.replace("turns", "turns at the waist, head following");
+  }
+  if (action.includes("grasps") && !action.includes("finger") && !action.includes("hand")) {
+    return action.replace("grasps", "grasps with jointed fingers");
+  }
+  if (action.includes("lifts") && !action.includes("arm")) {
+    return action.replace("lifts", "lifts with hinged arm");
+  }
+  if (action.includes("falls") && !action.includes("limb")) {
+    return action.replace("falls", "falls with limbs folding");
+  }
+  if (action.includes("rises") && !action.includes("leg") && !action.includes("knee")) {
+    return action.replace("rises", "rises, knees bending, then straightening");
+  }
+  return action;
+}
+
+/**
+ * Build a V2 Myth Mode prompt using Lotte Reiniger technique-based anchors.
+ * 
+ * Key insight: Describe the ANIMATION TECHNIQUE, not the aesthetic.
+ * This triggers the model's knowledge of historical silhouette animation.
+ * 
+ * From Lotte Reiniger's own description (1936):
+ * - "Silhouette marionettes cut out of black cardboard"
+ * - "Every limb being cut separately and joined with wire hinges"
+ * - "Laid out on a glass table, strong light from underneath"
+ * - "Backgrounds cut from layers of transparent paper"
+ * 
+ * V2 structure (~450 chars):
+ * 1. Action with explicit articulation (200 chars max)
+ * 2. Setting with layer language
+ * 3. Technique anchor (Reiniger-specific)
+ * 4. Light behavior (breathing, per beat)
+ * 5. Minimal negatives (technique-focused)
+ */
+export function buildMythPromptV2(
+  scene: MythScene,
+  storyboard: Partial<MythStoryboard>
+): string {
+  const character = storyboard.character;
+  const setting = storyboard.setting;
+  
+  // 1. ACTION with articulation hints (highest priority - first 200 chars)
+  const archetype = character?.archetype || "solitary figure";
+  const rawAction = scene.silhouette_action || scene.visual_description || "moves through the scene";
+  
+  // Add explicit articulation to action verbs
+  const articulatedAction = addArticulationHints(rawAction);
+  
+  // Build transformation phrase if available
+  let transformPhrase = "";
+  if (scene.start_state && scene.end_state) {
+    const startClean = truncateClean(scene.start_state, 45);
+    const endClean = truncateClean(scene.end_state, 45);
+    transformPhrase = `. From ${startClean} to ${endClean}`;
+  }
+  
+  // Combine into action line with explicit joint articulation
+  const actionLine = `A ${archetype} with jointed articulated limbs ${articulatedAction}${transformPhrase}.`;
+  
+  // 2. SETTING with layer language (parallax depth)
+  const realm = setting?.realm || "timeless realm";
+  const settingLine = `${realm} rendered in separate paper layers behind.`;
+  
+  // 3. TECHNIQUE ANCHOR (Reiniger-specific - describes HOW, not WHAT)
+  const techniqueLine = REINIGER_TECHNIQUE_ANCHOR;
+  
+  // 4. LIGHT BEHAVIOR (breathing, per beat - dynamic, not static)
+  const lightLine = LIGHT_BEHAVIOR_V2[scene.beat_type] || LIGHT_BEHAVIOR_V2.journey;
+  
+  // 5. MINIMAL NEGATIVES (technique-focused - what breaks the style)
+  const avoidLine = "No 3D rendering, no smooth interpolation, no realistic faces.";
+  
+  // Combine with clean structure
+  return `${actionLine} ${settingLine}
+
+${techniqueLine}
+
+${lightLine}
 
 ${avoidLine}`;
 }
