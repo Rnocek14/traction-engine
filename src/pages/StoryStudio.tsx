@@ -324,7 +324,7 @@ export default function StoryStudio() {
         <Film className="h-12 w-12 text-muted-foreground" />
         <h1 className="text-xl font-semibold">Story not found</h1>
         <Button asChild>
-          <Link to="/studio/lab">Back to Lab</Link>
+          <Link to="/stories">Back to Stories</Link>
         </Button>
       </div>
     );
@@ -336,7 +336,7 @@ export default function StoryStudio() {
       <header className="h-12 flex-shrink-0 border-b bg-card/50 px-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="icon" className="h-8 w-8" asChild>
-            <Link to="/studio/lab">
+            <Link to="/stories">
               <ArrowLeft className="h-4 w-4" />
             </Link>
           </Button>

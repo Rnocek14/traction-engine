@@ -22,9 +22,8 @@ import {
   ChevronUp,
   Sparkles,
   Zap,
-  ArrowLeft,
 } from "lucide-react";
-import { Link } from "react-router-dom";
+import { GlobalNav } from "@/components/GlobalNav";
 import { 
   createScriptRun,
   listAccountConfigs,
@@ -151,24 +150,17 @@ export default function ScriptGenerator() {
 
   return (
     <div className="min-h-screen bg-background">
+      <GlobalNav />
+      
       {/* Header */}
-      <header className="sticky top-0 z-40 border-b border-border/50 bg-background/80 backdrop-blur-xl">
+      <header className="border-b border-border/50 bg-background/80">
         <div className="container mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <Link to="/">
-                <Button variant="ghost" size="sm" className="gap-2">
-                  <ArrowLeft className="w-4 h-4" />
-                  Dashboard
-                </Button>
-              </Link>
-              <div className="h-8 w-px bg-border" />
-              <div>
-                <h1 className="text-xl font-semibold">Script Generator</h1>
-                <p className="text-sm text-muted-foreground">
-                  Generate QA-gated scripts for content pipeline
-                </p>
-              </div>
+            <div>
+              <h1 className="text-xl font-semibold">Script Generator</h1>
+              <p className="text-sm text-muted-foreground">
+                Generate QA-gated scripts for content pipeline
+              </p>
             </div>
             
             {/* Stats */}
