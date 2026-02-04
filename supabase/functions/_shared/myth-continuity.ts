@@ -621,3 +621,82 @@ export function generateFallbackStates(scene: MythScene, storyboard: Partial<Myt
   const states = fallbacksByBeat[scene.beat_type] || fallbacksByBeat.journey;
   return { start_state: states.start, end_state: states.end };
 }
+
+// =============================================================================
+// SIMPLIFIED PROMPT BUILDER - "Essence First" Format
+// =============================================================================
+
+/**
+ * Simple motion hints by beat type (one phrase, not a bracketed block)
+ */
+const SIMPLE_MOTION_HINTS: Record<string, string> = {
+  introduction: "Figure emerges slowly from darkness, first movement deliberate.",
+  journey: "Continuous forward movement, visible progress step by step.",
+  trial: "Frantic reaching, grasping at things slipping away.",
+  revelation: "Stillness breaks — sudden understanding visible in posture.",
+  consequence: "Things fall and scatter, weight of loss visible.",
+  moral: "Final gesture of release, peace settles into stillness.",
+};
+
+/**
+ * Build a simplified Myth Mode prompt following "Essence First" principles.
+ * 
+ * Research shows:
+ * - First 500 chars carry 80% of the weight with AI video models
+ * - After ~1000 chars, models experience "semantic drift"
+ * - 16 directive blocks = nothing stands out
+ * 
+ * This version uses ~400 chars instead of ~1400 chars:
+ * 1. One vivid action sentence (first 200 chars - highest priority)
+ * 2. Core style anchor (shadow-puppet, pulsing light)
+ * 3. One motion hint
+ * 4. Minimal negatives
+ */
+export function buildMythPromptSimplified(
+  scene: MythScene,
+  storyboard: Partial<MythStoryboard>
+): string {
+  const character = storyboard.character;
+  const setting = storyboard.setting;
+  
+  // 1. THE ACTION (first 200 chars - highest priority)
+  // Combine character, action, and transformation into ONE vivid sentence
+  const archetype = character?.archetype || "solitary figure";
+  const symbol = character?.symbol || "";
+  const symbolPhrase = symbol ? ` with ${symbol}` : "";
+  
+  // Build action from scene data
+  const action = scene.silhouette_action || scene.visual_description || "moves through the scene";
+  
+  // Build transformation phrase if we have start/end states
+  let transformPhrase = "";
+  if (scene.start_state && scene.end_state) {
+    // Extract key visual from states (abbreviated for prompt efficiency)
+    transformPhrase = `. From ${scene.start_state.slice(0, 40)} to ${scene.end_state.slice(0, 40)}`;
+  }
+  
+  // Combine into one vivid opening
+  const actionLine = `A ${archetype} silhouette${symbolPhrase} ${action}${transformPhrase}.`;
+  
+  // 2. SETTING CONTEXT (brief, ~50 chars)
+  const realm = setting?.realm || "timeless realm";
+  const settingLine = `${realm} stretches behind in paper layers.`;
+  
+  // 3. STYLE ANCHOR (core aesthetic - ~100 chars)
+  const styleLine = "STYLE: Shadow-puppet silhouette, parchment paper texture, warm pulsing light, high contrast black and gold.";
+  
+  // 4. ONE MOTION HINT (optional, ~60 chars)
+  const motionHint = SIMPLE_MOTION_HINTS[scene.beat_type] || SIMPLE_MOTION_HINTS.journey;
+  
+  // 5. MINIMAL NEGATIVES (end of prompt, ~40 chars)
+  const avoidLine = "No faces, no 3D, no modern elements.";
+  
+  // Combine all parts with clean line breaks
+  return `${actionLine} ${settingLine}
+
+${styleLine}
+
+${motionHint}
+
+${avoidLine}`;
+}
