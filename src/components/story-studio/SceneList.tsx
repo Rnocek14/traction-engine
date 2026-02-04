@@ -27,7 +27,7 @@ interface SceneListProps {
   storyType: string;
 }
 
-// Role colors using semantic tokens
+// Role colors using semantic tokens (includes myth mode beat_types)
 const ROLE_COLORS: Record<SceneRole | string, string> = {
   hook: "bg-primary",
   problem: "bg-secondary",
@@ -37,6 +37,12 @@ const ROLE_COLORS: Record<SceneRole | string, string> = {
   cta: "bg-secondary",
   atmosphere: "bg-muted",
   establish: "bg-accent",
+  // Myth mode beat types
+  introduction: "bg-primary",
+  journey: "bg-accent",
+  trial: "bg-secondary",
+  consequence: "bg-destructive",
+  moral: "bg-primary",
 };
 
 export function SceneList({
@@ -126,10 +132,15 @@ function SceneCard({ scene, index, clip, isSelected, onSelect }: SceneCardProps)
     return null;
   }, [clip]);
 
-  // Prompt preview (first 50 chars)
-  const promptPreview = (scene.prompt || scene.subject_action || "").slice(0, 50);
-  const role = scene.role || "story_a";
-  const roleColor = ROLE_COLORS[role] || "bg-muted";
+  // Prompt preview (first 50 chars) - support all modes
+  const promptText = scene.prompt 
+    || scene.subject_action 
+    || scene.visual_description 
+    || scene.silhouette_action
+    || "";
+  const promptPreview = promptText.slice(0, 50);
+  const role = scene.role || (scene as any).beat_type || "story_a";
+  const roleColor = ROLE_COLORS[role] || ROLE_COLORS[(scene as any).beat_type] || "bg-muted";
 
   return (
     <div
@@ -175,11 +186,11 @@ function SceneCard({ scene, index, clip, isSelected, onSelect }: SceneCardProps)
 
         {/* Duration */}
         <div className="flex items-center gap-2 text-[10px] text-muted-foreground/70">
-          <span>{scene.duration_target || 5}s</span>
-          {scene.camera_direction && (
+          <span>{scene.duration_target || scene.duration_seconds || 5}s</span>
+          {(scene.camera_direction || scene.camera_move) && (
             <>
               <span>•</span>
-              <span className="truncate">{scene.camera_direction}</span>
+              <span className="truncate">{scene.camera_direction || scene.camera_move}</span>
             </>
           )}
         </div>
