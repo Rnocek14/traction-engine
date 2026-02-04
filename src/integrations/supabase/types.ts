@@ -1430,6 +1430,7 @@ export type Database = {
           human_preference_rating: number | null
           human_rating_override: boolean | null
           id: string
+          is_primary: boolean
           is_serendipity: boolean
           openai_status: string | null
           openai_video_id: string | null
@@ -1446,6 +1447,7 @@ export type Database = {
           routing_confidence: number | null
           routing_reason: string | null
           routing_source: string | null
+          scene_id: string | null
           script_run_id: string
           sequence_index: number | null
           settings: Json | null
@@ -1485,6 +1487,7 @@ export type Database = {
           human_preference_rating?: number | null
           human_rating_override?: boolean | null
           id?: string
+          is_primary?: boolean
           is_serendipity?: boolean
           openai_status?: string | null
           openai_video_id?: string | null
@@ -1501,6 +1504,7 @@ export type Database = {
           routing_confidence?: number | null
           routing_reason?: string | null
           routing_source?: string | null
+          scene_id?: string | null
           script_run_id: string
           sequence_index?: number | null
           settings?: Json | null
@@ -1540,6 +1544,7 @@ export type Database = {
           human_preference_rating?: number | null
           human_rating_override?: boolean | null
           id?: string
+          is_primary?: boolean
           is_serendipity?: boolean
           openai_status?: string | null
           openai_video_id?: string | null
@@ -1556,6 +1561,7 @@ export type Database = {
           routing_confidence?: number | null
           routing_reason?: string | null
           routing_source?: string | null
+          scene_id?: string | null
           script_run_id?: string
           sequence_index?: number | null
           settings?: Json | null

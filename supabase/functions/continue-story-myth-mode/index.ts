@@ -204,13 +204,23 @@ Deno.serve(async (req) => {
 
         const jobId = result.job?.id;
         
-        // Link job to story
+        // Link job to story with stable scene_id + mark as primary
         if (jobId) {
+          // First, unset any existing primary for this scene
+          await supabase
+            .from("video_jobs")
+            .update({ is_primary: false })
+            .eq("story_job_id", body.story_job_id)
+            .eq("scene_id", scene.id);
+          
+          // Set the new job as primary with stable scene linkage
           await supabase
             .from("video_jobs")
             .update({
               story_job_id: body.story_job_id,
               sequence_index: i,
+              scene_id: scene.id,
+              is_primary: true,
               style_hints: JSON.stringify({
                 mode: "myth",
                 beat_type: scene.beat_type,
