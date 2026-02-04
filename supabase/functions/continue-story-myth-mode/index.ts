@@ -12,9 +12,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
   type MythStoryboard,
   type MythScene,
-  buildMythPrompt,
+  buildMythPromptSimplified,
   MYTH_STYLE_ANCHORS,
-  MYTH_NEGATIVE_ANCHORS,
 } from "../_shared/myth-continuity.ts";
 
 const corsHeaders = {
@@ -170,11 +169,12 @@ Deno.serve(async (req) => {
 
       const scene = storyboard.scenes[i] as MythScene;
       
-      // Build the mythic prompt with style constraints
-      const mythPrompt = buildMythPrompt(scene, storyboard);
+      // Build the simplified mythic prompt (essence-first ~400 chars vs old ~1400 chars)
+      const mythPrompt = buildMythPromptSimplified(scene, storyboard);
       
       console.log(`[myth-mode] Queueing scene ${i}: ${scene.beat_type}`);
-      console.log(`[myth-mode] Prompt preview: ${mythPrompt.slice(0, 200)}...`);
+      console.log(`[myth-mode] Prompt length: ${mythPrompt.length} chars`);
+      console.log(`[myth-mode] Prompt: ${mythPrompt}`);
 
       // Myth Mode always uses T2V (no I2V - we want abstraction, not identity)
       // Call queue-video to properly submit to Sora API
