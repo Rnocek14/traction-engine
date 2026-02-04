@@ -260,6 +260,46 @@ export default function StoryStudio() {
     }
   }, [storyId, toast, refetchClips]);
 
+  // Generate all scenes
+  const [isGeneratingAll, setIsGeneratingAll] = useState(false);
+  const generateAllScenes = useCallback(async () => {
+    if (!storyId || !story) return;
+    
+    setIsGeneratingAll(true);
+    toast({ title: "Starting generation...", description: "Queueing all scenes" });
+
+    try {
+      // Determine which edge function to call based on story type
+      const functionName = story.story_type === "myth" 
+        ? "continue-story-myth-mode"
+        : story.story_type === "film_continuity"
+        ? "continue-story-film-mode"
+        : "continue-story-chain";
+
+      const { data, error } = await supabase.functions.invoke(functionName, {
+        body: { story_job_id: storyId },
+      });
+
+      if (error) throw error;
+      
+      const queued = data?.summary?.queued || 0;
+      toast({ 
+        title: "Generation started!", 
+        description: `${queued} scenes queued for generation` 
+      });
+      
+      refetchClips();
+    } catch (err) {
+      toast({ 
+        title: "Generation failed", 
+        description: String(err), 
+        variant: "destructive" 
+      });
+    } finally {
+      setIsGeneratingAll(false);
+    }
+  }, [storyId, story, toast, refetchClips]);
+
   // Progress stats
   const stats = useMemo(() => {
     const total = scenes.length;
@@ -310,6 +350,22 @@ export default function StoryStudio() {
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Generate All button - show when no clips are generating */}
+          {stats.running === 0 && stats.done < stats.total && (
+            <Button
+              size="sm"
+              className="h-8 gap-1.5 text-xs"
+              onClick={generateAllScenes}
+              disabled={isGeneratingAll}
+            >
+              {isGeneratingAll ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Sparkles className="h-3.5 w-3.5" />
+              )}
+              Generate All
+            </Button>
+          )}
           {stats.running > 0 && (
             <Badge variant="default" className="text-[10px] bg-primary/80 animate-pulse">
               <Loader2 className="h-3 w-3 mr-1 animate-spin" />
