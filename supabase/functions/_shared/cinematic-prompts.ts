@@ -230,15 +230,11 @@ export function buildCinematicPrompt(
   sections.push("Allow for natural pauses and subtle secondary movements.");
   sections.push("Actions have weight, momentum, and follow-through.");
   
-  // Quality directives - REALISTIC CAPTURE FRAMING (film-first, not CGI-first)
-  // Note: Removed "clean edges, sharp details, broadcast-quality" which activate CGI/game priors
-  sections.push("\n--- QUALITY STANDARDS ---");
-  sections.push("MOTION: Natural motion blur with lifelike physics. 24fps cinematic cadence with realistic momentum.");
-  sections.push("ANATOMY: Consistent human proportions throughout. Five fingers per hand. Natural body mechanics.");
-  sections.push("FACES: Expressive and engaged. Natural eye movements. Subtle authentic micro-expressions.");
-  sections.push("TEMPORAL: Consistent velocity and acceleration. Movement flow with natural imperfection.");
-  sections.push("SPATIAL: Coherent 3D space. Correct perspective. Objects maintain relative positions throughout.");
-  sections.push("LIGHTING: Practical light sources. Exposure can vary. Shadows allowed to crush.");
+  // Quality directives REMOVED (v2.0)
+  // The previous "Quality Standards" block was identified as a CGI/game prior trigger.
+  // Terms like "clean edges", "sharp details", "consistent proportions" push models toward
+  // rendered/artificial looks. Video models already know cinematography - we don't need
+  // to micromanage quality. Removed to restore creative freedom.
   
   // Continuity directive (critical for chained generation)
   if (!isFirstClip) {

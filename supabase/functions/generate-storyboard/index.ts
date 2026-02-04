@@ -104,9 +104,10 @@ interface GeneratedStoryboard {
   };
 }
 
-// === ACTION VERB ENFORCEMENT ===
-// These verbs create "static tableaux" - Sora interprets them as "hold this pose"
-const BANNED_VERBS = [
+// === ACTION VERB PREFERENCES (SOFT SCORING, NOT HARD REJECTION) ===
+// These verbs tend to create "static tableaux" - Sora interprets them as "hold this pose"
+// SOFT MODE: We warn about these but don't reject - atmospheric beats need breathing room
+const SOFT_WARN_VERBS = [
   "stand", "stands", "standing",
   "gaze", "gazes", "gazing",
   "look", "looks", "looking",
@@ -126,8 +127,9 @@ const BANNED_VERBS = [
   "pause", "pauses", "pausing",
 ];
 
-// These verbs FORCE physical action - at least one must appear in first 20 words
-const REQUIRED_ACTION_VERBS = [
+// These verbs ENCOURAGE physical action - prefer at least one in first 20 words
+// SOFT MODE: Score bonus for including these, not a hard requirement
+const PREFERRED_ACTION_VERBS = [
   "run", "runs", "running", "sprint", "sprints", "sprinting",
   "dodge", "dodges", "dodging", "grab", "grabs", "grabbing",
   "slam", "slams", "slamming", "leap", "leaps", "leaping",
@@ -154,6 +156,10 @@ const REQUIRED_ACTION_VERBS = [
   "discover", "discovers", "discovering", // allowed: active reveal
   "react", "reacts", "reacting", "respond", "responds", "responding",
 ];
+
+// Legacy exports for backwards compatibility
+const BANNED_VERBS = SOFT_WARN_VERBS;
+const REQUIRED_ACTION_VERBS = PREFERRED_ACTION_VERBS;
 
 const STORY_TYPE_GUIDANCE: Record<string, string> = {
   short_story: `Create a narrative arc with beginning, middle, and end. 
@@ -202,28 +208,29 @@ Choose roles based on narrative position and purpose. A typical 6-scene story us
 hook → problem → story_a → reset → story_b → cta
 
 ═══════════════════════════════════════════════════════════════════════════════
-🎬 ACTION BEAT SCHEMA (CRITICAL - READ CAREFULLY)
+🎬 ACTION GUIDANCE (SOFT PREFERENCES, NOT HARD RULES)
 ═══════════════════════════════════════════════════════════════════════════════
 
-Every scene MUST contain PHYSICAL ACTION, not contemplation.
-Static scenes will be REJECTED. Video AI interprets static verbs as "freeze".
+Every scene SHOULD contain PHYSICAL ACTION for best results.
+However, atmospheric and contemplative beats ARE ALLOWED when narratively justified.
 
-For each scene, you MUST provide a 3-BEAT ACTION STRUCTURE:
+For high-action scenes, you SHOULD provide a 3-BEAT ACTION STRUCTURE:
 1. beat_trigger: "What external event forces action" (storm hits, door opens, branch snaps)
 2. beat_action: "Physical verb the character performs" (dives, grabs, sprints, leaps)
 3. beat_result: "Observable end-state" (lands behind rock, holds object, enters new space)
 
-BANNED VERBS (scenes will be rejected if these are the main action):
-stand, stands, gaze, gazes, look, looks, observe, hesitate, wonder, feel, realize,
-contemplate, notice, see, watch, stare, hold, holds, sit, sits, wait, pause
+SOFT WARNINGS (these CAN work but often produce static output):
+stand, gaze, look, observe, hesitate, wonder, feel, realize,
+contemplate, notice, see, watch, stare, hold, sit, wait, pause
 
-REQUIRED ACTION VERBS (main action MUST use one of these):
+PREFERRED ACTION VERBS (use these for dynamic scenes):
 run, sprint, dodge, grab, slam, leap, stumble, turn, spin, rip, collide, dive,
 tackle, climb, yank, recoil, throw, catch, push, pull, fall, jump, reach, step,
 duck, roll, strike, block, tear, smash, swing, crash, burst, scramble, surge,
 sweep, snap, whip, lunge, twist, slide, plunge, vault, hurl, drop, lift
 
-THE ACTION MUST APPEAR IN THE FIRST 20 WORDS OF THE PROMPT.
+NOTE: Atmospheric beats (character gazes at horizon) ARE VALID for pacing.
+The goal is DYNAMIC STORIES, not constant action. Use soft verbs intentionally.
 
 Example of GOOD scene:
 prompt: "The Martian DIVES for cover as the dust storm CRASHES over the ridge, scrambling on hands and knees toward a rock formation"

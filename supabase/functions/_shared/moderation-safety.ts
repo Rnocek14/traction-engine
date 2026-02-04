@@ -209,30 +209,70 @@ export function sanitizeForModeration(
 }
 
 /**
- * Get recommended sanitization level for a provider
+ * Story mode types for sanitization decisions
+ */
+export type StoryMode = "default" | "myth" | "film" | "spectacle" | "brutality";
+
+/**
+ * Mode/Provider Sanitization Matrix
+ * 
+ * This is the SINGLE SOURCE OF TRUTH for sanitization decisions.
+ * 
+ * Runway: ALWAYS strict (provider requirement, non-negotiable)
+ * Sora/Luma + Default/Film: soft (cinematic safety)
+ * Sora/Luma + Myth: soft (need symbolic language)
+ * Sora/Luma + Spectacle/Brutality: OFF (trust creative intent)
+ */
+const SANITIZATION_MATRIX: Record<VideoProvider, Record<StoryMode, SanitizationLevel>> = {
+  runway: {
+    default: "strict",
+    myth: "strict",
+    film: "strict",
+    spectacle: "strict",
+    brutality: "strict", // Runway is ALWAYS strict
+  },
+  sora: {
+    default: "soft",
+    myth: "soft",
+    film: "soft",
+    spectacle: "off", // Dragons, battles, action - trust the creative
+    brutality: "off", // Maximum creative freedom
+  },
+  luma: {
+    default: "soft",
+    myth: "soft",
+    film: "soft",
+    spectacle: "off",
+    brutality: "off",
+  },
+};
+
+/**
+ * Get recommended sanitization level for a provider/mode combination
+ * 
+ * This replaces the old provider-only function with mode awareness.
  */
 export function getProviderSanitizationLevel(
   provider: VideoProvider,
-  brutalityMode: boolean = false
+  brutalityMode: boolean = false,
+  storyMode: StoryMode = "default"
 ): SanitizationLevel {
-  // CRITICAL: Runway ALWAYS strict - non-negotiable for provider stability
-  if (provider === "runway") {
-    return "strict";
-  }
+  // Brutality mode flag overrides storyMode for backwards compatibility
+  const effectiveMode = brutalityMode ? "brutality" : storyMode;
   
-  // Brutality mode reduces sanitization but never to "off"
-  if (brutalityMode) {
-    return "soft";
-  }
-  
-  switch (provider) {
-    case "luma":
-      return "soft";
-    case "sora":
-      return "soft";
-    default:
-      return "soft";
-  }
+  return SANITIZATION_MATRIX[provider][effectiveMode];
+}
+
+/**
+ * Check if mode allows action/violence language
+ * Use this to decide whether to apply weapon/combat rewrites
+ */
+export function modeAllowsActionLanguage(
+  provider: VideoProvider,
+  storyMode: StoryMode
+): boolean {
+  const level = SANITIZATION_MATRIX[provider][storyMode];
+  return level === "off";
 }
 
 /**
