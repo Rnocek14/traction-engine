@@ -1,284 +1,192 @@
 
-# Making Myth Mode Videos More Compelling
+# Simplifying Myth Mode Prompts: "Less is More"
 
-## Current State Analysis
+## The Core Problem
 
-After deep-diving into "The Dance of Vanished Fortune" and the entire Myth Mode pipeline, I've identified several categories of improvements across the **visual**, **motion**, **narrative structure**, and **audio** dimensions.
+We're sending **1,400+ character prompts with 16+ directive blocks** to Sora, but research shows:
+- **The first 500 characters carry 80% of the weight** — Sora prioritizes the beginning
+- After ~1,000 characters, models experience **"semantic drift"** and start forgetting earlier instructions
+- We're giving equal weight to everything, so **nothing stands out**
 
-### What's Working
-- Beat-specific camera movements (we added this)
-- Transformation hints (visible change requirements)
-- Anti-boring verb requirements in storyboard generation
-- Silhouette aesthetic with parchment palette
+Meanwhile, the actual "Tale of Three Brothers" that inspired Myth Mode used an **extremely focused aesthetic**:
+- Silhouettes expressing emotion through body pose only
+- "Pulsing light" — the single most distinctive visual element
+- Layers of paper with independent motion (parallax)
+- Naive, graphical, simple — NOT instruction-dense
 
-### What's Missing or Weak
-
-## Problem Areas & Solutions
-
-### 1. Visual Depth: Scenes Feel Flat
-
-**Problem**: Current prompts describe action but lack visual layering. The silhouette is against a static background.
-
-**Solution**: Add **Parallax Depth Layers** to Myth Mode prompts
+## Current Prompt Structure (Too Complex)
 
 ```text
-[LAYERS: 
-  FOREGROUND: close symbolic element (coins, leaves, flames) drifting past camera
+[STYLE: ...] 
+[PALETTE: ...]
+REALM: ...
+[LAYERS: ...]
+[LIGHT: ...]
+[CAMERA: ...]
+[TEMPO: ...]
+SILHOUETTE: ...
+SYMBOL: ...
+SCENE: ...
+[DELTA: ...]
+[ENVIRONMENT: ...]
+[SYMBOL STATE: ...]
+[MOTION: ...]
+[ATMOSPHERE: ...]
+[AVOID: ...]
+```
+
+That's **16 competing directive blocks**. Sora can't prioritize when everything screams "important."
+
+## The Fix: Radical Simplification
+
+### New "Essence First" Prompt Structure
+
+Put the **single most important visual idea** in the first 150 characters. Everything else is supporting context.
+
+```text
+SINGLE SHOT: [One vivid sentence describing the action]
+
+STYLE: Shadow-puppet silhouette, parchment texture, pulsing warm light
+
+[Then 2-3 supporting details if needed]
+```
+
+### What to Keep (High-Impact)
+
+| Directive | Why It Matters |
+|-----------|----------------|
+| **The Scene Action** | This IS the video — what happens |
+| **STYLE anchor** | "Shadow-puppet silhouette" is the aesthetic |
+| **Light behavior** | "Pulsing warm light" = the Three Brothers magic |
+| **One motion verb** | A single physical action the figure performs |
+
+### What to Consolidate or Remove
+
+| Current Block | Problem | Solution |
+|---------------|---------|----------|
+| `[LAYERS]` + `[ATMOSPHERE]` | Competing parallax instructions | Merge into STYLE |
+| `[TEMPO]` + `[MOTION]` | Both describe pacing | Pick one, remove other |
+| `[DELTA]` + `[SYMBOL STATE]` | Redundant with scene description | Fold into action line |
+| `[CAMERA]` | Often ignored by model | Move to end or remove |
+| `[AVOID]` | 50+ characters of negatives | Keep minimal or drop |
+
+## Proposed New Prompt Builder
+
+### Phase 1: The "Essence First" Format
+
+```typescript
+export function buildMythPromptSimplified(
+  scene: MythScene,
+  storyboard: Partial<MythStoryboard>
+): string {
+  // 1. THE ACTION (first 200 chars — highest priority)
+  const action = buildActionLine(scene, storyboard);
+  
+  // 2. STYLE ANCHOR (next 100 chars)
+  const style = "STYLE: Shadow-puppet silhouette, parchment texture, pulsing warm light, high contrast";
+  
+  // 3. ONE MOTION DIRECTIVE (optional, 50 chars)
+  const motion = getSimpleMotion(scene.beat_type);
+  
+  // 4. AVOID (minimal, end of prompt)
+  const avoid = "No faces, no 3D, no modern elements";
+  
+  return `${action}\n\n${style}\n\n${motion}\n\n${avoid}`;
+}
+
+function buildActionLine(scene: MythScene, storyboard: Partial<MythStoryboard>): string {
+  const character = storyboard.character?.archetype || "figure";
+  const symbol = storyboard.character?.symbol || "";
+  
+  // Combine scene action + transformation into ONE vivid sentence
+  // Example: "A financier lunges for scattering coins as golden light fades to shadow"
+  return `${character} ${scene.silhouette_action}. ${scene.start_state} transforms to ${scene.end_state}.`;
+}
+```
+
+### Example: Old vs New
+
+**Old (1,400 chars):**
+```text
+[STYLE: flat silhouette animation, shadow-puppet, parchment texture, 2D cutout, high contrast, storybook illustration]
+[PALETTE: amber, charcoal, parchment, gold]
+REALM: ancient market city, parchment texture
+[LAYERS:
+  FOREGROUND: scattered coins drift slowly past camera
   MIDGROUND: silhouette figure performing action
-  BACKGROUND: environment (realm) with slow independent motion (clouds drift, market stalls recede)]
+  BACKGROUND: ancient market city with slow independent motion...]
+[LIGHT: light gradually intensifies from darkness...]
+[CAMERA: slow push in from wide to medium...]
+[TEMPO: Measured and slow. Each action has weight...]
+SILHOUETTE: financier — enters center stage, raising pouch high...
+SYMBOL: pouch of coins
+SCENE: The financier enters, his pouch gleaming...
+[DELTA: Start with "figure enters, pouch full" → End with "figure stands, pouch held aloft"]
+[ENVIRONMENT: market stalls BUZZ around; light SHIFTS...]
+[SYMBOL STATE: Scene 0: Pouch full, coins glinting...]
+[MOTION: figure emerges from shadow, first movement reveals form...]
+[ATMOSPHERE: parchment texture subtly crinkles and shifts]
+[AVOID: photorealistic, detailed face, eyes, 3D, modern elements, static poses, frozen figures]
 ```
 
-**Why This Works**: Even "Tale of the Three Brothers" animation has distinct depth planes moving at different speeds. This creates visual richness without breaking the 2D aesthetic.
-
----
-
-### 2. Light Dynamics: Scenes Look Static
-
-**Problem**: Current palette is static (amber, charcoal, gold). No light movement within scenes.
-
-**Solution**: Add **Dynamic Light Events** per beat type
-
-```typescript
-const LIGHT_DYNAMICS = {
-  introduction: "light gradually intensifies, silhouette becomes more defined",
-  journey: "moving light source (sun/moon travel) casts shifting shadows",
-  trial: "light flickers, shadows grow, contrast increases dramatically",
-  consequence: "light fades, silhouette dissolves into darkness at edges",
-  moral: "soft golden light breaks through, peace settles",
-};
-```
-
-**Why This Works**: Light change = temporal change. Even in silhouette, shifting light/shadow creates movement.
-
----
-
-### 3. Environmental Animation: Background Is Dead
-
-**Problem**: `symbolic_elements` exist but don't have motion verbs. "Distant horizon" doesn't move.
-
-**Solution**: Require **Animated Environment Elements** with their own motion verbs
-
-Change from:
-```json
-"symbolic_elements": ["bag of coins swings", "market stalls bustling"]
-```
-
-To:
-```json
-"environment_motion": [
-  "market stalls FADE into obscurity as focus narrows",
-  "coins RAIN DOWN from above, then SCATTER across ground"
-]
-```
-
-**Implementation**: Update `buildMythStoryboardPrompt` to require motion verbs for environment, not just listing elements.
-
----
-
-### 4. Transformation Clarity: Before/After Not Defined
-
-**Problem**: `TRANSFORMATION` hints are generic ("darkness to light"). The model doesn't know what SPECIFICALLY changes.
-
-**Solution**: Add explicit **Visual Delta** fields to scenes
-
-```typescript
-interface MythScene {
-  // ... existing fields
-  start_state: string;  // "silhouette stands tall, bag full"
-  end_state: string;    // "silhouette hunched, bag deflated, dust in air"
-  key_transformation: string; // "full → empty"
-}
-```
-
-**Implementation**: Update storyboard prompt to require A→B visual delta per scene, then inject into prompt:
-
+**New (~400 chars):**
 ```text
-[DELTA: Start with "bag full, figure upright" → End with "bag deflated, figure hunched"]
+A financier silhouette emerges from shadow, raising a pouch of coins high as golden light intensifies. Market stalls hum in background layers. He stands triumphant, coins gleaming — then begins to lower his arm as the first coin slips free.
+
+STYLE: Shadow-puppet silhouette, parchment paper layers, warm pulsing light, high contrast black and gold
+
+No faces, no 3D, no modern elements.
 ```
 
----
+## Technical Changes
 
-### 5. Motion Variety: Same Motion Anchor Every Scene
+### File: `supabase/functions/_shared/myth-continuity.ts`
 
-**Problem**: Each beat type has ONE motion anchor. 5-scene story = 5 nearly identical motion blocks.
+1. Create new `buildMythPromptSimplified()` function
+2. Keep old `buildMythPrompt()` for A/B testing comparison
+3. Add flag in `create-story-myth-mode` to choose version
 
-**Solution**: Create **Motion Anchor Pools** with rotation
+### File: `supabase/functions/continue-story-myth-mode/index.ts`
 
-```typescript
-const TRIAL_MOTION_POOL = [
-  "frantic grasping, fingers close on nothing, repeat with increasing desperation",
-  "catches one object successfully, then loses grip on five more",
-  "lunges left, misses; lunges right, misses; collapses in center",
-  "arms windmill wildly, body twists, finally falls backward",
-];
-```
+1. Use simplified prompt builder by default
+2. Log prompt length to verify reduction
 
-**Implementation**: Rotate through pool based on scene index to prevent same motion in consecutive stories.
+### Testing Strategy
 
----
-
-### 6. Particle/Atmosphere Layer Missing
-
-**Problem**: Film Mode has "dust particles catching light" realism hints. Myth Mode has no equivalent.
-
-**Solution**: Add **Mythic Atmosphere Elements**
-
-```typescript
-const MYTH_ATMOSPHERE_POOL = [
-  "golden dust motes drift slowly through frame",
-  "ink wash effect bleeds at frame edges",
-  "parchment texture subtly crinkles/moves",
-  "shadow puppets of other figures visible at edges",
-  "candlelight flicker affects entire scene brightness",
-];
-```
-
-**Implementation**: Inject 1-2 atmosphere hints per scene, rotating to prevent repetition.
-
----
-
-### 7. Narrative Urgency: Pacing Too Even
-
-**Problem**: All scenes feel the same tempo. No "fast panic" vs "slow realization" contrast.
-
-**Solution**: Add **Temporal Pacing Directives**
-
-```typescript
-const BEAT_PACING = {
-  introduction: "[TEMPO: Measured and slow. Each action has weight. Hold on key moments.]",
-  journey: "[TEMPO: Steady forward momentum. Progress visible frame-to-frame.]",
-  trial: "[TEMPO: Accelerating panic. Actions crowd together. Desperation builds.]",
-  consequence: "[TEMPO: Heavy stillness. Long pauses. Weight of loss.]",
-  moral: "[TEMPO: Slow exhale. Final gesture drawn out. Peace settles.]",
-};
-```
-
----
-
-### 8. Audio/Visual Sync Opportunity
-
-**Problem**: Narration and visuals are generated independently. No sync points.
-
-**Solution (Future)**: Add **Beat Markers** for narration sync
-
-```typescript
-interface MythScene {
-  narration_sync_point?: string; // "on 'empty' - show bag deflate"
-}
-```
-
-This is more complex but would elevate the final result significantly.
-
----
-
-### 9. Silhouette Pose Variety
-
-**Problem**: "Figure stands" in various contexts. Same silhouette shape.
-
-**Solution**: Require **Distinct Silhouette Shapes** per scene
-
-```text
-SILHOUETTE SHAPES (no two adjacent scenes may share shape):
-- Triumphant: arms raised, head up, expanded
-- Reaching: one arm extended, body leaning
-- Collapsed: hunched, head down, contracted
-- Walking: mid-stride, dynamic profile
-- Kneeling: low to ground, supplicant pose
-```
-
-**Implementation**: Validate in storyboard generation that adjacent scenes have different pose categories.
-
----
-
-### 10. Symbol Transformation Arc
-
-**Problem**: The symbol (bag of coins) is mentioned but doesn't have a clear transformation arc across all scenes.
-
-**Solution**: Define **Symbol Journey** in storyboard
-
-```json
-{
-  "symbol": "bag of coins",
-  "symbol_arc": [
-    "Scene 0: Bag full, jingles with promise",
-    "Scene 1: Bag grows, coins multiply",
-    "Scene 2: Bag tears, coins scatter",
-    "Scene 3: Bag deflated, dust emerges",
-    "Scene 4: Bag becomes branch, life emerges"
-  ]
-}
-```
-
----
-
-## Implementation Priority
-
-### Phase 1: Quick Wins (High Impact, Low Effort)
-| Change | File | Impact |
-|--------|------|--------|
-| Light dynamics per beat | `myth-continuity.ts` | Scenes feel alive |
-| Motion anchor pools (rotation) | `myth-continuity.ts` | No repetition |
-| Atmosphere layer injection | `myth-continuity.ts` | Visual richness |
-| Tempo/pacing directives | `myth-continuity.ts` | Variety in energy |
-
-### Phase 2: Storyboard Enrichment (Medium Effort)
-| Change | File | Impact |
-|--------|------|--------|
-| Require `start_state`/`end_state` | `buildMythStoryboardPrompt` | Clear deltas |
-| Environment motion verbs | Storyboard prompt | Background moves |
-| Symbol transformation arc | Storyboard prompt | Narrative coherence |
-| Silhouette pose variety check | `create-story-myth-mode` | Visual variety |
-
-### Phase 3: Depth System (Higher Effort)
-| Change | File | Impact |
-|--------|------|--------|
-| Parallax layer injection | `buildMythPrompt` | Depth perception |
-| Foreground element pool | `myth-continuity.ts` | Compositional richness |
-
----
-
-## Technical Implementation Notes
-
-### `myth-continuity.ts` Changes
-
-1. **New constants**: `LIGHT_DYNAMICS`, `MYTH_ATMOSPHERE_POOL`, `BEAT_PACING`, `MOTION_ANCHOR_POOLS`
-
-2. **Enhanced `buildMythPrompt`**:
-   - Add light dynamics injection
-   - Add atmosphere layer (rotated by scene index)
-   - Add tempo directive
-   - Add parallax layer block
-   - Use motion pool rotation instead of single anchor
-
-3. **Enhanced `buildMythStoryboardPrompt`**:
-   - Require `start_state` and `end_state` for each scene
-   - Require `environment_motion` with verbs
-   - Define `symbol_arc` across scenes
-   - Validate silhouette pose variety
-
-### `create-story-myth-mode` Changes
-
-1. **Validation**: Check symbol arc exists
-2. **Fallbacks**: Generate start/end states if missing
-3. **Variety check**: Ensure adjacent silhouette poses differ
-
-### `continue-story-myth-mode` Changes
-
-1. **Pass scene index** to motion pool rotation
-2. **Include symbol arc state** in each scene prompt
-
----
+1. Create new Myth Mode story with simplified prompts
+2. Compare side-by-side with existing "Shadow of Vanishing Wealth"
+3. Metrics to evaluate:
+   - Does light actually pulse/change?
+   - Are silhouette poses distinct?
+   - Is there visible parallax?
+   - Does the scene have transformation (start ≠ end)?
 
 ## Expected Outcome
 
-After these changes, a Myth Mode video will have:
-- Foreground elements drifting past camera
-- Background with its own subtle motion
-- Light that shifts within each scene
-- Distinct energy/tempo per beat type
-- Clear start→end visual transformation
-- Symbol that evolves across the story
-- No repeated motion patterns between scenes
-- Atmospheric particles/effects for texture
+| Metric | Before | After |
+|--------|--------|-------|
+| Prompt length | 1,400 chars | ~400 chars |
+| Directive blocks | 16 | 3-4 |
+| First 500 chars | Fragmented | Complete action + style |
+| Model focus | Scattered | Unified on action + aesthetic |
 
-This transforms "a series of storybook illustrations" into "an animated shadow-puppet film" — which is the true aspiration of Myth Mode.
+## The "Tale of Three Brothers" Lesson
+
+Ben Hibon (the director) said the magic was:
+> "Expressing everything with hands, heads, and body positions... pulsing light... the quality and texture of the canvas"
+
+Three things. Not sixteen. We need to **trust the model** to interpret a vivid scene description rather than micromanaging every technical parameter.
+
+---
+
+## Summary
+
+**Problem**: We over-engineered the prompts. 16 directive blocks = nothing stands out.
+
+**Solution**: Radically simplify to 3-4 elements:
+1. One vivid action sentence (first 200 chars)
+2. Core style anchor (shadow-puppet, pulsing light)
+3. One motion/transformation hint
+4. Minimal negative constraints
+
+**Inspiration**: The actual Three Brothers animation was simple, naïve, graphical — and magical precisely because of its constraints, not its complexity.
