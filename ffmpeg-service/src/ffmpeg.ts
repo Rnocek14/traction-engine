@@ -10,6 +10,8 @@ export interface FFmpegServiceRequest {
     requested_seconds: number;
     generated_seconds: number;
     trim_seconds: number;
+    /** If true, freeze last frame to reach requested_seconds (for audio-master mode) */
+    freeze_extend?: boolean;
   }>;
   voiceover_url?: string;
   output: {
@@ -65,39 +67,59 @@ export function buildFiltergraph(
   const isCut = req.transition.type === "cut";
   const t = isCut ? 0 : req.transition.duration;
 
-  const trims = req.clips.map((c) => Math.max(0.05, Number(c.trim_seconds)));
+  // For each clip: effective duration for timeline purposes
+  // If freeze_extend, we use requested_seconds (narration); otherwise trim_seconds (clamped)
+  const effectiveDurations = req.clips.map((c) => {
+    if (c.freeze_extend && c.requested_seconds > c.generated_seconds) {
+      return Math.max(0.05, Number(c.requested_seconds));
+    }
+    return Math.max(0.05, Number(c.trim_seconds));
+  });
 
-  // Video xfade offsets
+  // Video xfade offsets based on effective durations
   const offsets: number[] = [];
   let vSum = 0;
-  for (let i = 0; i < trims.length - 1; i++) {
-    vSum += trims[i];
+  for (let i = 0; i < effectiveDurations.length - 1; i++) {
+    vSum += effectiveDurations[i];
     offsets.push(Math.max(0, vSum - (i + 1) * t));
   }
 
   // Audio start times
   const starts: number[] = [];
   let aSum = 0;
-  for (let i = 0; i < trims.length; i++) {
+  for (let i = 0; i < effectiveDurations.length; i++) {
     if (i === 0) starts.push(0);
     else {
-      aSum += trims[i - 1];
+      aSum += effectiveDurations[i - 1];
       starts.push(Math.max(0, aSum - i * t));
     }
   }
 
   const filterParts: string[] = [];
 
-  // Video: normalize + trim each clip
+  // Video: normalize + trim (+ freeze-frame extend if needed)
   for (let i = 0; i < req.clips.length; i++) {
-    filterParts.push(
+    const clip = req.clips[i];
+    const trimDur = Math.max(0.05, Number(clip.trim_seconds));
+    const effectiveDur = effectiveDurations[i];
+    const needsFreeze = clip.freeze_extend && effectiveDur > trimDur;
+    const freezePad = needsFreeze ? effectiveDur - trimDur : 0;
+
+    let videoFilter =
       `[${i}:v]` +
-        `scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
-        `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,` +
-        `fps=${fps},setsar=1,format=yuv420p,` +
-        `trim=0:${trims[i].toFixed(3)},setpts=PTS-STARTPTS` +
-        `[v${i}]`
-    );
+      `scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
+      `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,` +
+      `fps=${fps},setsar=1,format=yuv420p,` +
+      `trim=0:${trimDur.toFixed(3)},setpts=PTS-STARTPTS`;
+
+    // Freeze last frame if narration is longer than clip
+    if (needsFreeze && freezePad > 0.01) {
+      videoFilter += `,tpad=stop_mode=clone:stop_duration=${freezePad.toFixed(3)}`;
+      console.log(`Clip ${i}: freezing last frame for ${freezePad.toFixed(2)}s (requested=${clip.requested_seconds}s, generated=${clip.generated_seconds}s)`);
+    }
+
+    videoFilter += `[v${i}]`;
+    filterParts.push(videoFilter);
   }
 
   // Video: chain clips together
@@ -115,16 +137,19 @@ export function buildFiltergraph(
     }
   }
 
-  // Audio: place each clip audio on timeline
+  // Audio: place each clip audio on timeline (using effective durations)
   const audioLabels: string[] = [];
   for (let i = 0; i < req.clips.length; i++) {
     const startMs = Math.round(starts[i] * 1000);
-    const trimDur = trims[i].toFixed(3);
+    const effectiveDur = effectiveDurations[i].toFixed(3);
 
     if (clipHasAudio[i]) {
+      // For clips with audio: trim to effective duration (may include silence during freeze)
+      const trimDur = Math.max(0.05, Number(req.clips[i].trim_seconds)).toFixed(3);
       filterParts.push(
         `[${i}:a]aformat=sample_rates=48000:channel_layouts=stereo,` +
           `atrim=0:${trimDur},asetpts=PTS-STARTPTS,` +
+          `apad=whole_dur=${effectiveDur},` +
           `adelay=${startMs}|${startMs}` +
           `[a${i}]`
       );
@@ -132,7 +157,7 @@ export function buildFiltergraph(
       filterParts.push(
         `anullsrc=r=48000:cl=stereo,` +
           `aformat=sample_rates=48000:channel_layouts=stereo,` +
-          `atrim=0:${trimDur},asetpts=PTS-STARTPTS,` +
+          `atrim=0:${effectiveDur},asetpts=PTS-STARTPTS,` +
           `adelay=${startMs}|${startMs}` +
           `[a${i}]`
       );
@@ -146,7 +171,7 @@ export function buildFiltergraph(
       `volume=${req.mix.video_audio_gain_db}dB,alimiter=limit=0.98[vid_a]`
   );
 
-  const totalDuration = trims.reduce((sum, d) => sum + d, 0) - (trims.length - 1) * t;
+  const totalDuration = effectiveDurations.reduce((sum, d) => sum + d, 0) - (effectiveDurations.length - 1) * t;
 
   // Voiceover handling
   if (req.voiceover_url) {

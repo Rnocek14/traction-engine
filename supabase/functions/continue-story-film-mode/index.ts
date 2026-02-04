@@ -196,13 +196,23 @@ Deno.serve(async (req) => {
         scriptRunId = newScript.id;
       }
 
-      // Create video job with minimal metadata
+      // Unset previous primary for this scene (race-safe: single request flow)
+      const sceneId = nextScene.id || `scene_${nextScene.index}`;
+      await supabase
+        .from("video_jobs")
+        .update({ is_primary: false })
+        .eq("story_job_id", story.id)
+        .eq("scene_id", sceneId);
+
+      // Create video job with scene linkage + primary selection
       const { data: job, error: jobError } = await supabase
         .from("video_jobs")
         .insert({
           script_run_id: scriptRunId,
           story_job_id: story.id,
           sequence_index: nextScene.index,
+          scene_id: sceneId,
+          is_primary: true,
           provider: "sora",
           status: "queued",
           original_prompt: nextScene.subject_action,
