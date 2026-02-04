@@ -1,238 +1,284 @@
 
-
-# Story Generation UX Simplification Plan
+# Making Myth Mode Videos More Compelling
 
 ## Current State Analysis
 
-### What Exists Today
+After deep-diving into "The Dance of Vanished Fortune" and the entire Myth Mode pipeline, I've identified several categories of improvements across the **visual**, **motion**, **narrative structure**, and **audio** dimensions.
 
-The `/studio/lab` page has **4 tabs** at the top level:
-1. **Generate** - Single video generation with prompt/engine selection
-2. **Story** - Story creation and editing (the focus of this audit)
-3. **Compare** - A/B video comparison tool
-4. **Learning** - AI learning inspector
+### What's Working
+- Beat-specific camera movements (we added this)
+- Transformation hints (visible change requirements)
+- Anti-boring verb requirements in storyboard generation
+- Silhouette aesthetic with parchment palette
 
-When you click the **Story tab**, you see:
-- **Left sidebar (272px)**: `StoryLibrary` - list of existing stories with "New" button
-- **Right panel**: `StoryBuilderPanel` - a 2,459-line monolith that handles:
-  - Story concept input and AI generation
-  - Scene list with drag-and-drop editing
-  - Continuity anchors (character/environment settings)
-  - Video preview (multiple systems)
-  - Voiceover/narration panel
-  - Export/assembly controls
+### What's Missing or Weak
 
-### Key UX Problems Identified
+## Problem Areas & Solutions
 
-| Problem | Severity | Description |
-|---------|----------|-------------|
-| **Mode Confusion** | High | 5+ toggles in "Advanced Settings" (Myth Mode, Film Mode, Continuity Mode, Brutality Mode, Soft Continuity) - users don't know which to pick |
-| **Dual Purpose Panel** | High | `StoryBuilderPanel` is both a "creation wizard" AND an "editing interface" - different mental models crammed together |
-| **Duplicated Navigation** | Medium | New Story Studio exists at `/story/:id` but Lab still embeds the full editor |
-| **Hidden Settings** | Medium | Critical settings (Tier, Provider Lock) are buried in collapsibles |
-| **Multiple Previews** | Medium | 3 different preview components: `StoryVideoPlayer`, `StorySyncPreview`, and inline clip previews |
-| **Generator Selection Invisible** | Medium | Provider routing is automatic via `getProviderForRoleWithContext()` - no per-scene override in creation flow |
+### 1. Visual Depth: Scenes Feel Flat
 
-### What Already Works Well
+**Problem**: Current prompts describe action but lack visual layering. The silhouette is against a static background.
 
-A dedicated `StoryStudio` page exists at `/story/:storyId` with:
-- Clean 3-column layout (Scene List | Preview | Inspector)
-- Per-scene provider override capability
-- Primary clip selection
-- Real-time status updates
-
-The problem is: **the Lab's "Story" tab still tries to do everything** instead of just being a creation wizard that funnels into Story Studio.
-
----
-
-## Proposed Solution: Minimal Generation Wizard
-
-### Goal
-
-Transform the Lab's Story tab into a **simple "Create Story" wizard** with 2-3 steps, then immediately navigate to `/story/:id` for editing.
-
-### New User Flow
+**Solution**: Add **Parallax Depth Layers** to Myth Mode prompts
 
 ```text
-/studio/lab (Story tab)
-    |
-    v
-+---------------------------+
-|     Create Story          |
-|                           |
-|  [Concept textarea]       |
-|  "A lonely astronaut..."  |
-|                           |
-|  Story Type: [Short ▼]    |
-|  Scenes: [5 ▼]            |
-|                           |
-|  [Advanced Settings ▼]    |
-|    - Myth Mode toggle     |
-|    - Film Mode toggle     |
-|    - Tier: Volume/Hero    |
-|                           |
-|  [Build Story] button     |
-+---------------------------+
-    |
-    | (on success)
-    v
-navigate("/story/{newStoryId}")
-    |
-    v
-+---------------------------+
-|     Story Studio          |
-|  (3-column editor)        |
-+---------------------------+
+[LAYERS: 
+  FOREGROUND: close symbolic element (coins, leaves, flames) drifting past camera
+  MIDGROUND: silhouette figure performing action
+  BACKGROUND: environment (realm) with slow independent motion (clouds drift, market stalls recede)]
 ```
+
+**Why This Works**: Even "Tale of the Three Brothers" animation has distinct depth planes moving at different speeds. This creates visual richness without breaking the 2D aesthetic.
 
 ---
 
-## Implementation Plan
+### 2. Light Dynamics: Scenes Look Static
 
-### Phase 1: Quick Wins (1-2 hours)
+**Problem**: Current palette is static (amber, charcoal, gold). No light movement within scenes.
 
-**Goal**: Make the Lab Story tab a pure creation flow, remove duplicate editing
+**Solution**: Add **Dynamic Light Events** per beat type
 
-#### 1.1 Simplify StoryBuilderPanel
-
-Remove from `StoryBuilderPanel.tsx`:
-- Scene editing section (lines ~1844-2000) - this belongs in Story Studio
-- Continuity anchors editor (lines ~1844-1900) - move to Story Studio
-- Full preview section (lines ~2004-2059) - Story Studio has this
-- "Generate Clips" button - generation happens in Story Studio
-
-Keep only:
-- Concept input
-- Story type selector
-- Scene count (add if missing)
-- Collapsed "Advanced Settings" with mode toggles
-- "Build Story" button that navigates to Story Studio
-
-#### 1.2 Update Navigation After Creation
-
-In `StoryBuilderPanel.tsx`, the `generateStory` mutation's `onSuccess` already calls:
 ```typescript
-onStoryCreated?.(data.story_job_id);
+const LIGHT_DYNAMICS = {
+  introduction: "light gradually intensifies, silhouette becomes more defined",
+  journey: "moving light source (sun/moon travel) casts shifting shadows",
+  trial: "light flickers, shadows grow, contrast increases dramatically",
+  consequence: "light fades, silhouette dissolves into darkness at edges",
+  moral: "soft golden light breaks through, peace settles",
+};
 ```
 
-And in `Lab.tsx`, this handler navigates:
+**Why This Works**: Light change = temporal change. Even in silhouette, shifting light/shadow creates movement.
+
+---
+
+### 3. Environmental Animation: Background Is Dead
+
+**Problem**: `symbolic_elements` exist but don't have motion verbs. "Distant horizon" doesn't move.
+
+**Solution**: Require **Animated Environment Elements** with their own motion verbs
+
+Change from:
+```json
+"symbolic_elements": ["bag of coins swings", "market stalls bustling"]
+```
+
+To:
+```json
+"environment_motion": [
+  "market stalls FADE into obscurity as focus narrows",
+  "coins RAIN DOWN from above, then SCATTER across ground"
+]
+```
+
+**Implementation**: Update `buildMythStoryboardPrompt` to require motion verbs for environment, not just listing elements.
+
+---
+
+### 4. Transformation Clarity: Before/After Not Defined
+
+**Problem**: `TRANSFORMATION` hints are generic ("darkness to light"). The model doesn't know what SPECIFICALLY changes.
+
+**Solution**: Add explicit **Visual Delta** fields to scenes
+
 ```typescript
-onStoryCreated={(newStoryId) => navigate(`/story/${newStoryId}`)}
+interface MythScene {
+  // ... existing fields
+  start_state: string;  // "silhouette stands tall, bag full"
+  end_state: string;    // "silhouette hunched, bag deflated, dust in air"
+  key_transformation: string; // "full → empty"
+}
 ```
 
-This flow is correct. The issue is the panel also renders a full editing UI below the creation form. Remove that.
+**Implementation**: Update storyboard prompt to require A→B visual delta per scene, then inject into prompt:
 
-#### 1.3 Rename Lab "Story" Tab
-
-Change the tab label from "Story" to "Create Story" to set expectations:
-```tsx
-<TabsTrigger value="story" className="gap-1.5 text-xs h-7">
-  <Plus className="h-3.5 w-3.5" />
-  Create Story
-</TabsTrigger>
+```text
+[DELTA: Start with "bag full, figure upright" → End with "bag deflated, figure hunched"]
 ```
-
-### Phase 2: UI Polish (1-2 hours)
-
-#### 2.1 Consolidate Mode Selection into Presets
-
-Replace 5 toggles with a single "Style Preset" selector:
-
-| Preset | Description | Under the hood |
-|--------|-------------|----------------|
-| **Standard** | Default multi-provider routing | filmMode=false, mythMode=false |
-| **Cinematic** | Film-first I2V chaining | filmMode=true |
-| **Storybook** | Silhouettes, symbolic | mythMode=true |
-| **Character Focus** | Single provider consistency | characterContinuityMode=true |
-
-This dramatically reduces cognitive load.
-
-#### 2.2 Add Scene Count Selector
-
-Currently missing - users have no control over story length at creation time. Add:
-```tsx
-<Select value={sceneCount} onValueChange={setSceneCount}>
-  <SelectTrigger className="h-8 text-xs w-20">
-    <SelectValue />
-  </SelectTrigger>
-  <SelectContent>
-    {[3, 5, 7, 10].map(n => (
-      <SelectItem key={n} value={String(n)}>{n} scenes</SelectItem>
-    ))}
-  </SelectContent>
-</Select>
-```
-
-#### 2.3 Clear "What Happens Next" Messaging
-
-Add a visual hint below the button:
-```tsx
-<p className="text-[10px] text-muted-foreground text-center flex items-center gap-1 justify-center">
-  <ArrowRight className="h-3 w-3" />
-  Opens Story Studio for editing and generation
-</p>
-```
-
-### Phase 3: Story Studio Improvements (separate scope)
-
-These improvements belong in `/story/:id` rather than the Lab:
-
-1. **Generator Selection Dropdown** - per-scene provider override (already exists in SceneInspector)
-2. **Alternates Gallery** - show all clips for a scene (already exists)
-3. **Sync Quality Indicators** - narration vs clip duration mismatch
-4. **Batch Generate** - generate all scenes with one click
 
 ---
 
-## Files to Modify
+### 5. Motion Variety: Same Motion Anchor Every Scene
 
-### Primary Changes
+**Problem**: Each beat type has ONE motion anchor. 5-scene story = 5 nearly identical motion blocks.
 
-| File | Action | Lines |
-|------|--------|-------|
-| `src/components/lab/StoryBuilderPanel.tsx` | Reduce to creation-only (remove ~1000 lines) | 2459 -> ~800 |
-| `src/pages/Lab.tsx` | Rename tab, simplify Story tab content | ~10 lines |
+**Solution**: Create **Motion Anchor Pools** with rotation
 
-### The Reduced StoryBuilderPanel Should Contain
+```typescript
+const TRIAL_MOTION_POOL = [
+  "frantic grasping, fingers close on nothing, repeat with increasing desperation",
+  "catches one object successfully, then loses grip on five more",
+  "lunges left, misses; lunges right, misses; collapses in center",
+  "arms windmill wildly, body twists, finally falls backward",
+];
+```
 
-1. **Header** - "Create a New Story"
-2. **Concept Input** - Textarea for story idea
-3. **Quick Settings Row**:
-   - Story Type dropdown
-   - Scene Count dropdown  
-   - Tier selector (Volume/Hero)
-4. **Style Preset** - Single selector replacing 5 toggles
-5. **Build Story Button** - Triggers generation and navigation
-
-### What Gets Removed from StoryBuilderPanel
-
-- DnD scene editing (move to Story Studio)
-- Scene role/duration editors (move to Story Studio)
-- Continuity anchors editor (move to Story Studio)
-- StorySyncPreview / StoryVideoPlayer (move to Story Studio)
-- StoryNarrationPanel (move to Story Studio)
-- StoryAnalysisPanel (move to Story Studio)
-- ContinuityMonitor (move to Story Studio)
-- Generate Clips button (move to Story Studio)
-- Assemble/Export controls (move to Story Studio)
+**Implementation**: Rotate through pool based on scene index to prevent same motion in consecutive stories.
 
 ---
 
-## Summary
+### 6. Particle/Atmosphere Layer Missing
 
-The core fix is **separation of concerns**:
+**Problem**: Film Mode has "dust particles catching light" realism hints. Myth Mode has no equivalent.
 
-| Location | Purpose | Features |
-|----------|---------|----------|
-| **Lab > Create Story** | Wizard | Concept, type, presets, "Build" button |
-| **Story Studio** | Editor | Scenes, prompts, providers, preview, export |
+**Solution**: Add **Mythic Atmosphere Elements**
 
-This eliminates the "where am I?" confusion by making each page single-purpose.
+```typescript
+const MYTH_ATMOSPHERE_POOL = [
+  "golden dust motes drift slowly through frame",
+  "ink wash effect bleeds at frame edges",
+  "parchment texture subtly crinkles/moves",
+  "shadow puppets of other figures visible at edges",
+  "candlelight flicker affects entire scene brightness",
+];
+```
 
-### Expected Outcomes
+**Implementation**: Inject 1-2 atmosphere hints per scene, rotating to prevent repetition.
 
-1. **Reduced cognitive load** - 5 toggles become 1 preset selector
-2. **Clear workflow** - Create in Lab, Edit in Studio
-3. **Faster onboarding** - New users see a simple form, not a 2500-line panel
-4. **No feature loss** - All editing capabilities remain in Story Studio
+---
 
+### 7. Narrative Urgency: Pacing Too Even
+
+**Problem**: All scenes feel the same tempo. No "fast panic" vs "slow realization" contrast.
+
+**Solution**: Add **Temporal Pacing Directives**
+
+```typescript
+const BEAT_PACING = {
+  introduction: "[TEMPO: Measured and slow. Each action has weight. Hold on key moments.]",
+  journey: "[TEMPO: Steady forward momentum. Progress visible frame-to-frame.]",
+  trial: "[TEMPO: Accelerating panic. Actions crowd together. Desperation builds.]",
+  consequence: "[TEMPO: Heavy stillness. Long pauses. Weight of loss.]",
+  moral: "[TEMPO: Slow exhale. Final gesture drawn out. Peace settles.]",
+};
+```
+
+---
+
+### 8. Audio/Visual Sync Opportunity
+
+**Problem**: Narration and visuals are generated independently. No sync points.
+
+**Solution (Future)**: Add **Beat Markers** for narration sync
+
+```typescript
+interface MythScene {
+  narration_sync_point?: string; // "on 'empty' - show bag deflate"
+}
+```
+
+This is more complex but would elevate the final result significantly.
+
+---
+
+### 9. Silhouette Pose Variety
+
+**Problem**: "Figure stands" in various contexts. Same silhouette shape.
+
+**Solution**: Require **Distinct Silhouette Shapes** per scene
+
+```text
+SILHOUETTE SHAPES (no two adjacent scenes may share shape):
+- Triumphant: arms raised, head up, expanded
+- Reaching: one arm extended, body leaning
+- Collapsed: hunched, head down, contracted
+- Walking: mid-stride, dynamic profile
+- Kneeling: low to ground, supplicant pose
+```
+
+**Implementation**: Validate in storyboard generation that adjacent scenes have different pose categories.
+
+---
+
+### 10. Symbol Transformation Arc
+
+**Problem**: The symbol (bag of coins) is mentioned but doesn't have a clear transformation arc across all scenes.
+
+**Solution**: Define **Symbol Journey** in storyboard
+
+```json
+{
+  "symbol": "bag of coins",
+  "symbol_arc": [
+    "Scene 0: Bag full, jingles with promise",
+    "Scene 1: Bag grows, coins multiply",
+    "Scene 2: Bag tears, coins scatter",
+    "Scene 3: Bag deflated, dust emerges",
+    "Scene 4: Bag becomes branch, life emerges"
+  ]
+}
+```
+
+---
+
+## Implementation Priority
+
+### Phase 1: Quick Wins (High Impact, Low Effort)
+| Change | File | Impact |
+|--------|------|--------|
+| Light dynamics per beat | `myth-continuity.ts` | Scenes feel alive |
+| Motion anchor pools (rotation) | `myth-continuity.ts` | No repetition |
+| Atmosphere layer injection | `myth-continuity.ts` | Visual richness |
+| Tempo/pacing directives | `myth-continuity.ts` | Variety in energy |
+
+### Phase 2: Storyboard Enrichment (Medium Effort)
+| Change | File | Impact |
+|--------|------|--------|
+| Require `start_state`/`end_state` | `buildMythStoryboardPrompt` | Clear deltas |
+| Environment motion verbs | Storyboard prompt | Background moves |
+| Symbol transformation arc | Storyboard prompt | Narrative coherence |
+| Silhouette pose variety check | `create-story-myth-mode` | Visual variety |
+
+### Phase 3: Depth System (Higher Effort)
+| Change | File | Impact |
+|--------|------|--------|
+| Parallax layer injection | `buildMythPrompt` | Depth perception |
+| Foreground element pool | `myth-continuity.ts` | Compositional richness |
+
+---
+
+## Technical Implementation Notes
+
+### `myth-continuity.ts` Changes
+
+1. **New constants**: `LIGHT_DYNAMICS`, `MYTH_ATMOSPHERE_POOL`, `BEAT_PACING`, `MOTION_ANCHOR_POOLS`
+
+2. **Enhanced `buildMythPrompt`**:
+   - Add light dynamics injection
+   - Add atmosphere layer (rotated by scene index)
+   - Add tempo directive
+   - Add parallax layer block
+   - Use motion pool rotation instead of single anchor
+
+3. **Enhanced `buildMythStoryboardPrompt`**:
+   - Require `start_state` and `end_state` for each scene
+   - Require `environment_motion` with verbs
+   - Define `symbol_arc` across scenes
+   - Validate silhouette pose variety
+
+### `create-story-myth-mode` Changes
+
+1. **Validation**: Check symbol arc exists
+2. **Fallbacks**: Generate start/end states if missing
+3. **Variety check**: Ensure adjacent silhouette poses differ
+
+### `continue-story-myth-mode` Changes
+
+1. **Pass scene index** to motion pool rotation
+2. **Include symbol arc state** in each scene prompt
+
+---
+
+## Expected Outcome
+
+After these changes, a Myth Mode video will have:
+- Foreground elements drifting past camera
+- Background with its own subtle motion
+- Light that shifts within each scene
+- Distinct energy/tempo per beat type
+- Clear start→end visual transformation
+- Symbol that evolves across the story
+- No repeated motion patterns between scenes
+- Atmospheric particles/effects for texture
+
+This transforms "a series of storybook illustrations" into "an animated shadow-puppet film" — which is the true aspiration of Myth Mode.
