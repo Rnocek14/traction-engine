@@ -12,8 +12,9 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
   type MythStoryboard,
   type MythScene,
-  buildMythPromptSimplified,
+  buildMythPromptV2,
   MYTH_STYLE_ANCHORS,
+  LIGHT_BEHAVIOR_V2,
 } from "../_shared/myth-continuity.ts";
 
 const corsHeaders = {
@@ -169,12 +170,12 @@ Deno.serve(async (req) => {
 
       const scene = storyboard.scenes[i] as MythScene;
       
-      // Build the simplified mythic prompt (essence-first ~400 chars vs old ~1400 chars)
-      const mythPrompt = buildMythPromptSimplified(scene, storyboard);
+      // Build V2 prompt with Reiniger technique-based style anchors
+      const mythPrompt = buildMythPromptV2(scene, storyboard);
       
-      console.log(`[myth-mode] Queueing scene ${i}: ${scene.beat_type}`);
-      console.log(`[myth-mode] Prompt length: ${mythPrompt.length} chars`);
-      console.log(`[myth-mode] Prompt: ${mythPrompt}`);
+      console.log(`[myth-mode-v2] Queueing scene ${i}: ${scene.beat_type}`);
+      console.log(`[myth-mode-v2] Prompt length: ${mythPrompt.length} chars`);
+      console.log(`[myth-mode-v2] Prompt: ${mythPrompt}`);
 
       // Myth Mode always uses T2V (no I2V - we want abstraction, not identity)
       // Call queue-video to properly submit to Sora API
@@ -216,7 +217,7 @@ Deno.serve(async (req) => {
             .eq("scene_id", scene.id);
           
           // Set the new job as primary with stable scene linkage
-          // Include enhanced style hints with new Myth Mode features
+          // Include V2 Reiniger-style hints
           await supabase
             .from("video_jobs")
             .update({
@@ -226,14 +227,15 @@ Deno.serve(async (req) => {
               is_primary: true,
               style_hints: JSON.stringify({
                 mode: "myth",
+                prompt_version: "v2_reiniger",
+                technique_style: "lotte_reiniger_cutout",
                 beat_type: scene.beat_type,
                 silhouette: scene.has_silhouette,
                 silhouette_pose: scene.silhouette_pose,
-                style_anchors: MYTH_STYLE_ANCHORS.slice(0, 5),
-                symbol_arc_state: storyboard.symbol_arc?.[i],
+                light_behavior: LIGHT_BEHAVIOR_V2[scene.beat_type],
                 start_state: scene.start_state,
                 end_state: scene.end_state,
-                features: ["parallax_layers", "dynamic_lighting", "atmosphere", "motion_pools"],
+                features: ["articulated_limbs", "paper_layers", "backlit", "frame_by_frame"],
               }),
             })
             .eq("id", jobId);

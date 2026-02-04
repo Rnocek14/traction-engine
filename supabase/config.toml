@@ -80,3 +80,9 @@ verify_jwt = false
 
 [functions.generate-story-voiceover]
 verify_jwt = false
+
+[functions.create-story-myth-mode]
+verify_jwt = false
+
+[functions.continue-story-myth-mode]
+verify_jwt = false
