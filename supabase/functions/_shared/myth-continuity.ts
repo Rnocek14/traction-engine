@@ -671,8 +671,16 @@ export function buildMythPromptSimplified(
   // Build transformation phrase if we have start/end states
   let transformPhrase = "";
   if (scene.start_state && scene.end_state) {
-    // Extract key visual from states (abbreviated for prompt efficiency)
-    transformPhrase = `. From ${scene.start_state.slice(0, 40)} to ${scene.end_state.slice(0, 40)}`;
+    // Smarter truncation: find last space before limit to avoid mid-word cuts
+    const truncateClean = (s: string, max: number) => {
+      if (s.length <= max) return s;
+      const cut = s.slice(0, max);
+      const lastSpace = cut.lastIndexOf(' ');
+      return lastSpace > max * 0.6 ? cut.slice(0, lastSpace) : cut;
+    };
+    const startClean = truncateClean(scene.start_state, 50);
+    const endClean = truncateClean(scene.end_state, 50);
+    transformPhrase = `. From ${startClean} to ${endClean}`;
   }
   
   // Combine into one vivid opening
