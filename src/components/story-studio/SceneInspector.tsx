@@ -52,7 +52,7 @@ interface SceneInspectorProps {
   anchors: ContinuityAnchors;
 }
 
-const AVAILABLE_ROLES: Array<{ value: SceneRole; label: string }> = [
+const AVAILABLE_ROLES: Array<{ value: string; label: string }> = [
   { value: "hook", label: "Hook" },
   { value: "problem", label: "Problem" },
   { value: "story_a", label: "Story A" },
@@ -61,6 +61,12 @@ const AVAILABLE_ROLES: Array<{ value: SceneRole; label: string }> = [
   { value: "cta", label: "CTA" },
   { value: "atmosphere", label: "Atmosphere" },
   { value: "establish", label: "Establish" },
+  // Myth mode beat types
+  { value: "introduction", label: "Introduction" },
+  { value: "journey", label: "Journey" },
+  { value: "trial", label: "Trial" },
+  { value: "consequence", label: "Consequence" },
+  { value: "moral", label: "Moral" },
 ];
 
 const PROVIDERS = ["sora", "runway", "luma"] as const;
@@ -76,7 +82,13 @@ export function SceneInspector({
   storyType,
   anchors,
 }: SceneInspectorProps) {
-  const [localPrompt, setLocalPrompt] = useState(scene.prompt || scene.subject_action || "");
+  // Get prompt text based on story type
+  const promptText = scene.prompt 
+    || scene.subject_action 
+    || scene.visual_description 
+    || (scene as any).silhouette_action
+    || "";
+  const [localPrompt, setLocalPrompt] = useState(promptText);
 
   // Completed alternates
   const alternates = allClips.filter(c => c.status === "done" && c.output_url);
@@ -85,13 +97,16 @@ export function SceneInspector({
   // Provider override (stored in scene settings or inferred)
   const providerOverride = (scene as StoryScene & { provider_override?: string }).provider_override;
 
-  // Sync quality calculation
+  // Sync quality calculation (support both duration_target and duration_seconds)
   const clipDurationS = clip?.settings 
     ? ((clip.settings as { seconds?: number }).seconds || 5) 
     : 5;
-  const narrationDurationS = scene.duration_target || 5;
+  const narrationDurationS = scene.duration_target || scene.duration_seconds || 5;
   const driftS = Math.abs(clipDurationS - narrationDurationS);
   const syncStatus: "good" | "fair" | "poor" = driftS < 1 ? "good" : driftS < 3 ? "fair" : "poor";
+
+  // Get role label - support myth mode beat_type
+  const roleValue = scene.role || (scene as any).beat_type || "story_a";
 
   return (
     <ScrollArea className="h-full">
@@ -127,7 +142,11 @@ export function SceneInspector({
           <Textarea
             value={localPrompt}
             onChange={(e) => setLocalPrompt(e.target.value)}
-            onBlur={() => onUpdateScene({ prompt: localPrompt, subject_action: localPrompt })}
+            onBlur={() => onUpdateScene({ 
+              prompt: localPrompt, 
+              subject_action: localPrompt,
+              visual_description: localPrompt,
+            })}
             placeholder="Describe what happens in this scene..."
             className="min-h-[100px] text-sm"
           />
@@ -139,7 +158,7 @@ export function SceneInspector({
           <div className="space-y-1.5">
             <Label className="text-xs">Role</Label>
             <Select
-              value={scene.role || "story_a"}
+              value={roleValue}
               onValueChange={(v) => onUpdateScene({ role: v as SceneRole })}
             >
               <SelectTrigger className="h-8 text-xs">
@@ -159,8 +178,11 @@ export function SceneInspector({
           <div className="space-y-1.5">
             <Label className="text-xs">Duration</Label>
             <Select
-              value={String(scene.duration_target || 5)}
-              onValueChange={(v) => onUpdateScene({ duration_target: Number(v) })}
+              value={String(scene.duration_target || scene.duration_seconds || 5)}
+              onValueChange={(v) => onUpdateScene({ 
+                duration_target: Number(v), 
+                duration_seconds: Number(v) 
+              })}
             >
               <SelectTrigger className="h-8 text-xs">
                 <SelectValue />
@@ -183,7 +205,7 @@ export function SceneInspector({
             Camera Direction
           </Label>
           <Input
-            value={scene.camera_direction || ""}
+            value={scene.camera_direction || scene.camera_move || ""}
             onChange={(e) => onUpdateScene({ camera_direction: e.target.value })}
             placeholder="slow push-in, handheld, etc."
             className="h-8 text-xs"
