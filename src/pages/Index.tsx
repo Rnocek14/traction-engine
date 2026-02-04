@@ -1,4 +1,4 @@
-import { Header } from "@/components/dashboard/Header";
+import { GlobalNav } from "@/components/GlobalNav";
 import { MetricCard } from "@/components/dashboard/MetricCard";
 import { PipelineVisualizer } from "@/components/dashboard/PipelineVisualizer";
 import { AccountsGrid } from "@/components/dashboard/AccountsGrid";
@@ -17,7 +17,7 @@ import {
 const Index = () => {
   return (
     <div className="min-h-screen bg-background">
-      <Header />
+      <GlobalNav />
       
       <main className="container mx-auto px-6 py-8 space-y-8">
         {/* Hero metrics */}

@@ -11,6 +11,8 @@ import QAReviewInbox from "./pages/QAReviewInbox";
 import Studio from "./pages/Studio";
 import Lab from "./pages/Lab";
 import StoryStudio from "./pages/StoryStudio";
+import Stories from "./pages/Stories";
+import Settings from "./pages/Settings";
 import RoutingAnalytics from "./pages/RoutingAnalytics";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
@@ -25,23 +27,27 @@ const App = () => (
         <Sonner />
         <BrowserRouter>
           <Routes>
+            {/* Core Workspaces */}
             <Route path="/" element={<Index />} />
-            <Route path="/account/:accountId" element={<AccountDetail />} />
+            <Route path="/stories" element={<Stories />} />
+            <Route path="/stories/:storyId" element={<Stories />} />
             <Route path="/scripts" element={<ScriptGenerator />} />
             <Route path="/qa-review" element={<QAReviewInbox />} />
+            <Route path="/settings" element={<Settings />} />
+            <Route path="/settings/:tab" element={<Settings />} />
+            <Route path="/account/:accountId" element={<AccountDetail />} />
+            
+            {/* Legacy routes - redirect to new structure */}
+            <Route path="/story/:storyId" element={<StoryRedirect />} />
+            <Route path="/studio/lab/story/:storyId" element={<StoryRedirect />} />
+            <Route path="/studio/lab/story" element={<Navigate to="/stories" replace />} />
+            <Route path="/studio/lab" element={<Navigate to="/stories" replace />} />
+            
+            {/* Rendition Studio (script-based) - still separate */}
             <Route path="/studio" element={<Studio />} />
             <Route path="/studio/:scriptRunId" element={<Studio />} />
-            
-            {/* Story Studio - new dedicated route */}
-            <Route path="/story/:storyId" element={<StoryStudio />} />
-            
-            {/* Lab - keep for experiments (compare, learning) */}
-            <Route path="/studio/lab" element={<Lab />} />
-            <Route path="/studio/lab/story" element={<Lab />} />
-            {/* Redirect old story routes to new Story Studio */}
-            <Route path="/studio/lab/story/:storyId" element={<StoryStudioRedirect />} />
-            
             <Route path="/studio/analytics" element={<RoutingAnalytics />} />
+            
             <Route path="/login" element={<Login />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
@@ -52,10 +58,10 @@ const App = () => (
   </QueryClientProvider>
 );
 
-/** Redirect from old Lab story route to new Story Studio */
-function StoryStudioRedirect() {
+/** Redirect from old story routes to new unified /stories workspace */
+function StoryRedirect() {
   const storyId = window.location.pathname.split("/").pop();
-  return <Navigate to={`/story/${storyId}`} replace />;
+  return <Navigate to={`/stories/${storyId}`} replace />;
 }
 
 export default App;

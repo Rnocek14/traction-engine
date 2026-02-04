@@ -295,8 +295,8 @@ export function StoryLibrary({
             className="h-7 px-2 gap-1"
             onClick={(e) => {
               e.stopPropagation();
-              // Navigate to new story wizard (still in Lab for creation)
-              navigate("/studio/lab/story?new=true");
+              // Navigate to unified stories workspace
+              navigate("/stories?new=true");
             }}
           >
             <Plus className="h-3 w-3" />
@@ -397,7 +397,7 @@ function StoryCard({
           </Button>
 
           <Link
-            to={`/story/${story.id}`}
+            to={`/stories/${story.id}`}
             className="flex-1 min-w-0"
             onClick={onSelect}
           >

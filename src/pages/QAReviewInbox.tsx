@@ -7,16 +7,16 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import {
   CheckCircle,
-  ArrowLeft,
   ShieldCheck,
   ShieldAlert,
   RefreshCw,
   Lock,
 } from "lucide-react";
 import { Link } from "react-router-dom";
+import { GlobalNav } from "@/components/GlobalNav";
+import { AuthHeader } from "@/components/auth/AuthHeader";
 import { QAInboxFilters } from "@/components/qa-inbox/QAInboxFilters";
 import { QAReviewCard } from "@/components/qa-inbox/QAReviewCard";
-import { AuthHeader } from "@/components/auth/AuthHeader";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   useQAInbox,
@@ -81,31 +81,24 @@ export default function QAReviewInbox() {
 
   return (
     <div className="min-h-screen bg-background">
+      <GlobalNav />
+      
       {/* Header */}
-      <header className="sticky top-0 z-40 border-b border-border/50 bg-background/80 backdrop-blur-xl">
+      <header className="border-b border-border/50 bg-background/80">
         <div className="container mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <Link to="/">
-                <Button variant="ghost" size="sm" className="gap-2">
-                  <ArrowLeft className="w-4 h-4" />
-                  Dashboard
-                </Button>
-              </Link>
-              <div className="h-8 w-px bg-border" />
-              <div>
-                <h1 className="text-xl font-semibold flex items-center gap-2">
-                  <ShieldCheck className="w-5 h-5 text-warning" />
-                  QA Review Inbox
-                </h1>
-                <p className="text-sm text-muted-foreground">
-                  {statsLoading ? (
-                    <Skeleton className="h-4 w-32 inline-block" />
-                  ) : (
-                    `${stats?.total || 0} scripts pending review`
-                  )}
-                </p>
-              </div>
+            <div>
+              <h1 className="text-xl font-semibold flex items-center gap-2">
+                <ShieldCheck className="w-5 h-5 text-warning" />
+                QA Review Inbox
+              </h1>
+              <p className="text-sm text-muted-foreground">
+                {statsLoading ? (
+                  <Skeleton className="h-4 w-32 inline-block" />
+                ) : (
+                  `${stats?.total || 0} scripts pending review`
+                )}
+              </p>
             </div>
 
             {/* Right side: Stats + Auth */}

@@ -2,11 +2,12 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { 
-  ArrowLeft, BarChart3, Loader2, TrendingUp, AlertTriangle, 
+  BarChart3, Loader2, TrendingUp, AlertTriangle, 
   Target, Zap, Trophy, ChevronDown, Film, Layers, Crown, Database,
   Activity, PieChart, Tag, Check
 } from "lucide-react";
 import { CronMonitorPanel } from "@/components/studio/CronMonitorPanel";
+import { GlobalNav } from "@/components/GlobalNav";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -462,18 +463,13 @@ export default function RoutingAnalytics() {
 
   return (
     <div className="h-screen flex flex-col bg-background">
+      <GlobalNav />
+      
       {/* Header */}
       <header className="flex items-center justify-between px-4 py-2 border-b bg-card/50">
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon" className="h-8 w-8" asChild>
-            <Link to="/studio/lab">
-              <ArrowLeft className="h-4 w-4" />
-            </Link>
-          </Button>
-          <div className="flex items-center gap-2">
-            <BarChart3 className="h-4 w-4 text-primary" />
-            <h1 className="text-sm font-semibold">Routing Analytics</h1>
-          </div>
+        <div className="flex items-center gap-2">
+          <BarChart3 className="h-4 w-4 text-primary" />
+          <h1 className="text-sm font-semibold">Routing Analytics</h1>
           <Badge variant="secondary" className="text-[10px] h-5">
             Provider Performance
           </Badge>
