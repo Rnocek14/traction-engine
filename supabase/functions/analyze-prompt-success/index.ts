@@ -349,8 +349,13 @@ Deno.serve(async (req) => {
 
     console.log(`Learning ${isSuccess ? "positive" : "negative"} patterns for ${provider}`);
 
-    // Extract lexical patterns
-    const patterns = extractPatterns(enriched_prompt);
+    // CRITICAL: Use ORIGINAL prompt for pattern extraction, not enriched/sanitized
+    // This prevents learning from sanitized words like "shield" when user said "sword"
+    const promptForPatterns = original_prompt || enriched_prompt;
+    console.log(`[analyze-prompt-success] Using ${original_prompt ? "original" : "enriched"} prompt for pattern extraction`);
+
+    // Extract lexical patterns from ORIGINAL prompt
+    const patterns = extractPatterns(promptForPatterns);
     const learnedPatterns: string[] = [];
 
     // Process each pattern type
@@ -364,7 +369,7 @@ Deno.serve(async (req) => {
           patternValue,
           learningRating,
           isSuccess,
-          enriched_prompt,
+          promptForPatterns, // Use original for examples too
           source
         );
         learnedPatterns.push(`${patternType}:${patternValue}`);
@@ -383,7 +388,7 @@ Deno.serve(async (req) => {
           hint,
           learningRating,
           isSuccess,
-          enriched_prompt,
+          promptForPatterns, // Use original
           source
         );
         learnedPatterns.push(`style_hint:${hint}`);
@@ -391,9 +396,10 @@ Deno.serve(async (req) => {
     }
 
     // Extract semantic traits (only for successes, uses LLM)
+    // Use ORIGINAL prompt for semantic analysis to capture true intent
     let semanticTraits: string[] = [];
     if (isSuccess && openaiKey) {
-      semanticTraits = await extractSemanticTraits(enriched_prompt, openaiKey);
+      semanticTraits = await extractSemanticTraits(promptForPatterns, openaiKey);
       
       for (const trait of semanticTraits) {
         await upsertPatternLearning(
@@ -404,7 +410,7 @@ Deno.serve(async (req) => {
           trait.toLowerCase(),
           learningRating,
           true,
-          enriched_prompt,
+          promptForPatterns, // Use original
           source
         );
         learnedPatterns.push(`semantic_trait:${trait}`);
