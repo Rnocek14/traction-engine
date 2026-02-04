@@ -59,10 +59,11 @@ function calculateSyncQuality(
 
   voTiming.forEach((scene, i) => {
     const voDuration = scene.end_ms - scene.start_ms;
-    // Estimate clip duration (default 5s if unknown)
     const clip = clips.find((c) => c.sequence_index === i);
-    // Most clips are 4-8 seconds
-    const clipDuration = clip ? 5000 : 5000; // Could be enhanced with actual duration metadata
+    // Extract actual clip duration from settings (seconds or requested_seconds)
+    const settings = clip?.settings as { seconds?: number; requested_seconds?: number } | null;
+    const clipSeconds = settings?.seconds ?? settings?.requested_seconds ?? 5;
+    const clipDuration = clipSeconds * 1000;
     totalDrift += Math.abs(voDuration - clipDuration);
   });
 
@@ -166,7 +167,13 @@ export function StorySyncPreview({
     [completedClips]
   );
 
-  // Initialize audio element
+  // Stable refs for callbacks (prevent audio re-init on state changes)
+  const findSceneForTimeRef = useRef(findSceneForTime);
+  const findWordForTimeRef = useRef(findWordForTime);
+  useEffect(() => { findSceneForTimeRef.current = findSceneForTime; }, [findSceneForTime]);
+  useEffect(() => { findWordForTimeRef.current = findWordForTime; }, [findWordForTime]);
+
+  // Initialize audio element - ONLY when URL changes
   useEffect(() => {
     if (!voiceover.audio_url) return;
 
@@ -180,26 +187,20 @@ export function StorySyncPreview({
       setCurrentTimeMs(timeMs);
 
       // Find scene from audio time (audio is master)
-      const targetSceneIndex = findSceneForTime(timeMs);
+      const targetSceneIndex = findSceneForTimeRef.current(timeMs);
 
-      // Only switch scenes forward (or if user explicitly seeked)
-      const shouldSwitch =
+      // Forward-only unless user explicitly seeked
+      if (
         userSeekRef.current ||
-        targetSceneIndex > lastSceneIndexRef.current ||
-        targetSceneIndex !== currentSceneIndex;
-
-      if (shouldSwitch && targetSceneIndex !== currentSceneIndex) {
-        // Prevent backwards transitions unless user seeked
-        if (!userSeekRef.current && targetSceneIndex < lastSceneIndexRef.current) {
-          return;
-        }
+        targetSceneIndex > lastSceneIndexRef.current
+      ) {
         setCurrentSceneIndex(targetSceneIndex);
         lastSceneIndexRef.current = targetSceneIndex;
         userSeekRef.current = false;
       }
 
       // Find current word
-      setCurrentWord(findWordForTime(timeMs));
+      setCurrentWord(findWordForTimeRef.current(timeMs));
     };
 
     const handleEnded = () => {
@@ -225,9 +226,9 @@ export function StorySyncPreview({
       audio.src = "";
       audioRef.current = null;
     };
-  }, [voiceover.audio_url, findSceneForTime, findWordForTime, currentSceneIndex]);
+  }, [voiceover.audio_url]); // Only re-init when URL changes
 
-  // Load video for current scene (audio-driven)
+  // Load video for current scene with A/B gapless swap (audio-driven)
   useEffect(() => {
     const clip = getClipForScene(currentSceneIndex);
     if (!clip?.output_url) {
@@ -236,21 +237,46 @@ export function StorySyncPreview({
     }
 
     setVideoFrozen(false);
-    const video = activeVideo === "A" ? videoARef.current : videoBRef.current;
-    if (!video) return;
+    
+    // Get active and next video elements
+    const activeEl = activeVideo === "A" ? videoARef.current : videoBRef.current;
+    const nextEl = activeVideo === "A" ? videoBRef.current : videoARef.current;
+    
+    if (!nextEl) return;
 
-    // Only update source if different
-    if (video.src !== clip.output_url) {
-      console.log(`[StorySyncPreview] Loading clip ${currentSceneIndex}`);
-      video.src = clip.output_url;
-      video.load();
+    // Check if clip is already loaded in active element
+    if (activeEl?.src === clip.output_url) {
+      // Already showing correct clip
+      if (isPlaying) {
+        activeEl.play().catch(() => {});
+      }
+      return;
     }
 
-    // If playing, play the video too
-    if (isPlaying) {
-      video.play().catch(console.error);
-    }
-  }, [currentSceneIndex, activeVideo, getClipForScene, isPlaying]);
+    // Load clip into the NEXT (hidden) element, then swap
+    console.log(`[StorySyncPreview] Loading clip ${currentSceneIndex} into ${activeVideo === "A" ? "B" : "A"}`);
+    nextEl.src = clip.output_url;
+    nextEl.muted = true;
+    nextEl.playsInline = true;
+    nextEl.load();
+    nextEl.currentTime = 0;
+
+    // Swap when loaded
+    const handleCanPlay = () => {
+      if (isPlaying) {
+        nextEl.play().catch(() => {});
+      }
+      // Swap visibility
+      setActiveVideo(activeVideo === "A" ? "B" : "A");
+      nextEl.removeEventListener("canplaythrough", handleCanPlay);
+    };
+    
+    nextEl.addEventListener("canplaythrough", handleCanPlay);
+
+    return () => {
+      nextEl.removeEventListener("canplaythrough", handleCanPlay);
+    };
+  }, [currentSceneIndex, getClipForScene, isPlaying, activeVideo]);
 
   // Handle video ended - FREEZE, don't advance (audio is master)
   const handleVideoEnded = useCallback(() => {
@@ -264,15 +290,22 @@ export function StorySyncPreview({
     }
   }, [activeVideo]);
 
-  // Sync video play/pause with audio
+  // Sync video play/pause with audio - control BOTH elements
   useEffect(() => {
-    const video = activeVideo === "A" ? videoARef.current : videoBRef.current;
-    if (!video || videoFrozen) return;
+    const videoA = videoARef.current;
+    const videoB = videoBRef.current;
+    
+    // Always ensure both are muted
+    if (videoA) videoA.muted = true;
+    if (videoB) videoB.muted = true;
+    
+    const activeEl = activeVideo === "A" ? videoA : videoB;
+    if (!activeEl || videoFrozen) return;
 
     if (isPlaying) {
-      video.play().catch(() => {});
+      activeEl.play().catch(() => {});
     } else {
-      video.pause();
+      activeEl.pause();
     }
   }, [isPlaying, activeVideo, videoFrozen]);
 
