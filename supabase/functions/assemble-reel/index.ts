@@ -240,6 +240,16 @@ Deno.serve(async (req) => {
       created_at: string;
       settings: Record<string, unknown> | null;
       sequence_index?: number;
+      scene_id?: string;
+      is_primary?: boolean;
+    }
+
+    // Voiceover timing from story_voiceovers.actual_timing
+    interface VoiceoverSceneTiming {
+      scene_index: number;
+      scene_id?: string;
+      start_ms: number;
+      end_ms: number;
     }
     
     // Variables we need for both modes
@@ -248,6 +258,7 @@ Deno.serve(async (req) => {
     let clipDurations: Map<string, number> = new Map();
     let videoJobs: VideoJobRecord[] = [];
     let primaryId: string; // For idempotency key and status tracking
+    let voiceoverTiming: VoiceoverSceneTiming[] = []; // Audio-master timing for story mode
 
     if (isStoryMode) {
       // ============================================
@@ -273,25 +284,32 @@ Deno.serve(async (req) => {
         );
       }
 
-      // Fetch active voiceover for this story
+      // Fetch active voiceover for this story (with timing)
       if (existingStory?.active_voiceover_id) {
         const { data: voiceover } = await supabase
           .from("story_voiceovers")
-          .select("audio_url, status")
+          .select("audio_url, status, actual_timing, alignment_ok")
           .eq("id", existingStory.active_voiceover_id)
           .single();
 
         if (voiceover?.status === "done" && voiceover.audio_url) {
           voiceoverUrl = voiceover.audio_url;
           console.log(`[story-mode] Using voiceover: ${voiceoverUrl}`);
+          
+          // Extract per-scene timing if alignment is OK
+          if (voiceover.alignment_ok && Array.isArray(voiceover.actual_timing)) {
+            voiceoverTiming = voiceover.actual_timing as VoiceoverSceneTiming[];
+            console.log(`[story-mode] Using authoritative timing for ${voiceoverTiming.length} scenes`);
+          }
         }
       }
 
-      // Fetch completed video jobs for this story
+      // Fetch completed PRIMARY video jobs for this story (one per scene)
       const { data: storyJobs, error: jobsError } = await supabase
         .from("video_jobs")
         .select("*")
         .eq("story_job_id", story_job_id)
+        .eq("is_primary", true)
         .in("status", ["done", "succeeded"])
         .order("sequence_index", { ascending: true });
 
@@ -301,12 +319,27 @@ Deno.serve(async (req) => {
 
       videoJobs = (storyJobs || []) as VideoJobRecord[];
 
-      // For stories, use sequence_index order
+      // For stories, use voiceover timing as authoritative (if available)
       for (const job of videoJobs) {
         orderedClipIds.push(job.id);
-        // Stories don't have explicit timeline, use job settings
-        const duration = (job.settings?.seconds as number) || (job.settings?.requested_seconds as number) || 5;
-        clipDurations.set(job.id, duration);
+        
+        // Find matching timing from voiceover (by scene_id or sequence_index)
+        const timing = voiceoverTiming.find(t => 
+          (t.scene_id && t.scene_id === job.scene_id) ||
+          t.scene_index === job.sequence_index
+        );
+        
+        if (timing) {
+          // Audio-master: use narration duration as target
+          const narrationDuration = (timing.end_ms - timing.start_ms) / 1000;
+          clipDurations.set(job.id, narrationDuration);
+          console.log(`[story-mode] Scene ${job.sequence_index}: using narration duration ${narrationDuration.toFixed(2)}s`);
+        } else {
+          // Fallback to job settings if no timing available
+          const duration = (job.settings?.seconds as number) || (job.settings?.requested_seconds as number) || 5;
+          clipDurations.set(job.id, duration);
+          console.log(`[story-mode] Scene ${job.sequence_index}: fallback to clip duration ${duration}s`);
+        }
       }
 
     } else {
