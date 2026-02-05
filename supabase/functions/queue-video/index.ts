@@ -67,6 +67,10 @@ interface VideoRequest {
   force_model?: string;
   /** Disable pro upgrade even if scene qualifies (cost control) */
   pro_upgrade?: boolean | "auto";
+  /** Number of variants to generate (default 1) */
+  variants?: number;
+  /** Variant strategy: camera, staging, timing, or all */
+  variant_strategy?: "camera" | "staging" | "timing" | "all";
 }
 
 interface ClipData {
@@ -106,8 +110,15 @@ Deno.serve(async (req) => {
     // Fetch story context if story_job_id provided (for model upgrade decision)
     let storyGenerationSettings: Record<string, unknown> | null = null;
     let sceneContext: Record<string, unknown> | null = null;
+    let sequenceIndex: number | null = null;
     
+    // Safe parsing for sequence_index
     if (story_job_id && body.sequence_index !== undefined) {
+      const parsedSeq = Number(body.sequence_index);
+      sequenceIndex = Number.isFinite(parsedSeq) ? parsedSeq : null;
+    }
+    
+    if (story_job_id && sequenceIndex !== null) {
       const { data: storyJob } = await supabase
         .from("story_jobs")
         .select("storyboard_json")
@@ -118,7 +129,7 @@ Deno.serve(async (req) => {
         const storyboard = storyJob.storyboard_json as Record<string, unknown>;
         storyGenerationSettings = (storyboard.generation_settings || {}) as Record<string, unknown>;
         const scenes = (storyboard.scenes || []) as Record<string, unknown>[];
-        sceneContext = scenes[body.sequence_index] || null;
+        sceneContext = scenes[sequenceIndex] || null;
       }
     }
     
@@ -129,8 +140,12 @@ Deno.serve(async (req) => {
     ): boolean {
       const esc = Number(scene?.escalation_delta ?? 0);
       const sp = Number(scene?.setpiece_delta ?? 0);
-      const intensity = gs?.intensity_profile as string | undefined;
       const actionMode = gs?.action_mode === true;
+      // Normalize: action_mode=true overrides contemplative
+      const rawIntensity = gs?.intensity_profile as string | undefined;
+      const intensity = (actionMode && (!rawIntensity || rawIntensity === "contemplative"))
+        ? "action"
+        : rawIntensity;
       
       return (
         esc >= 2 ||
@@ -170,18 +185,22 @@ Deno.serve(async (req) => {
     // Model selection with pro auto-upgrade
     let model: string;
     const baseModel = settings?.model || "sora-2";
+    let modelReason: string;
     
     if (body.force_model) {
       // Explicit override wins
       model = body.force_model;
+      modelReason = "forced";
       console.log(`[queue-video] model=${model} (forced override)`);
     } else if (body.pro_upgrade === false) {
       // Pro upgrade explicitly disabled
       model = baseModel;
+      modelReason = "pro_disabled";
       console.log(`[queue-video] model=${model} (pro_upgrade disabled)`);
     } else if (provider === "sora" && shouldUsePro(storyGenerationSettings, sceneContext)) {
       // Auto-upgrade to pro for setpieces
       model = "sora-2-pro";
+      modelReason = "auto_pro";
       console.log(
         `[queue-video] model=${model} (auto-upgraded) ` +
         `esc=${sceneContext?.escalation_delta ?? 0} ` +
@@ -191,8 +210,59 @@ Deno.serve(async (req) => {
       );
     } else {
       model = baseModel;
+      modelReason = "default";
       console.log(`[queue-video] model=${model} (default)`);
     }
+
+    // ============================================================
+    // VARIANT GENERATION
+    // ============================================================
+    const variantCount = Math.min(Math.max(body.variants || 1, 1), 5); // 1-5 variants
+    const variantStrategy = body.variant_strategy || "all";
+    
+    // Variant mutation tags - controlled diversity without breaking V3 structure
+    const VARIANT_MUTATIONS: Record<string, string[]> = {
+      camera: [
+        "", // v0 = original
+        "[VARIANT: handheld, aggressive push-in, low angle on impacts]",
+        "[VARIANT: crane shot, sweeping overhead to ground level]",
+        "[VARIANT: dolly zoom, Hitchcock vertigo effect on transformation peak]",
+        "[VARIANT: static wide, let action fill frame, no camera movement]",
+      ],
+      staging: [
+        "",
+        "[VARIANT: wider debris field, stronger silhouette deformation]",
+        "[VARIANT: tighter framing, extreme close-up punctuations]",
+        "[VARIANT: layered depth, foreground particles + mid silhouette + far environment]",
+        "[VARIANT: asymmetric composition, rule of thirds tension]",
+      ],
+      timing: [
+        "",
+        "[VARIANT: front-load action in first 3s, slow reveal after]",
+        "[VARIANT: slow build, explosive climax in final 4s]",
+        "[VARIANT: rhythmic pulses, 3 distinct motion peaks]",
+        "[VARIANT: sustained crescendo, continuous escalation]",
+      ],
+    };
+    
+    function getVariantMutation(variantIndex: number, strategy: string): string {
+      if (variantIndex === 0) return ""; // v0 is always the original
+      
+      const mutations: string[] = [];
+      if (strategy === "all" || strategy === "camera") {
+        mutations.push(VARIANT_MUTATIONS.camera[variantIndex] || "");
+      }
+      if (strategy === "all" || strategy === "staging") {
+        mutations.push(VARIANT_MUTATIONS.staging[variantIndex] || "");
+      }
+      if (strategy === "all" || strategy === "timing") {
+        mutations.push(VARIANT_MUTATIONS.timing[variantIndex] || "");
+      }
+      return mutations.filter(Boolean).join("\n");
+    }
+    
+    // Results collector for multi-variant response
+    const createdJobs: Array<{ id: string; variant_index: number; openai_video_id: string }> = [];
 
     if (!allowedSizes.includes(size)) {
       throw new Error(`Invalid size. Allowed: ${allowedSizes.join(", ")}`);
@@ -326,183 +396,216 @@ Style: Professional, engaging, suitable for TikTok/Reels. Smooth transitions bet
       }
     }
 
-    // Create the video job in database first
-    // Store full prompts in dedicated columns (text columns are unlimited)
-    const { data: job, error: jobError } = await supabase
-      .from("video_jobs")
-      .insert({
-        script_run_id,
-        status: "queued",
-        provider,
-        // Store prompts in proper columns for auto-rating and audit
-        original_prompt: scenePrompt,
-        enriched_prompt: videoPrompt,
-        settings: { 
-          size, 
-          provider_seconds: providerSeconds,
-          requested_seconds: requestedSeconds,
-          // Legacy field for backwards compat
-          seconds: providerSeconds,
-          model,
-          clip_id: clip_id || null,
-          seed: settings.seed,
-          camera_direction: clipData?.camera_direction,
-          // Provider-neutral task ID (set after API call)
-          provider_job_id: null,
-        },
-        progress: 0,
-        openai_status: "pending",
-      })
-      .select()
-      .single();
-
-    if (jobError) {
-      throw new Error(`Failed to create job: ${jobError.message}`);
-    }
-
-    // Call OpenAI Sora API with retry ladder for moderation failures
-    // FIX #4: If skip_internal_retry is true, chain layer owns retry - single attempt only
-    const MAX_RETRIES = skip_internal_retry ? 1 : 3;
-    let lastError: string | undefined;
-    let openaiData: { id: string; status?: string };
-    let startingFrameBlob: Blob | undefined;
-    let startingFrameMime = "image/jpeg";
-    
-    // Pre-fetch starting frame (if provided) so we can retry with/without it
-    if (starting_frame_url) {
-      try {
-        const imgRes = await fetch(starting_frame_url);
-        if (imgRes.ok) {
-          startingFrameMime = imgRes.headers.get("content-type") || "image/jpeg";
-          startingFrameBlob = await imgRes.blob();
-          console.log(`Pre-fetched starting frame: ${starting_frame_url}, type: ${startingFrameMime}`);
-        }
-      } catch (frameErr) {
-        console.error("Failed to fetch starting frame:", frameErr);
-      }
-    }
-    
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-      // Get prompt for this attempt (escalating sanitization)
-      let promptForAttempt: string;
-      let useStartingFrame = !!startingFrameBlob;
+    // ============================================================
+    // VARIANT LOOP: Generate N variants with controlled mutations
+    // ============================================================
+    for (let variantIndex = 0; variantIndex < variantCount; variantIndex++) {
+      // Apply variant mutation to prompt
+      const variantMutation = getVariantMutation(variantIndex, variantStrategy);
+      const variantPrompt = variantMutation 
+        ? `${videoPrompt}\n\n${variantMutation}`
+        : videoPrompt;
       
-      if (attempt === 1) {
-        // First attempt: apply soft sanitization
-        const { sanitized, wasModified, replacements } = sanitizeForModeration(videoPrompt, "soft");
-        if (wasModified) {
-          logModerationSanitization(videoPrompt, sanitized, replacements, "soft", job.id);
+      if (variantCount > 1) {
+        console.log(`[queue-video] Generating variant ${variantIndex + 1}/${variantCount} (strategy: ${variantStrategy})`);
+      }
+
+      // Create the video job in database
+      const { data: job, error: jobError } = await supabase
+        .from("video_jobs")
+        .insert({
+          script_run_id,
+          status: "queued",
+          provider,
+          // Store prompts in proper columns for auto-rating and audit
+          original_prompt: scenePrompt,
+          enriched_prompt: variantPrompt,
+          settings: { 
+            size, 
+            provider_seconds: providerSeconds,
+            requested_seconds: requestedSeconds,
+            // Legacy field for backwards compat
+            seconds: providerSeconds,
+            model,
+            clip_id: clip_id || null,
+            seed: settings.seed,
+            camera_direction: clipData?.camera_direction,
+            // Provider-neutral task ID (set after API call)
+            provider_job_id: null,
+            // Model selection audit
+            model_selected: model,
+            model_reason: modelReason,
+            scene_escalation_delta: sceneContext?.escalation_delta ?? null,
+            scene_setpiece_delta: sceneContext?.setpiece_delta ?? null,
+            // Variant tracking
+            variant_index: variantIndex,
+            variant_count: variantCount,
+            variant_strategy: variantStrategy,
+          },
+          progress: 0,
+          openai_status: "pending",
+        })
+        .select()
+        .single();
+
+      if (jobError) {
+        throw new Error(`Failed to create job: ${jobError.message}`);
+      }
+
+      // Call OpenAI Sora API with retry ladder for moderation failures
+      // FIX #4: If skip_internal_retry is true, chain layer owns retry - single attempt only
+      const MAX_RETRIES = skip_internal_retry ? 1 : 3;
+      let lastError: string | undefined;
+      let openaiData: { id: string; status?: string } | undefined;
+      let startingFrameBlob: Blob | undefined;
+      let startingFrameMime = "image/jpeg";
+      
+      // Pre-fetch starting frame (if provided) so we can retry with/without it
+      // Only fetch once for first variant
+      if (starting_frame_url && variantIndex === 0) {
+        try {
+          const imgRes = await fetch(starting_frame_url);
+          if (imgRes.ok) {
+            startingFrameMime = imgRes.headers.get("content-type") || "image/jpeg";
+            startingFrameBlob = await imgRes.blob();
+            console.log(`Pre-fetched starting frame: ${starting_frame_url}, type: ${startingFrameMime}`);
+          }
+        } catch (frameErr) {
+          console.error("Failed to fetch starting frame:", frameErr);
         }
-        promptForAttempt = sanitized;
-      } else {
-        // Apply retry ladder
-        const retryCtx: RetryContext = {
-          attempt,
-          originalPrompt: videoPrompt,
-          provider: "sora",
-          brutalityMode: false,
-          lastError,
-        };
-        const retryResult = getRetryPrompt(retryCtx);
-        logRetryAttempt(retryCtx, retryResult, job.id);
+      }
+      
+      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        // Get prompt for this attempt (escalating sanitization)
+        let promptForAttempt: string;
+        let useStartingFrame = !!startingFrameBlob;
         
-        promptForAttempt = retryResult.prompt;
-        
-        // On attempt 3, drop reference frame (force T2V)
-        if (retryResult.shouldDropReference) {
-          console.log(`[queue-video] Attempt ${attempt}: Dropping reference frame, forcing T2V`);
-          useStartingFrame = false;
+        if (attempt === 1) {
+          // First attempt: apply soft sanitization
+          const { sanitized, wasModified, replacements } = sanitizeForModeration(variantPrompt, "soft");
+          if (wasModified) {
+            logModerationSanitization(variantPrompt, sanitized, replacements, "soft", job.id);
+          }
+          promptForAttempt = sanitized;
+        } else {
+          // Apply retry ladder
+          const retryCtx: RetryContext = {
+            attempt,
+            originalPrompt: variantPrompt,
+            provider: "sora",
+            brutalityMode: false,
+            lastError,
+          };
+          const retryResult = getRetryPrompt(retryCtx);
+          logRetryAttempt(retryCtx, retryResult, job.id);
+          
+          promptForAttempt = retryResult.prompt;
+          
+          // On attempt 3, drop reference frame (force T2V)
+          if (retryResult.shouldDropReference) {
+            console.log(`[queue-video] Attempt ${attempt}: Dropping reference frame, forcing T2V`);
+            useStartingFrame = false;
+          }
         }
-      }
-      
-      // Build FormData for this attempt
-      const form = new FormData();
-      form.set("prompt", promptForAttempt);
-      form.set("model", model);
-      form.set("size", size);
-      form.set("seconds", String(providerSeconds));
-      
-      if (useStartingFrame && startingFrameBlob) {
-        form.set("input_reference", new File([startingFrameBlob], "start-frame.jpg", { type: startingFrameMime }));
-      }
-      
-      const openaiResponse = await fetch("https://api.openai.com/v1/videos", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${openaiApiKey}`,
-        },
-        body: form,
-      });
+        
+        // Build FormData for this attempt
+        const form = new FormData();
+        form.set("prompt", promptForAttempt);
+        form.set("model", model);
+        form.set("size", size);
+        form.set("seconds", String(providerSeconds));
+        
+        if (useStartingFrame && startingFrameBlob) {
+          form.set("input_reference", new File([startingFrameBlob], "start-frame.jpg", { type: startingFrameMime }));
+        }
+        
+        const openaiResponse = await fetch("https://api.openai.com/v1/videos", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${openaiApiKey}`,
+          },
+          body: form,
+        });
 
-      if (openaiResponse.ok) {
-        openaiData = await openaiResponse.json();
-        break; // Success!
+        if (openaiResponse.ok) {
+          openaiData = await openaiResponse.json();
+          break; // Success!
+        }
+        
+        const errorText = await openaiResponse.text();
+        lastError = errorText;
+        console.error(`[queue-video] Attempt ${attempt}/${MAX_RETRIES} failed:`, openaiResponse.status, errorText.slice(0, 200));
+        
+        // Check if it's a moderation error worth retrying
+        if (!isModerationError(errorText) && attempt === 1) {
+          // Non-moderation error on first attempt - fail immediately
+          await supabase
+            .from("video_jobs")
+            .update({ 
+              status: "failed",
+              openai_status: "failed",
+              error: `OpenAI API error: ${openaiResponse.status} - ${errorText.slice(0, 200)}`,
+            })
+            .eq("id", job.id);
+          throw new Error(`OpenAI API error: ${openaiResponse.status}`);
+        }
+        
+        // If this was the last attempt, fail
+        if (attempt === MAX_RETRIES) {
+          await supabase
+            .from("video_jobs")
+            .update({ 
+              status: "failed",
+              openai_status: "failed",
+              error: `OpenAI API error after ${MAX_RETRIES} attempts: ${openaiResponse.status} - ${errorText.slice(0, 200)}`,
+            })
+            .eq("id", job.id);
+          throw new Error(`OpenAI API error: ${openaiResponse.status} - exhausted ${MAX_RETRIES} retry attempts`);
+        }
+        
+        // Wait briefly before retry (exponential backoff)
+        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
       }
-      
-      const errorText = await openaiResponse.text();
-      lastError = errorText;
-      console.error(`[queue-video] Attempt ${attempt}/${MAX_RETRIES} failed:`, openaiResponse.status, errorText.slice(0, 200));
-      
-      // Check if it's a moderation error worth retrying
-      if (!isModerationError(errorText) && attempt === 1) {
-        // Non-moderation error on first attempt - fail immediately
-        await supabase
-          .from("video_jobs")
-          .update({ 
-            status: "failed",
-            openai_status: "failed",
-            error: `OpenAI API error: ${openaiResponse.status} - ${errorText.slice(0, 200)}`,
-          })
-          .eq("id", job.id);
-        throw new Error(`OpenAI API error: ${openaiResponse.status}`);
-      }
-      
-      // If this was the last attempt, fail
-      if (attempt === MAX_RETRIES) {
-        await supabase
-          .from("video_jobs")
-          .update({ 
-            status: "failed",
-            openai_status: "failed",
-            error: `OpenAI API error after ${MAX_RETRIES} attempts: ${openaiResponse.status} - ${errorText.slice(0, 200)}`,
-          })
-          .eq("id", job.id);
-        throw new Error(`OpenAI API error: ${openaiResponse.status} - exhausted ${MAX_RETRIES} retry attempts`);
-      }
-      
-      // Wait briefly before retry (exponential backoff)
-      await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
-    }
 
-    const openaiVideoId = openaiData!.id;
-    const openaiStatus = openaiData!.status || "queued";
+      const openaiVideoId = openaiData!.id;
+      const openaiStatus = openaiData!.status || "queued";
 
-    // Update job with OpenAI video ID - store in both openai_video_id and settings.provider_job_id
-    await supabase
-      .from("video_jobs")
-      .update({ 
-        status: "running",
+      // Update job with OpenAI video ID - store in both openai_video_id and settings.provider_job_id
+      await supabase
+        .from("video_jobs")
+        .update({ 
+          status: "running",
+          openai_video_id: openaiVideoId,
+          openai_status: openaiStatus,
+          settings: {
+            ...job.settings,
+            provider_job_id: openaiVideoId,
+          },
+        })
+        .eq("id", job.id);
+
+      console.log(`Created OpenAI video job: ${openaiVideoId} (status: ${openaiStatus}) for job: ${job.id}${clip_id ? ` clip: ${clip_id}` : ""}${variantCount > 1 ? ` variant: ${variantIndex}` : ""}`);
+      
+      createdJobs.push({
+        id: job.id,
+        variant_index: variantIndex,
         openai_video_id: openaiVideoId,
-        openai_status: openaiStatus,
-        settings: {
-          ...job.settings,
-          provider_job_id: openaiVideoId,
-        },
-      })
-      .eq("id", job.id);
-
-    console.log(`Created OpenAI video job: ${openaiVideoId} (status: ${openaiStatus}) for job: ${job.id}${clip_id ? ` clip: ${clip_id}` : ""}`);
+      });
+    } // End variant loop
 
     return new Response(
       JSON.stringify({
         success: true,
-        job: {
-          id: job.id,
+        jobs: createdJobs,
+        // Legacy single-job response for backwards compat
+        job: createdJobs[0] ? {
+          id: createdJobs[0].id,
           status: "running",
-          openai_video_id: openaiVideoId,
-          openai_status: openaiStatus,
+          openai_video_id: createdJobs[0].openai_video_id,
+          openai_status: "queued",
           clip_id: clip_id || null,
-        },
+        } : null,
+        variant_count: variantCount,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
