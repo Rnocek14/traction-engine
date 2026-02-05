@@ -31,7 +31,7 @@ export interface MythScene {
   index: number;
   
   // Narrative beat
-  beat_type: "introduction" | "journey" | "trial" | "revelation" | "consequence" | "moral";
+  beat_type: "introduction" | "journey" | "trial" | "revelation" | "consequence" | "moral" | "battle" | "chase" | "clash" | "ascension";
   narration: string;         // Third-person omniscient narration line
   
   // Visual description (symbolic, not realistic)
@@ -205,6 +205,47 @@ export const BEAT_PACING: Record<string, string> = {
   revelation: "[TEMPO: Sudden stillness. Sharp contrast. Frozen moment breaks into movement.]",
   consequence: "[TEMPO: Heavy stillness. Long pauses. Weight of loss visible. Slow fade.]",
   moral: "[TEMPO: Slow exhale. Final gesture drawn out. Peace settles. Resolution.]",
+  // NEW ACTION BEATS
+  battle: "[TEMPO: Rapid cuts. Impact moments. Dynamic camera. Bodies in motion. Visceral energy. Fluid combat.]",
+  chase: "[TEMPO: Continuous forward thrust. Environment streaming past. Urgency visible. No pauses. Speed.]",
+  clash: "[TEMPO: Two forces meeting. Impact. Explosion. Collision energy. Shockwave ripples outward.]",
+  ascension: "[TEMPO: Rising action. Building power. Transformation crescendo. Energy amplifying.]",
+};
+
+// =============================================================================
+// MOTION ANCHOR POOLS - ACTION BEATS
+// =============================================================================
+
+// Add action beat motion pools
+export const ACTION_MOTION_POOLS: Record<string, string[]> = {
+  battle: [
+    "[MOTION: figures clash, impact sparks, bodies pivot and strike, momentum carries through]",
+    "[MOTION: weapon arcs through air, target recoils, attacker follows through, dust rises]",
+    "[MOTION: magic erupts from hands, target staggers, energy ripples outward, ground shakes]",
+    "[MOTION: dodge roll, counter-strike, parry and riposte, constant fluid motion]",
+    "[MOTION: leap attack, downward strike, landing impact, dust explosion on impact]",
+  ],
+  chase: [
+    "[MOTION: continuous forward sprint, environment blurs past, obstacles cleared in stride]",
+    "[MOTION: pursuers gain, prey dodges, narrow escapes, momentum never stops]",
+    "[MOTION: rooftop leap, grab ledge, swing forward, land running]",
+    "[MOTION: weaving through obstacles, near misses, desperate speed]",
+    "[MOTION: sliding under barrier, rolling up, continuing at full speed]",
+  ],
+  clash: [
+    "[MOTION: two forces collide, shockwave expands, both pushed back, recover stance]",
+    "[MOTION: energies meet mid-air, explosion of light, debris scatters outward]",
+    "[MOTION: charging at each other, impact at center, ground cracks beneath]",
+    "[MOTION: locked in struggle, straining against each other, neither yielding]",
+    "[MOTION: deflection and counter, back and forth, escalating intensity]",
+  ],
+  ascension: [
+    "[MOTION: rising from ground, energy gathering, form expanding with power]",
+    "[MOTION: transformation beginning, old form shattering, new form emerging]",
+    "[MOTION: power surge, aura expanding, figure lifting off ground]",
+    "[MOTION: ascending spiral, energy trail behind, reaching apex]",
+    "[MOTION: breaking through barrier, emerging transformed, radiating power]",
+  ],
 };
 
 // =============================================================================
@@ -550,6 +591,35 @@ export const MYTH_BEAT_CONFIGS: Record<string, {
     action_verbs: ["accepts", "releases", "stands renewed", "walks away"],
     motion_anchor: "[MOTION: final gesture of completion, figure's silhouette transforms - smaller yet resolute, or turns to leave]",
   },
+  // NEW ACTION BEAT CONFIGS
+  battle: {
+    typical_duration: 6,
+    camera: "dynamic tracking, rapid cuts between combatants, impact close-ups",
+    motion: "combat, striking, dodging, clashing",
+    action_verbs: ["strikes", "dodges", "parries", "slashes", "blocks", "attacks", "counters"],
+    motion_anchor: "[MOTION: fluid combat, bodies in constant motion, impacts visible, momentum flowing]",
+  },
+  chase: {
+    typical_duration: 6,
+    camera: "tracking shot following runner, environment streaming past",
+    motion: "running, leaping, dodging, escaping",
+    action_verbs: ["runs", "leaps", "dodges", "vaults", "sprints", "escapes", "pursues"],
+    motion_anchor: "[MOTION: continuous forward motion, obstacles cleared, never stopping]",
+  },
+  clash: {
+    typical_duration: 7,
+    camera: "wide to capture both forces, push in on impact moment",
+    motion: "collision, impact, shockwave, recoil",
+    action_verbs: ["collides", "clashes", "impacts", "meets", "shatters", "explodes"],
+    motion_anchor: "[MOTION: two forces meeting, impact energy radiating outward, aftermath settling]",
+  },
+  ascension: {
+    typical_duration: 8,
+    camera: "crane up following rising figure, widening to show transformation",
+    motion: "rising, transforming, expanding, radiating",
+    action_verbs: ["rises", "transforms", "ascends", "radiates", "expands", "transcends"],
+    motion_anchor: "[MOTION: upward motion, form changing, power building and releasing]",
+  },
 };
 
 // =============================================================================
@@ -817,7 +887,7 @@ export function buildMythPromptV2(
   const lightLine = LIGHT_BEHAVIOR_V2[scene.beat_type] || LIGHT_BEHAVIOR_V2.journey;
   
   // 5. MINIMAL NEGATIVES (technique-focused - what breaks the style)
-  const avoidLine = "No 3D rendering, no smooth interpolation, no realistic faces.";
+  const avoidLine = "No realistic faces.";
   
   // Combine with clean structure
   return `${actionLine} ${settingLine}

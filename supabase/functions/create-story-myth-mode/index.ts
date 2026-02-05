@@ -32,6 +32,8 @@ interface CreateMythStoryRequest {
   premise: string;
   scene_count?: number;
   title?: string;
+  pacing?: "slow" | "dynamic" | "fast";
+  epic_mode?: boolean;
 }
 
 Deno.serve(async (req) => {
@@ -52,6 +54,8 @@ Deno.serve(async (req) => {
     }
 
     const sceneCount = body.scene_count || 3; // Default to 3 scenes for myth mode
+    const pacing = body.pacing || "dynamic"; // Default to dynamic, not slow
+    const epicMode = body.epic_mode || false;
 
     // Generate storyboard via GPT-4o with myth-specific prompting
     const systemPrompt = buildMythStoryboardPrompt(body.premise, sceneCount);
@@ -242,10 +246,10 @@ Deno.serve(async (req) => {
             articulated_limbs: true,
             paper_layers: true,
             backlit_from_below: true,
-            frame_by_frame_motion: true,
-            silhouette_only: true,
+              silhouette_only: !epicMode,
             no_faces: true,
-            slow_pacing: true,
+              pacing: pacing,
+              epic_mode: epicMode,
           },
         },
         continuity_anchors: {
@@ -274,9 +278,10 @@ Deno.serve(async (req) => {
           moral: storyboard.moral,
           scene_count: storyboard.scenes.length,
           settings: {
-            silhouette_only: true,
+          silhouette_only: !epicMode,
             no_faces: true,
-            slow_pacing: true,
+          pacing: pacing,
+          epic_mode: epicMode,
           },
         },
         storyboard,

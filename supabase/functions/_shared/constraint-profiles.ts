@@ -12,7 +12,7 @@
  */
 
 export type VideoProvider = "sora" | "runway" | "luma";
-export type StoryMode = "default" | "myth" | "film" | "spectacle" | "brutality";
+export type StoryMode = "default" | "myth" | "myth-epic" | "myth-action" | "film" | "spectacle" | "brutality";
 export type SanitizationLevel = "off" | "soft" | "strict";
 
 /**
@@ -103,6 +103,8 @@ export const PROVIDER_BUDGETS: Record<VideoProvider, TierBudgets> = {
 export const MODE_BUDGET_MULTIPLIERS: Record<StoryMode, number> = {
   default: 1.0,
   myth: 0.8, // Myth needs style anchors, less room for constraints
+  "myth-epic": 0.7, // Epic myth - action beats but keep style
+  "myth-action": 0.6, // Full action myth - spectacle-level freedom
   film: 1.0, // Film mode is balanced
   spectacle: 0.6, // Spectacle prioritizes action - minimal constraints
   brutality: 0.5, // Brutality is minimal rails
@@ -119,36 +121,36 @@ export function getConstraintProfile(
   const multiplier = MODE_BUDGET_MULTIPLIERS[mode];
   
   // Spectacle and brutality modes disable Tier 2 by default
-  const enableTier2 = !["spectacle", "brutality"].includes(mode);
+  const enableTier2 = !["spectacle", "brutality", "myth-action"].includes(mode);
   
   // Brutality mode uses minimal Tier 1
-  const enableTier1 = mode !== "brutality";
+  const enableTier1 = !["brutality", "myth-action"].includes(mode);
   
   // Sanitization: Runway always strict, others mode-dependent
   let sanitizationLevel: SanitizationLevel = "soft";
   if (provider === "runway") {
     sanitizationLevel = "strict";
-  } else if (["brutality", "spectacle"].includes(mode)) {
+  } else if (["brutality", "spectacle", "myth-action", "myth-epic"].includes(mode)) {
     sanitizationLevel = "off"; // Trust the creative, skip soft sanitization
   }
   
   // Block enablement based on mode
   const blocks = {
     captureContract: mode === "film", // Only film mode uses capture contract
-    cinematographyDirective: enableTier2 && mode !== "myth",
-    motionAmplification: enableTier2 && !["myth", "spectacle"].includes(mode),
+    cinematographyDirective: enableTier2 && !["myth", "myth-epic", "myth-action"].includes(mode),
+    motionAmplification: enableTier2 && !["myth", "myth-epic", "spectacle"].includes(mode),
     narrativeContext: enableTier1,
     coverageDirective: false, // DEPRECATED - always disabled now
     qualityStandards: false, // DELETED - CGI trigger
     realismAnchors: mode === "film" && enableTier2,
-    identityAnchors: enableTier1 && mode !== "spectacle",
+    identityAnchors: enableTier1 && !["spectacle", "myth-action"].includes(mode),
   };
   
   // Storyboard validation: spectacle/brutality use soft mode
   const storyboardValidation = {
-    bannedVerbsMode: (["spectacle", "brutality"].includes(mode) ? "off" : mode === "film" ? "hard" : "soft") as "hard" | "soft" | "off",
-    requiredVerbsMode: (["spectacle", "brutality"].includes(mode) ? "off" : mode === "film" ? "hard" : "soft") as "hard" | "soft" | "off",
-    forceEscalationMode: (["spectacle", "brutality"].includes(mode) ? "off" : "soft") as "hard" | "soft" | "off",
+    bannedVerbsMode: (["spectacle", "brutality", "myth-action", "myth-epic"].includes(mode) ? "off" : mode === "film" ? "hard" : "soft") as "hard" | "soft" | "off",
+    requiredVerbsMode: (["spectacle", "brutality", "myth-action", "myth-epic"].includes(mode) ? "off" : mode === "film" ? "hard" : "soft") as "hard" | "soft" | "off",
+    forceEscalationMode: (["spectacle", "brutality", "myth-action", "myth-epic"].includes(mode) ? "off" : "soft") as "hard" | "soft" | "off",
   };
   
   return {

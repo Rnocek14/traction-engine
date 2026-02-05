@@ -7,9 +7,38 @@ const corsHeaders = {
 };
 
 const RATER_VERSION = "vlm-v2.5-hardened";
+const RATER_VERSION_SPECTACLE = "vlm-v2.5-spectacle-aware";
 
 // Thresholds
 const CONFIDENCE_THRESHOLD = 0.75;
+
+// Spectacle-tolerant defect types - these are expected in action content
+const SPECTACLE_TOLERANT_DEFECTS = new Set<DefectType>([
+  "floaty_motion",
+  "unnatural_motion", 
+  "physics_violation",
+  "flicker",
+]);
+
+// Detect if job is spectacle/action context from style_hints
+function isSpectacleContext(styleHints: string | null): boolean {
+  if (!styleHints) return false;
+  try {
+    const hints = JSON.parse(styleHints);
+    // Check for explicit spectacle modes
+    if (hints.mode === "spectacle" || hints.mode === "brutality") return true;
+    if (hints.mode === "myth-epic" || hints.mode === "myth-action") return true;
+    // Check for epic_mode flag
+    if (hints.epic_mode === true) return true;
+    // Check for action beat types
+    if (["battle", "chase", "clash", "ascension"].includes(hints.beat_type)) return true;
+    // Check for fast pacing
+    if (hints.pacing === "fast" || hints.pacing === "dynamic") return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // DYNAMIC ALLOWLIST CACHE
@@ -443,16 +472,20 @@ function sanitizeDefects(raw: unknown): Defect[] {
     .slice(0, 10);
 }
 
-function applyDefectDeductions(scores: DimensionScores, defects: Defect[]): DimensionScores {
+function applyDefectDeductions(scores: DimensionScores, defects: Defect[], spectacleMode: boolean = false): DimensionScores {
   const deductions: DimensionScores = { temporal: 0, motion: 0, fidelity: 0, adherence: 0, cinematic: 0 };
   const maxDeduction = 35;
 
   for (const defect of defects) {
     const mapping = DEFECT_DIMENSION_MAP[defect.type];
     if (!mapping) continue;
+    
+    // Reduce penalties for spectacle-tolerant defects in action content
+    const penaltyMultiplier = (spectacleMode && SPECTACLE_TOLERANT_DEFECTS.has(defect.type)) ? 0.5 : 1.0;
+    
     for (const dim of mapping.dimensions) {
       const weight = mapping.weights[dim] ?? 0.5;
-      deductions[dim] += defect.deduction * weight;
+      deductions[dim] += defect.deduction * weight * penaltyMultiplier;
     }
   }
 
@@ -476,6 +509,12 @@ async function scoreVideoWithVLM(
 ): Promise<AutoRatingResult> {
   const providerCriteria = getProviderCriteria(provider);
   const isSpritesheetLikely = imageUrl.includes("spritesheet");
+  const spectacleMode = isSpectacleContext(styleHints);
+  
+  // Log spectacle detection
+  if (spectacleMode) {
+    console.log("[auto-rate-video] Spectacle context detected - reducing motion penalties");
+  }
 
   const systemPrompt = `You are an expert AI video quality analyst with STRICT calibration. Evaluate ${isSpritesheetLikely ? "spritesheets (multiple frames)" : "a single thumbnail"} from AI videos.
 
@@ -531,7 +570,8 @@ OUTPUT (JSON only):
     // Apply mechanical deductions
     const adjusted = applyDefectDeductions(
       { temporal: temporalConsistency, motion: motionRealism, fidelity: visualFidelity, adherence: promptAdherence, cinematic: cinematicQuality },
-      defects
+      defects,
+      spectacleMode
     );
     temporalConsistency = adjusted.temporal;
     motionRealism = adjusted.motion;
@@ -558,10 +598,24 @@ OUTPUT (JSON only):
     const severeDefects = defects.filter(d => d.severity === "severe");
     const moderateDefects = defects.filter(d => d.severity === "moderate");
 
-    if (severeDefects.some(d => d.type === "flicker" || d.type === "identity_drift")) temporalConsistency = Math.min(temporalConsistency, 65);
-    if (moderateDefects.some(d => d.type === "flicker" || d.type === "identity_drift")) temporalConsistency = Math.min(temporalConsistency, 75);
+    // In spectacle mode, be more lenient with motion-related defect caps
+    if (!spectacleMode) {
+      if (severeDefects.some(d => d.type === "flicker" || d.type === "identity_drift")) temporalConsistency = Math.min(temporalConsistency, 65);
+      if (moderateDefects.some(d => d.type === "flicker" || d.type === "identity_drift")) temporalConsistency = Math.min(temporalConsistency, 75);
+    } else {
+      // Spectacle mode: only cap for true temporal issues like identity_drift, not flicker
+      if (severeDefects.some(d => d.type === "identity_drift")) temporalConsistency = Math.min(temporalConsistency, 70);
+    }
+    
     if (defects.some(d => (d.type === "missing_element" || d.type === "wrong_subject") && d.severity === "severe")) promptAdherence = Math.min(promptAdherence, 50);
-    if (severeDefects.some(d => d.type === "physics_violation" || d.type === "floaty_motion")) motionRealism = Math.min(motionRealism, 60);
+    
+    // Physics/floaty caps - relaxed in spectacle mode
+    if (!spectacleMode) {
+      if (severeDefects.some(d => d.type === "physics_violation" || d.type === "floaty_motion")) motionRealism = Math.min(motionRealism, 60);
+    } else {
+      // Spectacle allows more physics bending
+      if (severeDefects.some(d => d.type === "physics_violation" || d.type === "floaty_motion")) motionRealism = Math.min(motionRealism, 75);
+    }
 
     // Overall score
     let overallScore = Math.round(0.30 * promptAdherence + 0.20 * temporalConsistency + 0.20 * motionRealism + 0.20 * visualFidelity + 0.10 * cinematicQuality);
