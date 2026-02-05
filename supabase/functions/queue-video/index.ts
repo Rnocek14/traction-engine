@@ -295,7 +295,10 @@ Deno.serve(async (req) => {
     }
     
     // Generate variant group ID once for all variants in this request
-    const variantGroupId = crypto.randomUUID();
+    // Safe fallback for environments without crypto.randomUUID
+    const variantGroupId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     
     // Results collector for multi-variant response
     const createdJobs: Array<{ id: string; variant_index: number; openai_video_id: string }> = [];
@@ -498,6 +501,9 @@ Style: Professional, engaging, suitable for TikTok/Reels. Smooth transitions bet
             variant_strategy: variantStrategy,
             variant_group_id: variantGroupId,
             variant_mutation_codes: mutation.codes,
+            // Reference frame tracking
+            reference_url: starting_frame_url || null,
+            reference_used: !!startingFrameBlob,
           },
           progress: 0,
           openai_status: "pending",
@@ -541,10 +547,22 @@ Style: Professional, engaging, suitable for TikTok/Reels. Smooth transitions bet
           
           promptForAttempt = retryResult.prompt;
           
-          // On attempt 3, drop reference frame (force T2V)
+          // On attempt 3, drop reference frame (force T2V) and persist the reason
           if (retryResult.shouldDropReference) {
             console.log(`[queue-video] Attempt ${attempt}: Dropping reference frame, forcing T2V`);
             useStartingFrame = false;
+            // Persist reference drop for debugging
+            await supabase
+              .from("video_jobs")
+              .update({
+                settings: {
+                  ...job.settings,
+                  reference_used: false,
+                  reference_drop_reason: "retry_ladder",
+                  reference_drop_attempt: attempt,
+                },
+              })
+              .eq("id", job.id);
           }
         }
         
