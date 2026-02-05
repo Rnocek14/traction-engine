@@ -8,7 +8,7 @@
  * - Symbolic prompts with style anchors
  */
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "jsr:@supabase/supabase-js@2";
 import {
   type MythStoryboard,
   type MythScene,
@@ -55,6 +55,8 @@ interface ContinueMythStoryRequest {
   force_regen?: boolean;
   /** Regenerate only specific scene indices */
   regen_indices?: number[];
+  /** Per-scene keyframe URLs for reference continuity */
+  starting_frames?: Record<string, string>;
 }
 
 Deno.serve(async (req) => {
@@ -245,7 +247,8 @@ Deno.serve(async (req) => {
             skip_enrichment: true, // Already enriched with mythic style
             bypass_qa: true, // Story mode uses story_jobs flow, not script QA
             story_job_id: body.story_job_id, // Signal this is story mode
-            sequence_index: i, // Pass scene index for pro model upgrade
+            sequence_index: i, // Pass scene index for pro model upgrade + reference lookup
+            starting_frames: body.starting_frames, // Per-scene keyframe URLs (pass-through)
           }),
         });
 
