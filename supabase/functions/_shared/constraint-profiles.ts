@@ -146,8 +146,8 @@ export function getConstraintProfile(
   
   // Storyboard validation: spectacle/brutality use soft mode
   const storyboardValidation = {
-    bannedVerbsMode: (["spectacle", "brutality"].includes(mode) ? "soft" : "soft") as "hard" | "soft" | "off",
-    requiredVerbsMode: (["spectacle", "brutality"].includes(mode) ? "soft" : "soft") as "hard" | "soft" | "off",
+    bannedVerbsMode: (["spectacle", "brutality"].includes(mode) ? "off" : mode === "film" ? "hard" : "soft") as "hard" | "soft" | "off",
+    requiredVerbsMode: (["spectacle", "brutality"].includes(mode) ? "off" : mode === "film" ? "hard" : "soft") as "hard" | "soft" | "off",
     forceEscalationMode: (["spectacle", "brutality"].includes(mode) ? "off" : "soft") as "hard" | "soft" | "off",
   };
   
@@ -195,6 +195,7 @@ export interface AssembledPrompt {
     tier2Dropped: boolean;
     tier1Dropped: boolean;
     overBudget: boolean;
+    creativeTruncated?: boolean;
   };
 }
 
@@ -238,28 +239,42 @@ export function assembleWithBudget(
     totalChars = creative.length + totalConstraints;
   }
   
+  // LAST RESORT: If still over budget, truncate creative to fit
+  let truncatedCreative = creative;
+  let creativeTruncated = false;
+  if (totalChars > budgets.totalMax) {
+    const availableForCreative = budgets.totalMax - tier0.length;
+    if (availableForCreative > 50) {
+      truncatedCreative = creative.slice(0, availableForCreative - 3) + "...";
+      creativeTruncated = true;
+      totalChars = tier0.length + truncatedCreative.length;
+    }
+    // If tier0 alone exceeds budget, we still proceed but flag overBudget
+  }
+  
   // Assemble final prompt (Tier 0 first for injection survival)
-  const finalPrompt = [tier0, tier1, tier2, creative].filter(Boolean).join("\n\n");
+  const finalPrompt = [tier0, tier1, tier2, truncatedCreative].filter(Boolean).join("\n\n");
   
   return {
     finalPrompt,
-    creative,
+    creative: truncatedCreative,
     constraints: {
       tier0,
       tier1,
       tier2,
     },
     stats: {
-      creativeChars: creative.length,
+      creativeChars: truncatedCreative.length,
       tier0Chars: tier0.length,
       tier1Chars: tier1.length,
       tier2Chars: tier2.length,
       totalConstraintChars: totalConstraints,
-      totalChars,
+      totalChars: finalPrompt.length,
       constraintPercent: Math.round((totalConstraints / totalChars) * 100),
       tier2Dropped,
       tier1Dropped,
-      overBudget: totalChars > budgets.totalMax,
+      overBudget: finalPrompt.length > budgets.totalMax,
+      creativeTruncated,
     },
   };
 }
@@ -278,8 +293,8 @@ export function getEffectiveSanitizationLevel(
     return "strict";
   }
   
-  // Story-level override takes precedence
-  if (storySanitizationLevel && storySanitizationLevel !== "off") {
+  // Story-level override takes precedence (including explicit "off")
+  if (storySanitizationLevel !== undefined) {
     return storySanitizationLevel;
   }
   
