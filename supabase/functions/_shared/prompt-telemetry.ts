@@ -1,11 +1,14 @@
-/**
- * Prompt Telemetry System
- * 
- * Logs final prompt composition for debugging and regression prevention.
- * This is the "prompt receipt" that shows exactly what was sent to providers.
- */
-
-import type { SanitizationLevel, VideoProvider, StoryMode } from "./constraint-profiles.ts";
+ /**
+  * Prompt Telemetry System
+  * 
+  * Logs final prompt composition for debugging and regression prevention.
+  * This is the "prompt receipt" that shows exactly what was sent to providers.
+  */
+ 
+ // Inline types to avoid circular dependencies
+ export type VideoProvider = "sora" | "runway" | "luma";
+ export type StoryMode = "default" | "myth" | "film" | "spectacle" | "brutality";
+ export type SanitizationLevel = "off" | "soft" | "strict";
 
 /**
  * Telemetry data for a single prompt
