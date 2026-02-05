@@ -14,6 +14,17 @@
 // TYPES
 // =============================================================================
 
+export type MythForceType =
+  | "predator"
+  | "army"
+  | "monster"
+  | "magic"
+  | "weather"
+  | "environment"
+  | "pursuit"
+  | "collapse"
+  | "unknown";
+
 export interface MythCharacter {
   archetype: string;         // "the wanderer", "the seeker", "the fool"
   silhouette: string;        // visual description for shadow rendering
@@ -52,6 +63,14 @@ export interface MythScene {
   
   // Duration
   duration_seconds: number;
+
+  // === ESCALATION/FORCE FIELDS (brought from Film Mode) ===
+  force_present?: boolean;
+  force_type?: MythForceType;
+  escalation_delta?: 0 | 1 | 2 | 3;
+  setpiece_delta?: 0 | 1 | 2 | 3;
+  irreversible_action?: boolean;  // "something breaks forever"
+  threat_vector?: string;         // "wind tears gear", "predator closes distance"
 }
 
 export interface MythStoryboard {
@@ -775,10 +794,10 @@ ${avoidLine}`;
  * Reiniger technique anchor - describes HOW it was made, not how it looks.
  * Triggers model's knowledge of this specific animation technique.
  */
-const REINIGER_TECHNIQUE_ANCHOR = 
-  "STYLE: Lotte Reiniger articulated paper cutout animation. " +
-  "Black cardboard jointed figures against layered transparent paper. " +
-  "Backlit from below. Frame-by-frame handcrafted motion.";
+const REINIGER_TECHNIQUE_ANCHOR =
+  "STYLE: Lotte Reiniger-inspired articulated shadow-puppet cutout animation. " +
+  "Layered paper silhouettes, backlit from below, high-contrast. " +
+  "Fluid articulated motion with continuous movement.";
 
 /**
  * Light behavior per beat - breathing, pulsing, dynamic (not static descriptions)
@@ -790,6 +809,10 @@ export const LIGHT_BEHAVIOR_V2: Record<string, string> = {
   revelation: "Sudden light bloom, illumination spreads outward.",
   consequence: "Light drains slowly away, figure dissolves at edges.",
   moral: "Soft golden glow settles, peace in final stillness.",
+  battle: "Strobe-like flashes on impact, shadows clash violently.",
+  chase: "Light streaks past, environment blurs with speed.",
+  clash: "Explosion of light at collision point, shockwave shadows.",
+  ascension: "Light intensifies from within, radiating outward.",
 };
 
 /**
@@ -897,4 +920,123 @@ ${techniqueLine}
 ${lightLine}
 
 ${avoidLine}`;
+}
+
+// =============================================================================
+// V3 ACTION-FIRST PROMPT BUILDER
+// =============================================================================
+
+/**
+ * Combat verb contract - injected when action mode is active.
+ */
+export const ACTION_VERB_CONTRACT = `
+When beat_type is trial/consequence/battle/chase/clash/ascension:
+- Use HARD ACTION VERBS (crash, slam, tear, rupture, lunge, collide, shatter, explode, fracture, claw, sprint, dive).
+- Avoid SOFT VERBS (trudge, wander, stroll, gently, slowly, peacefully, calmly).
+- Action must be PHYSICAL and VISIBLE: impacts, debris, velocity, struggle.
+`;
+
+/**
+ * Action keywords that signal premise wants dynamic pacing.
+ */
+export const ACTION_KEYWORDS = [
+  "battle", "war", "kill", "hunt", "chase", "escape", "siege", "ambush",
+  "dragon", "monster", "army", "blood", "fight", "clash", "pursue",
+  "storm", "collapse", "fire", "rage", "doom", "curse", "attack",
+  "destroy", "conquer", "defeat", "slay", "strike", "charge"
+];
+
+/**
+ * Check if premise implies action-heavy content.
+ */
+export function premiseWantsAction(premise: string): boolean {
+  const p = (premise || "").toLowerCase();
+  return ACTION_KEYWORDS.some(k => p.includes(k));
+}
+
+/**
+ * Build a V3 Myth Mode prompt - ACTION PHYSICS FIRST, style secondary.
+ * 
+ * Structure:
+ * 1. Action block (physics + consequence) - HIGHEST PRIORITY
+ * 2. Motion directive (what moves, how fast, what collides)
+ * 3. Escalation header (delta + force)
+ * 4. Style anchor (short, non-conflicting)
+ * 5. Minimal negatives
+ * 
+ * NO:
+ * - "frame-by-frame"
+ * - "handcrafted motion"
+ * - "stop-motion"
+ * - any line that implies low FPS / choppy movement
+ */
+export function buildMythPromptV3(
+  scene: MythScene,
+  storyboard: Partial<MythStoryboard>,
+  settings?: { intensity_profile?: "contemplative" | "action" | "epic" }
+): string {
+  const character = storyboard.character;
+  const setting = storyboard.setting;
+  const isAction = settings?.intensity_profile === "action" || settings?.intensity_profile === "epic";
+  
+  // 1. ACTION BLOCK (physics + consequence) - FIRST
+  const archetype = character?.archetype || "solitary figure";
+  const rawAction = scene.silhouette_action || scene.visual_description || "moves through the scene";
+  
+  // Build transformation phrase if available
+  let transformPhrase = "";
+  if (scene.start_state && scene.end_state) {
+    transformPhrase = ` — from ${scene.start_state} to ${scene.end_state}`;
+  }
+  
+  const actionLine = `A ${archetype} ${rawAction}${transformPhrase}.`;
+  
+  // 2. FORCE + ESCALATION HEADER
+  const force = scene.force_present
+    ? `FORCE: ${scene.force_type || "unknown"}`
+    : "";
+  const esc = scene.escalation_delta !== undefined && scene.escalation_delta > 0
+    ? `ESC=${scene.escalation_delta}`
+    : "";
+  const setpiece = scene.setpiece_delta !== undefined && scene.setpiece_delta > 0
+    ? `SETPIECE=${scene.setpiece_delta}`
+    : "";
+  const threatLine = scene.threat_vector
+    ? `THREAT: ${scene.threat_vector}`
+    : "";
+  
+  const escalationParts = [force, esc, setpiece, threatLine].filter(Boolean);
+  const escalationHeader = escalationParts.length > 0 ? escalationParts.join(" | ") : "";
+  
+  // 3. MOTION DIRECTIVE (based on escalation)
+  let motionDirective: string;
+  if (scene.escalation_delta && scene.escalation_delta >= 2) {
+    motionDirective = "[MOTION: violent continuous motion; impacts; debris in flight; strong velocity; camera reacts.]";
+  } else if (isAction || ["battle", "chase", "clash", "ascension"].includes(scene.beat_type)) {
+    motionDirective = "[MOTION: fluid dynamic motion; clear impacts; momentum carries through; continuous movement.]";
+  } else {
+    motionDirective = "[MOTION: clear purposeful motion; continuous movement; readable silhouettes.]";
+  }
+  
+  // 4. SETTING CONTEXT
+  const realm = setting?.realm || "timeless realm";
+  const settingLine = `${realm} rendered in layered paper depths.`;
+  
+  // 5. STYLE ANCHOR (short, action-friendly)
+  const styleLine = isAction
+    ? "STYLE: Reiniger-inspired shadow silhouettes, high contrast, fluid articulated motion, dynamic staging."
+    : "STYLE: Reiniger-inspired shadow silhouettes, high contrast, poetic continuous motion.";
+  
+  // 6. LIGHT BEHAVIOR
+  const lightLine = LIGHT_BEHAVIOR_V2[scene.beat_type] || LIGHT_BEHAVIOR_V2.journey;
+  
+  // 7. MINIMAL NEGATIVES
+  const avoidLine = "No realistic faces. Avoid modern artifacts.";
+  
+  // Combine with action physics FIRST
+  const parts = [actionLine, settingLine];
+  if (escalationHeader) parts.push(escalationHeader);
+  parts.push(motionDirective, styleLine, lightLine, avoidLine);
+  
+  return parts.join("\n\n");
 }

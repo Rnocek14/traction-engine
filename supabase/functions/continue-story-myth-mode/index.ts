@@ -13,6 +13,8 @@ import {
   type MythStoryboard,
   type MythScene,
   buildMythPromptV2,
+  buildMythPromptV3,
+  premiseWantsAction,
   MYTH_STYLE_ANCHORS,
   LIGHT_BEHAVIOR_V2,
 } from "../_shared/myth-continuity.ts";
@@ -170,12 +172,25 @@ Deno.serve(async (req) => {
 
       const scene = storyboard.scenes[i] as MythScene;
       
-      // Build V2 prompt with Reiniger technique-based style anchors
-      const mythPrompt = buildMythPromptV2(scene, storyboard);
+      // Determine if this story wants action mode
+      const generationSettings = (storyboard as any).generation_settings || {};
+      const wantsAction = 
+        generationSettings.pacing === "fast" ||
+        generationSettings.epic_mode ||
+        generationSettings.intensity_profile === "action" ||
+        generationSettings.intensity_profile === "epic" ||
+        premiseWantsAction(storyboard.premise || "");
       
-      console.log(`[myth-mode-v2] Queueing scene ${i}: ${scene.beat_type}`);
-      console.log(`[myth-mode-v2] Prompt length: ${mythPrompt.length} chars`);
-      console.log(`[myth-mode-v2] Prompt: ${mythPrompt}`);
+      // Build V3 action-first prompt if action mode, otherwise V2
+      const mythPrompt = wantsAction
+        ? buildMythPromptV3(scene, storyboard, { 
+            intensity_profile: generationSettings.intensity_profile || "action" 
+          })
+        : buildMythPromptV2(scene, storyboard);
+      
+      console.log(`[myth-mode-v3] Queueing scene ${i}: ${scene.beat_type} (action=${wantsAction})`);
+      console.log(`[myth-mode-v3] Prompt length: ${mythPrompt.length} chars`);
+      console.log(`[myth-mode-v3] Prompt: ${mythPrompt}`);
 
       // Myth Mode always uses T2V (no I2V - we want abstraction, not identity)
       // Call queue-video to properly submit to Sora API
@@ -227,21 +242,25 @@ Deno.serve(async (req) => {
               is_primary: true,
               style_hints: JSON.stringify({
                 mode: "myth",
-                prompt_version: "v2_reiniger",
-                technique_style: "lotte_reiniger_cutout",
+                prompt_version: wantsAction ? "v3_action" : "v2_reiniger",
+                technique_style: wantsAction ? "reiniger_fluid" : "lotte_reiniger_cutout",
+                intensity_profile: generationSettings.intensity_profile || (wantsAction ? "action" : "contemplative"),
                 beat_type: scene.beat_type,
                 silhouette: scene.has_silhouette,
                 silhouette_pose: scene.silhouette_pose,
                 light_behavior: LIGHT_BEHAVIOR_V2[scene.beat_type],
                 start_state: scene.start_state,
                 end_state: scene.end_state,
-                features: ["articulated_limbs", "paper_layers", "backlit", "frame_by_frame"],
+                features: ["articulated_limbs", "paper_layers", "backlit", "fluid_motion"],
+                force_present: scene.force_present,
+                force_type: scene.force_type,
+                escalation_delta: scene.escalation_delta,
               }),
             })
             .eq("id", jobId);
         }
 
-        console.log(`[myth-mode] ✓ Queued scene ${i} as job ${jobId}`);
+        console.log(`[myth-mode-v3] ✓ Queued scene ${i} as job ${jobId}`);
         queuedScenes.push(i);
         queuedCount++;
       } catch (err) {
@@ -263,7 +282,7 @@ Deno.serve(async (req) => {
       await supabase.functions.invoke("process-video", { body: {} });
     }
 
-    console.log(`[myth-mode] Queued ${queuedCount}/${storyboard.scenes.length} scenes`);
+    console.log(`[myth-mode-v3] Queued ${queuedCount}/${storyboard.scenes.length} scenes`);
 
     return new Response(
       JSON.stringify({
