@@ -117,14 +117,12 @@ Deno.serve(async (req) => {
     }
 
     // Get existing video jobs to find what's already generated
-    // Only consider jobs with openai_video_id as "properly queued"
     const { data: existingJobs } = await supabase
       .from("video_jobs")
       .select("id, sequence_index, status, openai_video_id")
       .eq("story_job_id", body.story_job_id);
 
-    // Jobs are "complete" if they have an openai_video_id (properly submitted)
-    // or are in done/running status
+    // Build completed indices set (jobs with openai_video_id or done/running status)
     const completedIndices = new Set(
       (existingJobs || [])
         .filter(j => 
@@ -134,20 +132,35 @@ Deno.serve(async (req) => {
         )
         .map(j => j.sequence_index)
     );
-    
-    // Force regen support: clear completed indices as requested
-    if (body.force_regen === true) {
-      console.log(`[myth-mode] force_regen=true: clearing all ${completedIndices.size} completed indices`);
-      completedIndices.clear();
-    } else if (body.regen_indices && Array.isArray(body.regen_indices)) {
-      for (const idx of body.regen_indices) {
-        if (typeof idx === "number") {
-          console.log(`[myth-mode] regen_indices: removing index ${idx} from completed`);
-          completedIndices.delete(idx);
-        }
-      }
+
+    // Build explicit regen target set
+    const regenSet = new Set<number>(
+      Array.isArray(body.regen_indices) 
+        ? body.regen_indices.filter((idx): idx is number => typeof idx === "number")
+        : []
+    );
+
+    // Authoritative scene selection: force_regen > regen_indices > not-completed
+    function shouldGenerateScene(index: number): boolean {
+      if (body.force_regen === true) return true;
+      if (regenSet.size > 0) return regenSet.has(index);
+      return !completedIndices.has(index);
     }
-    
+
+    // Pre-delete jobs for regen targets (so old jobs don't block new ones)
+    const regenTargets = body.force_regen === true
+      ? storyboard.scenes.map((_, i) => i)
+      : Array.from(regenSet);
+
+    if (regenTargets.length > 0) {
+      console.log(`[myth-mode] Pre-deleting jobs for regen targets: [${regenTargets.join(", ")}]`);
+      await supabase
+        .from("video_jobs")
+        .delete()
+        .eq("story_job_id", body.story_job_id)
+        .in("sequence_index", regenTargets);
+    }
+
     // Delete stale jobs (queued but no openai_video_id)
     const staleJobIds = (existingJobs || [])
       .filter(j => j.status === "queued" && !j.openai_video_id)
@@ -200,8 +213,8 @@ Deno.serve(async (req) => {
     }
 
     for (let i = 0; i < storyboard.scenes.length; i++) {
-      if (completedIndices.has(i)) {
-        console.log(`[myth-mode] Scene ${i} already queued, skipping`);
+      if (!shouldGenerateScene(i)) {
+        console.log(`[myth-mode] Skipping scene ${i} (not selected for generation)`);
         continue;
       }
 
