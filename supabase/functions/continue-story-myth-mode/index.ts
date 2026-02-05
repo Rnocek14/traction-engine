@@ -245,6 +245,7 @@ Deno.serve(async (req) => {
             skip_enrichment: true, // Already enriched with mythic style
             bypass_qa: true, // Story mode uses story_jobs flow, not script QA
             story_job_id: body.story_job_id, // Signal this is story mode
+            sequence_index: i, // Pass scene index for pro model upgrade
           }),
         });
 

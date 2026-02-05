@@ -61,6 +61,12 @@ interface VideoRequest {
   bypass_qa?: boolean;
   /** Story job ID - if present, this is story mode (not script-based QA flow) */
   story_job_id?: string;
+  /** Scene index for story mode - used for pro model upgrade logic */
+  sequence_index?: number;
+  /** Force a specific model (overrides auto-upgrade) */
+  force_model?: string;
+  /** Disable pro upgrade even if scene qualifies (cost control) */
+  pro_upgrade?: boolean | "auto";
 }
 
 interface ClipData {
@@ -94,6 +100,47 @@ Deno.serve(async (req) => {
 
     const provider = reqProvider || "sora";
 
+    // ============================================================
+    // PRO MODEL AUTO-UPGRADE FOR SETPIECES
+    // ============================================================
+    // Fetch story context if story_job_id provided (for model upgrade decision)
+    let storyGenerationSettings: Record<string, unknown> | null = null;
+    let sceneContext: Record<string, unknown> | null = null;
+    
+    if (story_job_id && body.sequence_index !== undefined) {
+      const { data: storyJob } = await supabase
+        .from("story_jobs")
+        .select("storyboard_json")
+        .eq("id", story_job_id)
+        .single();
+      
+      if (storyJob?.storyboard_json) {
+        const storyboard = storyJob.storyboard_json as Record<string, unknown>;
+        storyGenerationSettings = (storyboard.generation_settings || {}) as Record<string, unknown>;
+        const scenes = (storyboard.scenes || []) as Record<string, unknown>[];
+        sceneContext = scenes[body.sequence_index] || null;
+      }
+    }
+    
+    // Determine if scene qualifies for sora-2-pro upgrade
+    function shouldUsePro(
+      gs: Record<string, unknown> | null, 
+      scene: Record<string, unknown> | null
+    ): boolean {
+      const esc = Number(scene?.escalation_delta ?? 0);
+      const sp = Number(scene?.setpiece_delta ?? 0);
+      const intensity = gs?.intensity_profile as string | undefined;
+      const actionMode = gs?.action_mode === true;
+      
+      return (
+        esc >= 2 ||
+        sp >= 2 ||
+        actionMode ||
+        intensity === "action" ||
+        intensity === "epic"
+      );
+    }
+    
     // Validate settings
     const allowedSizes = ["720x1280", "1280x720", "1024x1792", "1792x1024"];
     // Provider durations: Sora = 4, 8, 12; Runway = 5, 10
@@ -120,7 +167,32 @@ Deno.serve(async (req) => {
       console.log(`Legacy caller: using seconds=${settings.seconds} without provider_seconds`);
     }
     
-    const model = settings?.model || "sora-2";
+    // Model selection with pro auto-upgrade
+    let model: string;
+    const baseModel = settings?.model || "sora-2";
+    
+    if (body.force_model) {
+      // Explicit override wins
+      model = body.force_model;
+      console.log(`[queue-video] model=${model} (forced override)`);
+    } else if (body.pro_upgrade === false) {
+      // Pro upgrade explicitly disabled
+      model = baseModel;
+      console.log(`[queue-video] model=${model} (pro_upgrade disabled)`);
+    } else if (provider === "sora" && shouldUsePro(storyGenerationSettings, sceneContext)) {
+      // Auto-upgrade to pro for setpieces
+      model = "sora-2-pro";
+      console.log(
+        `[queue-video] model=${model} (auto-upgraded) ` +
+        `esc=${sceneContext?.escalation_delta ?? 0} ` +
+        `setpiece=${sceneContext?.setpiece_delta ?? 0} ` +
+        `intensity=${storyGenerationSettings?.intensity_profile ?? "none"} ` +
+        `action_mode=${storyGenerationSettings?.action_mode ?? false}`
+      );
+    } else {
+      model = baseModel;
+      console.log(`[queue-video] model=${model} (default)`);
+    }
 
     if (!allowedSizes.includes(size)) {
       throw new Error(`Invalid size. Allowed: ${allowedSizes.join(", ")}`);
