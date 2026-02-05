@@ -22,6 +22,11 @@ import {
   generateFallbackStates,
 } from "../_shared/myth-continuity.ts";
 
+import {
+  ACTION_VERB_CONTRACT,
+  premiseWantsAction,
+} from "../_shared/myth-continuity.ts";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -34,6 +39,7 @@ interface CreateMythStoryRequest {
   title?: string;
   pacing?: "slow" | "dynamic" | "fast";
   epic_mode?: boolean;
+  intensity_profile?: "contemplative" | "action" | "epic";
 }
 
 Deno.serve(async (req) => {
@@ -56,11 +62,28 @@ Deno.serve(async (req) => {
     const sceneCount = body.scene_count || 3; // Default to 3 scenes for myth mode
     const pacing = body.pacing || "dynamic"; // Default to dynamic, not slow
     const epicMode = body.epic_mode || false;
+    const intensityProfile = body.intensity_profile || (epicMode ? "action" : "contemplative");
+
+    // Detect if premise wants action beats
+    const wantsAction = epicMode || intensityProfile === "action" || intensityProfile === "epic" || premiseWantsAction(body.premise);
 
     // Generate storyboard via GPT-4o with myth-specific prompting
-    const systemPrompt = buildMythStoryboardPrompt(body.premise, sceneCount);
+    let systemPrompt = buildMythStoryboardPrompt(body.premise, sceneCount);
+
+    // Inject action verb contract when action mode is requested
+    if (wantsAction) {
+      systemPrompt += `\n\n${ACTION_VERB_CONTRACT}
+
+BEAT TYPE REQUIREMENTS FOR ACTION:
+- Include at least one "battle", "chase", or "clash" beat type when the premise involves conflict.
+- Action beats: battle, chase, clash, ascension — use these instead of passive "journey" beats.
+- Escalation: At least 2 scenes should have escalation_delta >= 2.
+- Force fields: Include force_present, force_type, escalation_delta, setpiece_delta for action scenes.
+`;
+    }
 
     console.log("[myth-mode] Generating mythic storyboard...");
+    console.log(`[myth-mode] Action mode: ${wantsAction}, Intensity: ${intensityProfile}`);
 
     const llmResponse = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -200,6 +223,14 @@ Deno.serve(async (req) => {
       if (scene.has_silhouette === undefined) {
         scene.has_silhouette = true;
       }
+
+      // === FORCE/ESCALATION FIELDS (action mode) ===
+      if (wantsAction && !scene.force_present && ["trial", "battle", "chase", "clash", "consequence"].includes(scene.beat_type)) {
+        scene.force_present = true;
+        scene.force_type = scene.force_type || "unknown";
+        scene.escalation_delta = scene.escalation_delta ?? (i < storyboard.scenes.length - 1 ? Math.min(i + 1, 3) as 0 | 1 | 2 | 3 : 1);
+        scene.setpiece_delta = scene.setpiece_delta ?? (scene.escalation_delta >= 2 ? 1 : 0) as 0 | 1 | 2 | 3;
+      }
     }
 
     // Validate pose variety
@@ -241,7 +272,7 @@ Deno.serve(async (req) => {
           negative_anchors: MYTH_NEGATIVE_ANCHORS,
           symbol_arc: storyboard.symbol_arc,
           generation_settings: {
-            prompt_version: "v2",
+            prompt_version: "v3",
             technique_style: "reiniger",
             articulated_limbs: true,
             paper_layers: true,
@@ -250,6 +281,8 @@ Deno.serve(async (req) => {
             no_faces: true,
               pacing: pacing,
               epic_mode: epicMode,
+            intensity_profile: intensityProfile,
+            action_mode: wantsAction,
           },
         },
         continuity_anchors: {
@@ -282,6 +315,8 @@ Deno.serve(async (req) => {
             no_faces: true,
           pacing: pacing,
           epic_mode: epicMode,
+          intensity_profile: intensityProfile,
+          action_mode: wantsAction,
           },
         },
         storyboard,
