@@ -210,6 +210,8 @@ Deno.serve(async (req) => {
               seconds: snapDurationForSora(scene.duration_seconds || 7),
             },
             skip_enrichment: true, // Already enriched with mythic style
+            bypass_qa: true, // Story mode uses story_jobs flow, not script QA
+            story_job_id: body.story_job_id, // Signal this is story mode
           }),
         });
 

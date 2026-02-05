@@ -57,6 +57,10 @@ interface VideoRequest {
   original_prompt?: string;
   /** Skip internal retry ladder - chain layer owns retry for story mode (FIX #4) */
   skip_internal_retry?: boolean;
+  /** Bypass QA gate for story mode / dev testing */
+  bypass_qa?: boolean;
+  /** Story job ID - if present, this is story mode (not script-based QA flow) */
+  story_job_id?: string;
 }
 
 interface ClipData {
@@ -82,7 +86,7 @@ Deno.serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     const body: VideoRequest = await req.json();
-    const { script_run_id, clip_id, prompt: overridePrompt, settings, starting_frame_url, provider: reqProvider, skip_enrichment, original_prompt: explicitOriginalPrompt, skip_internal_retry } = body;
+    const { script_run_id, clip_id, prompt: overridePrompt, settings, starting_frame_url, provider: reqProvider, skip_enrichment, original_prompt: explicitOriginalPrompt, skip_internal_retry, bypass_qa, story_job_id } = body;
 
     if (!script_run_id) {
       throw new Error("script_run_id is required");
@@ -136,9 +140,17 @@ Deno.serve(async (req) => {
       throw new Error("Script not found");
     }
 
-    // Only allow video generation for qa_passed scripts
-    if (script.status !== "qa_passed") {
-      throw new Error("Script must pass QA before video generation");
+    // QA gate - conditional bypass for story mode and dev testing
+    // Story mode uses story_jobs flow, not script QA flow
+    const isStoryMode = !!story_job_id || !!body.motif_context;
+    const shouldBypassQa = bypass_qa === true || isStoryMode;
+    
+    if (!shouldBypassQa && script.status !== "qa_passed") {
+      throw new Error("Script must pass QA before video generation (use bypass_qa: true for story mode)");
+    }
+    
+    if (shouldBypassQa) {
+      console.log(`[queue-video] QA bypass active: story_mode=${isStoryMode}, explicit_bypass=${bypass_qa}`);
     }
 
     // Fetch timeline to get style guide and clip data
