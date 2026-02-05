@@ -223,43 +223,79 @@ Deno.serve(async (req) => {
     // Variant mutation tags - controlled diversity without breaking V3 structure
     const VARIANT_MUTATIONS: Record<string, string[]> = {
       camera: [
-        "", // v0 = original
-        "[VARIANT: handheld, aggressive push-in, low angle on impacts]",
-        "[VARIANT: crane shot, sweeping overhead to ground level]",
-        "[VARIANT: dolly zoom, Hitchcock vertigo effect on transformation peak]",
-        "[VARIANT: static wide, let action fill frame, no camera movement]",
+        "", // v0 = original (no mutation)
+        "camera=handheld_low_pushin",
+        "camera=crane_sweep_overhead",
+        "camera=dolly_zoom_vertigo",
+        "camera=static_wide_fill",
       ],
       staging: [
         "",
-        "[VARIANT: wider debris field, stronger silhouette deformation]",
-        "[VARIANT: tighter framing, extreme close-up punctuations]",
-        "[VARIANT: layered depth, foreground particles + mid silhouette + far environment]",
-        "[VARIANT: asymmetric composition, rule of thirds tension]",
+        "staging=wide_debris_deform",
+        "staging=tight_closeup_punctuate",
+        "staging=layered_depth_particles",
+        "staging=asymmetric_thirds",
       ],
       timing: [
         "",
-        "[VARIANT: front-load action in first 3s, slow reveal after]",
-        "[VARIANT: slow build, explosive climax in final 4s]",
-        "[VARIANT: rhythmic pulses, 3 distinct motion peaks]",
-        "[VARIANT: sustained crescendo, continuous escalation]",
+        "timing=frontload_reveal",
+        "timing=slow_build_climax",
+        "timing=rhythmic_3peaks",
+        "timing=sustained_crescendo",
       ],
     };
     
-    function getVariantMutation(variantIndex: number, strategy: string): string {
-      if (variantIndex === 0) return ""; // v0 is always the original
+    // Human-readable expansion of mutation codes
+    const MUTATION_DESCRIPTIONS: Record<string, string> = {
+      "camera=handheld_low_pushin": "handheld camera, low angle, aggressive push-in on impacts",
+      "camera=crane_sweep_overhead": "crane shot, sweeping overhead to ground level",
+      "camera=dolly_zoom_vertigo": "dolly zoom, Hitchcock vertigo effect on transformation peak",
+      "camera=static_wide_fill": "static wide shot, let action fill frame, no camera movement",
+      "staging=wide_debris_deform": "wider debris field, stronger silhouette deformation",
+      "staging=tight_closeup_punctuate": "tighter framing, extreme close-up punctuations",
+      "staging=layered_depth_particles": "layered depth, foreground particles + mid silhouette + far environment",
+      "staging=asymmetric_thirds": "asymmetric composition, rule of thirds tension",
+      "timing=frontload_reveal": "front-load action in first 3s, slow reveal after",
+      "timing=slow_build_climax": "slow build, explosive climax in final 4s",
+      "timing=rhythmic_3peaks": "rhythmic pulses, 3 distinct motion peaks",
+      "timing=sustained_crescendo": "sustained crescendo, continuous escalation",
+    };
+    
+    interface VariantMutationResult {
+      codes: string[];        // Machine-parsable: ["camera=handheld_low_pushin", "staging=wide_debris_deform"]
+      promptBlock: string;    // Provider prompt text
+    }
+    
+    function getVariantMutation(variantIndex: number, strategy: string): VariantMutationResult {
+      if (variantIndex === 0) {
+        return { codes: [], promptBlock: "" };
+      }
       
-      const mutations: string[] = [];
+      const codes: string[] = [];
       if (strategy === "all" || strategy === "camera") {
-        mutations.push(VARIANT_MUTATIONS.camera[variantIndex] || "");
+        const code = VARIANT_MUTATIONS.camera[variantIndex];
+        if (code) codes.push(code);
       }
       if (strategy === "all" || strategy === "staging") {
-        mutations.push(VARIANT_MUTATIONS.staging[variantIndex] || "");
+        const code = VARIANT_MUTATIONS.staging[variantIndex];
+        if (code) codes.push(code);
       }
       if (strategy === "all" || strategy === "timing") {
-        mutations.push(VARIANT_MUTATIONS.timing[variantIndex] || "");
+        const code = VARIANT_MUTATIONS.timing[variantIndex];
+        if (code) codes.push(code);
       }
-      return mutations.filter(Boolean).join("\n");
+      
+      // Build provider prompt block with both machine codes and human descriptions
+      const descriptions = codes.map(c => MUTATION_DESCRIPTIONS[c] || c).filter(Boolean);
+      const promptBlock = codes.length > 0
+        ? `[VARIANT]\n${codes.join("\n")}\n[/VARIANT]\n${descriptions.join(". ")}.`
+        : "";
+      
+      return { codes, promptBlock };
     }
+    
+    // Generate variant group ID once for all variants in this request
+    const variantGroupId = crypto.randomUUID();
     
     // Results collector for multi-variant response
     const createdJobs: Array<{ id: string; variant_index: number; openai_video_id: string }> = [];
@@ -397,17 +433,36 @@ Style: Professional, engaging, suitable for TikTok/Reels. Smooth transitions bet
     }
 
     // ============================================================
+    // PRE-FETCH STARTING FRAME (once, reused by all variants)
+    // ============================================================
+    let startingFrameBlob: Blob | undefined;
+    let startingFrameMime = "image/jpeg";
+    
+    if (starting_frame_url) {
+      try {
+        const imgRes = await fetch(starting_frame_url);
+        if (imgRes.ok) {
+          startingFrameMime = imgRes.headers.get("content-type") || "image/jpeg";
+          startingFrameBlob = await imgRes.blob();
+          console.log(`[queue-video] Pre-fetched starting frame for all variants: ${starting_frame_url}`);
+        }
+      } catch (frameErr) {
+        console.error("[queue-video] Failed to fetch starting frame:", frameErr);
+      }
+    }
+
+    // ============================================================
     // VARIANT LOOP: Generate N variants with controlled mutations
     // ============================================================
     for (let variantIndex = 0; variantIndex < variantCount; variantIndex++) {
       // Apply variant mutation to prompt
-      const variantMutation = getVariantMutation(variantIndex, variantStrategy);
-      const variantPrompt = variantMutation 
-        ? `${videoPrompt}\n\n${variantMutation}`
+      const mutation = getVariantMutation(variantIndex, variantStrategy);
+      const variantPrompt = mutation.promptBlock 
+        ? `${videoPrompt}\n\n${mutation.promptBlock}`
         : videoPrompt;
       
       if (variantCount > 1) {
-        console.log(`[queue-video] Generating variant ${variantIndex + 1}/${variantCount} (strategy: ${variantStrategy})`);
+        console.log(`[queue-video] Generating variant ${variantIndex + 1}/${variantCount} (strategy: ${variantStrategy}, codes: ${mutation.codes.join(",")})`);
       }
 
       // Create the video job in database
@@ -441,6 +496,8 @@ Style: Professional, engaging, suitable for TikTok/Reels. Smooth transitions bet
             variant_index: variantIndex,
             variant_count: variantCount,
             variant_strategy: variantStrategy,
+            variant_group_id: variantGroupId,
+            variant_mutation_codes: mutation.codes,
           },
           progress: 0,
           openai_status: "pending",
@@ -455,30 +512,13 @@ Style: Professional, engaging, suitable for TikTok/Reels. Smooth transitions bet
       // Call OpenAI Sora API with retry ladder for moderation failures
       // FIX #4: If skip_internal_retry is true, chain layer owns retry - single attempt only
       const MAX_RETRIES = skip_internal_retry ? 1 : 3;
-      let lastError: string | undefined;
+      let lastError: string | undefined; // Per-variant retry state
       let openaiData: { id: string; status?: string } | undefined;
-      let startingFrameBlob: Blob | undefined;
-      let startingFrameMime = "image/jpeg";
-      
-      // Pre-fetch starting frame (if provided) so we can retry with/without it
-      // Only fetch once for first variant
-      if (starting_frame_url && variantIndex === 0) {
-        try {
-          const imgRes = await fetch(starting_frame_url);
-          if (imgRes.ok) {
-            startingFrameMime = imgRes.headers.get("content-type") || "image/jpeg";
-            startingFrameBlob = await imgRes.blob();
-            console.log(`Pre-fetched starting frame: ${starting_frame_url}, type: ${startingFrameMime}`);
-          }
-        } catch (frameErr) {
-          console.error("Failed to fetch starting frame:", frameErr);
-        }
-      }
       
       for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         // Get prompt for this attempt (escalating sanitization)
         let promptForAttempt: string;
-        let useStartingFrame = !!startingFrameBlob;
+        let useStartingFrame = !!startingFrameBlob; // All variants can use reference
         
         if (attempt === 1) {
           // First attempt: apply soft sanitization
