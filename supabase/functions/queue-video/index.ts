@@ -49,6 +49,8 @@ interface VideoRequest {
     seed?: number;
   };
   starting_frame_url?: string;
+  /** Map of sequence_index → keyframe URL for multi-scene reference */
+  starting_frames?: Record<string, string>;
   /** Optional motif context for story generation */
   motif_context?: MotifContext;
   /** Skip prompt enrichment - prompt is already fully built (Myth Mode, Film Mode, etc.) */
@@ -438,16 +440,22 @@ Style: Professional, engaging, suitable for TikTok/Reels. Smooth transitions bet
     // ============================================================
     // PRE-FETCH STARTING FRAME (once, reused by all variants)
     // ============================================================
+    // Resolve reference URL: explicit URL > map by sequence_index > none
+    const framesMap = body.starting_frames as Record<string, string> | undefined;
+    const resolvedStartingFrameUrl = 
+      starting_frame_url || 
+      (sequenceIndex !== null ? framesMap?.[String(sequenceIndex)] : undefined);
+    
     let startingFrameBlob: Blob | undefined;
     let startingFrameMime = "image/jpeg";
     
-    if (starting_frame_url) {
+    if (resolvedStartingFrameUrl) {
       try {
-        const imgRes = await fetch(starting_frame_url);
+        const imgRes = await fetch(resolvedStartingFrameUrl);
         if (imgRes.ok) {
           startingFrameMime = imgRes.headers.get("content-type") || "image/jpeg";
           startingFrameBlob = await imgRes.blob();
-          console.log(`[queue-video] Pre-fetched starting frame for all variants: ${starting_frame_url}`);
+          console.log(`[queue-video] Pre-fetched starting frame for all variants: ${resolvedStartingFrameUrl}`);
         }
       } catch (frameErr) {
         console.error("[queue-video] Failed to fetch starting frame:", frameErr);
@@ -501,8 +509,8 @@ Style: Professional, engaging, suitable for TikTok/Reels. Smooth transitions bet
             variant_strategy: variantStrategy,
             variant_group_id: variantGroupId,
             variant_mutation_codes: mutation.codes,
-            // Reference frame tracking
-            reference_url: starting_frame_url || null,
+            // Reference frame tracking (use resolved URL from map or explicit)
+            reference_url: resolvedStartingFrameUrl || null,
             reference_used: !!startingFrameBlob,
           },
           progress: 0,
