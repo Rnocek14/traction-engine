@@ -21,19 +21,48 @@ const SPECTACLE_TOLERANT_DEFECTS = new Set<DefectType>([
 ]);
 
 // Detect if job is spectacle/action context from style_hints
-function isSpectacleContext(styleHints: string | null): boolean {
-  if (!styleHints) return false;
+function isSpectacleContext(styleHints: string | null, storyContext?: { generation_settings?: Record<string, unknown>; scene?: Record<string, unknown> }): boolean {
   try {
+    // Check story context FIRST (generation_settings is the source of truth)
+    if (storyContext?.generation_settings) {
+      const gs = storyContext.generation_settings;
+      // Intensity profile is the primary indicator
+      if (gs.intensity_profile === "action" || gs.intensity_profile === "epic") return true;
+      // action_mode override
+      if (gs.action_mode === true) return true;
+      // Epic mode flag
+      if (gs.epic_mode === true) return true;
+      // Fast/dynamic pacing
+      if (gs.pacing === "fast" || gs.pacing === "dynamic") return true;
+    }
+    
+    // Check scene-level escalation (high escalation = spectacle)
+    if (storyContext?.scene) {
+      const scene = storyContext.scene;
+      // High escalation is action content
+      if (typeof scene.escalation_delta === "number" && scene.escalation_delta >= 2) return true;
+      // High setpiece is spectacle
+      if (typeof scene.setpiece_delta === "number" && scene.setpiece_delta >= 2) return true;
+      // Action beat types
+      if (["battle", "chase", "clash", "ascension", "transformation"].includes(String(scene.beat_type))) return true;
+    }
+    
+    // Fall back to style_hints parsing
+    if (!styleHints) return false;
     const hints = JSON.parse(styleHints);
     // Check for explicit spectacle modes
     if (hints.mode === "spectacle" || hints.mode === "brutality") return true;
     if (hints.mode === "myth-epic" || hints.mode === "myth-action") return true;
     // Check for epic_mode flag
     if (hints.epic_mode === true) return true;
+    // Check for intensity_profile in hints
+    if (hints.intensity_profile === "action" || hints.intensity_profile === "epic") return true;
     // Check for action beat types
     if (["battle", "chase", "clash", "ascension"].includes(hints.beat_type)) return true;
     // Check for fast pacing
     if (hints.pacing === "fast" || hints.pacing === "dynamic") return true;
+    // Check escalation_delta in hints
+    if (typeof hints.escalation_delta === "number" && hints.escalation_delta >= 2) return true;
     return false;
   } catch {
     return false;

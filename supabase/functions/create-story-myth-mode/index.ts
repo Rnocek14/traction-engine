@@ -62,10 +62,16 @@ Deno.serve(async (req) => {
     const sceneCount = body.scene_count || 3; // Default to 3 scenes for myth mode
     const pacing = body.pacing || "dynamic"; // Default to dynamic, not slow
     const epicMode = body.epic_mode || false;
-    const intensityProfile = body.intensity_profile || (epicMode ? "action" : "contemplative");
-
-    // Detect if premise wants action beats
-    const wantsAction = epicMode || intensityProfile === "action" || intensityProfile === "epic" || premiseWantsAction(body.premise);
+    
+    // Detect if premise wants action beats FIRST
+    const premiseWants = premiseWantsAction(body.premise);
+    
+    // Derive intensity_profile from wantsAction - never allow contemplative when action is desired
+    // Priority: explicit body.intensity_profile > epicMode > premiseWantsAction > default contemplative
+    const wantsAction = epicMode || body.intensity_profile === "action" || body.intensity_profile === "epic" || premiseWants;
+    
+    // SYNC FIX: if action_mode would be true, intensity_profile MUST be action (not contemplative)
+    const intensityProfile = wantsAction ? "action" : (body.intensity_profile || "contemplative");
 
     // Generate storyboard via GPT-4o with myth-specific prompting
     let systemPrompt = buildMythStoryboardPrompt(body.premise, sceneCount);
@@ -189,7 +195,16 @@ BEAT TYPE REQUIREMENTS FOR ACTION:
 
       // Default duration based on beat type
       if (!scene.duration_seconds) {
-        scene.duration_seconds = MYTH_BEAT_CONFIGS[scene.beat_type]?.typical_duration || 7;
+        // HIGH ESCALATION / ACTION SCENES GET 12s FOR PAYOFF
+        const isHighEscalation = (scene.escalation_delta ?? 0) >= 2;
+        const isSetpiece = (scene.setpiece_delta ?? 0) >= 2;
+        const isActionBeat = ["battle", "chase", "clash", "ascension", "transformation"].includes(scene.beat_type);
+        
+        if (isHighEscalation || isSetpiece || isActionBeat) {
+          scene.duration_seconds = 12; // Full 12s for spectacle payoff
+        } else {
+          scene.duration_seconds = MYTH_BEAT_CONFIGS[scene.beat_type]?.typical_duration || 7;
+        }
       }
 
       // Ensure symbolic elements

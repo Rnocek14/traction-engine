@@ -33,8 +33,28 @@ function snapDurationForSora(seconds: number): number {
   return 12;
 }
 
+/**
+ * Get scene duration with escalation-based bump:
+ * - High escalation (>=2), high setpiece (>=2), or action beats get 12s
+ * - Otherwise use scene.duration_seconds or default 7
+ */
+function getSceneDuration(scene: MythScene): number {
+  const isHighEscalation = (scene.escalation_delta ?? 0) >= 2;
+  const isSetpiece = (scene.setpiece_delta ?? 0) >= 2;
+  const isActionBeat = ["battle", "chase", "clash", "ascension", "transformation"].includes(scene.beat_type);
+  
+  if (isHighEscalation || isSetpiece || isActionBeat) {
+    return 12; // Full 12s for spectacle payoff
+  }
+  return scene.duration_seconds || 7;
+}
+
 interface ContinueMythStoryRequest {
   story_job_id: string;
+  /** Force regeneration of all scenes (clears completed indices) */
+  force_regen?: boolean;
+  /** Regenerate only specific scene indices */
+  regen_indices?: number[];
 }
 
 Deno.serve(async (req) => {
@@ -112,6 +132,19 @@ Deno.serve(async (req) => {
         )
         .map(j => j.sequence_index)
     );
+    
+    // Force regen support: clear completed indices as requested
+    if (body.force_regen === true) {
+      console.log(`[myth-mode] force_regen=true: clearing all ${completedIndices.size} completed indices`);
+      completedIndices.clear();
+    } else if (body.regen_indices && Array.isArray(body.regen_indices)) {
+      for (const idx of body.regen_indices) {
+        if (typeof idx === "number") {
+          console.log(`[myth-mode] regen_indices: removing index ${idx} from completed`);
+          completedIndices.delete(idx);
+        }
+      }
+    }
     
     // Delete stale jobs (queued but no openai_video_id)
     const staleJobIds = (existingJobs || [])
@@ -207,7 +240,7 @@ Deno.serve(async (req) => {
             original_prompt: scene.visual_description || scene.narration,
             settings: {
               size: "1280x720",
-              seconds: snapDurationForSora(scene.duration_seconds || 7),
+              seconds: snapDurationForSora(getSceneDuration(scene)),
             },
             skip_enrichment: true, // Already enriched with mythic style
             bypass_qa: true, // Story mode uses story_jobs flow, not script QA
