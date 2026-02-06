@@ -458,10 +458,11 @@ Each scene MUST have VISIBLE PHYSICAL ACTION that creates CHANGE:
 ❌ BORING: "The figure sits with the empty ledger"
 ✅ DYNAMIC: "The figure hurls the ledger — pages explode outward like startled birds, flutter, fall silent"
 
-EVERY silhouette_action MUST:
-- Use PHYSICAL VERBS: lunges, grasps, hurls, catches, drops, crumbles, scatters, reaches, falls, rises, turns, runs, climbs
-- Show TRANSFORMATION: "A becomes B" — coins to dust, full to empty, standing to fallen, darkness to light
-- Create VISUAL CHANGE: the end-frame must look DIFFERENT from the start-frame
+EVERY silhouette_action MUST describe a PHYSICAL TRAJECTORY with 2-3 beats:
+- Use TRAJECTORY VERBS (multi-beat): "lunges forward and slams into", "staggers backward then crashes to knees", "hurls object — it arcs through air — shatters against wall"
+- NEVER use TERMINAL POSE VERBS: steps, walks, stands, kneels, rises, sits, gazes, holds (these produce static results)
+- Show CONTINUOUS PHYSICAL PROCESS: "grasps at coins — they slip through fingers — scatter across stone floor"
+- The action must have ANTICIPATION → PEAK → FOLLOW-THROUGH (three distinct moments of motion)
 
 EVERY visual_description MUST include:
 - Something MOVING (figure, objects, environment elements)
@@ -543,7 +544,7 @@ OUTPUT FORMAT (JSON):
       "narration": "third-person omniscient line for this moment",
       "visual_description": "WHAT HAPPENS VISUALLY — must include movement and transformation",
       "has_silhouette": true,
-      "silhouette_action": "PHYSICAL VERB + what changes (e.g., 'lunges forward, grasps at falling coins')",
+      "silhouette_action": "TRAJECTORY VERB (e.g., 'lunges forward, grasps at coins — they slip through fingers, scatter across stone')",
       "silhouette_pose": "one of: triumphant, reaching, collapsed, walking, kneeling, standing, running, falling, sitting, turning",
       "symbolic_elements": ["element1", "element2"],
       "environment_motion": ["element VERB as context (e.g., 'shadows CREEP inward')"],
@@ -955,18 +956,91 @@ export function premiseWantsAction(premise: string): boolean {
 }
 
 /**
+ * Build concrete 3-beat motion sequence for myth scenes.
+ * Forces trajectory (anticipation → peak → follow-through) instead of single poses.
+ */
+function buildMythMotionBeats(scene: MythScene): string {
+  const esc = scene.escalation_delta ?? 0;
+  
+  // High-escalation beats: explosive physics
+  if (esc >= 2 || ["battle", "clash", "ascension"].includes(scene.beat_type)) {
+    const templates: Record<string, string> = {
+      battle: "Beat 1: Weight shifts, weapon raised. Beat 2: Full swing connects, target staggers backward, debris erupts. Beat 3: Follow-through carries attacker forward, dust settles around impact crater.",
+      chase: "Beat 1: Feet dig in, body launches forward. Beat 2: Full sprint, obstacles hurdled, ground kicks up behind. Beat 3: Sharp direction change, skid marks, momentum redirected.",
+      clash: "Beat 1: Two forces charge toward center. Beat 2: Collision — shockwave radiates outward, both figures buckle. Beat 3: Aftermath — one stands, one staggers, debris rains down.",
+      ascension: "Beat 1: Energy gathers at center, figure trembles. Beat 2: Eruption upward — form breaks apart and reconstitutes larger. Beat 3: New form radiates outward, environment recoils.",
+      trial: "Beat 1: Desperate lunge forward, fingers outstretched. Beat 2: Grasp fails — object shatters/scatters, body overextends. Beat 3: Collapse to knees, fragments settle around.",
+      consequence: "Beat 1: Standing among wreckage, hands open. Beat 2: Objects disintegrate in hands, dust streams through fingers. Beat 3: Weight buckles body downward, shadow shrinks.",
+    };
+    return templates[scene.beat_type] || templates.battle;
+  }
+  
+  // Medium-escalation: purposeful physics
+  if (esc >= 1 || ["journey", "chase"].includes(scene.beat_type)) {
+    const templates: Record<string, string> = {
+      journey: "Beat 1: Weight forward, stride begins. Beat 2: Full motion through space, environment scrolls past. Beat 3: Arrives at new position, posture adjusts to new context.",
+      trial: "Beat 1: Reaching motion begins, body extends. Beat 2: Contact — thing slips or resists, body strains. Beat 3: Result — either grasps or loses, posture shows outcome.",
+      chase: "Beat 1: Glance behind, fear registers. Beat 2: Sprint accelerates, limbs pump. Beat 3: Obstacle cleared mid-stride, pursuer visible behind.",
+    };
+    return templates[scene.beat_type] || "Beat 1: Preparation — body shifts weight. Beat 2: Primary action — visible displacement. Beat 3: Reaction — new position, consequence visible.";
+  }
+  
+  // Low-escalation: still physical but measured
+  const templates: Record<string, string> = {
+    introduction: "Beat 1: Shadow solidifies from darkness, outline sharpens. Beat 2: First limb moves — arm extends or head lifts. Beat 3: Full figure revealed in new stance, presence established.",
+    moral: "Beat 1: Tension held in posture, hands clenched. Beat 2: Release — hands open, shoulders drop, breath visible. Beat 3: Figure smaller against expanding backdrop, at peace.",
+    revelation: "Beat 1: Frozen mid-gesture, processing. Beat 2: Head snaps up, posture transforms from hunched to alert. Beat 3: Reaches toward truth with new understanding.",
+  };
+  return templates[scene.beat_type] || "Beat 1: Initial position, weight shifts. Beat 2: Primary movement, body displaces through space. Beat 3: Arrival at new state, posture changed.";
+}
+
+/**
+ * Convert pose verbs to trajectory verbs for more dynamic output.
+ */
+function upgradeToTrajectoryVerbs(action: string): string {
+  const VERB_UPGRADES: Record<string, string> = {
+    "steps": "strides",
+    "walks": "pushes forward",
+    "stands": "braces",
+    "rises": "surges upward",
+    "kneels": "buckles to knees",
+    "sits": "drops low",
+    "looks": "snaps focus toward",
+    "gazes": "locks eyes on",
+    "holds": "grips tight, knuckles white",
+    "watches": "tracks with full body rotation",
+    "turns": "pivots hard",
+    "reaches": "lunges for",
+    "touches": "slams hand against",
+    "runs": "tears forward at full sprint",
+    "walks forward": "drives forward with momentum",
+    "steps forward": "launches into stride",
+    "stands tall": "straightens explosively",
+    "stands alone": "braces against emptiness",
+  };
+  
+  let result = action;
+  for (const [pose, trajectory] of Object.entries(VERB_UPGRADES)) {
+    // Replace whole-word matches (case insensitive)
+    const regex = new RegExp(`\\b${pose}\\b`, 'gi');
+    result = result.replace(regex, trajectory);
+  }
+  return result;
+}
+
+/**
  * Build a V3 Myth Mode prompt - ACTION PHYSICS FIRST, style secondary.
  * 
- * Structure:
- * 1. Action block (physics + consequence) - HIGHEST PRIORITY
- * 2. Motion directive (what moves, how fast, what collides)
- * 3. Escalation header (delta + force)
- * 4. Style anchor (short, non-conflicting)
- * 5. Minimal negatives
+ * V3.1 Changes (motion overhaul):
+ * - Trajectory verbs replace pose verbs
+ * - 3-beat motion sequences (anticipation → action → follow-through)
+ * - Environment motion injected (was ignored before)
+ * - Prompt ratio flipped: ~60% action, ~20% style, ~20% context
+ * - Transformation as continuous journey, not "from X to Y" keyframes
  * 
  * NO:
  * - "frame-by-frame"
- * - "handcrafted motion"
+ * - "handcrafted motion"  
  * - "stop-motion"
  * - any line that implies low FPS / choppy movement
  */
@@ -979,64 +1053,82 @@ export function buildMythPromptV3(
   const setting = storyboard.setting;
   const isAction = settings?.intensity_profile === "action" || settings?.intensity_profile === "epic";
   
-  // 1. ACTION BLOCK (physics + consequence) - FIRST
+  // =========================================================================
+  // BLOCK 1: ACTION PHYSICS (~60% of prompt) — HIGHEST PRIORITY
+  // =========================================================================
+  
   const archetype = character?.archetype || "solitary figure";
   const rawAction = scene.silhouette_action || scene.visual_description || "moves through the scene";
   
-  // Build transformation phrase if available
+  // Upgrade pose verbs to trajectory verbs
+  const dynamicAction = upgradeToTrajectoryVerbs(rawAction);
+  
+  // Build transformation as CONTINUOUS JOURNEY (not "from X to Y" keyframes)
   let transformPhrase = "";
   if (scene.start_state && scene.end_state) {
-    transformPhrase = ` — from ${scene.start_state} to ${scene.end_state}`;
+    // Instead of "from A to B" (which models render as two frames + morph),
+    // describe the physical process of change
+    transformPhrase = `. Scene begins: ${scene.start_state}. Through the action, it becomes: ${scene.end_state}`;
   }
   
-  const actionLine = `A ${archetype} ${rawAction}${transformPhrase}.`;
+  const actionLine = `A ${archetype} ${dynamicAction}${transformPhrase}.`;
   
-  // 2. FORCE + ESCALATION HEADER
-  const force = scene.force_present
-    ? `FORCE: ${scene.force_type || "unknown"}`
-    : "";
-  const esc = scene.escalation_delta !== undefined && scene.escalation_delta > 0
-    ? `ESC=${scene.escalation_delta}`
-    : "";
-  const setpiece = scene.setpiece_delta !== undefined && scene.setpiece_delta > 0
-    ? `SETPIECE=${scene.setpiece_delta}`
-    : "";
-  const threatLine = scene.threat_vector
-    ? `THREAT: ${scene.threat_vector}`
-    : "";
-  
-  const escalationParts = [force, esc, setpiece, threatLine].filter(Boolean);
+  // FORCE + ESCALATION (compact header)
+  const escalationParts: string[] = [];
+  if (scene.force_present) escalationParts.push(`FORCE: ${scene.force_type || "unknown"}`);
+  if (scene.escalation_delta && scene.escalation_delta > 0) escalationParts.push(`ESC=${scene.escalation_delta}`);
+  if (scene.setpiece_delta && scene.setpiece_delta > 0) escalationParts.push(`SETPIECE=${scene.setpiece_delta}`);
+  if (scene.threat_vector) escalationParts.push(`THREAT: ${scene.threat_vector}`);
   const escalationHeader = escalationParts.length > 0 ? escalationParts.join(" | ") : "";
   
-  // 3. MOTION DIRECTIVE (based on escalation)
-  let motionDirective: string;
-  if (scene.escalation_delta && scene.escalation_delta >= 2) {
-    motionDirective = "[MOTION: violent continuous motion; impacts; debris in flight; strong velocity; camera reacts.]";
-  } else if (isAction || ["battle", "chase", "clash", "ascension"].includes(scene.beat_type)) {
-    motionDirective = "[MOTION: fluid dynamic motion; clear impacts; momentum carries through; continuous movement.]";
-  } else {
-    motionDirective = "[MOTION: clear purposeful motion; continuous movement; readable silhouettes.]";
+  // 3-BEAT MOTION SEQUENCE (concrete physics, not abstract directives)
+  const motionBeats = buildMythMotionBeats(scene);
+  
+  // ENVIRONMENT MOTION (was completely ignored in previous V3!)
+  let envMotionLine = "";
+  if (scene.environment_motion && scene.environment_motion.length > 0) {
+    envMotionLine = `ENVIRONMENT ACTION: ${scene.environment_motion.join(". ")}.`;
   }
   
-  // 4. SETTING CONTEXT
+  // =========================================================================
+  // BLOCK 2: CONTEXT (~20% of prompt)
+  // =========================================================================
+  
   const realm = setting?.realm || "timeless realm";
-  const settingLine = `${realm} rendered in layered paper depths.`;
+  const settingLine = `Setting: ${realm}, layered paper depths.`;
   
-  // 5. STYLE ANCHOR (short, action-friendly)
-  const styleLine = isAction
-    ? "STYLE: Reiniger-inspired shadow silhouettes, high contrast, fluid articulated motion, dynamic staging."
-    : "STYLE: Reiniger-inspired shadow silhouettes, high contrast, poetic continuous motion.";
+  // =========================================================================
+  // BLOCK 3: STYLE (~20% of prompt) — SHORT, non-conflicting
+  // =========================================================================
   
-  // 6. LIGHT BEHAVIOR
+  // Compact style — one line, not multiple blocks
+  const styleLine = "STYLE: Shadow silhouettes, high contrast, fluid articulated motion.";
+  
+  // Light behavior — one line
   const lightLine = LIGHT_BEHAVIOR_V2[scene.beat_type] || LIGHT_BEHAVIOR_V2.journey;
   
-  // 7. MINIMAL NEGATIVES
-  const avoidLine = "No realistic faces. Avoid modern artifacts.";
+  // Minimal negatives
+  const avoidLine = "No realistic faces.";
   
-  // Combine with action physics FIRST
-  const parts = [actionLine, settingLine];
+  // =========================================================================
+  // ASSEMBLE: Action-heavy ordering
+  // =========================================================================
+  
+  const parts: string[] = [];
+  
+  // Action physics FIRST (this is what matters most)
+  parts.push(actionLine);
   if (escalationHeader) parts.push(escalationHeader);
-  parts.push(motionDirective, styleLine, lightLine, avoidLine);
+  parts.push(`MOTION SEQUENCE:\n${motionBeats}`);
+  if (envMotionLine) parts.push(envMotionLine);
+  
+  // Context SECOND
+  parts.push(settingLine);
+  
+  // Style LAST (minimal)
+  parts.push(styleLine);
+  parts.push(lightLine);
+  parts.push(avoidLine);
   
   return parts.join("\n\n");
 }
