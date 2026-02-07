@@ -646,6 +646,38 @@ OUTPUT (JSON only):
       if (severeDefects.some(d => d.type === "physics_violation" || d.type === "floaty_motion")) motionRealism = Math.min(motionRealism, 75);
     }
 
+    // === MYTH MODE MOTION PENALTY (Blocker 7 fix) ===
+    // Myth mode often scores 78-88 on motion but users see static poses with ambient particles.
+    // Detect myth mode and apply stricter motion evaluation.
+    let isMythMode = false;
+    try {
+      if (styleHints) {
+        const hints = JSON.parse(styleHints);
+        isMythMode = hints.mode === "myth" || 
+                     hints.prompt_version?.startsWith("v3_") || 
+                     hints.prompt_version?.startsWith("v2_reiniger");
+      }
+    } catch { /* ignore parse errors */ }
+    
+    if (isMythMode) {
+      // Myth mode penalty: Cap motion score at 75 unless there's strong evidence of physical displacement
+      // The VLM tends to rate ambient particles (dust, light breathing) as "motion" when
+      // the actual silhouette character hasn't moved significantly
+      const hasMotionEvidence = reasons.some(r => {
+        const t = r.toLowerCase();
+        return (t.includes("displacement") || t.includes("trajectory") || t.includes("physical") || 
+                t.includes("stride") || t.includes("swing") || t.includes("impact")) &&
+               (t.includes("silhouette") || t.includes("figure") || t.includes("character") || t.includes("subject"));
+      });
+      
+      if (!hasMotionEvidence && motionRealism > 75) {
+        motionRealism = 75;
+        if (!reasons.some(r => r.includes("myth-mode-motion-cap"))) {
+          reasons.push("myth-mode-motion-cap: Motion capped at 75 — no evidence of primary subject displacement (ambient particles/light don't count as character motion).");
+        }
+      }
+    }
+
     // Overall score
     let overallScore = Math.round(0.30 * promptAdherence + 0.20 * temporalConsistency + 0.20 * motionRealism + 0.20 * visualFidelity + 0.10 * cinematicQuality);
     if (confidence < 0.6) overallScore = Math.min(overallScore, 78);

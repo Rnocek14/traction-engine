@@ -817,6 +817,24 @@ export const LIGHT_BEHAVIOR_V2: Record<string, string> = {
 };
 
 /**
+ * Action-intensity light overrides (Blocker 6 fix).
+ * When intensity_profile is "action" or "epic", use these instead of default LIGHT_BEHAVIOR_V2.
+ * Dynamic, impact-driven lighting replaces contemplative breathing/fading.
+ */
+export const ACTION_LIGHT_BEHAVIOR: Record<string, string> = {
+  introduction: "Sudden illumination — sharp shadows snap into existence, hard edge light carves the figure from darkness.",
+  journey: "Light pulses with movement, shadows stretch and snap with each stride, environment strobes with urgency.",
+  trial: "Rapid light oscillation on each impact, sparks illuminate faces of struggle, darkness punches between flashes.",
+  revelation: "Explosive light burst, radial shadows thrown outward, afterglow pulses.",
+  consequence: "Shattered light fragments scatter, intermittent darkness, residual glow fades in stutters.",
+  moral: "Final steady beam cuts through settling dust, last light holds firm.",
+  battle: "Strobe flashes on every impact, shockwave shadows expand from collision points, afterimages linger.",
+  chase: "Streak lighting — light source moves with pursuer, environment flashes past in staccato bursts.",
+  clash: "Twin light sources collide, explosion radiance, debris shadows scatter radially.",
+  ascension: "Light erupts from within figure, radiating outward in waves, environment washed in expanding glow.",
+};
+
+/**
  * Helper: Smart truncation that avoids mid-word cuts
  */
 function truncateClean(s: string, max: number): string {
@@ -956,11 +974,31 @@ export function premiseWantsAction(premise: string): boolean {
 }
 
 /**
- * Build concrete 3-beat motion sequence for myth scenes.
- * Forces trajectory (anticipation → peak → follow-through) instead of single poses.
+ * Build scene-specific 3-beat motion sequence for myth scenes (Blocker 3 fix).
+ * 
+ * Instead of generic templates, composes beats from the scene's actual data:
+ * - Beat 1 (anticipation): Derived from start_state
+ * - Beat 2 (peak action): Derived from silhouette_action with trajectory verbs
+ * - Beat 3 (follow-through): Derived from end_state
+ * 
+ * Falls back to escalation-based templates only when scene data is missing.
  */
 function buildMythMotionBeats(scene: MythScene): string {
   const esc = scene.escalation_delta ?? 0;
+  const archetype = "figure"; // Keep generic in motion beats (action line has the archetype)
+  
+  // SCENE-SPECIFIC BEATS: Use actual scene data when available
+  const hasSceneData = scene.start_state && scene.end_state && scene.silhouette_action;
+  
+  if (hasSceneData) {
+    const startClean = truncateClean(scene.start_state!, 60);
+    const endClean = truncateClean(scene.end_state!, 60);
+    const actionClean = truncateClean(scene.silhouette_action!, 80);
+    
+    return `Beat 1 (anticipation): ${startClean} — ${archetype} coils, weight shifts, muscles tense. Beat 2 (peak): ${actionClean} — full force, maximum displacement, impact visible. Beat 3 (settle): ${endClean} — momentum carries through, new position held.`;
+  }
+  
+  // FALLBACK: Escalation-based templates when scene data is sparse
   
   // High-escalation beats: explosive physics
   if (esc >= 2 || ["battle", "clash", "ascension"].includes(scene.beat_type)) {
@@ -1044,6 +1082,55 @@ function upgradeToTrajectoryVerbs(action: string): string {
  * - "stop-motion"
  * - any line that implies low FPS / choppy movement
  */
+/**
+ * Subject audit: Ensure the character archetype is the grammatical subject
+ * of the action line's primary clause. (Blocker 1 fix)
+ * 
+ * Problem: "A warrior sword gleams, guides, pulls" → sword is the subject
+ * Fix: "The warrior grips the sword as it gleams" → warrior is the subject
+ */
+function auditSubject(actionLine: string, archetype: string): string {
+  // Common object-as-subject patterns where the character's prop does the verbing
+  const OBJECT_SUBJECT_PATTERNS = [
+    // "warrior sword gleams" → sword is doing the action
+    /\b(sword|blade|staff|shield|hammer|axe|spear|dagger|bow|arrow|weapon)\s+(gleams?|shines?|glows?|pulses?|hums?|vibrates?|shatters?|breaks?|fragments?|cracks?|splits?|bursts?)\b/gi,
+    // "warrior fragments scatter" → fragments are doing the action
+    /\b(fragments?|shards?|pieces?|debris|dust|sparks?|embers?|flames?|light|shadow|darkness)\s+(scatter|spread|fly|drift|swirl|coalesce|gather|explode|burst|rain|fall|rise|glow|pulse)\b/gi,
+  ];
+  
+  let result = actionLine;
+  
+  for (const pattern of OBJECT_SUBJECT_PATTERNS) {
+    result = result.replace(pattern, (match, object, verb) => {
+      // Rewrite so the character acts WITH/ON the object
+      return `${archetype}'s ${object} ${verb} as the ${archetype}`;
+    });
+  }
+  
+  // Ensure the first clause starts with the archetype
+  // If after object audit, first word isn't "A/The [archetype]", restructure
+  const firstClause = result.split(/[,.]/, 1)[0].toLowerCase();
+  const archetypeLower = archetype.toLowerCase();
+  if (!firstClause.includes(archetypeLower)) {
+    // Prepend the archetype as subject
+    result = `The ${archetype} — ${result}`;
+  }
+  
+  return result;
+}
+
+/**
+ * Build an inline transformation phrase (Blocker 5 fix).
+ * Instead of "Scene begins: X. Through the action, it becomes: Y" (two keyframes → morph),
+ * embed the transformation INTO the action as a continuous physical process.
+ */
+function buildInlineTransformation(startState: string, endState: string): string {
+  const startClean = truncateClean(startState, 50);
+  const endClean = truncateClean(endState, 50);
+  // Describe as continuous journey, not two keyframes
+  return ` — starting from ${startClean}, through the action shifting into ${endClean}`;
+}
+
 export function buildMythPromptV3(
   scene: MythScene,
   storyboard: Partial<MythStoryboard>,
@@ -1063,15 +1150,16 @@ export function buildMythPromptV3(
   // Upgrade pose verbs to trajectory verbs
   const dynamicAction = upgradeToTrajectoryVerbs(rawAction);
   
-  // Build transformation as CONTINUOUS JOURNEY (not "from X to Y" keyframes)
+  // SUBJECT AUDIT (Blocker 1): Ensure archetype is the grammatical subject
+  const auditedAction = auditSubject(dynamicAction, archetype);
+  
+  // INLINE TRANSFORMATION (Blocker 5): Embed change into action, not as "begins/becomes"
   let transformPhrase = "";
   if (scene.start_state && scene.end_state) {
-    // Instead of "from A to B" (which models render as two frames + morph),
-    // describe the physical process of change
-    transformPhrase = `. Scene begins: ${scene.start_state}. Through the action, it becomes: ${scene.end_state}`;
+    transformPhrase = buildInlineTransformation(scene.start_state, scene.end_state);
   }
   
-  const actionLine = `A ${archetype} ${dynamicAction}${transformPhrase}.`;
+  const actionLine = `The ${archetype} ${auditedAction}${transformPhrase}.`;
   
   // FORCE + ESCALATION (compact header)
   const escalationParts: string[] = [];
@@ -1081,10 +1169,10 @@ export function buildMythPromptV3(
   if (scene.threat_vector) escalationParts.push(`THREAT: ${scene.threat_vector}`);
   const escalationHeader = escalationParts.length > 0 ? escalationParts.join(" | ") : "";
   
-  // 3-BEAT MOTION SEQUENCE (concrete physics, not abstract directives)
+  // 3-BEAT MOTION SEQUENCE (now scene-specific via Blocker 3 fix)
   const motionBeats = buildMythMotionBeats(scene);
   
-  // ENVIRONMENT MOTION (was completely ignored in previous V3!)
+  // ENVIRONMENT MOTION
   let envMotionLine = "";
   if (scene.environment_motion && scene.environment_motion.length > 0) {
     envMotionLine = `ENVIRONMENT ACTION: ${scene.environment_motion.join(". ")}.`;
@@ -1104,8 +1192,10 @@ export function buildMythPromptV3(
   // Compact style — one line, not multiple blocks
   const styleLine = "STYLE: Shadow silhouettes, high contrast, fluid articulated motion.";
   
-  // Light behavior — one line
-  const lightLine = LIGHT_BEHAVIOR_V2[scene.beat_type] || LIGHT_BEHAVIOR_V2.journey;
+  // LIGHT BEHAVIOR (Blocker 6 fix): Use action-intensity lighting when appropriate
+  const lightLine = isAction
+    ? (ACTION_LIGHT_BEHAVIOR[scene.beat_type] || ACTION_LIGHT_BEHAVIOR.battle)
+    : (LIGHT_BEHAVIOR_V2[scene.beat_type] || LIGHT_BEHAVIOR_V2.journey);
   
   // Minimal negatives
   const avoidLine = "No realistic faces.";
