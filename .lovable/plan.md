@@ -1,260 +1,187 @@
 
-# Complete Constraint Removal Plan: Unleashing Action in Myth Mode
 
-## ✅ IMPLEMENTATION COMPLETE (2026-02-05)
+# Deep System Audit: Why Videos Aren't "Cool" Yet
 
-All phases have been implemented and deployed:
+## Executive Summary
 
-### Changes Made:
-
-1. **`create-story-myth-mode/index.ts`** - Story Creation
-   - ✅ Removed `slow_pacing: true` default
-   - ✅ Removed `frame_by_frame_motion: true` default  
-   - ✅ Added `pacing` parameter (slow/dynamic/fast) - defaults to "dynamic"
-   - ✅ Added `epic_mode` parameter for full action support
-   - ✅ Made `silhouette_only` conditional on epic_mode
-
-2. **`myth-continuity.ts`** - Prompt Building
-   - ✅ Added new beat types: `battle`, `chase`, `clash`, `ascension`
-   - ✅ Added `ACTION_MOTION_POOLS` with combat/chase motion anchors
-   - ✅ Added action-friendly `BEAT_PACING` directives
-   - ✅ Added `MYTH_BEAT_CONFIGS` for battle/chase/clash/ascension
-   - ✅ Removed "no smooth interpolation" from V2 builder negatives
-
-3. **`auto-rate-video/index.ts`** - Rating System
-   - ✅ Added `isSpectacleContext()` detection function
-   - ✅ Added `SPECTACLE_TOLERANT_DEFECTS` set (floaty_motion, unnatural_motion, physics_violation, flicker)
-   - ✅ Reduced motion penalties by 50% for spectacle content
-   - ✅ Relaxed defect caps in spectacle mode (flicker not penalized, physics_violation caps at 75 not 60)
-
-4. **`constraint-profiles.ts`** - Budget System
-   - ✅ Added `myth-epic` and `myth-action` modes
-   - ✅ myth-action gets spectacle-level freedom (tier1 disabled, sanitization off)
-   - ✅ Updated mode multipliers for action content
-   - ✅ Updated storyboard validation to skip verb checks for action modes
-
-### Edge Functions Deployed:
-- `create-story-myth-mode`
-- `auto-rate-video`
-
-### Verification:
-- Existing stories keep their original settings
-- NEW stories will use dynamic pacing by default
-- Action beat types now available in storyboard generation
-- Rating system won't penalize intentional dynamic motion
+After scanning the full pipeline -- storyboard generation, prompt compilation, moderation, video queuing, and the actual prompts sent to Sora -- I've identified **7 concrete blockers** preventing dynamic, cinematic output. The system has a lot of sophisticated infrastructure, but several critical issues cause the final prompt that reaches Sora to produce static or underwhelming results.
 
 ---
 
-## Summary
+## The Full Pipeline (What Actually Happens)
 
-This plan removes ALL action-killing constraints across the video generation system, with special focus on unlocking "The Awakening of Arcane" and future Myth Mode stories.
+```text
+User creates story
+  -> create-story-myth-mode (GPT-4o generates storyboard JSON)
+  -> continue-story-myth-mode (builds prompts per scene)
+     -> buildMythPromptV3() in myth-continuity.ts
+     -> queue-video (sends to Sora API)
+        -> sanitizeForModeration("soft") applied to EVERY prompt
+        -> FormData sent to OpenAI /v1/videos
+  -> process-video (polls for completion, downloads mp4)
+  -> auto-rate-video (GPT-4o Vision scores result)
+```
 
 ---
 
-## Part 1: Files to Modify
+## Blocker 1: Subject Confusion -- Objects Are the Grammatical Subject
 
-### 1.1 `create-story-myth-mode/index.ts` - Story Creation
-**Current Restrictions:**
+**Evidence from "The Warrior's Descent":**
+
+| Scene | Prompt Head (what Sora reads first) | Problem |
+|-------|--------------------------------------|---------|
+| 0 | "A warrior strides forward, cape billows, **sword slices** through the air" | OK - warrior is subject |
+| 1 | "A warrior **sword gleams, guides, pulls** down winding path" | SWORD is doing all verbs |
+| 2 | "A warrior **swings blade**, sparks fly, **demons recoil**" | Acceptable but "demons" get animated |
+| 3 | "A warrior **sword shatters, fragments scatter**, warrior falls back" | SWORD and FRAGMENTS are subjects |
+| 4 | "A warrior **fragments glow, coalesce**, light explodes outward" | FRAGMENTS and LIGHT are subjects |
+
+**Root cause:** `buildMythPromptV3` concatenates `archetype + silhouette_action` directly. When `silhouette_action` is "sword gleams, guides, pulls", the resulting sentence makes the sword the grammatical subject, and Sora animates it while the warrior stands still.
+
+**Fix:** Add a compile-time subject audit that rewrites any prompt where the character is not the grammatical subject of the primary action verb.
+
+---
+
+## Blocker 2: Scene 0 Is Only 4 Seconds
+
+Scene 0 gets `snapDurationForSora(6)` = 4 seconds. A 3-beat motion sequence (anticipation, peak action, follow-through) cannot resolve in 4 seconds. Sora defaults to a single pose with ambient particle effects.
+
+**Fix:** Set a minimum floor of 8 seconds for all myth mode scenes, especially those with 3-beat motion sequences.
+
+---
+
+## Blocker 3: Motion Beats Are Generic Templates, Not Scene-Specific
+
+`buildMythMotionBeats()` uses hardcoded templates by beat_type:
+
+```
+introduction -> "Beat 1: Shadow solidifies... Beat 2: First limb moves... Beat 3: Full figure revealed"
+```
+
+These are the same regardless of whether the scene is "warrior enters a cave" or "dragon emerges from fire." They don't reference the actual `silhouette_action`, the character, or the environment.
+
+**Fix:** Move 3-beat generation into the storyboard LLM prompt so GPT generates scene-specific motion beats, OR dynamically compose beats from the scene's action/environment data.
+
+---
+
+## Blocker 4: Soft Moderation Still Sanitizes Myth Prompts
+
+In `queue-video`, line 539:
 ```typescript
-generation_settings: {
-  slow_pacing: true,         // <-- KILLS ACTION
-  frame_by_frame_motion: true, // <-- KILLS FLUIDITY  
-  silhouette_only: true,
-  no_faces: true,
-}
+const { sanitized, wasModified, replacements } = sanitizeForModeration(variantPrompt, "soft");
 ```
 
-**Changes:**
-- Add `pacing` parameter to request (slow/medium/fast)
-- Default pacing to `"dynamic"` instead of `"slow"`
-- Remove `frame_by_frame_motion` default
-- Make silhouette/no_faces optional for "epic" variants
+This is applied to **every** myth prompt, even though myth mode uses Sora (not Runway). The `SOFT_REPLACEMENTS` array rewrites combat verbs:
+- "stab through" -> "thrust toward"  
+- "slash across" -> "swing across"
+- "fight to the death" -> "fight desperately"
 
-### 1.2 `myth-continuity.ts` - Prompt Building
-**Current Restrictions:**
-- `BEAT_PACING` hardcodes slow tempo directives
-- Motion anchors prioritize stillness/deliberation
-- "No 3D rendering, no smooth interpolation" negatives block fluid motion
-- Style anchors enforce rigid shadow-puppet aesthetic even for action
+For a story called "The Warrior's Descent" fighting demons, this blunts every action verb.
 
-**Changes:**
-- Create `DYNAMIC_BEAT_CONFIGS` with action-friendly pacing
-- Add "battle", "chase", "transformation" beat types
-- Remove motion-restricting negatives for non-pure-myth stories
-- Create `buildMythPromptV3` for action-oriented variant
-
-### 1.3 `auto-rate-video/index.ts` - Rating System
-**Current Restrictions:**
-```typescript
-// These defect types penalize intentional action:
-"unnatural_motion"  // -5 to -20 points
-"floaty_motion"     // -5 to -15 points  
-"physics_violation" // -10 to -25 points
-"flicker"           // -5 to -20 points
-```
-
-**Problem:** Dynamic spectacle (dragons breathing fire, battles, magic) triggers these "defects" unfairly.
-
-**Changes:**
-- Add `spectacle_mode` flag to style_hints check
-- When spectacle/myth-action mode: reduce motion penalties by 50%
-- Add `intentional_dynamics` recognition in defect parsing
-- Create `SPECTACLE_TOLERANT_DEFECTS` that are not penalized in action modes
-
-### 1.4 `constraint-profiles.ts` - Budget System
-**Changes:**
-- Add `"myth-epic"` and `"myth-action"` modes alongside `"myth"`
-- Give myth-epic mode spectacle-level freedom (sanitization: off, tier2: disabled)
-- Update mode multipliers: myth-action gets 0.6x constraint budget
-
-### 1.5 `moderation-safety.ts` - Sanitization Matrix
-**Current State (already good):**
-- Spectacle/brutality modes already bypass sanitization for Sora/Luma
-
-**Verify:**
-- Ensure myth mode can opt into spectacle-level sanitization via flag
+**Fix:** Set myth mode's sanitization to "off" in the matrix (same as spectacle/brutality modes), since myth mode uses silhouette abstraction which inherently reduces violence signaling. OR pass `sanitization_level: "off"` from `continue-story-myth-mode`.
 
 ---
 
-## Part 2: Technical Implementation
+## Blocker 5: "from X to Y" Transformation Was Fixed But "Scene begins: X" Replacement Is Also Problematic
 
-### 2.1 New Beat Types for Myth Mode
-```text
-Current beat types: introduction, journey, trial, revelation, consequence, moral
+V3.1 changed `"From ${start} to ${end}"` to `"Scene begins: ${start_state}. Through the action, it becomes: ${end_state}"`. But this is still a two-keyframe instruction that models render as a morph:
 
-NEW beat types to add:
-- battle     → Fast cutting, dynamic motion, weapons/magic clash
-- chase      → Continuous forward motion, urgency, speed
-- clash      → Two forces meeting, impact, explosion
-- ascension  → Rising action, building power, transformation crescendo
+```
+Scene begins: warrior holding sword high, shadows alive with threat.
+Through the action, it becomes: sword dimming, demons pressing in closer.
 ```
 
-### 2.2 Action-Friendly Pacing Directives
-```text
-CURRENT (trial beat):
-"[TEMPO: Accelerating panic. Actions crowd together. Desperation builds. Frantic energy.]"
+Sora reads "begins" and "becomes" as two target frames, renders the start pose, then morphs to the end pose. There is no physical process described between them.
 
-NEW (battle beat):
-"[TEMPO: Rapid cuts. Impact moments. Dynamic camera. Bodies in motion. Visceral energy.]"
-
-NEW (chase beat):
-"[TEMPO: Continuous forward thrust. Environment streaming past. Urgency visible. No pauses.]"
-```
-
-### 2.3 Motion Anchor Pools for Action
-```text
-NEW motion anchors for "battle" beat:
-- "[MOTION: figures clash, impact sparks, bodies pivot and strike, momentum carries through]"
-- "[MOTION: weapon arcs through air, target recoils, attacker follows through, dust rises]"
-- "[MOTION: magic erupts from hands, target staggers, energy ripples outward, ground shakes]"
-```
-
-### 2.4 Rating System Mode Detection
-```typescript
-// In auto-rate-video, detect spectacle context:
-const styleHints = JSON.parse(job.style_hints || "{}");
-const isSpectacleContext = 
-  styleHints.mode === "spectacle" ||
-  styleHints.mode === "brutality" ||
-  styleHints.beat_type === "battle" ||
-  styleHints.beat_type === "chase" ||
-  styleHints.pacing === "fast";
-
-// Reduce motion penalties for spectacle content
-if (isSpectacleContext) {
-  motionRealism = Math.min(100, motionRealism + 10); // Boost baseline
-  // Don't penalize "floaty_motion" or "unnatural_motion" as heavily
-}
-```
+**Fix:** Replace the start/end format with a single continuous action description. The physical transformation should be embedded in the action line itself, not in a separate "begins/becomes" block.
 
 ---
 
-## Part 3: Configuration Changes
+## Blocker 6: Style Block Conflicts With Action Intent
 
-### 3.1 New Myth Mode Variants
-```text
-"myth"        → Classic: slow pacing, silhouette, fable structure
-"myth-epic"   → Epic: dynamic pacing, silhouette allowed, action beats enabled
-"myth-action" → Full action: no pacing restrictions, spectacle sanitization rules
+The V3 prompt ends with:
+```
+STYLE: Shadow silhouettes, high contrast, fluid articulated motion.
+Light breathes from darkness, intensity slowly rises.
+No realistic faces.
 ```
 
-### 3.2 Storyboard Prompt Changes
-Update `buildMythStoryboardPrompt` to:
-- Allow "battle", "chase", "clash" beat types in scene structure
-- Remove "slow pacing" language from anti-boring rules
-- Add COMBAT VERBS to allowed action words: strike, clash, charge, blast, shatter
+"Fluid articulated motion" tells the model to animate limbs smoothly -- good. But "Light breathes from darkness, intensity slowly rises" for an introduction scene creates a slow-fade-in effect that competes with the 3-beat action sequence. The light directive implies a contemplative, gradual reveal, while the motion beats demand rapid physical action.
 
-### 3.3 V3 Prompt Builder
-Create `buildMythPromptV3()` that:
-- Removes "No smooth interpolation" negative
-- Removes "frame-by-frame handcrafted motion" constraint
-- Keeps silhouette aesthetic but allows fluid motion
-- Uses shorter technique anchor (under 100 chars)
+**Fix:** Make light behavior match the intensity profile. For action stories, use dynamic light (strobes, flashes on impact, shockwave lighting) not breathing/gradual effects.
 
 ---
 
-## Part 4: Specific Deletions
+## Blocker 7: No Auto-Rating Feedback Loop for Motion Quality
 
-### Files and Lines to Delete/Modify:
+The auto-rater gives motion scores of 78-88 for these clips, and the system accepts them as "good enough." But the user perceives them as static. The auto-rater's motion threshold is too forgiving -- it's measuring "is something moving?" not "is the motion dynamic and physically convincing?"
 
-1. **Delete hardcoded slow_pacing:**
-   - `create-story-myth-mode/index.ts` line 248: `slow_pacing: true`
-   - `create-story-myth-mode/index.ts` line 279: `slow_pacing: true`
+Current scores for The Warrior's Descent:
+- Scene 0: motion=88, overall=86
+- Scene 1: motion=82, overall=86  
+- Scene 2: motion=78, overall=80
+- Scene 3: motion=79, overall=85
+- Scene 4: motion=86, overall=87
 
-2. **Delete frame_by_frame restriction:**
-   - `create-story-myth-mode/index.ts` line 245: `frame_by_frame_motion: true`
-
-3. **Delete overly restrictive negatives in V2 builder:**
-   - `myth-continuity.ts` line 820: `"No 3D rendering, no smooth interpolation, no realistic faces."`
-   - Replace with: `"No realistic faces."`
-
-4. **Delete slow tempo from trial beat:**
-   - `myth-continuity.ts` line 203-208: Update `BEAT_PACING` to be mode-aware
-
-5. **Reduce motion defect penalties:**
-   - `auto-rate-video/index.ts` lines 560-564: Add spectacle context check before applying caps
+These scores suggest "good motion" but the user sees static poses with ambient particles. The rater needs recalibration for myth mode specifically.
 
 ---
 
-## Part 5: Verification Plan
+## Implementation Plan
 
-After implementation, verify with these checks:
+### Phase 1: Immediate Impact (Subject Fix + Duration + Sanitization)
 
-1. **Prompt Content Check:**
-```sql
-SELECT id, enriched_prompt, style_hints 
-FROM video_jobs 
-WHERE story_job_id = '540bd761-c516-46f6-9e90-09c3a3cf83d1'
-LIMIT 1;
-```
-Verify: No "slow pacing", "frame-by-frame", or "no smooth interpolation" in prompts.
+1. **Subject Audit in `buildMythPromptV3`**
+   - After `upgradeToTrajectoryVerbs()`, scan the action line
+   - If the character archetype is not the grammatical subject of the first verb clause, restructure: force "The [archetype] [verb]..." format
+   - Strip orphaned object-as-subject patterns like "sword gleams" -> "warrior's sword gleams as the warrior..."
 
-2. **Rating System Check:**
-   - Generate a test battle scene
-   - Verify motion_score is not unfairly penalized for dynamic content
+2. **8-Second Minimum Floor**
+   - In `continue-story-myth-mode`, change `snapDurationForSora(getSceneDuration(scene))` to enforce a minimum of 8
+   - `Math.max(8, snapDurationForSora(getSceneDuration(scene)))`
 
-3. **End-to-End Test:**
-   - Create a new myth story with action premise
-   - Confirm dynamic beats are allowed in storyboard
-   - Confirm prompts are action-friendly
-   - Confirm ratings don't penalize motion
+3. **Disable Soft Moderation for Myth Mode**
+   - In `queue-video`, detect myth mode (story_job_id present + story_type check or skip_enrichment flag) and set sanitization level to "off"
+   - Alternative: have `continue-story-myth-mode` pass a `sanitization_level: "off"` field that queue-video respects
 
----
+### Phase 2: Prompt Quality (Motion Beats + Transformation)
 
-## Execution Order
+4. **Scene-Specific Motion Beats**
+   - Instead of `buildMythMotionBeats(scene)` returning generic templates, compose beats from scene data:
+     - Beat 1: Extract anticipation from `start_state`
+     - Beat 2: Extract peak action from `silhouette_action` (with upgraded verbs)
+     - Beat 3: Extract follow-through from `end_state`
+   - This makes each beat unique to the scene content
 
-1. **Phase 1: Remove hardcoded restrictions** (immediate unblock)
-   - Delete slow_pacing, frame_by_frame_motion defaults
-   - Remove "no smooth interpolation" from V2 builder
-   
-2. **Phase 2: Add action beat types** (enable action storyboards)
-   - Add battle/chase/clash to MYTH_BEAT_CONFIGS
-   - Update storyboard prompt to allow action verbs
+5. **Inline Transformation (Remove "Scene begins/becomes")**
+   - Embed the transformation directly into the action line
+   - Instead of two blocks, write one continuous sentence:
+     - Before: "A warrior swings blade... Scene begins: warrior holding sword high. Through the action, it becomes: sword dimming"
+     - After: "A warrior swings blade from a stance with sword held high -- sparks fly as demons recoil -- the sword dims as demons press in closer"
 
-3. **Phase 3: Fix rating system** (stop penalizing action)
-   - Add spectacle context detection
-   - Reduce motion penalties for action content
+### Phase 3: Style Alignment
 
-4. **Phase 4: Create V3 builder** (full action support)
-   - New prompt builder optimized for dynamic myth content
-   - Optional use via story settings flag
+6. **Match Light Behavior to Intensity**
+   - When `intensity_profile === "action"`, override `LIGHT_BEHAVIOR_V2` with dynamic variants
+   - introduction + action: "Sudden illumination, sharp shadows snap into existence"
+   - journey + action: "Light pulses with movement, shadows stretch and snap with each stride"
+   - clash + action: "Strobe flashes on impact, shockwave shadows expand"
+
+7. **Auto-Rater Motion Threshold for Myth Mode**
+   - Add a myth-mode penalty in `auto-rate-video` for scenes where the primary silhouette has minimal displacement (pose-to-pose detection)
+   - Cap motion scores at 70 when the main subject occupies the same screen position in frame 1 and frame N
+
+### Technical Details
+
+**Files to modify:**
+- `supabase/functions/_shared/myth-continuity.ts` -- Subject audit, scene-specific beats, inline transformation, action light behavior
+- `supabase/functions/continue-story-myth-mode/index.ts` -- 8s minimum, pass sanitization_level
+- `supabase/functions/queue-video/index.ts` -- Respect sanitization_level pass-through from story mode
+- `supabase/functions/auto-rate-video/index.ts` -- Myth mode motion threshold (Phase 3)
+
+**Risk assessment:**
+- Subject audit: Low risk, only affects prompt text
+- Duration floor: Low risk, Sora handles 8s well
+- Sanitization off: Medium risk -- myth mode uses silhouettes (no faces/gore), so moderation blocks are unlikely, but monitor for any 400 errors
+- Motion beats: Medium risk, need to ensure generated beats don't exceed prompt length budget (~700 chars total)
+
