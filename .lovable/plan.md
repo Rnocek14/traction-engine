@@ -1,177 +1,129 @@
 
 
-# Fix Myth Mode: Bugs + Architectural Improvements
+# Analysis: "Descent to the Abyss" -- What's Happening and What Needs Fixing
 
-## Status: What's Working vs. What's Broken
+## Current Status
 
-**Working:**
-- Sanitization bypass (combat verbs preserved)
-- 8s duration floor (all scenes >= 8s)
-- Action light behavior (strobe/shockwave in prompts)
-- Auto-rater motion cap at 75 (correct penalty)
-- Force/escalation headers in prompts
+These videos were generated with the **old, buggy prompt compiler** before the flowing-prose overhaul was deployed. The current code in `myth-continuity.ts` has already fixed several issues (phrasal verbs, subject audit, removed labels), but has **not been used to regenerate** this story.
 
-**Broken (3 bugs, 4 architectural issues):**
+However, the current code still has problems that would affect a regen.
 
 ---
 
-## Bug 1: Double Archetype — "The warrior The warrior"
+## What's Actually Wrong (Current Code Issues)
 
-Every prompt starts with `The warrior The warrior —`. This is because:
+### 1. State Truncation Is Too Aggressive (40 chars)
 
-1. `buildMythPromptV3` line 1162: `const actionLine = "The ${archetype} ${auditedAction}..."` — prepends "The warrior"
-2. `auditSubject()` line 1116: if the first clause doesn't contain the archetype, it prepends `"The ${archetype} — "` — adds ANOTHER "The warrior"
+Line 1178-1179 uses `truncateClean(start_state, 40)` and `truncateClean(end_state, 40)`.
 
-The problem: the `auditedAction` string already starts with the archetype from the regex replacements (line 1106: `"${archetype}'s ${object} ${verb} as the ${archetype}"`), but then line 1162 ALSO prepends `"The ${archetype}"`.
+Example state: `"warrior standing at the top of a gleaming staircase, shield shining"` (68 chars)
+Truncated to: `"warrior standing at the top of a gleamin"` -- mid-word garbage.
 
-**Fix:** Remove the `"The ${archetype}"` prefix from line 1162 — let `auditSubject()` be solely responsible for ensuring the archetype is the subject. Change the actionLine to just use the audited action directly.
+This produces fragments like `"starting from warrior standing at the top of a"` and `"shifting into warrior leaping into darkness as the"` -- both are incomplete sentences that confuse Sora.
 
----
+**Fix:** Increase truncation limit to 60 chars and ensure `truncateClean` cuts at the last complete word/comma boundary, never mid-word.
 
-## Bug 2: Verb Mangling — "lunges for out"
+### 2. Start/End State Inlining Creates Redundancy
 
-`upgradeToTrajectoryVerbs()` replaces "reaches" with "lunges for" via regex. When the original text is "reaches out", it becomes "lunges for out" — grammatically broken.
+The current structure appends `"-- starting from X, shifting into Y"` AFTER the action, then ALSO appends the motion beats which ALSO reference start and end states via `ANTICIPATION_BY_BEAT` and `FOLLOWTHROUGH_BY_BEAT`.
 
-The problem: the verb upgrades are naive single-word replacements that don't account for phrasal verbs (reaches out, reaches for, stands tall, walks forward).
+This creates double-mention of the same information:
+- `"leaps forward -- starting from warrior at staircase, shifting into warrior in darkness"`
+- `"shadow sharpens into form -- then leaps forward -- full figure stands revealed"`
 
-**Fix:** 
-- Process multi-word phrases FIRST (longest match first): "reaches out" -> "lunges outward", "reaches for" -> "lunges for"
-- Then process single-word fallbacks
-- Add the missing phrasal verbs to the upgrade map
+The action appears twice, the transformation is described twice, wasting ~150 chars on repetition.
 
----
+**Fix:** Remove the explicit `"starting from / shifting into"` block. Let the motion beats alone carry the transformation arc (they already do via anticipation + follow-through).
 
-## Bug 3: Generic Beat 1 and Beat 3 Templates
+### 3. ALLCAPS Verbs in Environment Motion
 
-When `hasSceneData` is true (line 993), Beat 1 and Beat 3 use hardcoded templates:
-- Beat 1: `"${startClean} — figure coils, weight shifts, muscles tense"` (SAME for every scene)
-- Beat 3: `"${endClean} — momentum carries through, new position held"` (SAME for every scene)
+The storyboard's `environment_motion` field contains ALLCAPS verbs: `["staircase SPIRALS downward", "light DIMINISHES with each step"]`. These are LLM-formatting artifacts that get passed directly into the prompt. Sora doesn't interpret ALLCAPS as emphasis -- it's just noise.
 
-Only Beat 2 uses the actual `silhouette_action`. This means 2/3 of the motion sequence is identical across all 5 scenes.
+**Fix:** Lowercase the environment motion text before injecting it.
 
-**Fix:** Make all 3 beats derive from scene data:
-- Beat 1: Use beat_type to select anticipation verb (introduction: "shadow sharpens into form", battle: "weight drops, stance widens", journey: "body leans into motion")
-- Beat 3: Use beat_type to select follow-through verb (battle: "impact ripples outward, stance recovers", journey: "arrives at new ground, posture shifts")
+### 4. Scene 2 Failed (Connection Reset) -- Not a Code Bug
 
----
+Scene 2 (the trial/battle scene, 12s) failed with `"Connection reset by peer"` from the OpenAI API. This is an infrastructure issue, not a prompt issue. The scene needs to be regenerated.
 
-## Architectural Issue 4: Structural Labels Are Noise to Sora
+### 5. Scene 3 Was Never Auto-Rated
 
-The prompt contains labels like `MOTION SEQUENCE:`, `ENVIRONMENT ACTION:`, `STYLE:`, `FORCE:`, `ESC=3`, `SETPIECE=1`. Sora is a video generation model, not an instruction-following LLM. These labels:
-- Waste character budget on non-visual tokens
-- Create no meaningful model priors (Sora doesn't know what "ESC=3" means)
-- Fragment the prompt into disconnected blocks instead of a flowing visual description
-
-**Fix:** Remove all structural labels and write prompts as flowing prose paragraphs. Convert `FORCE: unknown | ESC=3 | SETPIECE=1` and `MOTION SEQUENCE: Beat 1...` into natural continuous description. Keep only `"No realistic faces."` as a constraint.
+Scene 3 completed (`status: done`) but has no auto-rating scores (`auto_motion_score: nil`). The auto-rater may have failed silently or was never triggered for this job.
 
 ---
 
-## Architectural Issue 5: `auditSubject` Regex Creates Ungrammatical Text
+## Storyboard Quality (GPT-4o Output)
 
-Line 1106: the replacement pattern `"${archetype}'s ${object} ${verb} as the ${archetype}"` produces text like:
-- "warrior's shards fly as the warrior outward, then hover"
+The storyboard itself is **good**. The narrative arc is solid:
 
-The "as the warrior" fragment dangles — there's no completing verb. The regex replaces the object-verb pair but doesn't construct a complete clause for the character.
+| Scene | Beat | Action | Quality |
+|-------|------|--------|---------|
+| 0 | introduction | leaps from staircase into darkness | Strong opening gesture |
+| 1 | journey | pushes through shadows, path reveals | Good physical motion |
+| 2 | trial | shield blocks demon collision, shadows splinter | Best action beat |
+| 3 | consequence | shield shatters, fragments explode | Strong escalation |
+| 4 | moral | rises, fragments reform into new shield | Satisfying resolution |
 
-**Fix:** Rewrite the replacement to produce complete sentences:
-- "fragments scatter" -> "the warrior sends fragments scattering"
-- "shield explodes" -> "the warrior's shield explodes around them"
-- Use a map of object+verb -> character-as-subject rewrites instead of a generic regex
-
----
-
-## Architectural Issue 6: Prompt Is Still Too Long (~700+ chars)
-
-Even with V3's "60/20/20 split", the prompt contains:
-- Action line (~150 chars)
-- Escalation header (~50 chars) 
-- Motion sequence with 3 beats (~250 chars)
-- Environment action (~80 chars)
-- Setting line (~40 chars)
-- Style line (~60 chars)
-- Light behavior (~100 chars)
-- Avoid line (~20 chars)
-
-Total: ~750 chars. With the "first 500 chars = 80% weight" principle, the motion beats and environment are falling into the low-priority tail. The light behavior and style compete for attention.
-
-**Fix:** 
-- Merge the 3-beat motion INTO the action line as flowing prose (no separate block)
-- Drop the separate style/light/setting lines — weave them into the action description
-- Target: 400-500 chars total, all visual, all in one paragraph
+The `silhouette_action`, `start_state`, `end_state`, and `environment_motion` fields are all rich and specific. The problem is entirely in compilation.
 
 ---
 
-## Architectural Issue 7: Storyline Quality Is Actually Fine
+## What the Fix Will Produce
 
-The storyboard generation (GPT-4o) is producing good narrative structure — proper beat types, escalation, force fields, symbol arcs. The problem is entirely in **prompt compilation**, not story creation. The LLM output has rich `silhouette_action`, `start_state`, `end_state`, and `environment_motion` fields. They're just being assembled badly.
+### Before (what was actually sent):
+```text
+The warrior leaps forward from the last step — staircase folds in 
+on itself — vanishes — starting from warrior standing at the top of 
+a, shifting into warrior leaping into darkness as the. shadow 
+sharpens into form, outline crystallizes — then leaps forward from 
+the last step — staircase folds in on itself — vanishes, full force 
+— full figure stands revealed, presence claimed. Behind, staircase 
+SPIRALS downward, light DIMINISHES with each step. shadowed 
+underworld, layered paper depths, sudden illumination — sharp 
+shadows snap into existence, hard edge light carves the figure from 
+darkness.... Articulated cutout limbs, backlit from below...
+```
+~680 chars. Action repeated twice. Truncated states. ALLCAPS verbs.
+
+### After (what the fixed code will produce):
+```text
+The warrior leaps forward from the last step — staircase folds in 
+on itself — vanishes. Shadow sharpens into form, outline 
+crystallizes — then leaps forward, full force — full figure stands 
+revealed, presence claimed. Behind, staircase spirals downward, 
+light diminishes with each step. Shadowed underworld, layered paper 
+depths, sudden illumination — sharp shadows snap into existence. 
+Articulated cutout limbs, backlit from below, high contrast. No 
+realistic faces.
+```
+~430 chars. One paragraph. No repetition. All visual.
 
 ---
 
 ## Implementation Plan
 
-### Files to modify:
-- `supabase/functions/_shared/myth-continuity.ts` — All prompt compilation fixes
+### File: `supabase/functions/_shared/myth-continuity.ts`
 
-### Changes:
+**Change 1: Remove the redundant "starting from / shifting into" block**
+- Delete lines 1177-1181 (the inline transformation append)
+- The motion beats already carry the transformation arc via beat-type-specific anticipation and follow-through phrases
 
-1. **Fix `upgradeToTrajectoryVerbs`**: Process multi-word phrases first (longest-match-first), add missing phrasal verbs
+**Change 2: Increase truncation limits in motion beats**
+- In `buildMythMotionBeats` (line 1026), increase action truncation from 80 to 100 chars
+- This prevents mid-sentence cuts in the silhouette_action
 
-2. **Fix `auditSubject`**: Replace generic regex with a curated rewrite map that produces complete grammatical sentences. Remove the dangling "as the [archetype]" pattern.
+**Change 3: Lowercase environment motion text**
+- At line 1188, lowercase the `envClean` string before injecting to remove ALLCAPS LLM artifacts
 
-3. **Fix `buildMythPromptV3`**: 
-   - Remove the duplicate `"The ${archetype}"` prefix (let auditSubject own it)
-   - Merge motion beats INTO the action line as prose (not a separate labeled block)
-   - Remove all structural labels (MOTION SEQUENCE, ENVIRONMENT ACTION, STYLE, FORCE, ESC)
-   - Write the full prompt as 1-2 flowing paragraphs targeting 400-500 chars
-   - Weave style/light cues into the action description naturally
+**Change 4: Ensure `truncateClean` cuts at word boundaries**
+- Verify that `truncateClean` doesn't cut mid-word (check its implementation)
 
-4. **Fix `buildMythMotionBeats`**: Make Beat 1 and Beat 3 use beat_type-specific anticipation/follow-through verbs instead of hardcoded "figure coils, weight shifts" / "momentum carries through"
+### Post-deploy:
+- Deploy `continue-story-myth-mode`
+- Regen "Descent to the Abyss" to verify prompt quality improvement
 
-### Expected result:
-
-Before (current broken output):
-```
-The warrior The warrior — strides forward, shield raised high — light 
-pulses along its edge, casting shadows behind — starting from warrior in 
-darkness, shield dull, through the action shifting into warrior in partial 
-light, shield gleaming.
-
-FORCE: unknown | ESC=3 | SETPIECE=1
-
-MOTION SEQUENCE:
-Beat 1 (anticipation): warrior in darkness — figure coils, weight shifts, 
-muscles tense. Beat 2 (peak): strides forward, shield raised high — full 
-force, maximum displacement. Beat 3 (settle): warrior in partial light — 
-momentum carries through, new position held.
-
-ENVIRONMENT ACTION: shadows retreat from shield's glow.
-
-Setting: ancient battlefield, layered paper depths.
-
-STYLE: Shadow silhouettes, high contrast, fluid articulated motion.
-
-Sudden illumination — sharp shadows snap into existence.
-
-No realistic faces.
-```
-
-After (target output):
-```
-A warrior silhouette surges forward from darkness, shield thrust high — 
-light erupts along its edge as shadows recoil. Weight drops low then 
-launches into a full stride, shield arm extending, momentum carrying 
-through into a braced stance as the glow steadies. Behind, battlefield 
-shadows retreat in layered paper depths, sharp illumination snapping 
-the figure into hard-edged relief. Articulated cutout limbs, backlit 
-from below, high contrast black and gold. No realistic faces.
-```
-
-One flowing paragraph. ~450 chars. All visual. Action physics at the head. Style woven in naturally at the tail.
-
-### Technical notes:
-- No database changes needed
-- No changes to `queue-video` or `auto-rate-video` (those fixes are working)
-- No changes to storyboard generation (storyline is fine)
-- Only `myth-continuity.ts` prompt compilation needs work
-- Deploy `continue-story-myth-mode` after changes (it imports from myth-continuity)
+### No changes needed to:
+- `queue-video` (sanitization bypass already working)
+- `auto-rate-video` (motion cap at 75 already working)
+- Storyboard generation (storyline quality is fine)
+- `continue-story-myth-mode/index.ts` (already passes correct settings)
 
