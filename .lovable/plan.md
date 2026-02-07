@@ -1,129 +1,90 @@
 
 
-# Analysis: "Descent to the Abyss" -- What's Happening and What Needs Fixing
+# Fix Remaining Prompt Compilation Issues in Myth Mode
 
-## Current Status
+## Summary
 
-These videos were generated with the **old, buggy prompt compiler** before the flowing-prose overhaul was deployed. The current code in `myth-continuity.ts` has already fixed several issues (phrasal verbs, subject audit, removed labels), but has **not been used to regenerate** this story.
+The flowing-prose overhaul fixed 5 major bugs (double archetype, ALLCAPS, structural labels, redundant state block, generic beats). But 4 new issues emerged in the "Descent into Shadow" generation that prevent the prompts from being truly clean.
 
-However, the current code still has problems that would affect a regen.
+## Issues to Fix
 
----
+### 1. Action Duplicated Verbatim in Every Prompt (Critical)
 
-## What's Actually Wrong (Current Code Issues)
+The `silhouette_action` text appears twice in every prompt: once as the opening line, and again inside the motion beats. This is because `buildMythPromptV3` outputs the audited action on its own, then appends `buildMythMotionBeats` which also embeds the same `silhouette_action`.
 
-### 1. State Truncation Is Too Aggressive (40 chars)
+**Fix:** Remove the standalone action line from `buildMythPromptV3`. Instead, let `buildMythMotionBeats` be the sole carrier of the action, structured as: `[anticipation] -- then [action] -- [follow-through]`. The `auditSubject` call should be applied to the motion beats output, not to a separate action line.
 
-Line 1178-1179 uses `truncateClean(start_state, 40)` and `truncateClean(end_state, 40)`.
+### 2. "full force" Filler Removed
 
-Example state: `"warrior standing at the top of a gleaming staircase, shield shining"` (68 chars)
-Truncated to: `"warrior standing at the top of a gleamin"` -- mid-word garbage.
+The hardcoded `", full force"` connector in `buildMythMotionBeats` adds zero visual information. Replace with nothing -- let the em-dash carry the transition naturally: `"[anticipation] -- then [action] -- [follow-through]"`.
 
-This produces fragments like `"starting from warrior standing at the top of a"` and `"shifting into warrior leaping into darkness as the"` -- both are incomplete sentences that confuse Sora.
+### 3. Capitalization and Double Periods
 
-**Fix:** Increase truncation limit to 60 chars and ensure `truncateClean` cuts at the last complete word/comma boundary, never mid-word.
+- Capitalize the first letter of the motion beats output before appending after a period
+- Clean up double periods by ensuring only one period separates sections
+- Add a utility to strip trailing periods from segments before joining
 
-### 2. Start/End State Inlining Creates Redundancy
+### 4. Redundant "upward upward" from Verb Upgrades
 
-The current structure appends `"-- starting from X, shifting into Y"` AFTER the action, then ALSO appends the motion beats which ALSO reference start and end states via `ANTICIPATION_BY_BEAT` and `FOLLOWTHROUGH_BY_BEAT`.
+`upgradeToTrajectoryVerbs` converts "rises" to "surges upward", but doesn't check if the surrounding context already contains "upward". Add a post-processing step: if the upgraded text contains the same directional word twice within 40 chars, remove the duplicate.
 
-This creates double-mention of the same information:
-- `"leaps forward -- starting from warrior at staircase, shifting into warrior in darkness"`
-- `"shadow sharpens into form -- then leaps forward -- full figure stands revealed"`
+## Technical Changes
 
-The action appears twice, the transformation is described twice, wasting ~150 chars on repetition.
+### File: `supabase/functions/_shared/myth-continuity.ts`
 
-**Fix:** Remove the explicit `"starting from / shifting into"` block. Let the motion beats alone carry the transformation arc (they already do via anticipation + follow-through).
+**Change 1: Restructure `buildMythPromptV3` to eliminate action duplication**
+- Remove line 1178 (`let actionParagraph = auditedAction`)
+- Remove line 1184 (`. ${motionProse}.`)
+- Instead, apply `upgradeToTrajectoryVerbs` and `auditSubject` to the motion beats output directly
+- The motion beats already contain the action; they become the sole opening paragraph
 
-### 3. ALLCAPS Verbs in Environment Motion
+**Change 2: Update `buildMythMotionBeats` to drop "full force"**
+- Line 1035: change `${actionClean}, full force` to just `${actionClean}`
+- Result: `"[anticipation] -- then [action] -- [follow-through]"`
 
-The storyboard's `environment_motion` field contains ALLCAPS verbs: `["staircase SPIRALS downward", "light DIMINISHES with each step"]`. These are LLM-formatting artifacts that get passed directly into the prompt. Sora doesn't interpret ALLCAPS as emphasis -- it's just noise.
+**Change 3: Capitalize + clean punctuation**
+- After building the motion prose, capitalize its first letter
+- Before joining sections, strip trailing periods to prevent doubles
+- Join with `. ` (period-space) for clean sentence boundaries
 
-**Fix:** Lowercase the environment motion text before injecting it.
+**Change 4: Deduplicate directional words post-upgrade**
+- After `upgradeToTrajectoryVerbs`, scan for repeated directional words (upward, forward, downward, outward, backward) within a short window
+- If found, remove the second occurrence
 
-### 4. Scene 2 Failed (Connection Reset) -- Not a Code Bug
+## Expected Output After Fix
 
-Scene 2 (the trial/battle scene, 12s) failed with `"Connection reset by peer"` from the OpenAI API. This is an infrastructure issue, not a prompt issue. The scene needs to be regenerated.
-
-### 5. Scene 3 Was Never Auto-Rated
-
-Scene 3 completed (`status: done`) but has no auto-rating scores (`auto_motion_score: nil`). The auto-rater may have failed silently or was never triggered for this job.
-
----
-
-## Storyboard Quality (GPT-4o Output)
-
-The storyboard itself is **good**. The narrative arc is solid:
-
-| Scene | Beat | Action | Quality |
-|-------|------|--------|---------|
-| 0 | introduction | leaps from staircase into darkness | Strong opening gesture |
-| 1 | journey | pushes through shadows, path reveals | Good physical motion |
-| 2 | trial | shield blocks demon collision, shadows splinter | Best action beat |
-| 3 | consequence | shield shatters, fragments explode | Strong escalation |
-| 4 | moral | rises, fragments reform into new shield | Satisfying resolution |
-
-The `silhouette_action`, `start_state`, `end_state`, and `environment_motion` fields are all rich and specific. The problem is entirely in compilation.
-
----
-
-## What the Fix Will Produce
-
-### Before (what was actually sent):
-```text
-The warrior leaps forward from the last step — staircase folds in 
-on itself — vanishes — starting from warrior standing at the top of 
-a, shifting into warrior leaping into darkness as the. shadow 
-sharpens into form, outline crystallizes — then leaps forward from 
-the last step — staircase folds in on itself — vanishes, full force 
-— full figure stands revealed, presence claimed. Behind, staircase 
-SPIRALS downward, light DIMINISHES with each step. shadowed 
-underworld, layered paper depths, sudden illumination — sharp 
-shadows snap into existence, hard edge light carves the figure from 
-darkness.... Articulated cutout limbs, backlit from below...
+**Before (current Scene 0, 540 chars):**
 ```
-~680 chars. Action repeated twice. Truncated states. ALLCAPS verbs.
+The warrior leaps downward — lands on stony ground — dust explodes 
+outward. shadow sharpens into form, outline crystallizes — then 
+leaps downward — lands on stony ground — dust explodes outward, 
+full force — full figure stands revealed, presence claimed. Behind, 
+shadows swell and engulf as descent begins. the shadowy underworld, 
+layered paper depths, sudden illumination — sharp shadows snap into 
+existence, hard edge light carves the figure from darkness.. 
+Articulated cutout limbs, backlit from below, high contrast. No 
+realistic faces.
+```
 
-### After (what the fixed code will produce):
-```text
-The warrior leaps forward from the last step — staircase folds in 
-on itself — vanishes. Shadow sharpens into form, outline 
-crystallizes — then leaps forward, full force — full figure stands 
-revealed, presence claimed. Behind, staircase spirals downward, 
-light diminishes with each step. Shadowed underworld, layered paper 
+**After (target, ~420 chars):**
+```
+Shadow sharpens into form, outline crystallizes — then the warrior 
+leaps downward, lands on stony ground, dust explodes outward — full 
+figure stands revealed, presence claimed. Behind, shadows swell and 
+engulf as descent begins. The shadowy underworld, layered paper 
 depths, sudden illumination — sharp shadows snap into existence. 
 Articulated cutout limbs, backlit from below, high contrast. No 
 realistic faces.
 ```
-~430 chars. One paragraph. No repetition. All visual.
 
----
+One clean paragraph. Action appears once. No filler words. Proper capitalization. ~420 chars inside the high-weight window.
 
-## Implementation Plan
+## Non-Code Issue: Auto-Rater Quota
 
-### File: `supabase/functions/_shared/myth-continuity.ts`
+All 5 scenes failed auto-rating due to OpenAI 429 (quota exhaustion). This is the same billing issue blocking story creation. Once the API key is refreshed or credits added, the auto-rater will need to be re-triggered for these jobs to get quality scores.
 
-**Change 1: Remove the redundant "starting from / shifting into" block**
-- Delete lines 1177-1181 (the inline transformation append)
-- The motion beats already carry the transformation arc via beat-type-specific anticipation and follow-through phrases
+## Deployment
 
-**Change 2: Increase truncation limits in motion beats**
-- In `buildMythMotionBeats` (line 1026), increase action truncation from 80 to 100 chars
-- This prevents mid-sentence cuts in the silhouette_action
-
-**Change 3: Lowercase environment motion text**
-- At line 1188, lowercase the `envClean` string before injecting to remove ALLCAPS LLM artifacts
-
-**Change 4: Ensure `truncateClean` cuts at word boundaries**
-- Verify that `truncateClean` doesn't cut mid-word (check its implementation)
-
-### Post-deploy:
-- Deploy `continue-story-myth-mode`
-- Regen "Descent to the Abyss" to verify prompt quality improvement
-
-### No changes needed to:
-- `queue-video` (sanitization bypass already working)
-- `auto-rate-video` (motion cap at 75 already working)
-- Storyboard generation (storyline quality is fine)
-- `continue-story-myth-mode/index.ts` (already passes correct settings)
-
+- Edit `supabase/functions/_shared/myth-continuity.ts`
+- Deploy `continue-story-myth-mode` (imports from myth-continuity)
+- Regen story after OpenAI quota is restored to verify
