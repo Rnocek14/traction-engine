@@ -17,6 +17,7 @@ import {
   premiseWantsAction,
   MYTH_STYLE_ANCHORS,
   LIGHT_BEHAVIOR_V2,
+  ACTION_LIGHT_BEHAVIOR,
 } from "../_shared/myth-continuity.ts";
 
 const corsHeaders = {
@@ -255,8 +256,12 @@ Deno.serve(async (req) => {
             original_prompt: scene.visual_description || scene.narration,
             settings: {
               size: "1280x720",
-              seconds: snapDurationForSora(getSceneDuration(scene)),
+              // Blocker 2 fix: 8s minimum floor for myth mode
+              seconds: Math.max(8, snapDurationForSora(getSceneDuration(scene))),
             },
+            // Blocker 4 fix: Disable soft moderation for myth mode
+            // Myth mode uses silhouette abstraction which inherently reduces violence signaling
+            sanitization_level: "off",
             skip_enrichment: true, // Already enriched with mythic style
             bypass_qa: true, // Story mode uses story_jobs flow, not script QA
             story_job_id: body.story_job_id, // Signal this is story mode

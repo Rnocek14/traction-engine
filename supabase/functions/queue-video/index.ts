@@ -71,6 +71,8 @@ interface VideoRequest {
   pro_upgrade?: boolean | "auto";
   /** Number of variants to generate (default 1) */
   variants?: number;
+  /** Override sanitization level: "off" | "soft" | "strict" (myth mode passes "off") */
+  sanitization_level?: "off" | "soft" | "strict";
   /** Variant strategy: camera, staging, timing, or all */
   variant_strategy?: "camera" | "staging" | "timing" | "all";
 }
@@ -534,13 +536,20 @@ Style: Professional, engaging, suitable for TikTok/Reels. Smooth transitions bet
         let promptForAttempt: string;
         let useStartingFrame = !!startingFrameBlob; // All variants can use reference
         
-        if (attempt === 1) {
-          // First attempt: apply soft sanitization
-          const { sanitized, wasModified, replacements } = sanitizeForModeration(variantPrompt, "soft");
-          if (wasModified) {
-            logModerationSanitization(variantPrompt, sanitized, replacements, "soft", job.id);
+      if (attempt === 1) {
+          // Blocker 4 fix: Respect sanitization_level pass-through from myth mode / story modes
+          const sanitizationLevel = body.sanitization_level || "soft";
+          if (sanitizationLevel === "off") {
+            // Skip sanitization entirely (myth mode uses silhouette abstraction)
+            promptForAttempt = variantPrompt;
+            console.log(`[queue-video] Sanitization OFF (sanitization_level=${sanitizationLevel})`);
+          } else {
+            const { sanitized, wasModified, replacements } = sanitizeForModeration(variantPrompt, sanitizationLevel);
+            if (wasModified) {
+              logModerationSanitization(variantPrompt, sanitized, replacements, sanitizationLevel, job.id);
+            }
+            promptForAttempt = sanitized;
           }
-          promptForAttempt = sanitized;
         } else {
           // Apply retry ladder
           const retryCtx: RetryContext = {
