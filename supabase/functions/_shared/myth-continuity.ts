@@ -983,154 +983,175 @@ export function premiseWantsAction(premise: string): boolean {
  * 
  * Falls back to escalation-based templates only when scene data is missing.
  */
+/**
+ * Beat-type-specific anticipation phrases (Beat 1)
+ */
+const ANTICIPATION_BY_BEAT: Record<string, string> = {
+  introduction: "shadow sharpens into form, outline crystallizes",
+  journey: "body leans into motion, weight commits forward",
+  trial: "muscles coil, desperate tension builds",
+  revelation: "frozen stillness, breath held, body rigid",
+  consequence: "posture buckles, weight sinks inward",
+  moral: "tension gathers one last time, chest lifts",
+  battle: "weight drops low, stance widens, ready to strike",
+  chase: "feet dig in, body cocks back like a spring",
+  clash: "two forces brace, ground cracks beneath",
+  ascension: "energy coils inward, trembling with gathered force",
+};
+
+/**
+ * Beat-type-specific follow-through phrases (Beat 3)
+ */
+const FOLLOWTHROUGH_BY_BEAT: Record<string, string> = {
+  introduction: "full figure stands revealed, presence claimed",
+  journey: "arrives at new ground, posture shifts to survey",
+  trial: "collapses or catches breath, outcome written in stance",
+  revelation: "body transforms with understanding, new posture emerges",
+  consequence: "shadow shrinks, diminished form settles into loss",
+  moral: "figure smaller against vast space, yet stands resolved",
+  battle: "impact ripples outward, stance recovers into guard",
+  chase: "skids into new position, momentum barely contained",
+  clash: "one force yields, aftermath radiates outward",
+  ascension: "new form radiates power, environment recoils",
+};
+
+/**
+ * Build scene-specific 3-beat motion as flowing prose (not labeled blocks).
+ * All 3 beats derive from scene data + beat_type-specific vocabulary.
+ */
 function buildMythMotionBeats(scene: MythScene): string {
-  const esc = scene.escalation_delta ?? 0;
-  const archetype = "figure"; // Keep generic in motion beats (action line has the archetype)
-  
-  // SCENE-SPECIFIC BEATS: Use actual scene data when available
   const hasSceneData = scene.start_state && scene.end_state && scene.silhouette_action;
   
   if (hasSceneData) {
-    const startClean = truncateClean(scene.start_state!, 60);
-    const endClean = truncateClean(scene.end_state!, 60);
     const actionClean = truncateClean(scene.silhouette_action!, 80);
+    const anticipation = ANTICIPATION_BY_BEAT[scene.beat_type] || ANTICIPATION_BY_BEAT.journey;
+    const followThrough = FOLLOWTHROUGH_BY_BEAT[scene.beat_type] || FOLLOWTHROUGH_BY_BEAT.journey;
     
-    return `Beat 1 (anticipation): ${startClean} — ${archetype} coils, weight shifts, muscles tense. Beat 2 (peak): ${actionClean} — full force, maximum displacement, impact visible. Beat 3 (settle): ${endClean} — momentum carries through, new position held.`;
+    // Flowing prose, no labels
+    return `${anticipation} — then ${actionClean}, full force — ${followThrough}`;
   }
   
-  // FALLBACK: Escalation-based templates when scene data is sparse
+  // Fallback: beat_type-specific template as prose
+  const anticipation = ANTICIPATION_BY_BEAT[scene.beat_type] || "weight shifts, body prepares";
+  const followThrough = FOLLOWTHROUGH_BY_BEAT[scene.beat_type] || "new position held, consequence visible";
+  const action = scene.visual_description 
+    ? truncateClean(scene.visual_description, 60) 
+    : "primary movement carries through space";
   
-  // High-escalation beats: explosive physics
-  if (esc >= 2 || ["battle", "clash", "ascension"].includes(scene.beat_type)) {
-    const templates: Record<string, string> = {
-      battle: "Beat 1: Weight shifts, weapon raised. Beat 2: Full swing connects, target staggers backward, debris erupts. Beat 3: Follow-through carries attacker forward, dust settles around impact crater.",
-      chase: "Beat 1: Feet dig in, body launches forward. Beat 2: Full sprint, obstacles hurdled, ground kicks up behind. Beat 3: Sharp direction change, skid marks, momentum redirected.",
-      clash: "Beat 1: Two forces charge toward center. Beat 2: Collision — shockwave radiates outward, both figures buckle. Beat 3: Aftermath — one stands, one staggers, debris rains down.",
-      ascension: "Beat 1: Energy gathers at center, figure trembles. Beat 2: Eruption upward — form breaks apart and reconstitutes larger. Beat 3: New form radiates outward, environment recoils.",
-      trial: "Beat 1: Desperate lunge forward, fingers outstretched. Beat 2: Grasp fails — object shatters/scatters, body overextends. Beat 3: Collapse to knees, fragments settle around.",
-      consequence: "Beat 1: Standing among wreckage, hands open. Beat 2: Objects disintegrate in hands, dust streams through fingers. Beat 3: Weight buckles body downward, shadow shrinks.",
-    };
-    return templates[scene.beat_type] || templates.battle;
-  }
-  
-  // Medium-escalation: purposeful physics
-  if (esc >= 1 || ["journey", "chase"].includes(scene.beat_type)) {
-    const templates: Record<string, string> = {
-      journey: "Beat 1: Weight forward, stride begins. Beat 2: Full motion through space, environment scrolls past. Beat 3: Arrives at new position, posture adjusts to new context.",
-      trial: "Beat 1: Reaching motion begins, body extends. Beat 2: Contact — thing slips or resists, body strains. Beat 3: Result — either grasps or loses, posture shows outcome.",
-      chase: "Beat 1: Glance behind, fear registers. Beat 2: Sprint accelerates, limbs pump. Beat 3: Obstacle cleared mid-stride, pursuer visible behind.",
-    };
-    return templates[scene.beat_type] || "Beat 1: Preparation — body shifts weight. Beat 2: Primary action — visible displacement. Beat 3: Reaction — new position, consequence visible.";
-  }
-  
-  // Low-escalation: still physical but measured
-  const templates: Record<string, string> = {
-    introduction: "Beat 1: Shadow solidifies from darkness, outline sharpens. Beat 2: First limb moves — arm extends or head lifts. Beat 3: Full figure revealed in new stance, presence established.",
-    moral: "Beat 1: Tension held in posture, hands clenched. Beat 2: Release — hands open, shoulders drop, breath visible. Beat 3: Figure smaller against expanding backdrop, at peace.",
-    revelation: "Beat 1: Frozen mid-gesture, processing. Beat 2: Head snaps up, posture transforms from hunched to alert. Beat 3: Reaches toward truth with new understanding.",
-  };
-  return templates[scene.beat_type] || "Beat 1: Initial position, weight shifts. Beat 2: Primary movement, body displaces through space. Beat 3: Arrival at new state, posture changed.";
+  return `${anticipation} — ${action} — ${followThrough}`;
 }
 
 /**
  * Convert pose verbs to trajectory verbs for more dynamic output.
  */
 function upgradeToTrajectoryVerbs(action: string): string {
-  const VERB_UPGRADES: Record<string, string> = {
-    "steps": "strides",
-    "walks": "pushes forward",
-    "stands": "braces",
-    "rises": "surges upward",
-    "kneels": "buckles to knees",
-    "sits": "drops low",
-    "looks": "snaps focus toward",
-    "gazes": "locks eyes on",
-    "holds": "grips tight, knuckles white",
-    "watches": "tracks with full body rotation",
-    "turns": "pivots hard",
-    "reaches": "lunges for",
-    "touches": "slams hand against",
-    "runs": "tears forward at full sprint",
-    "walks forward": "drives forward with momentum",
-    "steps forward": "launches into stride",
-    "stands tall": "straightens explosively",
-    "stands alone": "braces against emptiness",
-  };
-  
+  // PHRASAL VERBS FIRST (longest match first to prevent mangling)
+  const PHRASAL_UPGRADES: [string, string][] = [
+    ["reaches out", "lunges outward"],
+    ["reaches for", "lunges for"],
+    ["reaches toward", "lunges toward"],
+    ["walks forward", "drives forward with momentum"],
+    ["steps forward", "launches into stride"],
+    ["stands tall", "straightens explosively"],
+    ["stands alone", "braces against emptiness"],
+    ["stands firm", "plants weight, immovable"],
+    ["looks up", "snaps gaze upward"],
+    ["looks down", "drops focus downward"],
+    ["turns away", "wrenches away"],
+    ["turns toward", "pivots hard toward"],
+    ["falls back", "staggers backward"],
+    ["holds up", "thrusts upward"],
+    ["holds out", "extends with force"],
+    ["runs forward", "tears forward at full sprint"],
+  ];
+
+  // SINGLE-WORD FALLBACKS (only after phrasal processing)
+  const SINGLE_UPGRADES: [string, string][] = [
+    ["steps", "strides"],
+    ["walks", "pushes forward"],
+    ["stands", "braces"],
+    ["rises", "surges upward"],
+    ["kneels", "buckles to knees"],
+    ["sits", "drops low"],
+    ["looks", "snaps focus toward"],
+    ["gazes", "locks eyes on"],
+    ["holds", "grips tight"],
+    ["watches", "tracks with full body rotation"],
+    ["turns", "pivots hard"],
+    ["reaches", "lunges for"],
+    ["touches", "slams hand against"],
+    ["runs", "tears forward at full sprint"],
+  ];
+
   let result = action;
-  for (const [pose, trajectory] of Object.entries(VERB_UPGRADES)) {
-    // Replace whole-word matches (case insensitive)
-    const regex = new RegExp(`\\b${pose}\\b`, 'gi');
-    result = result.replace(regex, trajectory);
+  
+  // Process phrasal verbs FIRST
+  for (const [phrase, replacement] of PHRASAL_UPGRADES) {
+    const regex = new RegExp(`\\b${phrase}\\b`, 'gi');
+    result = result.replace(regex, replacement);
   }
+  
+  // Then single-word fallbacks
+  for (const [word, replacement] of SINGLE_UPGRADES) {
+    const regex = new RegExp(`\\b${word}\\b`, 'gi');
+    result = result.replace(regex, replacement);
+  }
+  
   return result;
 }
 
 /**
- * Build a V3 Myth Mode prompt - ACTION PHYSICS FIRST, style secondary.
- * 
- * V3.1 Changes (motion overhaul):
- * - Trajectory verbs replace pose verbs
- * - 3-beat motion sequences (anticipation → action → follow-through)
- * - Environment motion injected (was ignored before)
- * - Prompt ratio flipped: ~60% action, ~20% style, ~20% context
- * - Transformation as continuous journey, not "from X to Y" keyframes
- * 
- * NO:
- * - "frame-by-frame"
- * - "handcrafted motion"  
- * - "stop-motion"
- * - any line that implies low FPS / choppy movement
- */
-/**
- * Subject audit: Ensure the character archetype is the grammatical subject
- * of the action line's primary clause. (Blocker 1 fix)
- * 
- * Problem: "A warrior sword gleams, guides, pulls" → sword is the subject
- * Fix: "The warrior grips the sword as it gleams" → warrior is the subject
+ * Subject audit: Ensure the character archetype is the grammatical subject.
  */
 function auditSubject(actionLine: string, archetype: string): string {
-  // Common object-as-subject patterns where the character's prop does the verbing
-  const OBJECT_SUBJECT_PATTERNS = [
-    // "warrior sword gleams" → sword is doing the action
-    /\b(sword|blade|staff|shield|hammer|axe|spear|dagger|bow|arrow|weapon)\s+(gleams?|shines?|glows?|pulses?|hums?|vibrates?|shatters?|breaks?|fragments?|cracks?|splits?|bursts?)\b/gi,
-    // "warrior fragments scatter" → fragments are doing the action
-    /\b(fragments?|shards?|pieces?|debris|dust|sparks?|embers?|flames?|light|shadow|darkness)\s+(scatter|spread|fly|drift|swirl|coalesce|gather|explode|burst|rain|fall|rise|glow|pulse)\b/gi,
-  ];
-  
   let result = actionLine;
   
-  for (const pattern of OBJECT_SUBJECT_PATTERNS) {
-    result = result.replace(pattern, (match, object, verb) => {
-      // Rewrite so the character acts WITH/ON the object
-      return `${archetype}'s ${object} ${verb} as the ${archetype}`;
-    });
-  }
-  
-  // Ensure the first clause starts with the archetype
-  // If after object audit, first word isn't "A/The [archetype]", restructure
+  // Props doing ambient actions -> character wielding props
+  result = result.replace(
+    /\b(sword|blade|staff|shield|hammer|axe|spear|dagger|bow|weapon)\s+(gleams?|shines?|glows?|pulses?|hums?|vibrates?)\b/gi,
+    (_m, obj, verb) => `the ${archetype}'s ${obj} ${verb} in their grip`
+  );
+  result = result.replace(
+    /\b(sword|blade|staff|shield|hammer|axe|spear|dagger|bow|weapon)\s+(shatters?|breaks?|cracks?|splits?|bursts?|explodes?)\b/gi,
+    (_m, obj, verb) => `the ${archetype}'s ${obj} ${verb} around them`
+  );
+  // Debris/particles as subject -> character causing them
+  result = result.replace(
+    /\b(fragments?|shards?|pieces?|debris)\s+(scatter|spread|fly|rain|fall)\b/gi,
+    (_m, obj, verb) => `the ${archetype} sends ${obj} ${verb}ing`
+  );
+  result = result.replace(
+    /\b(sparks?|embers?|flames?)\s+(fly|drift|swirl|burst|rain|rise|scatter)\b/gi,
+    (_m, obj, verb) => `${obj} ${verb} around the ${archetype}`
+  );
+  result = result.replace(
+    /\b(light|shadow|darkness)\s+(explodes?|bursts?|erupts?|spreads?|pulses?|glows?)\b/gi,
+    (_m, obj, verb) => `${obj} ${verb} around the ${archetype}`
+  );
+  result = result.replace(
+    /\b(fragments?|shards?|pieces?)\s+(glow|coalesce|gather|pulse)\b/gi,
+    (_m, obj, verb) => `the ${archetype} draws ${obj} to ${verb}`
+  );
+
+  // Ensure the first clause contains the archetype
   const firstClause = result.split(/[,.]/, 1)[0].toLowerCase();
-  const archetypeLower = archetype.toLowerCase();
-  if (!firstClause.includes(archetypeLower)) {
-    // Prepend the archetype as subject
-    result = `The ${archetype} — ${result}`;
+  if (!firstClause.includes(archetype.toLowerCase())) {
+    result = `The ${archetype} ${result}`;
   }
-  
+
   return result;
 }
 
-/**
- * Build an inline transformation phrase (Blocker 5 fix).
- * Instead of "Scene begins: X. Through the action, it becomes: Y" (two keyframes → morph),
- * embed the transformation INTO the action as a continuous physical process.
- */
-function buildInlineTransformation(startState: string, endState: string): string {
-  const startClean = truncateClean(startState, 50);
-  const endClean = truncateClean(endState, 50);
-  // Describe as continuous journey, not two keyframes
-  return ` — starting from ${startClean}, through the action shifting into ${endClean}`;
-}
+// buildInlineTransformation removed — transformation is now woven inline in buildMythPromptV3
 
+/**
+ * Build a V4 Myth Mode prompt — FLOWING PROSE, no structural labels.
+ * 
+ * All visual information in 1-2 paragraphs, ~400-500 chars.
+ * Action physics at the head (first 500 chars = 80% model weight).
+ * Style/lighting woven naturally into the description at the tail.
+ * Only hard constraint: "No realistic faces."
+ */
 export function buildMythPromptV3(
   scene: MythScene,
   storyboard: Partial<MythStoryboard>,
@@ -1140,85 +1161,50 @@ export function buildMythPromptV3(
   const setting = storyboard.setting;
   const isAction = settings?.intensity_profile === "action" || settings?.intensity_profile === "epic";
   
-  // =========================================================================
-  // BLOCK 1: ACTION PHYSICS (~60% of prompt) — HIGHEST PRIORITY
-  // =========================================================================
-  
   const archetype = character?.archetype || "solitary figure";
   const rawAction = scene.silhouette_action || scene.visual_description || "moves through the scene";
   
-  // Upgrade pose verbs to trajectory verbs
+  // Upgrade verbs -> audit subject -> get motion beats
   const dynamicAction = upgradeToTrajectoryVerbs(rawAction);
-  
-  // SUBJECT AUDIT (Blocker 1): Ensure archetype is the grammatical subject
   const auditedAction = auditSubject(dynamicAction, archetype);
+  const motionProse = buildMythMotionBeats(scene);
   
-  // INLINE TRANSFORMATION (Blocker 5): Embed change into action, not as "begins/becomes"
-  let transformPhrase = "";
+  // Build the action paragraph: audited action + motion beats woven together
+  // auditSubject already ensures archetype is the subject, so no extra prefix
+  let actionParagraph = `${auditedAction}`;
+  
+  // Weave in inline transformation if available
   if (scene.start_state && scene.end_state) {
-    transformPhrase = buildInlineTransformation(scene.start_state, scene.end_state);
+    const startClean = truncateClean(scene.start_state, 40);
+    const endClean = truncateClean(scene.end_state, 40);
+    actionParagraph += ` — starting from ${startClean}, shifting into ${endClean}`;
   }
   
-  const actionLine = `The ${archetype} ${auditedAction}${transformPhrase}.`;
+  // Append motion beats as continuation
+  actionParagraph += `. ${motionProse}.`;
   
-  // FORCE + ESCALATION (compact header)
-  const escalationParts: string[] = [];
-  if (scene.force_present) escalationParts.push(`FORCE: ${scene.force_type || "unknown"}`);
-  if (scene.escalation_delta && scene.escalation_delta > 0) escalationParts.push(`ESC=${scene.escalation_delta}`);
-  if (scene.setpiece_delta && scene.setpiece_delta > 0) escalationParts.push(`SETPIECE=${scene.setpiece_delta}`);
-  if (scene.threat_vector) escalationParts.push(`THREAT: ${scene.threat_vector}`);
-  const escalationHeader = escalationParts.length > 0 ? escalationParts.join(" | ") : "";
-  
-  // 3-BEAT MOTION SEQUENCE (now scene-specific via Blocker 3 fix)
-  const motionBeats = buildMythMotionBeats(scene);
-  
-  // ENVIRONMENT MOTION
-  let envMotionLine = "";
+  // Environment motion woven in
   if (scene.environment_motion && scene.environment_motion.length > 0) {
-    envMotionLine = `ENVIRONMENT ACTION: ${scene.environment_motion.join(". ")}.`;
+    const envClean = scene.environment_motion.slice(0, 2).join(", ");
+    actionParagraph += ` Behind, ${envClean}.`;
   }
   
-  // =========================================================================
-  // BLOCK 2: CONTEXT (~20% of prompt)
-  // =========================================================================
-  
+  // Setting + style woven as tail context
   const realm = setting?.realm || "timeless realm";
-  const settingLine = `Setting: ${realm}, layered paper depths.`;
-  
-  // =========================================================================
-  // BLOCK 3: STYLE (~20% of prompt) — SHORT, non-conflicting
-  // =========================================================================
-  
-  // Compact style — one line, not multiple blocks
-  const styleLine = "STYLE: Shadow silhouettes, high contrast, fluid articulated motion.";
-  
-  // LIGHT BEHAVIOR (Blocker 6 fix): Use action-intensity lighting when appropriate
-  const lightLine = isAction
+  const lightBehavior = isAction
     ? (ACTION_LIGHT_BEHAVIOR[scene.beat_type] || ACTION_LIGHT_BEHAVIOR.battle)
     : (LIGHT_BEHAVIOR_V2[scene.beat_type] || LIGHT_BEHAVIOR_V2.journey);
+  // Strip any label prefix from light behavior (e.g., "Sudden illumination —" is fine)
   
-  // Minimal negatives
-  const avoidLine = "No realistic faces.";
+  const styleTail = `${realm}, layered paper depths, ${lightBehavior.toLowerCase()}. Articulated cutout limbs, backlit from below, high contrast. No realistic faces.`;
   
-  // =========================================================================
-  // ASSEMBLE: Action-heavy ordering
-  // =========================================================================
+  // Combine: one flowing prompt
+  const fullPrompt = `${actionParagraph} ${styleTail}`;
   
-  const parts: string[] = [];
+  // Budget check: trim to ~600 chars max to stay in the high-weight window
+  if (fullPrompt.length > 600) {
+    return fullPrompt.slice(0, 597) + "...";
+  }
   
-  // Action physics FIRST (this is what matters most)
-  parts.push(actionLine);
-  if (escalationHeader) parts.push(escalationHeader);
-  parts.push(`MOTION SEQUENCE:\n${motionBeats}`);
-  if (envMotionLine) parts.push(envMotionLine);
-  
-  // Context SECOND
-  parts.push(settingLine);
-  
-  // Style LAST (minimal)
-  parts.push(styleLine);
-  parts.push(lightLine);
-  parts.push(avoidLine);
-  
-  return parts.join("\n\n");
+  return fullPrompt;
 }
