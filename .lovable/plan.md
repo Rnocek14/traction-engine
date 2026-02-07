@@ -1,90 +1,84 @@
 
 
-# Fix Remaining Prompt Compilation Issues in Myth Mode
+# Fix 3 Remaining Prompt Compilation Issues in Myth Mode
 
 ## Summary
 
-The flowing-prose overhaul fixed 5 major bugs (double archetype, ALLCAPS, structural labels, redundant state block, generic beats). But 4 new issues emerged in the "Descent into Shadow" generation that prevent the prompts from being truly clean.
+"Descent of Shadows" was generated with the latest code, and while action duplication is fixed, 3 systemic issues remain that affect every scene.
 
-## Issues to Fix
+## Issues
 
-### 1. Action Duplicated Verbatim in Every Prompt (Critical)
+### 1. ALLCAPS Verbs in silhouette_action (affects all 5 scenes)
 
-The `silhouette_action` text appears twice in every prompt: once as the opening line, and again inside the motion beats. This is because `buildMythPromptV3` outputs the audited action on its own, then appends `buildMythMotionBeats` which also embeds the same `silhouette_action`.
+The storyboard's `silhouette_action` field contains ALLCAPS verbs from GPT-4o formatting (EXPANDS, PULSES, CLASHES, CLATTERS, BURSTS). The previous fix lowercased `environment_motion` but not the action itself.
 
-**Fix:** Remove the standalone action line from `buildMythPromptV3`. Instead, let `buildMythMotionBeats` be the sole carrier of the action, structured as: `[anticipation] -- then [action] -- [follow-through]`. The `auditSubject` call should be applied to the motion beats output, not to a separate action line.
+**Examples:**
+- Scene 1: `"sword's light EXPANDS then PULSES with each swing"`
+- Scene 2: `"sword arcs and CLASHES against spectral forms"`
+- Scene 4: `"light BURSTS around the warrior forth"`
 
-### 2. "full force" Filler Removed
+**Fix:** In `buildMythMotionBeats`, apply a regex to strip ALLCAPS words down to lowercase in the `actionClean` variable, right after `truncateClean`. Target pattern: any word that is 4+ chars and entirely uppercase.
 
-The hardcoded `", full force"` connector in `buildMythMotionBeats` adds zero visual information. Replace with nothing -- let the em-dash carry the transition naturally: `"[anticipation] -- then [action] -- [follow-through]"`.
+### 2. auditSubject Creates Broken Grammar (affects 4 of 5 scenes)
 
-### 3. Capitalization and Double Periods
+The anticipation phrases from `ANTICIPATION_BY_BEAT` use body-part subjects ("muscles coil", "body leans", "posture buckles", "tension gathers"). When `auditSubject` prepends "The warrior", it produces "The warrior muscles coil" instead of "The warrior's muscles coil".
 
-- Capitalize the first letter of the motion beats output before appending after a period
-- Clean up double periods by ensuring only one period separates sections
-- Add a utility to strip trailing periods from segments before joining
+**Fix:** Update `auditSubject` to detect when the first word after the archetype would be a body-part noun (muscles, body, posture, tension, chest, weight, shadow, silhouette, form, outline). In that case, insert possessive `'s` after the archetype: "The warrior's muscles coil".
 
-### 4. Redundant "upward upward" from Verb Upgrades
+### 3. auditSubject Injects Archetype Mid-Sentence (Scene 4)
 
-`upgradeToTrajectoryVerbs` converts "rises" to "surges upward", but doesn't check if the surrounding context already contains "upward". Add a post-processing step: if the upgraded text contains the same directional word twice within 40 chars, remove the duplicate.
+When `silhouette_action` starts with a non-character subject like "light BURSTS forth", the audit tries to inject the archetype but places it in the wrong position, producing "light BURSTS around the warrior forth".
 
-## Technical Changes
+**Fix:** The audit should only prepend the archetype at the very start of the full prompt (which it already does for the motion beats). The issue is that `auditSubject` also has fallback mid-sentence injection logic that fires incorrectly. Remove or constrain the mid-sentence injection so it only fires if the archetype is completely absent from the surrounding context. Since the motion beats already start with anticipation phrases that get the archetype prepended, mid-sentence injection is unnecessary.
+
+## Technical Implementation
 
 ### File: `supabase/functions/_shared/myth-continuity.ts`
 
-**Change 1: Restructure `buildMythPromptV3` to eliminate action duplication**
-- Remove line 1178 (`let actionParagraph = auditedAction`)
-- Remove line 1184 (`. ${motionProse}.`)
-- Instead, apply `upgradeToTrajectoryVerbs` and `auditSubject` to the motion beats output directly
-- The motion beats already contain the action; they become the sole opening paragraph
+**Change 1: Lowercase ALLCAPS in silhouette_action (in `buildMythMotionBeats`, ~line 1030)**
 
-**Change 2: Update `buildMythMotionBeats` to drop "full force"**
-- Line 1035: change `${actionClean}, full force` to just `${actionClean}`
-- Result: `"[anticipation] -- then [action] -- [follow-through]"`
-
-**Change 3: Capitalize + clean punctuation**
-- After building the motion prose, capitalize its first letter
-- Before joining sections, strip trailing periods to prevent doubles
-- Join with `. ` (period-space) for clean sentence boundaries
-
-**Change 4: Deduplicate directional words post-upgrade**
-- After `upgradeToTrajectoryVerbs`, scan for repeated directional words (upward, forward, downward, outward, backward) within a short window
-- If found, remove the second occurrence
-
-## Expected Output After Fix
-
-**Before (current Scene 0, 540 chars):**
+After `truncateClean`, add:
+```typescript
+// Strip ALLCAPS words (4+ chars) to lowercase — LLM formatting artifacts
+const actionNorm = actionClean.replace(/\b[A-Z]{4,}\b/g, w => w.toLowerCase());
 ```
-The warrior leaps downward — lands on stony ground — dust explodes 
-outward. shadow sharpens into form, outline crystallizes — then 
-leaps downward — lands on stony ground — dust explodes outward, 
-full force — full figure stands revealed, presence claimed. Behind, 
-shadows swell and engulf as descent begins. the shadowy underworld, 
-layered paper depths, sudden illumination — sharp shadows snap into 
-existence, hard edge light carves the figure from darkness.. 
-Articulated cutout limbs, backlit from below, high contrast. No 
-realistic faces.
+Then use `actionNorm` instead of `actionClean` in the return template.
+
+**Change 2: Possessive insertion in `auditSubject` (~line 1120-1140)**
+
+Add a body-part detection step after the archetype prepend:
+```typescript
+const BODY_PARTS = new Set([
+  "muscles", "body", "posture", "tension", "chest", 
+  "weight", "shadow", "silhouette", "form", "outline",
+  "stance", "frame", "limbs", "arms", "hands"
+]);
+
+// After prepending archetype, check if next word is a body part
+const firstWord = textAfterArchetype.split(/\s/)[0].toLowerCase();
+if (BODY_PARTS.has(firstWord)) {
+  // Insert possessive: "The warrior muscles" -> "The warrior's muscles"
+  result = result.replace(archetype, `${archetype}'s`);
+}
 ```
 
-**After (target, ~420 chars):**
-```
-Shadow sharpens into form, outline crystallizes — then the warrior 
-leaps downward, lands on stony ground, dust explodes outward — full 
-figure stands revealed, presence claimed. Behind, shadows swell and 
-engulf as descent begins. The shadowy underworld, layered paper 
-depths, sudden illumination — sharp shadows snap into existence. 
-Articulated cutout limbs, backlit from below, high contrast. No 
-realistic faces.
-```
+**Change 3: Disable mid-sentence archetype injection in `auditSubject`**
 
-One clean paragraph. Action appears once. No filler words. Proper capitalization. ~420 chars inside the high-weight window.
+Remove or guard the fallback that injects "around the warrior" mid-sentence. The prepend-at-start logic is sufficient since the motion beats are the sole action carrier.
 
-## Non-Code Issue: Auto-Rater Quota
+### Deployment
 
-All 5 scenes failed auto-rating due to OpenAI 429 (quota exhaustion). This is the same billing issue blocking story creation. Once the API key is refreshed or credits added, the auto-rater will need to be re-triggered for these jobs to get quality scores.
+- Deploy `continue-story-myth-mode` (imports myth-continuity)
+- Regenerate "Descent of Shadows" to verify
 
-## Deployment
+### Expected Results
 
-- Edit `supabase/functions/_shared/myth-continuity.ts`
-- Deploy `continue-story-myth-mode` (imports from myth-continuity)
-- Regen story after OpenAI quota is restored to verify
+**Scene 0 before:** `"The warrior shadow sharpens into form"`
+**Scene 0 after:** `"The warrior's shadow sharpens into form"`
+
+**Scene 1 before:** `"sword's light EXPANDS then PULSES"`
+**Scene 1 after:** `"sword's light expands then pulses"`
+
+**Scene 4 before:** `"light BURSTS around the warrior forth"`
+**Scene 4 after:** `"The warrior's tension gathers one last time, chest lifts — then grasps sword, lifts it high — light bursts forth, scattering shadows"`
+
