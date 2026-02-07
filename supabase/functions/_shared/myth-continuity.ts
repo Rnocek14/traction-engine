@@ -1027,7 +1027,9 @@ function buildMythMotionBeats(scene: MythScene): string {
   const hasSceneData = scene.start_state && scene.end_state && scene.silhouette_action;
   
   if (hasSceneData) {
-    const actionClean = truncateClean(scene.silhouette_action!, 100);
+    const actionRaw = truncateClean(scene.silhouette_action!, 100);
+    // Strip ALLCAPS words (4+ chars) to lowercase — LLM formatting artifacts
+    const actionClean = actionRaw.replace(/\b[A-Z]{4,}\b/g, w => w.toLowerCase());
     const anticipation = ANTICIPATION_BY_BEAT[scene.beat_type] || ANTICIPATION_BY_BEAT.journey;
     const followThrough = FOLLOWTHROUGH_BY_BEAT[scene.beat_type] || FOLLOWTHROUGH_BY_BEAT.journey;
     
@@ -1114,6 +1116,13 @@ function upgradeToTrajectoryVerbs(action: string): string {
 /**
  * Subject audit: Ensure the character archetype is the grammatical subject.
  */
+// Body-part nouns that need possessive when following an archetype
+const BODY_PART_NOUNS = new Set([
+  "muscles", "body", "posture", "tension", "chest",
+  "weight", "shadow", "silhouette", "form", "outline",
+  "stance", "frame", "limbs", "arms", "hands",
+]);
+
 function auditSubject(actionLine: string, archetype: string): string {
   let result = actionLine;
   
@@ -1135,10 +1144,9 @@ function auditSubject(actionLine: string, archetype: string): string {
     /\b(sparks?|embers?|flames?)\s+(fly|drift|swirl|burst|rain|rise|scatter)\b/gi,
     (_m, obj, verb) => `${obj} ${verb} around the ${archetype}`
   );
-  result = result.replace(
-    /\b(light|shadow|darkness)\s+(explodes?|bursts?|erupts?|spreads?|pulses?|glows?)\b/gi,
-    (_m, obj, verb) => `${obj} ${verb} around the ${archetype}`
-  );
+  // NOTE: Removed mid-sentence "around the warrior" injection for light/shadow/darkness.
+  // This caused broken grammar like "light BURSTS around the warrior forth".
+  // The archetype is ensured via the prepend-at-start logic below instead.
   result = result.replace(
     /\b(fragments?|shards?|pieces?)\s+(glow|coalesce|gather|pulse)\b/gi,
     (_m, obj, verb) => `the ${archetype} draws ${obj} to ${verb}`
@@ -1148,6 +1156,13 @@ function auditSubject(actionLine: string, archetype: string): string {
   const firstClause = result.split(/[,.]/, 1)[0].toLowerCase();
   if (!firstClause.includes(archetype.toLowerCase())) {
     result = `The ${archetype} ${result}`;
+    
+    // Check if next word after archetype is a body-part noun → insert possessive
+    const afterArchetype = result.slice(`The ${archetype} `.length);
+    const firstWord = afterArchetype.split(/\s/)[0].toLowerCase();
+    if (BODY_PART_NOUNS.has(firstWord)) {
+      result = `The ${archetype}'s ${afterArchetype}`;
+    }
   }
 
   return result;
