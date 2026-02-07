@@ -840,8 +840,12 @@ export const ACTION_LIGHT_BEHAVIOR: Record<string, string> = {
 function truncateClean(s: string, max: number): string {
   if (s.length <= max) return s;
   const cut = s.slice(0, max);
+  // Prefer cutting at comma boundary, then word boundary — never mid-word
+  const lastComma = cut.lastIndexOf(',');
+  if (lastComma > max * 0.5) return cut.slice(0, lastComma);
   const lastSpace = cut.lastIndexOf(' ');
-  return lastSpace > max * 0.6 ? cut.slice(0, lastSpace) : cut;
+  if (lastSpace > max * 0.4) return cut.slice(0, lastSpace);
+  return cut;
 }
 
 /**
@@ -1023,7 +1027,7 @@ function buildMythMotionBeats(scene: MythScene): string {
   const hasSceneData = scene.start_state && scene.end_state && scene.silhouette_action;
   
   if (hasSceneData) {
-    const actionClean = truncateClean(scene.silhouette_action!, 80);
+    const actionClean = truncateClean(scene.silhouette_action!, 100);
     const anticipation = ANTICIPATION_BY_BEAT[scene.beat_type] || ANTICIPATION_BY_BEAT.journey;
     const followThrough = FOLLOWTHROUGH_BY_BEAT[scene.beat_type] || FOLLOWTHROUGH_BY_BEAT.journey;
     
@@ -1173,19 +1177,15 @@ export function buildMythPromptV3(
   // auditSubject already ensures archetype is the subject, so no extra prefix
   let actionParagraph = `${auditedAction}`;
   
-  // Weave in inline transformation if available
-  if (scene.start_state && scene.end_state) {
-    const startClean = truncateClean(scene.start_state, 40);
-    const endClean = truncateClean(scene.end_state, 40);
-    actionParagraph += ` — starting from ${startClean}, shifting into ${endClean}`;
-  }
+  // Transformation is already carried by beat-type-specific anticipation/follow-through
+  // in buildMythMotionBeats — no need for redundant "starting from / shifting into" block
   
   // Append motion beats as continuation
   actionParagraph += `. ${motionProse}.`;
   
   // Environment motion woven in
   if (scene.environment_motion && scene.environment_motion.length > 0) {
-    const envClean = scene.environment_motion.slice(0, 2).join(", ");
+    const envClean = scene.environment_motion.slice(0, 2).join(", ").toLowerCase();
     actionParagraph += ` Behind, ${envClean}.`;
   }
   
