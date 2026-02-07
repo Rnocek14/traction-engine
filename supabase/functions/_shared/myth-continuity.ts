@@ -1032,7 +1032,7 @@ function buildMythMotionBeats(scene: MythScene): string {
     const followThrough = FOLLOWTHROUGH_BY_BEAT[scene.beat_type] || FOLLOWTHROUGH_BY_BEAT.journey;
     
     // Flowing prose, no labels
-    return `${anticipation} — then ${actionClean}, full force — ${followThrough}`;
+    return `${anticipation} — then ${actionClean} — ${followThrough}`;
   }
   
   // Fallback: beat_type-specific template as prose
@@ -1101,6 +1101,13 @@ function upgradeToTrajectoryVerbs(action: string): string {
     result = result.replace(regex, replacement);
   }
   
+  // Deduplicate directional words within short window
+  const DIRECTIONALS = ["upward", "forward", "downward", "outward", "backward"];
+  for (const dir of DIRECTIONALS) {
+    const re = new RegExp(`\\b(${dir})\\b(.{0,40})\\b(${dir})\\b`, 'gi');
+    result = result.replace(re, (_m, first, mid) => `${first}${mid}`);
+  }
+  
   return result;
 }
 
@@ -1166,27 +1173,21 @@ export function buildMythPromptV3(
   const isAction = settings?.intensity_profile === "action" || settings?.intensity_profile === "epic";
   
   const archetype = character?.archetype || "solitary figure";
-  const rawAction = scene.silhouette_action || scene.visual_description || "moves through the scene";
   
-  // Upgrade verbs -> audit subject -> get motion beats
-  const dynamicAction = upgradeToTrajectoryVerbs(rawAction);
-  const auditedAction = auditSubject(dynamicAction, archetype);
-  const motionProse = buildMythMotionBeats(scene);
+  // Motion beats are the sole carrier of the action (anticipation — action — follow-through)
+  // Apply verb upgrades and subject audit to the motion beats output directly
+  const rawMotion = buildMythMotionBeats(scene);
+  const upgradedMotion = upgradeToTrajectoryVerbs(rawMotion);
+  const auditedMotion = auditSubject(upgradedMotion, archetype);
   
-  // Build the action paragraph: audited action + motion beats woven together
-  // auditSubject already ensures archetype is the subject, so no extra prefix
-  let actionParagraph = `${auditedAction}`;
-  
-  // Transformation is already carried by beat-type-specific anticipation/follow-through
-  // in buildMythMotionBeats — no need for redundant "starting from / shifting into" block
-  
-  // Append motion beats as continuation
-  actionParagraph += `. ${motionProse}.`;
+  // Capitalize first letter and strip trailing period for clean joining
+  const motionClean = auditedMotion.charAt(0).toUpperCase() + auditedMotion.slice(1);
+  let actionParagraph = motionClean.replace(/\.+$/, "");
   
   // Environment motion woven in
   if (scene.environment_motion && scene.environment_motion.length > 0) {
     const envClean = scene.environment_motion.slice(0, 2).join(", ").toLowerCase();
-    actionParagraph += ` Behind, ${envClean}.`;
+    actionParagraph += `. Behind, ${envClean}`;
   }
   
   // Setting + style woven as tail context
@@ -1198,8 +1199,9 @@ export function buildMythPromptV3(
   
   const styleTail = `${realm}, layered paper depths, ${lightBehavior.toLowerCase()}. Articulated cutout limbs, backlit from below, high contrast. No realistic faces.`;
   
-  // Combine: one flowing prompt
-  const fullPrompt = `${actionParagraph} ${styleTail}`;
+  // Combine: strip trailing period from action, then join with period-space
+  const actionClean = actionParagraph.replace(/\.+$/, "");
+  const fullPrompt = `${actionClean}. ${styleTail}`.replace(/\.{2,}/g, ".");
   
   // Budget check: trim to ~600 chars max to stay in the high-weight window
   if (fullPrompt.length > 600) {
