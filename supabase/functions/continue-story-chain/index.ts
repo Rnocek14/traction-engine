@@ -259,18 +259,22 @@ Deno.serve(async (req) => {
 
     const { story_job_id, scene_index, replace_job_id, prompt_override } = retryRequest;
     const isManualRetry = story_job_id !== undefined && scene_index !== undefined;
+    // Direct invoke: story_job_id passed without scene_index (e.g. "Generate All" button)
+    const isDirectInvoke = story_job_id !== undefined && scene_index === undefined;
 
     if (isManualRetry) {
       console.log(`[chain-continue] Manual retry: story=${story_job_id} scene=${scene_index} replace=${replace_job_id || "none"} ai_sanitized=${!!prompt_override}`);
+    } else if (isDirectInvoke) {
+      console.log(`[chain-continue] Direct invoke: story=${story_job_id}`);
     }
 
-    // Find stories that are generating (or specific story for retry)
+    // Find stories that are generating (or specific story for retry/direct invoke)
     let query = supabase
       .from("story_jobs")
       .select("id, storyboard_json, continuity_anchors, total_clips, completed_clips, story_type");
     
-    if (isManualRetry) {
-      // For manual retry, get the specific story (regardless of status)
+    if (isManualRetry || isDirectInvoke) {
+      // For manual retry or direct invoke, get the specific story (regardless of status)
       query = query.eq("id", story_job_id);
     } else {
       // Normal cron mode: only get actively generating stories
@@ -293,15 +297,13 @@ Deno.serve(async (req) => {
       );
     }
     
-    // For manual retry, if story is not generating, put it back to generating status
-    if (isManualRetry && activeStories[0].id === story_job_id) {
-      const story = activeStories[0] as { status?: string; id: string };
-      // Note: status isn't in our select, so we need to update anyway for retry
+    // For manual retry or direct invoke, ensure story is in "generating" status
+    if ((isManualRetry || isDirectInvoke) && activeStories[0].id === story_job_id) {
       await supabase
         .from("story_jobs")
         .update({ status: "generating" })
         .eq("id", story_job_id);
-      console.log(`[chain-continue] Set story ${story_job_id} back to generating status`);
+      console.log(`[chain-continue] Set story ${story_job_id} to generating status`);
       
       // Mark the old failed job as replaced (if provided)
       if (replace_job_id) {
