@@ -34,6 +34,9 @@ interface GenerateRequest {
   sanitization_level?: string;
   character_continuity_mode?: boolean;
   locked_provider?: string;
+  /** Debug persist — writes audit snapshot to story_engine_debug_runs (requires env gate) */
+  debug_persist?: boolean;
+  debug_tag?: string;
 }
 
 type SceneRole = "hook" | "problem" | "story_a" | "reset" | "story_b" | "cta" | "atmosphere" | "establish";
@@ -547,6 +550,7 @@ Deno.serve(async (req) => {
       const { sanitizePromptText, selectWeightedHookCategory, getVerticalCTA, sanitizeStory } = await import("../_shared/prompt-compliance.ts");
       const { buildStoryEngineAudit, seededRng } = await import("../_shared/story-engine-audit.ts");
       const { buildResearchBrief, buildClaimConstraintBlock, checkClaimCoverage, validateClaimIds, scanTextForBannedLanguage, detectResearchIntent } = await import("../_shared/research-engine.ts");
+      const { checkStrictComplianceBlock, checkCompiledHardBlocks, checkClaimCoverageBlock, resolveDebugPersist, buildDebugPayload, writeDebugPersist } = await import("../_shared/story-preflight.ts");
 
       const vertical = body.story_engine.vertical as ContentVertical;
       const goal = body.story_engine.goal as ContentGoal;
@@ -775,28 +779,8 @@ Return ONLY valid JSON array:
           }
 
           // 4d. STRICT BLOCKING: If strict vertical, these become hard errors
-          const isStrictVertical = ["health", "finance", "news"].includes(vertical);
-          if (isStrictVertical && (claimValidationErrors.length > 0 || bannedLanguageErrors.length > 0)) {
-            const allErrors = [...claimValidationErrors, ...bannedLanguageErrors];
-            console.error(`[generate-storyboard] STRICT VERTICAL BLOCK: ${allErrors.length} compliance errors`);
-
-            // Return compliance_blocked status with actionable detail
-            return new Response(
-              JSON.stringify({
-                error: "compliance_blocked",
-                message: `Strict vertical (${vertical}) blocked due to ${allErrors.length} compliance violation(s)`,
-                violations: allErrors,
-                story_engine: {
-                  version: "v1.1",
-                  compliance: {
-                    has_hard_blocks: true,
-                    hard_blocks: allErrors,
-                  },
-                },
-              }),
-              { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-            );
-          }
+          const strictCheck = checkStrictComplianceBlock(vertical, claimValidationErrors, bannedLanguageErrors);
+          if (strictCheck.blocked) return strictCheck.response;
         }
 
         // 5. Compile each scene through viral compiler
@@ -958,21 +942,8 @@ Return ONLY valid JSON array:
         }
 
         // 5c. Block if any hard blocks in strict verticals
-        if (compileHardBlocks.length > 0 && constraints.moderation_level === "strict") {
-          console.error(`[generate-storyboard] STRICT HARD BLOCKS from compliance: ${compileHardBlocks.join("; ")}`);
-          return new Response(
-            JSON.stringify({
-              error: "compliance_blocked",
-              message: `Strict vertical (${vertical}) blocked due to ${compileHardBlocks.length} hard-block violation(s) in compiled prompts`,
-              violations: compileHardBlocks,
-              story_engine: {
-                version: "v1.1",
-                compliance: { has_hard_blocks: true, hard_blocks: compileHardBlocks },
-              },
-            }),
-            { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-          );
-        }
+        const hardBlockCheck = checkCompiledHardBlocks(vertical, constraints.moderation_level, compileHardBlocks);
+        if (hardBlockCheck.blocked) return hardBlockCheck.response;
 
         // 6. Preflight validation
         const preflight = preflightValidate(constraints, {
@@ -1018,25 +989,8 @@ Return ONLY valid JSON array:
           console.log(`[generate-storyboard] Claim coverage: ${claimCoverage.coverage_pct}% (${claimCoverage.items_with_claims}/${claimCoverage.total_items} items)`);
 
           // Block in strict verticals if coverage preflight fails
-          const isStrictVertical = ["health", "finance", "news"].includes(vertical);
-          if (isStrictVertical && claimCoverage.errors.length > 0) {
-            return new Response(
-              JSON.stringify({
-                error: "compliance_blocked",
-                message: `Strict vertical (${vertical}) blocked: insufficient claim coverage`,
-                violations: claimCoverage.errors,
-                coverage: {
-                  pct: claimCoverage.coverage_pct,
-                  unreferenced: claimCoverage.unreferenced_claim_ids,
-                },
-                story_engine: {
-                  version: "v1.1",
-                  compliance: { has_hard_blocks: true, hard_blocks: claimCoverage.errors },
-                },
-              }),
-              { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-            );
-          }
+          const coverageBlock = checkClaimCoverageBlock(vertical, claimCoverage);
+          if (coverageBlock.blocked) return coverageBlock.response;
         }
 
         // 7. Run compliance on all scenes at once for summary
@@ -1101,7 +1055,15 @@ Return ONLY valid JSON array:
           } catch { /* use defaults */ }
         }
 
-        // 10. Return same response shape as legacy
+        // 10. Debug persist (fire-and-forget, gated by env + request flag)
+        const debugConfig = resolveDebugPersist(body.debug_persist, body.debug_tag, undefined, tempId);
+        let debugPersistId: string | null = null;
+        if (debugConfig.enabled) {
+          const debugPayload = buildDebugPayload(audit, vertical, goal, tier);
+          debugPersistId = await writeDebugPersist(debugConfig, debugPayload);
+        }
+
+        // 11. Return same response shape as legacy
         console.log(`[generate-storyboard] ✓ Template mode complete: ${compiledScenes.length} scenes, type=${selection.type}`);
 
         return new Response(
@@ -1136,6 +1098,7 @@ Return ONLY valid JSON array:
               has_hard_blocks: storyCompliance.has_hard_blocks,
             },
             story_engine_audit: audit,
+            ...(debugPersistId ? { debug_persist_id: debugPersistId } : {}),
           }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
