@@ -962,9 +962,7 @@ Deno.serve(async (req) => {
         
         if (complianceResult.was_modified) {
           console.log(`[compliance] Scene ${nextSceneIndex + 1}: ${complianceResult.replacements.length} replacements applied`);
-          finalPrompt = complianceResult.was_modified 
-            ? sanitizePromptText(finalPrompt, storyVertical).text 
-            : finalPrompt;
+          finalPrompt = complianceResult.text;
         }
         
         if (complianceResult.hard_blocks.length > 0) {

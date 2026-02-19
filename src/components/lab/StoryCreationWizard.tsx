@@ -151,6 +151,7 @@ export function StoryCreationWizard({
         brutality_mode: brutalityMode,
         sanitization_level: brutalityMode ? "off" : "soft",
         story_engine: {
+          version: "v1",
           request: {
             vertical: enginePayload?.vertical,
             goal: enginePayload?.goal,
