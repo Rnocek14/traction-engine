@@ -1,5 +1,5 @@
 /**
- * Viral Prompt Compiler v1.0
+ * Viral Prompt Compiler v1.1
  * 
  * Stripped-down prompt compiler for viral story types.
  * NO director briefs, NO escalation deltas, NO capture contracts.
@@ -10,11 +10,15 @@
  * - Style anchor (visual feel)
  * - Platform format (aspect ratio, aesthetic)
  * 
+ * v1.1 changes:
+ * - Fix #1: Truncates by word count first, then char count
+ * - Fix #7: Uses Pacing type from story-types.ts
+ * 
  * This replaces the cinematic prompt-compiler.ts for all viral modes.
  */
 
 import type { MergedConstraints } from "./story-type-router.ts";
-import type { SceneBeat } from "./story-types.ts";
+import type { SceneBeat, Pacing } from "./story-types.ts";
 
 // ─── Scene Input ────────────────────────────────────────────
 
@@ -36,16 +40,18 @@ export interface ViralPromptOutput {
   sequence_index: number;
   prompt: string;
   char_count: number;
+  word_count: number;
   was_truncated: boolean;
+  truncation_method?: "words" | "chars";
   beat_role: string;
   camera_suggestion: string;
   duration_target: number;
   text_overlay?: string;
 }
 
-// ─── Style Anchors ──────────────────────────────────────────
+// ─── Style Anchors (keyed by Pacing enum) ───────────────────
 
-const STYLE_ANCHORS: Record<string, string> = {
+const STYLE_ANCHORS: Record<Pacing, string> = {
   fast: "Vertical 9:16. Energetic pacing. Handheld phone aesthetic. Punchy, scroll-stopping.",
   moderate: "Vertical 9:16. Natural pacing. Clean framing. Engaging, authentic feel.",
   slow: "Vertical 9:16. Deliberate pacing. Steady camera. Thoughtful, composed.",
@@ -69,8 +75,52 @@ const CAMERA_MAP: Record<string, string> = {
 // ═══════════════════════════════════════════════════════════
 
 /**
+ * Truncate a prompt by word count first, then by char count.
+ * Fix #1: Words are a better proxy for tokens than chars.
+ */
+function truncatePrompt(
+  prompt: string,
+  maxWords: number,
+  maxChars: number
+): { text: string; wasTruncated: boolean; method?: "words" | "chars" } {
+  let text = prompt;
+  let wasTruncated = false;
+  let method: "words" | "chars" | undefined;
+  
+  // Step 1: Truncate by word count
+  const words = text.split(/\s+/).filter(Boolean);
+  if (words.length > maxWords) {
+    text = words.slice(0, maxWords).join(" ");
+    // Try to end at a sentence
+    const lastPeriod = text.lastIndexOf(".");
+    if (lastPeriod > text.length * 0.5) {
+      text = text.slice(0, lastPeriod + 1);
+    } else {
+      text += ".";
+    }
+    wasTruncated = true;
+    method = "words";
+  }
+  
+  // Step 2: Truncate by char count (safety net)
+  if (text.length > maxChars) {
+    const truncated = text.slice(0, maxChars - 3);
+    const lastPeriod = truncated.lastIndexOf(".");
+    if (lastPeriod > maxChars * 0.5) {
+      text = truncated.slice(0, lastPeriod + 1);
+    } else {
+      text = truncated + "...";
+    }
+    wasTruncated = true;
+    method = method || "chars";
+  }
+  
+  return { text, wasTruncated, method };
+}
+
+/**
  * Compile a single viral scene prompt.
- * Target: 150-300 characters. No structural labels. Pure visual prose.
+ * Target: 150-300 characters, 35-55 words. No structural labels. Pure visual prose.
  */
 export function compileViralPrompt(
   scene: ViralSceneInput,
@@ -78,8 +128,9 @@ export function compileViralPrompt(
 ): ViralPromptOutput {
   const { visual_style } = constraints;
   const charLimit = constraints.prompt_char_limit;
+  const wordLimit = constraints.prompt_max_words;
   
-  // Build the style anchor
+  // Build the style anchor (Fix #7: typed pacing key)
   const styleAnchor = STYLE_ANCHORS[visual_style.pacing] || STYLE_ANCHORS.fast;
   
   // Camera direction
@@ -106,26 +157,18 @@ export function compileViralPrompt(
   // Clean up whitespace
   prompt = prompt.replace(/\s+/g, " ").trim();
   
-  // Truncate if over limit
-  let wasTruncated = false;
-  if (prompt.length > charLimit) {
-    // Cut at last complete sentence before limit
-    const truncated = prompt.slice(0, charLimit - 3);
-    const lastPeriod = truncated.lastIndexOf(".");
-    if (lastPeriod > charLimit * 0.5) {
-      prompt = truncated.slice(0, lastPeriod + 1);
-    } else {
-      prompt = truncated + "...";
-    }
-    wasTruncated = true;
-  }
+  // Fix #1: Truncate by words first, then chars
+  const { text, wasTruncated, method } = truncatePrompt(prompt, wordLimit, charLimit);
+  prompt = text;
   
   return {
     scene_id: scene.scene_id,
     sequence_index: scene.sequence_index,
     prompt,
     char_count: prompt.length,
+    word_count: prompt.split(/\s+/).filter(Boolean).length,
     was_truncated: wasTruncated,
+    truncation_method: method,
     beat_role: scene.beat.role,
     camera_suggestion: camera,
     duration_target: duration,
@@ -145,6 +188,7 @@ export function compileViralStory(
   total_duration: number;
   stats: {
     avg_chars: number;
+    avg_words: number;
     truncated_count: number;
     beat_roles: string[];
   };
@@ -152,6 +196,7 @@ export function compileViralStory(
   const prompts = scenes.map(s => compileViralPrompt(s, constraints));
   
   const total_chars = prompts.reduce((sum, p) => sum + p.char_count, 0);
+  const total_words = prompts.reduce((sum, p) => sum + p.word_count, 0);
   const total_duration = prompts.reduce((sum, p) => sum + p.duration_target, 0);
   const truncated_count = prompts.filter(p => p.was_truncated).length;
   
@@ -161,6 +206,7 @@ export function compileViralStory(
     total_duration,
     stats: {
       avg_chars: Math.round(total_chars / prompts.length),
+      avg_words: Math.round(total_words / prompts.length),
       truncated_count,
       beat_roles: prompts.map(p => p.beat_role),
     },
@@ -179,19 +225,18 @@ export function quickViralPrompt(
     environment?: string;
     mood?: string;
     max_chars?: number;
+    max_words?: number;
   }
 ): string {
   const camera = CAMERA_MAP[options?.camera || "medium"] || "Medium shot";
   const env = options?.environment ? ` Setting: ${options.environment}.` : "";
   const mood = options?.mood ? ` ${options.mood} mood.` : "";
   const maxChars = options?.max_chars || 300;
+  const maxWords = options?.max_words || 50;
   
   let prompt = `${camera}. ${subject} ${action}.${env}${mood} Vertical 9:16. Energetic pacing. Handheld phone aesthetic.`;
   prompt = prompt.replace(/\s+/g, " ").trim();
   
-  if (prompt.length > maxChars) {
-    prompt = prompt.slice(0, maxChars - 3) + "...";
-  }
-  
-  return prompt;
+  const { text } = truncatePrompt(prompt, maxWords, maxChars);
+  return text;
 }
