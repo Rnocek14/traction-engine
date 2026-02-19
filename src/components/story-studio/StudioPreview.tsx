@@ -127,15 +127,17 @@ export function StudioPreview({
         </div>
 
         {/* Preview */}
-        <div className="flex-1 p-4 flex items-center justify-center bg-black/90">
-          <StorySyncPreview
-            clips={clips}
-            voiceover={voiceover}
-            onAssemble={handleAssemble}
-            isAssembling={isAssembling}
-            assembledUrl={assembledUrl}
-            className="w-full max-w-md aspect-[9/16] max-h-full"
-          />
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 bg-black/90">
+          <div className="max-w-lg mx-auto">
+            <StorySyncPreview
+              clips={clips}
+              voiceover={voiceover}
+              onAssemble={handleAssemble}
+              isAssembling={isAssembling}
+              assembledUrl={assembledUrl}
+              className="w-full aspect-[9/16]"
+            />
+          </div>
         </div>
       </div>
     );
@@ -179,14 +181,16 @@ export function StudioPreview({
       )}
 
       {/* Preview */}
-      <div className="flex-1 p-4 flex items-center justify-center bg-black/90">
-        <StoryVideoPlayer
-          clips={clips}
-          onAssemble={handleAssemble}
-          isAssembling={isAssembling}
-          assembledUrl={assembledUrl}
-          className="w-full max-w-md aspect-[9/16] max-h-full"
-        />
+      <div className="flex-1 min-h-0 overflow-y-auto p-4 bg-black/90">
+        <div className="max-w-lg mx-auto">
+          <StoryVideoPlayer
+            clips={clips}
+            onAssemble={handleAssemble}
+            isAssembling={isAssembling}
+            assembledUrl={assembledUrl}
+            className="w-full aspect-[9/16]"
+          />
+        </div>
       </div>
     </div>
   );
