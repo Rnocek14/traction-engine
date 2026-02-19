@@ -849,7 +849,35 @@ Return ONLY valid JSON array:
           };
         });
 
-        // 5b. Block if any hard blocks in strict verticals
+        // 5b. Narration-aware duration adjustment
+        // Estimate audio duration per scene from word count (~2.5 words/sec at natural speaking pace)
+        // Then adjust duration_target so video clips match narration length
+        const WORDS_PER_SECOND = 2.5;
+        const MIN_CLIP_DURATION = 3; // floor: never go below 3s
+        const MAX_CLIP_DURATION = 12; // ceiling: Sora max
+
+        const narrationDurations = compiledScenes.map(s => {
+          const words = (s.narration_line || "").trim().split(/\s+/).filter(Boolean).length;
+          return words > 0 ? words / WORDS_PER_SECOND : s.duration_target;
+        });
+
+        const totalEstimatedAudio = narrationDurations.reduce((sum, d) => sum + d, 0);
+        const totalTemplateDuration = compiledScenes.reduce((sum, s) => sum + s.duration_target, 0);
+        const driftPct = Math.abs(totalEstimatedAudio - totalTemplateDuration) / totalTemplateDuration;
+
+        // Only adjust if drift > 15% — otherwise template durations are fine
+        if (driftPct > 0.15) {
+          console.log(`[generate-storyboard] Narration drift ${(driftPct * 100).toFixed(0)}% (est=${totalEstimatedAudio.toFixed(1)}s vs template=${totalTemplateDuration.toFixed(1)}s) — adjusting durations`);
+          for (let i = 0; i < compiledScenes.length; i++) {
+            const adjusted = Math.round(narrationDurations[i]);
+            compiledScenes[i].duration_target = Math.max(MIN_CLIP_DURATION, Math.min(MAX_CLIP_DURATION, adjusted));
+          }
+          console.log(`[generate-storyboard] Adjusted durations: [${compiledScenes.map(s => s.duration_target).join(", ")}]`);
+        } else {
+          console.log(`[generate-storyboard] Narration drift ${(driftPct * 100).toFixed(0)}% — within tolerance, keeping template durations`);
+        }
+
+        // 5c. Block if any hard blocks in strict verticals
         if (compileHardBlocks.length > 0 && constraints.moderation_level === "strict") {
           console.error(`[generate-storyboard] STRICT HARD BLOCKS from compliance: ${compileHardBlocks.join("; ")}`);
           return new Response(
