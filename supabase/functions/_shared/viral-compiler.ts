@@ -77,6 +77,23 @@ const CAMERA_MAP: Record<string, string> = {
   "dramatic": "Low angle dramatic framing",
 };
 
+// ─── Story-Type Camera Lead Patterns ────────────────────────
+// Per-type "first words" that front-load the right framing for each format.
+// Falls back to beat.camera_suggestion if no override exists.
+
+import type { StoryType } from "./story-types.ts";
+
+const STORY_TYPE_CAMERA_LEADS: Partial<Record<StoryType, Record<string, string>>> = {
+  authority:     { contrarian_hook: "Static medium shot:", evidence: "Medium shot, waist-up:", takeaway: "Tight close-up:", credibility_cta: "Tight close-up:" },
+  pas:           { hook_pain: "Tight close-up:", agitate: "Medium shot:", solution: "Product hero shot:", proof_cta: "Tight close-up:" },
+  listicle:      { curiosity_hook: "Quick cuts montage:", item_1: "Medium shot:", item_2: "Dynamic push-in:", item_3_cta: "Tight close-up:" },
+  trend_hijack:  { trend_hook: "Handheld phone POV:", twist: "Medium shot:", value_cta: "Tight close-up:" },
+  viral_hook:    { hook: "Dynamic push-in:", payoff: "Medium shot:", escalate: "Dynamic push-in:", cta: "Tight close-up:" },
+  micro_story:   { in_media_res: "Tight close-up:", conflict: "Medium shot:", turning_point: "Dynamic push-in:", resolution: "Tight close-up:" },
+  before_after:  { shock_hook: "Tight close-up:", before: "Medium shot:", after_reveal: "Dynamic push-in:", how_cta: "Tight close-up:" },
+  myth:          { symbolic_hook: "Slow tracking shot:", tension: "Dynamic push-in:", escalation: "Smooth tracking shot:", climax: "Low angle dramatic framing:", resolution: "Wide establishing shot:" },
+};
+
 // ═══════════════════════════════════════════════════════════
 // TRUNCATION
 // ═══════════════════════════════════════════════════════════
@@ -186,31 +203,39 @@ export function compileViralPrompt(
     (scene.beat.duration_range[0] + scene.beat.duration_range[1]) / 2
   );
   
-  // Build as flowing prose — no structural labels
-  // Hook beats: single punchy sentence. Others: allow flowing description.
+  // Build as flowing prose — camera + subject + action in first ~12 words
+  // Prompt order: Camera → Subject + Action → Environment → Lighting → Mood → Style anchor (last)
+  // Hook beats: single punchy sentence, no style anchor.
   const parts: string[] = [];
   
-  // Camera lead (short sentence)
-  parts.push(`${cameraDir}.`);
+  // Camera lead: use story-type-specific lead if available, else generic
+  const storyType = constraints.story_type;
+  const typeLeads = STORY_TYPE_CAMERA_LEADS[storyType];
+  const beatLead = typeLeads?.[scene.beat.role];
+  const cameraLead = beatLead || `${cameraDir}:`;
   
-  // Core action sentence
-  let actionSentence = `${scene.subject} ${scene.action}`;
+  // Front-load camera + subject + action as a single sentence (first ~12 words)
+  let coreSentence = `${cameraLead} ${scene.subject} ${scene.action}`;
   
-  if (scene.environment) {
-    actionSentence += `, in a ${scene.environment}`;
-  }
-  if (visual_style.lighting) {
-    actionSentence += `, lit with ${visual_style.lighting} light`;
-  }
-  if (scene.mood) {
-    actionSentence += `, ${scene.mood} mood`;
-  }
-  actionSentence += ".";
-  
-  parts.push(actionSentence);
-  
-  // Style anchor (skip for hooks to keep them ultra-short)
-  if (!scene.beat.is_hook) {
+  // Hook beats: stop here. Single sentence, no environment/lighting/style bloat.
+  if (scene.beat.is_hook) {
+    coreSentence += ".";
+    parts.push(coreSentence);
+  } else {
+    // Non-hook: append environment, lighting, mood after core action
+    if (scene.environment) {
+      coreSentence += `, in a ${scene.environment}`;
+    }
+    if (visual_style.lighting) {
+      coreSentence += `, lit with ${visual_style.lighting} light`;
+    }
+    if (scene.mood) {
+      coreSentence += `, ${scene.mood} mood`;
+    }
+    coreSentence += ".";
+    parts.push(coreSentence);
+    
+    // Style anchor at the end (lowest priority tokens)
     parts.push(styleAnchor);
   }
   

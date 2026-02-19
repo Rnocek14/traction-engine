@@ -87,6 +87,14 @@ export interface VerticalProfile {
     lighting: string;         // e.g. "bright, natural", "moody, dramatic"
     pacing: "fast" | "moderate" | "slow";
   };
+
+  /** Per-vertical render guidance for camera bias and overlay density */
+  render_hints: {
+    /** Preferred camera types for this vertical (ordered by preference) */
+    camera_bias: string[];
+    /** How dense overlays should be: "minimal" | "moderate" | "dense" */
+    overlay_density: "minimal" | "moderate" | "dense";
+  };
 }
 
 // ─── Profile Definitions ────────────────────────────────────
@@ -116,6 +124,10 @@ export const VERTICAL_PROFILES: Record<ContentVertical, VerticalProfile> = {
       lighting: "bright, warm, natural",
       pacing: "moderate",
     },
+    render_hints: {
+      camera_bias: ["medium", "product-focus", "close-up"],
+      overlay_density: "moderate",
+    },
   },
 
   finance: {
@@ -141,6 +153,10 @@ export const VERTICAL_PROFILES: Record<ContentVertical, VerticalProfile> = {
       lighting: "clean, neutral",
       pacing: "moderate",
     },
+    render_hints: {
+      camera_bias: ["medium", "product-focus"],
+      overlay_density: "moderate",
+    },
   },
 
   saas: {
@@ -164,6 +180,10 @@ export const VERTICAL_PROFILES: Record<ContentVertical, VerticalProfile> = {
       aesthetic: "modern, sleek, product-focused",
       lighting: "bright, clean",
       pacing: "fast",
+    },
+    render_hints: {
+      camera_bias: ["dynamic", "product-focus", "close-up"],
+      overlay_density: "dense",
     },
   },
 
@@ -189,6 +209,10 @@ export const VERTICAL_PROFILES: Record<ContentVertical, VerticalProfile> = {
       lighting: "bright, neutral",
       pacing: "moderate",
     },
+    render_hints: {
+      camera_bias: ["medium", "close-up"],
+      overlay_density: "moderate",
+    },
   },
 
   entertainment: {
@@ -212,6 +236,10 @@ export const VERTICAL_PROFILES: Record<ContentVertical, VerticalProfile> = {
       aesthetic: "dynamic, bold, eye-catching",
       lighting: "dramatic, high contrast",
       pacing: "fast",
+    },
+    render_hints: {
+      camera_bias: ["dynamic", "close-up", "pov"],
+      overlay_density: "dense",
     },
   },
 
@@ -237,6 +265,10 @@ export const VERTICAL_PROFILES: Record<ContentVertical, VerticalProfile> = {
       lighting: "bright, studio or natural",
       pacing: "fast",
     },
+    render_hints: {
+      camera_bias: ["product-focus", "close-up", "dynamic"],
+      overlay_density: "dense",
+    },
   },
 
   lifestyle: {
@@ -261,6 +293,10 @@ export const VERTICAL_PROFILES: Record<ContentVertical, VerticalProfile> = {
       lighting: "golden hour, natural",
       pacing: "moderate",
     },
+    render_hints: {
+      camera_bias: ["medium", "close-up", "dynamic"],
+      overlay_density: "moderate",
+    },
   },
 
   news: {
@@ -284,6 +320,10 @@ export const VERTICAL_PROFILES: Record<ContentVertical, VerticalProfile> = {
       aesthetic: "documentary, raw, immediate",
       lighting: "natural, available light",
       pacing: "fast",
+    },
+    render_hints: {
+      camera_bias: ["dynamic", "close-up", "tracking"],
+      overlay_density: "moderate",
     },
   },
 };

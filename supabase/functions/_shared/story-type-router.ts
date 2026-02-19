@@ -421,9 +421,13 @@ export function preflightValidate(
     }
   }
   
-  // ── Beat count alignment ──
+  // ── Beat count alignment (error if enforce_beat_count, else warning) ──
   if (scenes.length !== template.beats.length) {
-    warnings.push(`Scene count (${scenes.length}) does not match template beat count (${template.beats.length}) for ${template.type}`);
+    if (template.enforce_beat_count) {
+      errors.push(`Scene count (${scenes.length}) does not match enforced beat count (${template.beats.length}) for ${template.type}`);
+    } else {
+      warnings.push(`Scene count (${scenes.length}) does not match template beat count (${template.beats.length}) for ${template.type}`);
+    }
   }
   
   // ── Hard-block enforcement for strict verticals ──
