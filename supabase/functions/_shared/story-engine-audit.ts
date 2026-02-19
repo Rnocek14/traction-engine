@@ -10,6 +10,7 @@
 
 import type { ContentVertical } from "./vertical-profiles.ts";
 import type { ContentGoal, StoryType, EmotionalIntensity } from "./story-types.ts";
+import type { ResearchBrief } from "./research-engine.ts";
 
 // ─── Canonical Audit Shape ──────────────────────────────────
 
@@ -64,6 +65,9 @@ export interface StoryEngineAudit {
     seed?: string;
     version: string;
   };
+
+  /** Research brief (append-only, v1) — present when research pipeline was invoked */
+  research?: ResearchBrief;
 }
 
 // ─── Builder Helper ─────────────────────────────────────────
@@ -88,8 +92,9 @@ export function buildStoryEngineAudit(params: {
   preflight: { valid: boolean; errors: string[]; warnings: string[] };
   compliance: { disclaimer?: string; total_replacements: number; has_hard_blocks: boolean; hard_blocks?: string[] };
   rng_seed?: string;
+  research?: ResearchBrief;
 }): StoryEngineAudit {
-  return {
+  const audit: StoryEngineAudit = {
     version: "v1",
     request: {
       vertical: params.vertical,
@@ -116,6 +121,10 @@ export function buildStoryEngineAudit(params: {
       version: "v1",
     },
   };
+  if (params.research) {
+    audit.research = params.research;
+  }
+  return audit;
 }
 
 // ─── Deterministic RNG (mulberry32) ─────────────────────────

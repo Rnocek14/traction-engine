@@ -20,6 +20,7 @@ interface GenerateRequest {
     goal: string;
     emotional_intensity?: string;
     requested_story_type?: string;
+    research_mode?: "auto" | "on" | "off";
   };
   /** Override generator path: "legacy" (default) | "template" */
   generator_mode?: "legacy" | "template";
@@ -540,13 +541,15 @@ Deno.serve(async (req) => {
       const compileViralPrompt = viralMod.compileViralPrompt;
       const { sanitizePromptText, selectWeightedHookCategory, getVerticalCTA, sanitizeStory } = await import("../_shared/prompt-compliance.ts");
       const { buildStoryEngineAudit, seededRng } = await import("../_shared/story-engine-audit.ts");
+      const { buildResearchBrief, buildClaimConstraintBlock, checkClaimCoverage } = await import("../_shared/research-engine.ts");
 
       const vertical = body.story_engine.vertical as ContentVertical;
       const goal = body.story_engine.goal as ContentGoal;
       const emotional_intensity = body.story_engine.emotional_intensity as EmotionalIntensity | undefined;
       const requested_story_type = body.story_engine.requested_story_type as StoryType | undefined;
+      const researchMode = body.story_engine.research_mode || "auto";
 
-      console.log(`[generate-storyboard] Template mode: vertical=${vertical} goal=${goal} intensity=${emotional_intensity || "unset"}`);
+      console.log(`[generate-storyboard] Template mode: vertical=${vertical} goal=${goal} intensity=${emotional_intensity || "unset"} research=${researchMode}`);
 
       // 1. Route story → get constraints + selection
       const { constraints, selection } = routeStory({
@@ -558,6 +561,32 @@ Deno.serve(async (req) => {
 
       const template = constraints.template;
       console.log(`[generate-storyboard] Resolved: type=${selection.type} compiler=${constraints.compiler} beats=${template.beats.length}`);
+
+      // 1b. Research step — runs BEFORE beat generation
+      const perplexityKey = Deno.env.get("PERPLEXITY_API_KEY") || "";
+      const researchBrief = await buildResearchBrief({
+        concept,
+        vertical,
+        perplexityKey,
+        mode: researchMode as "auto" | "on" | "off",
+      });
+
+      if (researchBrief.activated) {
+        console.log(`[generate-storyboard] Research: grounded=${researchBrief.grounded} claims=${researchBrief.claims.length} sources=${researchBrief.sources.length}`);
+        if (researchMode === "on" && !researchBrief.grounded) {
+          // Hard fail: user explicitly requested research but retrieval failed
+          return new Response(
+            JSON.stringify({
+              error: `Research mode is "on" but retrieval failed: ${researchBrief.failure_reason || "unknown error"}. Set research_mode to "auto" or "off" to proceed without research.`,
+              research_failure: true,
+            }),
+            { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+      }
+
+      // Build claim constraint block for GPT prompt (empty string if no research)
+      const claimConstraints = buildClaimConstraintBlock(researchBrief, vertical);
 
       // 2. Seeded RNG for deterministic hook/CTA selection
       const tempId = crypto.randomUUID();
@@ -593,7 +622,7 @@ CONCEPT: "${concept}"
 STORY TYPE: ${selection.type} (${template.name})
 VERTICAL: ${vertical}
 TONE: ${constraints.allowed_tones.join(", ")}
-
+${claimConstraints}
 BEAT STRUCTURE (generate content for each):
 ${beatPrompts.join("\n")}
 
@@ -604,12 +633,13 @@ For each beat, return:
 - mood: Single word (energetic, calm, shocking, determined)
 - text_overlay: Short text for on-screen overlay (if beat requires it)
 - narration_line: Optional TTS voiceover line
+${researchBrief.activated && researchBrief.grounded ? '- claim_ids: Array of claim IDs this beat references (e.g., ["claim_001"])' : ""}
 
 IMPORTANT: Subject must be concrete and visual. Action must be PHYSICAL, not emotional.
 
 Return ONLY valid JSON array:
 [
-  { "subject": "...", "action": "...", "environment": "...", "mood": "...", "text_overlay": "...", "narration_line": "..." }
+  { "subject": "...", "action": "...", "environment": "...", "mood": "...", "text_overlay": "...", "narration_line": "..."${researchBrief.activated && researchBrief.grounded ? ', "claim_ids": [...]' : ""} }
 ]`;
 
         const gptResponse = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -647,6 +677,7 @@ Return ONLY valid JSON array:
           mood?: string;
           text_overlay?: string;
           narration_line?: string;
+          claim_ids?: string[];
         }> = JSON.parse(jsonMatch[0]);
 
         // 5. Compile each scene through viral compiler
@@ -688,6 +719,7 @@ Return ONLY valid JSON array:
             change_type: (i === 0 ? "info" : "emotion") as ChangeType,
             narration_line: content.narration_line,
             onscreen_text: content.text_overlay,
+            claim_ids: content.claim_ids || [],
             sequence_index: i,
             zone: (beat.is_hook ? "hook" : beat.role.includes("cta") ? "payoff" : "setup") as CutZone,
             cut_type: (i === 0 || beat.is_hook ? "hard" : "continuity") as CutType,
@@ -714,13 +746,29 @@ Return ONLY valid JSON array:
           console.warn(`[generate-storyboard] Preflight warnings: ${preflight.warnings.join("; ")}`);
         }
 
+        // 6b. Claim coverage preflight (when research is active)
+        let claimCoverage = undefined;
+        if (researchBrief.activated && researchBrief.grounded && researchBrief.claims.length > 0) {
+          claimCoverage = checkClaimCoverage(compiledScenes, researchBrief, vertical);
+          if (claimCoverage.errors.length > 0) {
+            console.error(`[generate-storyboard] Claim coverage errors: ${claimCoverage.errors.join("; ")}`);
+            preflight.warnings.push(...claimCoverage.warnings);
+            preflight.errors.push(...claimCoverage.errors);
+            preflight.valid = preflight.valid && claimCoverage.errors.length === 0;
+          }
+          if (claimCoverage.warnings.length > 0) {
+            console.warn(`[generate-storyboard] Claim coverage warnings: ${claimCoverage.warnings.join("; ")}`);
+          }
+          console.log(`[generate-storyboard] Claim coverage: ${claimCoverage.coverage_pct}% (${claimCoverage.beats_with_claims}/${claimCoverage.total_beats} beats)`);
+        }
+
         // 7. Run compliance on all scenes at once for summary
         const storyCompliance = sanitizeStory(
           compiledScenes.map(s => ({ scene_id: s.id, prompt: s.prompt })),
           vertical
         );
 
-        // 8. Build canonical audit
+        // 8. Build canonical audit (with research brief)
         const audit = buildStoryEngineAudit({
           vertical,
           goal,
@@ -741,6 +789,7 @@ Return ONLY valid JSON array:
             has_hard_blocks: storyCompliance.has_hard_blocks,
           },
           rng_seed: tempId,
+          research: researchBrief.activated ? researchBrief : undefined,
         });
 
         // 9. Generate title/spine/palette via tiny GPT call
