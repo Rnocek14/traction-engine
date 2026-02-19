@@ -850,31 +850,112 @@ Return ONLY valid JSON array:
         });
 
         // 5b. Narration-aware duration adjustment
-        // Estimate audio duration per scene from word count (~2.5 words/sec at natural speaking pace)
-        // Then adjust duration_target so video clips match narration length
-        const WORDS_PER_SECOND = 2.5;
-        const MIN_CLIP_DURATION = 3; // floor: never go below 3s
-        const MAX_CLIP_DURATION = 12; // ceiling: Sora max
+        // Uses realistic speech model + proportional distribution + provider snapping
+        const SPEECH_WPS = 2.9; // ~175 WPM, typical TikTok/Reels VO pace
+        const COMMA_PAUSE = 0.15; // slight pause per comma
+        const SENTENCE_PAUSE = 0.25; // pause per sentence-ending punctuation
+        const MIN_CLIP_DURATION = 3;
+        const MAX_CLIP_DURATION = 12; // Sora max
+
+        // Provider snap buckets (same as queue-video-smart)
+        const PROVIDER_BUCKETS: Record<string, number[]> = {
+          sora: [4, 8, 12],
+          runway: [4, 6, 8],
+          luma: [5],
+        };
+
+        function snapToProvider(seconds: number, provider: string): number {
+          const buckets = PROVIDER_BUCKETS[provider] || PROVIDER_BUCKETS.sora;
+          // Find the smallest bucket >= seconds, or the largest bucket
+          return buckets.find(b => b >= seconds) || buckets[buckets.length - 1];
+        }
+
+        // Upgrade 1: Realistic speech duration estimator
+        function estimateNarrationDuration(text: string): number {
+          if (!text || text.trim().length === 0) return 0;
+          const words = text.trim().split(/\s+/).filter(Boolean).length;
+          const commas = (text.match(/,/g) || []).length;
+          const sentences = (text.match(/[.!?…]+/g) || []).length;
+          return (words / SPEECH_WPS) + (commas * COMMA_PAUSE) + (sentences * SENTENCE_PAUSE);
+        }
+
+        // Determine default provider for snapping (tier-based)
+        const defaultProvider = tier === "hero" ? "sora" : "sora"; // could vary by tier later
 
         const narrationDurations = compiledScenes.map(s => {
-          const words = (s.narration_line || "").trim().split(/\s+/).filter(Boolean).length;
-          return words > 0 ? words / WORDS_PER_SECOND : s.duration_target;
+          const est = estimateNarrationDuration(s.narration_line || "");
+          return est > 0 ? est : s.duration_target; // fallback to template if no narration
         });
 
         const totalEstimatedAudio = narrationDurations.reduce((sum, d) => sum + d, 0);
         const totalTemplateDuration = compiledScenes.reduce((sum, s) => sum + s.duration_target, 0);
         const driftPct = Math.abs(totalEstimatedAudio - totalTemplateDuration) / totalTemplateDuration;
 
-        // Only adjust if drift > 15% — otherwise template durations are fine
+        // Upgrade 5: Overflow guard — narration too long for template capacity
+        const maxFeasibleTotal = compiledScenes.length * MAX_CLIP_DURATION;
+        if (totalEstimatedAudio > maxFeasibleTotal * 1.15) {
+          console.warn(`[generate-storyboard] ⚠️ Narration overflow: ${totalEstimatedAudio.toFixed(1)}s estimated vs ${maxFeasibleTotal}s max capacity (${compiledScenes.length} beats × ${MAX_CLIP_DURATION}s). Narration may need shortening.`);
+          // Store warning for downstream (audit/preflight) — don't block, but flag it
+          compiledScenes.forEach(s => {
+            (s as any).narration_overflow_warning = true;
+          });
+        }
+
+        // Only adjust if drift > 15%
         if (driftPct > 0.15) {
           console.log(`[generate-storyboard] Narration drift ${(driftPct * 100).toFixed(0)}% (est=${totalEstimatedAudio.toFixed(1)}s vs template=${totalTemplateDuration.toFixed(1)}s) — adjusting durations`);
-          for (let i = 0; i < compiledScenes.length; i++) {
-            const adjusted = Math.round(narrationDurations[i]);
-            compiledScenes[i].duration_target = Math.max(MIN_CLIP_DURATION, Math.min(MAX_CLIP_DURATION, adjusted));
+
+          // Upgrade 2: Proportional distribution preserving total
+          // Use blended target: weighted average of template total and estimated total
+          const targetTotal = Math.min(
+            Math.round((totalTemplateDuration * 0.3 + totalEstimatedAudio * 0.7)),
+            maxFeasibleTotal
+          );
+          const totalWeight = narrationDurations.reduce((sum, d) => sum + d, 0);
+
+          // Allocate proportionally
+          const rawAllocated = narrationDurations.map(d => (d / totalWeight) * targetTotal);
+
+          // Upgrade 4: Dead scene guardrail — cap short narration scenes
+          const TRANSITION_ROLES = ["reset", "atmosphere", "establish"];
+          for (let i = 0; i < rawAllocated.length; i++) {
+            const words = (compiledScenes[i].narration_line || "").trim().split(/\s+/).filter(Boolean).length;
+            const isTransition = TRANSITION_ROLES.includes(compiledScenes[i].beat_role || compiledScenes[i].role);
+            if (words < 4 && !isTransition) {
+              rawAllocated[i] = Math.min(rawAllocated[i], MIN_CLIP_DURATION);
+            }
           }
-          console.log(`[generate-storyboard] Adjusted durations: [${compiledScenes.map(s => s.duration_target).join(", ")}]`);
+
+          // Clamp to [MIN, MAX]
+          const clamped = rawAllocated.map(d => Math.max(MIN_CLIP_DURATION, Math.min(MAX_CLIP_DURATION, d)));
+
+          // Upgrade 3: Snap to provider buckets
+          const snapped = clamped.map(d => snapToProvider(d, defaultProvider));
+
+          // Rebalance: if snapping changed total, redistribute delta to largest scene
+          const snappedTotal = snapped.reduce((sum, d) => sum + d, 0);
+          const rebalanceDelta = targetTotal - snappedTotal;
+          if (Math.abs(rebalanceDelta) >= 2) {
+            // Find the scene with most narration (best candidate to absorb delta)
+            const longestIdx = narrationDurations.indexOf(Math.max(...narrationDurations));
+            const adjusted = snapped[longestIdx] + rebalanceDelta;
+            const resnapped = snapToProvider(Math.max(MIN_CLIP_DURATION, Math.min(MAX_CLIP_DURATION, adjusted)), defaultProvider);
+            snapped[longestIdx] = resnapped;
+          }
+
+          // Apply
+          for (let i = 0; i < compiledScenes.length; i++) {
+            compiledScenes[i].duration_target = snapped[i];
+          }
+
+          const finalTotal = snapped.reduce((sum, d) => sum + d, 0);
+          console.log(`[generate-storyboard] Adjusted durations: [${snapped.join(", ")}] total=${finalTotal}s (target=${targetTotal}s)`);
         } else {
           console.log(`[generate-storyboard] Narration drift ${(driftPct * 100).toFixed(0)}% — within tolerance, keeping template durations`);
+          // Still snap template durations to provider buckets for consistency
+          for (let i = 0; i < compiledScenes.length; i++) {
+            compiledScenes[i].duration_target = snapToProvider(compiledScenes[i].duration_target, defaultProvider);
+          }
         }
 
         // 5c. Block if any hard blocks in strict verticals
