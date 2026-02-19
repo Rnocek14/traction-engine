@@ -649,11 +649,25 @@ BAD narration examples (NEVER do this):
 - "It's scarier than you think!" ← empty filler, says nothing
 - "You won't believe these facts!" ← clickbait with zero substance
 - "Want to know more? Watch again!" ← CTA without value
+- "Wait for a surprising twist at the end!" ← generic, no content
+- "Follow for more amazing facts!" ← empty engagement bait
 
 GOOD narration examples:
 - "The average American carries $104,215 in total debt — that's triple what it was in 2003."
 - "Your phone checks in with Google's servers over 900 times per day, even while you sleep."
 - "Banks earn $34 billion a year just from overdraft fees — more than Netflix makes total."
+
+═══ CTA BEAT RULES (CRITICAL) ═══
+The CTA/closing beat narration must NEVER be generic filler like "follow for more" or "wait for the twist."
+Instead, the CTA beat MUST do ONE of these:
+1. DROP A FINAL BONUS FACT — the most surprising one, saved for last as a reward for watching
+   Example: "Oh, and one more — babies are born with no kneecaps. They don't develop until age 2."
+2. REFRAME the topic with a mind-bending callback to the opening hook
+   Example: "So the 300 bones you started with? By the time you're 25, 94 of them have literally disappeared."
+3. TEASE a specific follow-up topic (not vague "more facts")
+   Example: "Part 2 covers what happens to your brain — and that one's even wilder."
+
+The CTA narration must contain SUBSTANCE — a real fact, a real callback, or a real tease with specifics.
 
 The narration IS the content. Without specific, mind-blowing facts, the video has no value.
 ${!researchBrief.activated || !researchBrief.grounded ? '\nSince no research data is available, use your training knowledge for well-known, verifiable facts. Prioritize surprising statistics and counterintuitive truths.' : ''}
