@@ -18,6 +18,7 @@
 
 import type { MergedConstraints } from "./story-type-router.ts";
 import type { SceneBeat, Pacing } from "./story-types.ts";
+import { sanitizePromptText } from "./prompt-compliance.ts";
 
 // ─── Scene Input ────────────────────────────────────────────
 
@@ -31,6 +32,7 @@ export interface ViralSceneInput {
   environment?: string;      // "modern kitchen, morning light"
   text_overlay?: string;     // "You won't believe this..."
   mood?: string;             // "energetic", "shocking", "calm"
+  hook_category?: string;    // Assigned hook category for hook beats
 }
 
 // ─── Compiled Output ────────────────────────────────────────
@@ -47,6 +49,11 @@ export interface ViralPromptOutput {
   camera_suggestion: string;
   duration_target: number;
   text_overlay?: string;
+  hook_category?: string;
+  /** Compliance replacements applied */
+  compliance_replacements?: string[];
+  /** Whether compliance modified the prompt */
+  compliance_modified?: boolean;
 }
 
 // ─── Style Anchors (keyed by Pacing enum) ───────────────────
@@ -114,23 +121,61 @@ function truncatePrompt(
 }
 
 // ═══════════════════════════════════════════════════════════
+// BEAT-AWARE PROMPT SHAPING
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * Beat-role-specific word/char budgets and style hints.
+ * Hook beats: shorter, punchier (12–18 words target).
+ * CTA beats: loop-friendly phrasing.
+ * Payoff/evidence: allow a second sentence for clarity.
+ */
+interface BeatBudget {
+  wordMultiplier: number;   // Multiplier on base word limit
+  charMultiplier: number;   // Multiplier on base char limit
+  styleHint?: string;       // Appended to style anchor for this beat
+}
+
+function getBeatBudget(role: string, isHook: boolean): BeatBudget {
+  if (isHook) {
+    return { wordMultiplier: 0.6, charMultiplier: 0.6, styleHint: "Punchy, immediate, one sentence." };
+  }
+  if (role.includes("cta") || role === "proof_cta" || role === "value_cta" || role === "how_cta" || role === "credibility_cta" || role === "item_3_cta") {
+    return { wordMultiplier: 0.7, charMultiplier: 0.7, styleHint: "Loop-friendly, invites rewatch." };
+  }
+  if (role === "payoff" || role === "evidence" || role === "solution" || role === "after_reveal" || role === "takeaway") {
+    return { wordMultiplier: 1.0, charMultiplier: 1.0 }; // Full budget, allows 2 sentences
+  }
+  return { wordMultiplier: 0.85, charMultiplier: 0.85 }; // Default: slightly tighter
+}
+
+// ═══════════════════════════════════════════════════════════
 // COMPILER
 // ═══════════════════════════════════════════════════════════
 
 /**
  * Compile a single viral scene prompt.
- * Fix #5: Natural prose flow — no structural labels.
+ * Beat-aware shaping: hooks are shorter/punchier, CTAs are loop-friendly.
+ * Compliance pass: sanitizes banned phrases for strict verticals.
  */
 export function compileViralPrompt(
   scene: ViralSceneInput,
   constraints: MergedConstraints
 ): ViralPromptOutput {
   const { visual_style } = constraints;
-  const charLimit = constraints.prompt_char_limit;
-  const wordLimit = constraints.prompt_max_words;
+  const baseCharLimit = constraints.prompt_char_limit;
+  const baseWordLimit = constraints.prompt_max_words;
+  
+  // Beat-aware budgets
+  const budget = getBeatBudget(scene.beat.role, scene.beat.is_hook);
+  const charLimit = Math.round(baseCharLimit * budget.charMultiplier);
+  const wordLimit = Math.round(baseWordLimit * budget.wordMultiplier);
   
   // Style anchor
-  const styleAnchor = STYLE_ANCHORS[visual_style.pacing] || STYLE_ANCHORS.fast;
+  let styleAnchor = STYLE_ANCHORS[visual_style.pacing] || STYLE_ANCHORS.fast;
+  if (budget.styleHint) {
+    styleAnchor = `${budget.styleHint} ${styleAnchor}`;
+  }
   
   // Camera direction
   const camera = scene.beat.camera_suggestion || "medium";
@@ -141,35 +186,39 @@ export function compileViralPrompt(
     (scene.beat.duration_range[0] + scene.beat.duration_range[1]) / 2
   );
   
-  // Fix #5: Build as flowing prose — no "Setting:" or "lighting." labels
-  // Pattern: "[Camera]. [Subject] [action], [environment], [lighting], [mood]. [Style anchor]."
-  const parts: string[] = [cameraDir];
+  // Build as flowing prose — no structural labels
+  // Hook beats: single punchy sentence. Others: allow flowing description.
+  const parts: string[] = [];
   
-  // Core action
-  parts.push(`${scene.subject} ${scene.action}`);
+  // Camera lead (short sentence)
+  parts.push(`${cameraDir}.`);
   
-  // Environment (natural flow)
+  // Core action sentence
+  let actionSentence = `${scene.subject} ${scene.action}`;
+  
   if (scene.environment) {
-    parts[parts.length - 1] += `, in a ${scene.environment}`;
+    actionSentence += `, in a ${scene.environment}`;
   }
-  
-  // Lighting (natural flow)
   if (visual_style.lighting) {
-    parts[parts.length - 1] += `, lit with ${visual_style.lighting} light`;
+    actionSentence += `, lit with ${visual_style.lighting} light`;
   }
-  
-  // Mood
   if (scene.mood) {
-    parts[parts.length - 1] += `, ${scene.mood} mood`;
+    actionSentence += `, ${scene.mood} mood`;
   }
+  actionSentence += ".";
   
-  // Close the action sentence
-  parts[parts.length - 1] += ".";
+  parts.push(actionSentence);
   
-  // Style anchor
-  parts.push(styleAnchor);
+  // Style anchor (skip for hooks to keep them ultra-short)
+  if (!scene.beat.is_hook) {
+    parts.push(styleAnchor);
+  }
   
   let prompt = parts.join(" ").replace(/\s+/g, " ").trim();
+  
+  // Compliance pass: sanitize banned phrases for the vertical
+  const compliance = sanitizePromptText(prompt, constraints.vertical);
+  prompt = compliance.text;
   
   // Truncate (words first, then chars)
   const { text, wasTruncated, method } = truncatePrompt(prompt, wordLimit, charLimit);
@@ -187,6 +236,9 @@ export function compileViralPrompt(
     camera_suggestion: camera,
     duration_target: duration,
     text_overlay: scene.text_overlay,
+    hook_category: scene.hook_category,
+    compliance_replacements: compliance.replacements.length > 0 ? compliance.replacements : undefined,
+    compliance_modified: compliance.was_modified || undefined,
   };
 }
 
