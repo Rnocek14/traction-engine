@@ -5,6 +5,11 @@
  * from a simple concept or description.
  */
 
+import {
+  MIN_CLIP_DURATION, MAX_CLIP_DURATION, PROVIDER_BUCKETS, TIMING_LIGHT_ROLES,
+  snapToProvider, estimateNarrationDuration, bucketAwareRebalance, formatProviderBuckets,
+} from "../_shared/timing-helpers.ts";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -850,95 +855,7 @@ Return ONLY valid JSON array:
         });
 
         // 5b. Narration-aware duration adjustment (v2)
-        // Realistic speech model + proportional distribution + bucket-aware snapping
-        const SPEECH_WPS = 2.9; // ~175 WPM, typical TikTok/Reels VO pace
-        const COMMA_PAUSE = 0.15;
-        const SENTENCE_PAUSE = 0.25;
-        const MIN_CLIP_DURATION = 3;
-        const MAX_CLIP_DURATION = 12; // Sora max
-
-        // Provider snap buckets (mirrors queue-video-smart)
-        const PROVIDER_BUCKETS: Record<string, number[]> = {
-          sora: [4, 8, 12],
-          runway: [4, 6, 8],
-          luma: [5],
-        };
-
-        function snapToProvider(seconds: number, provider: string): number {
-          const buckets = PROVIDER_BUCKETS[provider] || PROVIDER_BUCKETS.sora;
-          const clamped = Math.max(MIN_CLIP_DURATION, Math.min(MAX_CLIP_DURATION, seconds));
-          return buckets.find(b => b >= clamped) || buckets[buckets.length - 1];
-        }
-
-        // Realistic speech duration estimator (fix #1)
-        function estimateNarrationDuration(text: string): number {
-          if (!text || text.trim().length === 0) return 0;
-          const words = text.trim().split(/\s+/).filter(Boolean).length;
-          const commas = (text.match(/,/g) || []).length;
-          const sentences = (text.match(/[.!?…]+/g) || []).length;
-          return (words / SPEECH_WPS) + (commas * COMMA_PAUSE) + (sentences * SENTENCE_PAUSE);
-        }
-
-        // Bucket-aware redistribution (fix #2)
-        // Always takes the smallest valid step in the needed direction; stops when close enough or no moves remain.
-        function bucketAwareRebalance(durations: number[], targetTotal: number, provider: string): number[] {
-          const buckets = PROVIDER_BUCKETS[provider] || PROVIDER_BUCKETS.sora;
-          const minBucketStep = Math.min(...buckets.slice(1).map((b, i) => b - buckets[i]));
-          const result = [...durations];
-          const MAX_ITERATIONS = 10;
-
-          for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
-            const currentTotal = result.reduce((s, d) => s + d, 0);
-            const delta = targetTotal - currentTotal;
-            if (Math.abs(delta) < minBucketStep) break; // close enough
-
-            if (delta > 0) {
-              // Need to increase: find scene where bump to next bucket costs least
-              let bestIdx = -1;
-              let bestCost = Infinity;
-              for (let i = 0; i < result.length; i++) {
-                const nextBucket = buckets.find(b => b > result[i]);
-                if (nextBucket) {
-                  const cost = nextBucket - result[i];
-                  if (cost < bestCost) {
-                    bestCost = cost;
-                    bestIdx = i;
-                  }
-                }
-              }
-              if (bestIdx === -1) break; // no valid moves
-              const nextBucket = buckets.find(b => b > result[bestIdx]);
-              if (nextBucket) result[bestIdx] = nextBucket;
-            } else {
-              // Need to decrease: find scene where drop to previous bucket costs least
-              let bestIdx = -1;
-              let bestCost = Infinity;
-              for (let i = 0; i < result.length; i++) {
-                const prevBuckets = buckets.filter(b => b < result[i]);
-                if (prevBuckets.length > 0) {
-                  const prevBucket = prevBuckets[prevBuckets.length - 1];
-                  const cost = result[i] - prevBucket;
-                  if (cost < bestCost) {
-                    bestCost = cost;
-                    bestIdx = i;
-                  }
-                }
-              }
-              if (bestIdx === -1) break; // no valid moves
-              const prevBuckets = buckets.filter(b => b < result[bestIdx]);
-              result[bestIdx] = prevBuckets[prevBuckets.length - 1];
-            }
-          }
-          return result;
-        }
-
-        // Timing-light roles (fix #4) — roles where short/no narration is expected
-        const TIMING_LIGHT_ROLES = new Set([
-          "hook", "curiosity_hook", "trend_hook", "shock_hook", "symbolic_hook",
-          "contrarian_hook", "hook_pain", "in_media_res",
-          "reset", "atmosphere", "establish", "transition",
-        ]);
-
+        // Uses shared timing helpers for speech model, provider snapping, and bucket-aware rebalancing.
         const defaultProvider = tier === "hero" ? "sora" : "sora";
 
         const narrationDurations = compiledScenes.map(s => {
@@ -1016,7 +933,7 @@ Return ONLY valid JSON array:
             final_total: finalTotal,
             drift_pct: Math.round(driftPct * 100),
             adjusted: true,
-            provider_buckets: `${defaultProvider}:${(PROVIDER_BUCKETS[defaultProvider]||[]).join(",")}`,
+            provider_buckets: formatProviderBuckets(defaultProvider),
             per_scene: rebalanced,
             overflow_warning: !!overflowWarningMsg || undefined,
           };
@@ -1034,7 +951,7 @@ Return ONLY valid JSON array:
             final_total: finalTotal,
             drift_pct: Math.round(driftPct * 100),
             adjusted: false,
-            provider_buckets: `${defaultProvider}:${(PROVIDER_BUCKETS[defaultProvider]||[]).join(",")}`,
+            provider_buckets: formatProviderBuckets(defaultProvider),
             per_scene: compiledScenes.map(s => s.duration_target),
             overflow_warning: !!overflowWarningMsg || undefined,
           };
