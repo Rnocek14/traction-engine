@@ -518,6 +518,15 @@ const BANNED_ABSOLUTES = [
   /\bno side effects?\b/gi,
   /\bclinically proven\b/gi,
   /\bproven to\b/gi,
+  // Implicit certainty verbs (strict verticals)
+  /\bprevents?\b/gi,
+  /\bstops?\s+(heart|cancer|disease|illness|aging|diabetes)/gi,
+  /\beliminates?\b/gi,
+  /\bworks every time\b/gi,
+  /\bnever fails?\b/gi,
+  /\bwill fix\b/gi,
+  /\bwill prevent\b/gi,
+  /\bwill stop\b/gi,
 ];
 
 /**
@@ -536,13 +545,20 @@ export function scanTextForBannedLanguage(
   // Build dynamic patterns from brief do_not_say lists
   const dynamicPatterns: Array<{ pattern: RegExp; source: string }> = [];
   if (brief?.activated && brief.grounded) {
+    const buildPattern = (phrase: string): RegExp => {
+      const escaped = phrase.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      // Multi-word or phrases with non-word chars: don't use \b (fails on hyphens, punctuation)
+      const hasNonWordChars = /[^a-zA-Z0-9_\s]/.test(phrase) || /\s/.test(phrase);
+      if (hasNonWordChars) {
+        return new RegExp(escaped, "gi");
+      }
+      return new RegExp(`\\b${escaped}\\b`, "gi");
+    };
+
     for (const phrase of (brief.do_not_say_global || [])) {
       if (phrase.trim()) {
         try {
-          dynamicPatterns.push({
-            pattern: new RegExp(`\\b${phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "gi"),
-            source: "global",
-          });
+          dynamicPatterns.push({ pattern: buildPattern(phrase), source: "global" });
         } catch { /* skip invalid regex */ }
       }
     }
@@ -550,10 +566,7 @@ export function scanTextForBannedLanguage(
       for (const phrase of (claim.do_not_say || [])) {
         if (phrase.trim()) {
           try {
-            dynamicPatterns.push({
-              pattern: new RegExp(`\\b${phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "gi"),
-              source: `claim:${claim.claim_id}`,
-            });
+            dynamicPatterns.push({ pattern: buildPattern(phrase), source: `claim:${claim.claim_id}` });
           } catch { /* skip invalid regex */ }
         }
       }
