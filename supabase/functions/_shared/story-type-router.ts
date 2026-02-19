@@ -65,7 +65,7 @@ interface StoryTypeSelection {
   type: StoryType;
   reason: string;
   /** The effective intensity after clamping. undefined if caller didn't specify. */
-  effective_intensity: EmotionalIntensity | undefined;
+  effective_intensity?: EmotionalIntensity;
 }
 
 // ─── Merged Constraints (output of the router) ─────────────
@@ -116,7 +116,7 @@ interface MergedConstraints {
   
   // Metadata
   selection_reason: string;
-  effective_intensity: EmotionalIntensity | undefined;
+  effective_intensity?: EmotionalIntensity;
 }
 
 // ─── Intensity Rank ─────────────────────────────────────────

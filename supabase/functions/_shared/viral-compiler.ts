@@ -169,7 +169,7 @@ export function compileViralPrompt(
   // Style anchor
   parts.push(styleAnchor);
   
-  let prompt = parts.join(". ").replace(/\.\./g, ".").replace(/\s+/g, " ").trim();
+  let prompt = parts.join(" ").replace(/\s+/g, " ").trim();
   
   // Truncate (words first, then chars)
   const { text, wasTruncated, method } = truncatePrompt(prompt, wordLimit, charLimit);

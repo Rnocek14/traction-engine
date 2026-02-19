@@ -50,8 +50,18 @@ import {
   STORY_TYPE_META,
   VERTICAL_META,
   GOAL_META,
-  isViralStoryType,
 } from "@/types/story-engine";
+
+// Runtime type guards to prevent invalid casts from Select values
+function isContentVertical(v: string): v is ContentVertical {
+  return v in VERTICAL_META;
+}
+function isContentGoal(v: string): v is ContentGoal {
+  return v in GOAL_META;
+}
+function isStoryType(v: string): v is StoryType {
+  return v in STORY_TYPE_META;
+}
 
 const DEFAULT_ACCOUNT_ID = "lab_sandbox";
 
@@ -84,17 +94,14 @@ export function StoryCreationWizard({
   
   const [isGenerating, setIsGenerating] = useState(false);
 
-  // Determine if this is a cinematic/myth override
-  const isMythOverride = storyTypeOverride === "myth";
-
-  // Generate story mutation
+  // Generate story mutation — always calls ONE edge function, backend decides compiler
   const generateStory = useMutation({
     mutationFn: async () => {
       if (!concept.trim()) throw new Error("Enter a concept first");
       
       setIsGenerating(true);
       
-      // Build the story engine payload
+      // Build the story engine payload (single source of truth)
       const enginePayload = {
         vertical,
         goal,
@@ -102,30 +109,12 @@ export function StoryCreationWizard({
         requested_story_type: storyTypeOverride === "auto" ? undefined : storyTypeOverride,
       };
       
-      // Myth Mode uses the storybook-style generator
-      if (isMythOverride) {
-        const { data, error } = await supabase.functions.invoke("create-story-myth-mode", {
-          body: {
-            account_id: DEFAULT_ACCOUNT_ID,
-            premise: concept.trim(),
-            scene_count: 5,
-            story_engine: enginePayload,
-          },
-        });
-        
-        if (error) throw error;
-        if (data?.error) throw new Error(data.error);
-        
-        return { story_job_id: data.story?.id };
-      }
-      
-      // Standard path: use generate-storyboard with story engine config
+      // Single edge function call — backend runs routeStory() and decides compiler
       const { data, error } = await supabase.functions.invoke("generate-storyboard", {
         body: {
           concept: concept.trim(),
-          story_type: storyTypeOverride === "auto" ? undefined : storyTypeOverride,
           tier,
-          // Story Engine config (new)
+          // Story Engine config (single source of truth — no top-level story_type)
           story_engine: enginePayload,
           // Legacy settings
           character_continuity_mode: characterContinuityMode,
@@ -143,7 +132,13 @@ export function StoryCreationWizard({
         return { story_job_id: data.story_job_id };
       }
       
-      // Otherwise, create the story from the generated storyboard
+      // Resolve story type: prefer backend's resolved value, then explicit override, then fallback
+      const resolvedStoryType =
+        data?.resolved_story_type ??
+        (storyTypeOverride !== "auto" ? storyTypeOverride : undefined) ??
+        "viral_hook";
+      
+      // Build the storyboard with engine config persisted
       const fullStoryboard = {
         scenes: data.scenes || [],
         tier,
@@ -155,18 +150,19 @@ export function StoryCreationWizard({
         soft_continuity: true,
         brutality_mode: brutalityMode,
         sanitization_level: brutalityMode ? "off" : "soft",
-        // Persist story engine config
-        story_engine: enginePayload,
+        story_engine: {
+          ...enginePayload,
+          resolved_story_type: resolvedStoryType,
+          compiler: data?.compiler,
+        },
       };
-      
-      const resolvedStoryType = data.resolved_story_type || storyTypeOverride || "viral_hook";
       
       const { data: newStory, error: insertError } = await supabase
         .from("story_jobs")
         .insert([{
           account_id: DEFAULT_ACCOUNT_ID,
           title: data.title || `Story ${new Date().toLocaleDateString()}`,
-          story_type: resolvedStoryType === "auto" ? "viral_hook" : resolvedStoryType,
+          story_type: resolvedStoryType,
           storyboard_json: JSON.parse(JSON.stringify(fullStoryboard)),
           continuity_anchors: JSON.parse(JSON.stringify(data.anchors || {})),
           total_clips: (data.scenes || []).length,
@@ -230,7 +226,7 @@ export function StoryCreationWizard({
             {/* Vertical */}
             <div className="space-y-1.5">
               <Label className="text-xs text-muted-foreground">Vertical</Label>
-              <Select value={vertical} onValueChange={(v) => setVertical(v as ContentVertical)}>
+              <Select value={vertical} onValueChange={(v) => { if (isContentVertical(v)) setVertical(v); }}>
                 <SelectTrigger className="h-9 text-xs">
                   <SelectValue />
                 </SelectTrigger>
@@ -247,7 +243,7 @@ export function StoryCreationWizard({
             {/* Goal */}
             <div className="space-y-1.5">
               <Label className="text-xs text-muted-foreground">Goal</Label>
-              <Select value={goal} onValueChange={(v) => setGoal(v as ContentGoal)}>
+              <Select value={goal} onValueChange={(v) => { if (isContentGoal(v)) setGoal(v); }}>
                 <SelectTrigger className="h-9 text-xs">
                   <SelectValue />
                 </SelectTrigger>
@@ -267,7 +263,7 @@ export function StoryCreationWizard({
             {/* Story Type */}
             <div className="space-y-1.5">
               <Label className="text-xs text-muted-foreground">Story Type</Label>
-              <Select value={storyTypeOverride} onValueChange={(v) => setStoryTypeOverride(v as StoryType | "auto")}>
+              <Select value={storyTypeOverride} onValueChange={(v) => { if (v === "auto" || isStoryType(v)) setStoryTypeOverride(v); }}>
                 <SelectTrigger className="h-9 text-xs">
                   <SelectValue />
                 </SelectTrigger>
@@ -331,7 +327,7 @@ export function StoryCreationWizard({
               {/* Emotional Intensity */}
               <div className="space-y-1.5">
                 <Label className="text-xs text-muted-foreground">Emotional Intensity</Label>
-                <Select value={intensity} onValueChange={(v) => setIntensity(v as EmotionalIntensity | "unset")}>
+                <Select value={intensity} onValueChange={(v) => { const valid: string[] = ["unset","low","medium","high","extreme"]; if (valid.includes(v)) setIntensity(v as EmotionalIntensity | "unset"); }}>
                   <SelectTrigger className="h-8 text-xs">
                     <SelectValue />
                   </SelectTrigger>
