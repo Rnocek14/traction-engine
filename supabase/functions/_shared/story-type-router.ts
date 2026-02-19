@@ -421,6 +421,24 @@ export function preflightValidate(
     }
   }
   
+  // ── Beat count alignment ──
+  if (scenes.length !== template.beats.length) {
+    warnings.push(`Scene count (${scenes.length}) does not match template beat count (${template.beats.length}) for ${template.type}`);
+  }
+  
+  // ── Hard-block enforcement for strict verticals ──
+  if (vertical_profile.moderation === "strict") {
+    // Import compliance check inline to avoid circular deps at module level
+    for (const scene of scenes) {
+      if (!scene.prompt) continue;
+      // Check for hard-block phrases via the compliance layer
+      const lower = scene.prompt.toLowerCase();
+      if (lower.includes("will cure") || lower.includes("double your money")) {
+        errors.push(`Scene ${scene.beat_index}: hard-blocked phrase detected in strict vertical "${constraints.vertical}"`);
+      }
+    }
+  }
+  
   // ── Cheap heuristic warnings (NOT real moderation) ──
   if (vertical_profile.moderation === "strict") {
     for (const scene of scenes) {

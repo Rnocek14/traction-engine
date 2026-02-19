@@ -109,18 +109,16 @@ export function sanitizePromptText(
     // Skip rules that don't apply to this vertical
     if (rule.verticals.length > 0 && !rule.verticals.includes(vertical)) continue;
     
-    if (rule.pattern.test(text)) {
+    // Reset before each use to avoid stale lastIndex
+    rule.pattern.lastIndex = 0;
+    const match = text.match(rule.pattern);
+    if (match) {
       if (rule.hard_block) {
-        hard_blocks.push(`Banned phrase detected: "${text.match(rule.pattern)?.[0]}"`);
+        hard_blocks.push(`Banned phrase detected: "${match[0]}"`);
       } else {
-        const before = text;
         text = text.replace(rule.pattern, rule.replacement);
-        if (text !== before) {
-          replacements.push(`"${before.match(rule.pattern)?.[0]}" → "${rule.replacement}"`);
-        }
+        replacements.push(`"${match[0]}" → "${rule.replacement}"`);
       }
-      // Reset regex lastIndex for global patterns
-      rule.pattern.lastIndex = 0;
     }
     rule.pattern.lastIndex = 0;
   }
@@ -193,7 +191,8 @@ export function sanitizeStory(
  */
 export function selectWeightedHookCategory(
   vertical: ContentVertical,
-  allowedCategories: string[]
+  allowedCategories: string[],
+  rng: () => number = Math.random
 ): string {
   const weights = VERTICAL_HOOK_WEIGHTS[vertical];
   
@@ -206,7 +205,7 @@ export function selectWeightedHookCategory(
   if (totalWeight === 0) return candidates[0];
   
   // Weighted random selection
-  let roll = Math.random() * totalWeight;
+  let roll = rng() * totalWeight;
   for (const cat of candidates) {
     roll -= weights[cat] || 0;
     if (roll <= 0) return cat;
@@ -218,8 +217,8 @@ export function selectWeightedHookCategory(
 /**
  * Get CTA phrase for a vertical.
  */
-export function getVerticalCTA(vertical: ContentVertical): { style: CTAStyle; phrase: string } {
+export function getVerticalCTA(vertical: ContentVertical, rng: () => number = Math.random): { style: CTAStyle; phrase: string } {
   const config = CTA_TEMPLATES[vertical];
-  const phrase = config.phrases[Math.floor(Math.random() * config.phrases.length)];
+  const phrase = config.phrases[Math.floor(rng() * config.phrases.length)];
   return { style: config.style, phrase };
 }

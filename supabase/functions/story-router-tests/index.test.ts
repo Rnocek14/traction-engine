@@ -74,14 +74,13 @@ Deno.test("selectStoryType: entertainment allows extreme intensity", () => {
   assertEquals(result.effective_intensity, "extreme");
 });
 
-Deno.test("selectStoryType: resolved type is never 'auto'", () => {
+Deno.test("selectStoryType: resolved type is always a valid STORY_TEMPLATES key", () => {
   const verticals: ContentVertical[] = ["health", "finance", "saas", "entertainment", "education", "ecommerce", "lifestyle", "news"];
   const goals: ContentGoal[] = ["reach", "sell", "authority", "brand", "retain"];
   
   for (const v of verticals) {
     for (const g of goals) {
       const result = selectStoryType({ vertical: v, goal: g });
-      assertNotEquals(result.type, "auto" as StoryType);
       assert(result.type in STORY_TEMPLATES, `Unknown type: ${result.type}`);
     }
   }
@@ -337,6 +336,16 @@ Deno.test("sanitizeStory: batch sanitization works", () => {
   assert(result.disclaimer !== undefined);
 });
 
+Deno.test("selectWeightedHookCategory: deterministic with fixed rng", () => {
+  const allowed: HookCategory[] = ["curiosity", "authority"];
+  // rng=0.01 always picks first weighted category
+  const result = selectWeightedHookCategory("finance", allowed, () => 0.01);
+  assert(allowed.includes(result as HookCategory));
+  // With same rng, result is stable
+  const result2 = selectWeightedHookCategory("finance", allowed, () => 0.01);
+  assertEquals(result, result2);
+});
+
 Deno.test("selectWeightedHookCategory: returns allowed category", () => {
   const allowed: HookCategory[] = ["curiosity", "authority"];
   const result = selectWeightedHookCategory("finance", allowed);
@@ -346,6 +355,13 @@ Deno.test("selectWeightedHookCategory: returns allowed category", () => {
 Deno.test("selectWeightedHookCategory: fallback when no weights match", () => {
   const result = selectWeightedHookCategory("health", ["nonexistent_category" as HookCategory]);
   assertEquals(result, "nonexistent_category"); // Returns first allowed even if no weight
+});
+
+Deno.test("getVerticalCTA: deterministic with fixed rng", () => {
+  const cta1 = getVerticalCTA("saas", () => 0);
+  const cta2 = getVerticalCTA("saas", () => 0);
+  assertEquals(cta1.phrase, cta2.phrase);
+  assertEquals(cta1.style, "direct");
 });
 
 Deno.test("getVerticalCTA: returns valid CTA", () => {
@@ -406,4 +422,43 @@ Deno.test("routeStory + compile: end-to-end viral pipeline", () => {
     });
     assertEquals(preflight.valid, true);
   }
+});
+
+// ═══════════════════════════════════════════════════════════
+// E) NEW HARDENING TESTS
+// ═══════════════════════════════════════════════════════════
+
+Deno.test("preflightValidate: beat count mismatch → warning", () => {
+  const c = mergeConstraints("viral_hook", "saas", "test");
+  // Create fewer scenes than template beats
+  const scenes = [{ id: "s0", prompt: "Test.", duration_target: 3, beat_index: 0, beat_role: "hook" }];
+  const result = preflightValidate(c, { scenes });
+  assert(result.warnings.some(w => w.includes("does not match template beat count")));
+});
+
+Deno.test("preflightValidate: hard-blocked phrase in strict vertical → error", () => {
+  const c = mergeConstraints("viral_hook", "health", "test");
+  const scenes = c.template.beats.map((beat, i) => ({
+    id: `s${i}`,
+    prompt: i === 0 ? "This will cure your pain" : "Normal prompt",
+    duration_target: Math.round((beat.duration_range[0] + beat.duration_range[1]) / 2),
+    beat_index: i,
+    beat_role: beat.role,
+  }));
+  const result = preflightValidate(c, { scenes });
+  assertEquals(result.valid, false);
+  assert(result.errors.some(e => e.includes("hard-blocked phrase")));
+});
+
+Deno.test("preflightValidate: hard-blocked phrase in relaxed vertical → no error", () => {
+  const c = mergeConstraints("viral_hook", "entertainment", "test");
+  const scenes = c.template.beats.map((beat, i) => ({
+    id: `s${i}`,
+    prompt: "This will cure your boredom",
+    duration_target: Math.round((beat.duration_range[0] + beat.duration_range[1]) / 2),
+    beat_index: i,
+    beat_role: beat.role,
+  }));
+  const result = preflightValidate(c, { scenes });
+  assert(!result.errors.some(e => e.includes("hard-blocked")));
 });
