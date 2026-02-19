@@ -84,6 +84,12 @@ const FACTUAL_PATTERNS = [
   /\b(tech|technology|AI|artificial intelligence|software|app)\s*(update|news|release)\b/i,
   /\b(wasting|waste|don'?t work|useless|overrated|overhyped)\b/i,
   /\b(actually|really|truth about|reality of|honest)\b/i,
+  // Finance/money patterns — catch even in non-finance verticals
+  /\b(finance|financial|money|debt|invest|stock|credit|loan|mortgage|budget|savings?|retirement|wealth)\b/i,
+  // Factual framing patterns — "scary facts", "truths about X"
+  /\b(scary|insane|crazy|wild|unbelievable|mind.?blowing)\s*(facts?|things?|truths?|stats?)\b/i,
+  // Explicit factual-intent phrasing
+  /\b(facts?\s+about|truths?\s+about|things?\s+about|what\s+you\s+need\s+to\s+know)\b/i,
 ];
 
 const NARRATIVE_PATTERNS = [
