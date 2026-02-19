@@ -111,10 +111,17 @@ export default function StoryStudio() {
   const anchors = (story?.continuity_anchors as unknown as ContinuityAnchors) || {};
 
   // Deduplicate clips per scene - keep primary or best status
+  // Match by scene_id first, then fall back to sequence_index → scene position
   const clipsBySceneId = useMemo(() => {
     const map = new Map<string, VideoJob>();
+    
+    // Build index: sequence_index → scene.id for fallback matching
+    const seqToSceneId = new Map<number, string>();
+    scenes.forEach((s, i) => seqToSceneId.set(i, s.id));
+    
     for (const clip of clips) {
-      const sceneId = clip.scene_id || String(clip.sequence_index);
+      // Determine which scene this clip belongs to
+      const sceneId = clip.scene_id || seqToSceneId.get(clip.sequence_index ?? -1) || String(clip.sequence_index);
       const existing = map.get(sceneId);
       
       if (!existing) {
@@ -136,14 +143,16 @@ export default function StoryStudio() {
       }
     }
     return map;
-  }, [clips]);
+  }, [clips, scenes]);
 
   // All clips for a scene (for alternates)
   const allClipsForScene = useCallback((sceneId: string) => {
+    const sceneIndex = scenes.findIndex(s => s.id === sceneId);
     return clips.filter(c => 
-      c.scene_id === sceneId || String(c.sequence_index) === sceneId
+      c.scene_id === sceneId || 
+      (sceneIndex >= 0 && c.sequence_index === sceneIndex)
     );
-  }, [clips]);
+  }, [clips, scenes]);
 
   // Selected scene data
   const selectedScene = useMemo(() => {
@@ -300,10 +309,17 @@ export default function StoryStudio() {
     }
   }, [storyId, story, toast, refetchClips]);
 
-  // Progress stats
+  // Progress stats — count unique scenes with done clips (not just is_primary)
   const stats = useMemo(() => {
     const total = scenes.length;
-    const done = clips.filter(c => c.status === "done" && c.is_primary).length;
+    const doneSceneIds = new Set<string>();
+    for (const clip of clips) {
+      if (clip.status === "done") {
+        const key = clip.scene_id || String(clip.sequence_index);
+        doneSceneIds.add(key);
+      }
+    }
+    const done = doneSceneIds.size;
     const running = clips.filter(c => c.status === "running" || c.status === "queued").length;
     return { total, done, running };
   }, [scenes.length, clips]);
