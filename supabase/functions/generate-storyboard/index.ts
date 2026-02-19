@@ -14,6 +14,20 @@ interface GenerateRequest {
   concept: string;
   story_type?: "short_story" | "brainrot" | "info" | "hybrid";
   scene_count?: number;
+  /** Template-mode engine config — when present, skips legacy GPT storyboard */
+  story_engine?: {
+    vertical: string;
+    goal: string;
+    emotional_intensity?: string;
+    requested_story_type?: string;
+  };
+  /** Override generator path: "legacy" (default) | "template" */
+  generator_mode?: "legacy" | "template";
+  tier?: "volume" | "hero";
+  brutality_mode?: boolean;
+  sanitization_level?: string;
+  character_continuity_mode?: boolean;
+  locked_provider?: string;
 }
 
 type SceneRole = "hook" | "problem" | "story_a" | "reset" | "story_b" | "cta" | "atmosphere" | "establish";
@@ -512,7 +526,296 @@ Deno.serve(async (req) => {
     }
 
     const body = await req.json() as GenerateRequest;
-    const { concept, story_type = "short_story", scene_count, tier = "volume" } = body as GenerateRequest & { tier?: string };
+    const { concept, story_type = "short_story", scene_count } = body;
+    const tier = body.tier || "volume";
+
+    // ═══════════════════════════════════════════════════════════
+    // TEMPLATE MODE: story_engine provided → use routeStory() pipeline
+    // ═══════════════════════════════════════════════════════════
+    const useTemplateMode = !!(body.story_engine?.vertical && body.story_engine?.goal) || body.generator_mode === "template";
+
+    if (useTemplateMode && body.story_engine) {
+      const { routeStory, preflightValidate } = await import("../_shared/story-type-router.ts");
+      const viralMod = await import("../_shared/viral-compiler.ts");
+      const compileViralPrompt = viralMod.compileViralPrompt;
+      const { sanitizePromptText, selectWeightedHookCategory, getVerticalCTA, sanitizeStory } = await import("../_shared/prompt-compliance.ts");
+      const { buildStoryEngineAudit, seededRng } = await import("../_shared/story-engine-audit.ts");
+
+      const vertical = body.story_engine.vertical as ContentVertical;
+      const goal = body.story_engine.goal as ContentGoal;
+      const emotional_intensity = body.story_engine.emotional_intensity as EmotionalIntensity | undefined;
+      const requested_story_type = body.story_engine.requested_story_type as StoryType | undefined;
+
+      console.log(`[generate-storyboard] Template mode: vertical=${vertical} goal=${goal} intensity=${emotional_intensity || "unset"}`);
+
+      // 1. Route story → get constraints + selection
+      const { constraints, selection } = routeStory({
+        vertical,
+        goal,
+        emotional_intensity,
+        forced_type: requested_story_type,
+      });
+
+      const template = constraints.template;
+      console.log(`[generate-storyboard] Resolved: type=${selection.type} compiler=${constraints.compiler} beats=${template.beats.length}`);
+
+      // 2. Seeded RNG for deterministic hook/CTA selection
+      const tempId = crypto.randomUUID();
+      const rng = seededRng(tempId);
+
+      // 3. Select hook category + CTA deterministically
+      const hookCategory = selectWeightedHookCategory(
+        vertical,
+        constraints.allowed_hook_categories.map(String),
+        rng
+      );
+      const ctaResult = getVerticalCTA(vertical, rng);
+      console.log(`[generate-storyboard] Hook category: ${hookCategory}, CTA: "${ctaResult.phrase}"`);
+
+      // 4. For viral mode: compile prompts from template beats
+      //    For cinematic (myth): fall through to legacy GPT
+      if (constraints.compiler === "cinematic") {
+        console.log(`[generate-storyboard] Cinematic compiler → falling through to legacy GPT`);
+        // Fall through to legacy path below
+      } else {
+        // ── VIRAL TEMPLATE PIPELINE ──
+
+        // Use a lightweight GPT call to generate scene content per beat
+        const beatPrompts = template.beats.map((beat, i) => {
+          const isHook = beat.is_hook;
+          const isCTA = beat.role.includes("cta") || beat.role === "proof_cta" || beat.role === "value_cta" || beat.role === "how_cta" || beat.role === "credibility_cta" || beat.role === "item_3_cta";
+          return `Beat ${i + 1} (${beat.role}): ${beat.description}${isHook ? ` [hook_category: ${hookCategory}]` : ""}${isCTA ? ` [CTA: "${ctaResult.phrase}"]` : ""}`;
+        });
+
+        const templatePrompt = `You are a viral content strategist. Given a concept and beat structure, generate scene content.
+
+CONCEPT: "${concept}"
+STORY TYPE: ${selection.type} (${template.name})
+VERTICAL: ${vertical}
+TONE: ${constraints.allowed_tones.join(", ")}
+
+BEAT STRUCTURE (generate content for each):
+${beatPrompts.join("\n")}
+
+For each beat, return:
+- subject: Who/what is on screen (e.g., "A fitness coach", "A supplement bottle")
+- action: What they DO physically (use action verbs: grabs, slams, points, reveals)
+- environment: Where (e.g., "modern kitchen, morning light")
+- mood: Single word (energetic, calm, shocking, determined)
+- text_overlay: Short text for on-screen overlay (if beat requires it)
+- narration_line: Optional TTS voiceover line
+
+IMPORTANT: Subject must be concrete and visual. Action must be PHYSICAL, not emotional.
+
+Return ONLY valid JSON array:
+[
+  { "subject": "...", "action": "...", "environment": "...", "mood": "...", "text_overlay": "...", "narration_line": "..." }
+]`;
+
+        const gptResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${openaiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "gpt-4o-mini",
+            messages: [
+              { role: "system", content: "Return only valid JSON arrays. No markdown, no explanation." },
+              { role: "user", content: templatePrompt },
+            ],
+            temperature: 0.7,
+            max_tokens: 1200,
+          }),
+        });
+
+        if (!gptResponse.ok) {
+          throw new Error(`OpenAI API error: ${gptResponse.status}`);
+        }
+
+        const gptData = await gptResponse.json();
+        const gptContent = gptData.choices?.[0]?.message?.content || "";
+        const jsonMatch = gptContent.match(/\[[\s\S]*\]/);
+        if (!jsonMatch) {
+          throw new Error("Failed to parse template scene content from GPT");
+        }
+
+        const sceneContents: Array<{
+          subject: string;
+          action: string;
+          environment?: string;
+          mood?: string;
+          text_overlay?: string;
+          narration_line?: string;
+        }> = JSON.parse(jsonMatch[0]);
+
+        // 5. Compile each scene through viral compiler
+        const storyboardId = crypto.randomUUID();
+        const compiledScenes = template.beats.map((beat, i) => {
+          const content = sceneContents[i] || { subject: "A person", action: "interacts with the scene" };
+
+          const sceneInput: viralMod.ViralSceneInput = {
+            scene_id: `scene_${storyboardId}_${i}`,
+            beat_index: i,
+            beat,
+            subject: content.subject,
+            action: content.action,
+            environment: content.environment,
+            mood: content.mood,
+            text_overlay: content.text_overlay,
+            hook_category: beat.is_hook ? hookCategory : undefined,
+          };
+
+          const compiled = compileViralPrompt(sceneInput, constraints);
+
+          // Run compliance on compiled prompt
+          const compliance = sanitizePromptText(compiled.prompt, vertical);
+          const finalPrompt = compliance.text;
+
+          // Hard-block check
+          if (compliance.hard_blocks.length > 0 && constraints.moderation_level === "strict") {
+            console.error(`[generate-storyboard] Hard block in scene ${i}: ${compliance.hard_blocks.join("; ")}`);
+          }
+
+          return {
+            id: `scene_${storyboardId}_${i}`,
+            prompt: finalPrompt,
+            duration_target: compiled.duration_target,
+            camera_direction: compiled.camera_suggestion,
+            role: beat.role as SceneRole,
+            beat_role: beat.role,
+            beat_index: i,
+            change_type: (i === 0 ? "info" : "emotion") as ChangeType,
+            narration_line: content.narration_line,
+            onscreen_text: content.text_overlay,
+            sequence_index: i,
+            zone: (beat.is_hook ? "hook" : beat.role.includes("cta") ? "payoff" : "setup") as CutZone,
+            cut_type: (i === 0 || beat.is_hook ? "hard" : "continuity") as CutType,
+            camera_lead_source: compiled.camera_lead_source,
+            compliance_modified: compliance.was_modified || undefined,
+          };
+        });
+
+        // 6. Preflight validation
+        const preflight = preflightValidate(constraints, {
+          scenes: compiledScenes.map(s => ({
+            id: s.id,
+            prompt: s.prompt,
+            duration_target: s.duration_target,
+            beat_index: s.beat_index,
+            beat_role: s.beat_role,
+          })),
+        });
+
+        if (!preflight.valid) {
+          console.error(`[generate-storyboard] Preflight errors: ${preflight.errors.join("; ")}`);
+        }
+        if (preflight.warnings.length > 0) {
+          console.warn(`[generate-storyboard] Preflight warnings: ${preflight.warnings.join("; ")}`);
+        }
+
+        // 7. Run compliance on all scenes at once for summary
+        const storyCompliance = sanitizeStory(
+          compiledScenes.map(s => ({ scene_id: s.id, prompt: s.prompt })),
+          vertical
+        );
+
+        // 8. Build canonical audit
+        const audit = buildStoryEngineAudit({
+          vertical,
+          goal,
+          emotional_intensity,
+          requested_story_type: requested_story_type,
+          resolved_story_type: selection.type,
+          selection_reason: selection.reason,
+          effective_intensity: selection.effective_intensity,
+          compiler: constraints.compiler,
+          moderation_level: constraints.moderation_level,
+          allowed_tones: constraints.allowed_tones.map(String),
+          allowed_hook_categories: constraints.allowed_hook_categories.map(String),
+          render_hints: constraints.vertical_profile.render_hints,
+          preflight,
+          compliance: {
+            disclaimer: storyCompliance.disclaimer,
+            total_replacements: storyCompliance.total_replacements,
+            has_hard_blocks: storyCompliance.has_hard_blocks,
+          },
+          rng_seed: tempId,
+        });
+
+        // 9. Generate title/spine/palette via tiny GPT call
+        const metaResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${openaiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "gpt-4o-mini",
+            messages: [
+              { role: "system", content: "Return only valid JSON. No markdown." },
+              { role: "user", content: `Given concept "${concept}" for a ${selection.type} video, return:\n{"title":"short catchy title","story_spine":"desire→tension→turn→payoff in 1 sentence","motif_anchors":["visual motif 1","visual motif 2"],"palette_keywords":["color1","color2","texture"]}` },
+            ],
+            temperature: 0.5,
+            max_tokens: 200,
+          }),
+        });
+
+        let meta = { title: concept.slice(0, 50), story_spine: "", motif_anchors: [] as string[], palette_keywords: [] as string[] };
+        if (metaResponse.ok) {
+          try {
+            const metaData = await metaResponse.json();
+            const metaContent = metaData.choices?.[0]?.message?.content || "";
+            const metaJson = metaContent.match(/\{[\s\S]*\}/);
+            if (metaJson) meta = { ...meta, ...JSON.parse(metaJson[0]) };
+          } catch { /* use defaults */ }
+        }
+
+        // 10. Return same response shape as legacy
+        console.log(`[generate-storyboard] ✓ Template mode complete: ${compiledScenes.length} scenes, type=${selection.type}`);
+
+        return new Response(
+          JSON.stringify({
+            title: meta.title,
+            story_spine: meta.story_spine,
+            motif_anchors: meta.motif_anchors,
+            palette_keywords: meta.palette_keywords,
+            scenes: compiledScenes,
+            anchors: {
+              character: { description: "", wardrobe: "", identity_lock_tokens: [] },
+              environment: { location: "", time_of_day: "", props: [] },
+              camera_language: { lens: "50mm", movement_style: "smooth", framing_rules: "" },
+              negative_list: ["flicker", "jitter", "identity drift", "morph"],
+            },
+            tier,
+            // Template-mode bonus fields (consumed by wizard)
+            generator_mode: "template",
+            resolved_story_type: selection.type,
+            selection_reason: selection.reason,
+            effective_intensity: selection.effective_intensity,
+            compiler: constraints.compiler,
+            moderation_level: constraints.moderation_level,
+            allowed_tones: constraints.allowed_tones,
+            allowed_hook_categories: constraints.allowed_hook_categories,
+            hook_category: hookCategory,
+            cta_phrase: ctaResult.phrase,
+            preflight,
+            compliance: {
+              disclaimer: storyCompliance.disclaimer,
+              total_replacements: storyCompliance.total_replacements,
+              has_hard_blocks: storyCompliance.has_hard_blocks,
+            },
+            story_engine_audit: audit,
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // LEGACY MODE: GPT-4o freeform storyboard generation
+    // ═══════════════════════════════════════════════════════════
+    console.log(`[generate-storyboard] Legacy mode: concept="${concept.slice(0, 60)}..." type=${story_type}`);
 
     if (!concept?.trim()) {
       return new Response(
