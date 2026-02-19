@@ -475,7 +475,7 @@ Deno.serve(async (req) => {
       // Get all clips for this story (include thumbnail dimensions for resize logic)
       const { data: clips, error: clipsError } = await supabase
         .from("video_jobs")
-        .select("id, sequence_index, status, thumbnail_url, thumbnail_width, thumbnail_height, script_run_id, provider")
+        .select("id, sequence_index, status, thumbnail_url, thumbnail_width, thumbnail_height, script_run_id, provider, output_url")
         .eq("story_job_id", story.id)
         .order("sequence_index", { ascending: true })
         .order("created_at", { ascending: false });
@@ -495,6 +495,9 @@ Deno.serve(async (req) => {
       }
 
       // Find the highest completed scene
+      // IMPORTANT: Accept "done" clips even without thumbnail_url — thumbnail extraction
+      // can fail (e.g., ffmpeg TLS errors) but the video is still valid.
+      // When thumbnail is missing, we fall back to T2V for the next scene.
       let highestDoneIndex = -1;
       let latestThumbnail: string | null = null;
       let latestThumbnailWidth: number | null = null;
@@ -504,12 +507,20 @@ Deno.serve(async (req) => {
 
       for (let i = 0; i < totalScenes; i++) {
         const clip = clipsByIndex.get(i);
-        if (clip?.status === "done" && clip.thumbnail_url) {
+        if (clip?.status === "done") {
           highestDoneIndex = i;
-          latestThumbnail = clip.thumbnail_url;
-          latestThumbnailWidth = clip.thumbnail_width ?? null;
-          latestThumbnailHeight = clip.thumbnail_height ?? null;
           latestScriptRunId = clip.script_run_id;
+          if (clip.thumbnail_url) {
+            latestThumbnail = clip.thumbnail_url;
+            latestThumbnailWidth = clip.thumbnail_width ?? null;
+            latestThumbnailHeight = clip.thumbnail_height ?? null;
+          } else {
+            // No thumbnail — clear reference so next scene uses T2V
+            latestThumbnail = null;
+            latestThumbnailWidth = null;
+            latestThumbnailHeight = null;
+            console.warn(`[chain-continue] Scene ${i + 1} done but no thumbnail — next scene will use T2V`);
+          }
         } else if (clip?.status === "running" || clip?.status === "queued") {
           hasRunningJob = true;
         }
@@ -650,15 +661,10 @@ Deno.serve(async (req) => {
         console.log(`[chain-continue] Using AI-sanitized prompt override (${prompt_override.length} chars)`);
       }
 
-      // For I2V scenes, we need a reference image (unless manually forced to T2V)
+      // For I2V scenes, if no reference image, fall back to T2V instead of blocking the chain
       if (!isFirstScene && !latestThumbnail && useReferenceFromPrevious) {
-        console.error(`[chain-continue] Story ${story.id} scene ${nextSceneIndex} needs reference but none available`);
-        await supabase
-          .from("story_jobs")
-          .update({ status: "partial" })
-          .eq("id", story.id);
-        results.push({ storyId: story.id, action: "failed_no_reference", nextScene: nextSceneIndex });
-        continue;
+        console.warn(`[chain-continue] Story ${story.id} scene ${nextSceneIndex + 1}: no reference frame available, falling back to T2V`);
+        // Don't block — just force T2V for this scene
       }
       
       // If we're retrying without a reference, clear the thumbnail to force T2V
@@ -685,6 +691,67 @@ Deno.serve(async (req) => {
           continue;
         }
         scriptRunId = newScript.id;
+      }
+
+      // === DUPLICATE PREVENTION ===
+      // Check if a job already exists for this scene_index that's queued/running
+      // This prevents the cron from creating duplicate jobs on every tick
+      if (!isTargetedRetry) {
+        const existingJob = (clips || []).find(
+          c => c.sequence_index === nextSceneIndex && (c.status === "queued" || c.status === "running")
+        );
+        if (existingJob) {
+          console.log(`[chain-continue] Scene ${nextSceneIndex + 1} already has ${existingJob.status} job ${existingJob.id}, skipping`);
+          results.push({ storyId: story.id, action: "already_queued", nextScene: nextSceneIndex });
+          continue;
+        }
+      }
+
+      // === EARLY VO TRIGGER (cron path) ===
+      // Trigger voiceover generation on the FIRST scene queue attempt for any story
+      // This ensures VO is generated regardless of which entry point created the story
+      if (nextSceneIndex === 0 && !isTargetedRetry) {
+        const hasNarration = scenes.some((s: { narration_line?: string }) => s.narration_line && s.narration_line.trim().length > 0);
+        if (hasNarration) {
+          const { data: existingVo } = await supabase
+            .from("story_voiceovers")
+            .select("id")
+            .eq("story_job_id", story.id)
+            .limit(1);
+          
+          if (!existingVo?.length) {
+            console.log(`[chain-continue] Triggering early VO for ${story.id} (first scene, cron path)`);
+            void (async () => {
+              try {
+                const compileResp = await fetch(`${supabaseUrl}/functions/v1/compile-story-script`, {
+                  method: "POST",
+                  headers: {
+                    "Authorization": `Bearer ${supabaseServiceKey}`,
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({ story_job_id: story.id }),
+                });
+                const compileData = await compileResp.json();
+                if (!compileResp.ok || !compileData.success || !compileData.voiceover_id) {
+                  console.error(`[chain-continue] Early VO compile failed for ${story.id}:`, compileData.error);
+                  return;
+                }
+                console.log(`[chain-continue] VO compiled for ${story.id}, voiceover_id=${compileData.voiceover_id}`);
+                const genResp = await fetch(`${supabaseUrl}/functions/v1/generate-story-voiceover`, {
+                  method: "POST",
+                  headers: {
+                    "Authorization": `Bearer ${supabaseServiceKey}`,
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({ voiceover_id: compileData.voiceover_id }),
+                });
+                console.log(`[chain-continue] VO generate for ${story.id}: ${genResp.status}`);
+              } catch (e) {
+                console.error(`[chain-continue] Early VO trigger failed for ${story.id}:`, e);
+              }
+            })();
+          }
+        }
       }
 
       console.log(`[chain-continue] Queueing scene ${nextSceneIndex + 1}/${totalScenes} for story ${story.id} [${isFirstScene ? "T2V" : "I2V"}]`);
@@ -1327,10 +1394,11 @@ Deno.serve(async (req) => {
           .eq("id", jobId);
       }
 
-      // Update progress
+      // Update progress — count all done clips (including the one we just queued)
+      const doneCount = (clips || []).filter(c => c.status === "done").length;
       await supabase
         .from("story_jobs")
-        .update({ completed_clips: highestDoneIndex + 1 })
+        .update({ completed_clips: doneCount })
         .eq("id", story.id);
 
       console.log(`[chain-continue] ✓ Queued scene ${nextSceneIndex + 1} as job ${jobId} (provider: ${currentProvider}${providerAttemptLog.length > 1 ? ` after fallback from ${providerAttemptLog.slice(0, -1).join("→")}` : ""})`);
