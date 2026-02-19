@@ -507,6 +507,9 @@ export function validateClaimIds(
 
 // ─── Narration/Overlay banned-language scanner ──────────────
 
+// Hedge words that soften implicit certainty verbs — if present before the verb, don't flag
+const HEDGE_PATTERN = /\b(may|might|can|could|helps?|may help|potentially|possibly)\b/i;
+
 const BANNED_ABSOLUTES = [
   /\bguaranteed?\b/gi,
   /\bwill cure\b/gi,
@@ -514,24 +517,49 @@ const BANNED_ABSOLUTES = [
   /\balways works?\b/gi,
   /\b100%\b/gi,
   /\bdouble your money\b/gi,
-  /\brisk[- ]free\b/gi,
+  /\brisk[- \u2010\u2011\u2012\u2013\u2014]free\b/gi,
   /\bno side effects?\b/gi,
   /\bclinically proven\b/gi,
   /\bproven to\b/gi,
-  // Implicit certainty verbs (strict verticals)
-  /\bprevents?\b/gi,
-  /\bstops?\s+(heart|cancer|disease|illness|aging|diabetes)/gi,
-  /\beliminates?\b/gi,
   /\bworks every time\b/gi,
   /\bnever fails?\b/gi,
   /\bwill fix\b/gi,
   /\bwill prevent\b/gi,
   /\bwill stop\b/gi,
+  /\bguaranteed results?\b/gi,
+];
+
+// Implicit certainty verbs — only flagged when NOT preceded by a hedge word
+const HEDGE_AWARE_PATTERNS = [
+  /\bprevents?\b/gi,
+  /\bstops?\s+(heart|cancer|disease|illness|aging|diabetes)/gi,
+  /\beliminates?\b/gi,
 ];
 
 /**
+ * Normalize unicode dashes and smart quotes in text before scanning.
+ */
+function normalizeText(text: string): string {
+  return text
+    .replace(/[\u2013\u2014\u2012\u2011\u2010]/g, "-")  // all dash variants → hyphen
+    .replace(/[\u2018\u2019\u201A]/g, "'")               // smart single quotes
+    .replace(/[\u201C\u201D\u201E]/g, '"')               // smart double quotes
+    .replace(/\s+/g, " ");                                // collapse whitespace
+}
+
+/**
+ * Check if a match position is preceded (within 4 words) by a hedge word.
+ */
+function isPrecededByHedge(text: string, matchIndex: number): boolean {
+  // Grab up to 40 chars before the match
+  const prefix = text.slice(Math.max(0, matchIndex - 40), matchIndex);
+  return HEDGE_PATTERN.test(prefix);
+}
+
+/**
  * Scan narration_line and onscreen_text for banned absolute language.
- * Checks both static BANNED_ABSOLUTES and dynamic do_not_say from the research brief.
+ * Checks both static BANNED_ABSOLUTES, hedge-aware implicit certainty verbs,
+ * and dynamic do_not_say from the research brief.
  * Returns list of issues found.
  */
 export function scanTextForBannedLanguage(
@@ -546,9 +574,15 @@ export function scanTextForBannedLanguage(
   const dynamicPatterns: Array<{ pattern: RegExp; source: string }> = [];
   if (brief?.activated && brief.grounded) {
     const buildPattern = (phrase: string): RegExp => {
-      const escaped = phrase.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      // Multi-word or phrases with non-word chars: don't use \b (fails on hyphens, punctuation)
-      const hasNonWordChars = /[^a-zA-Z0-9_\s]/.test(phrase) || /\s/.test(phrase);
+      const trimmed = phrase.trim();
+      const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const hasNonWordChars = /[^a-zA-Z0-9_\s]/.test(trimmed);
+      const isMultiWord = /\s/.test(trimmed);
+      if (isMultiWord) {
+        // Multi-word: replace spaces with \s+ for flexible whitespace matching
+        const flexEscaped = escaped.replace(/\\\s/g, "\\s+");
+        return new RegExp(flexEscaped, "gi");
+      }
       if (hasNonWordChars) {
         return new RegExp(escaped, "gi");
       }
@@ -575,13 +609,15 @@ export function scanTextForBannedLanguage(
 
   const issues: string[] = [];
   for (let i = 0; i < items.length; i++) {
-    const texts = [
+    const rawTexts = [
       items[i].narration_line || "",
       items[i].text_overlay || items[i].onscreen_text || "",
     ].filter(Boolean);
 
-    for (const text of texts) {
-      // Static banned absolutes
+    for (const rawText of rawTexts) {
+      const text = normalizeText(rawText);
+
+      // Static banned absolutes (always block, no hedge pass)
       for (const pattern of BANNED_ABSOLUTES) {
         pattern.lastIndex = 0;
         const match = pattern.exec(text);
@@ -589,6 +625,16 @@ export function scanTextForBannedLanguage(
           issues.push(`Item ${i}: banned phrase "${match[0]}" found in text`);
         }
       }
+
+      // Hedge-aware implicit certainty verbs (only flag if NOT preceded by hedge)
+      for (const pattern of HEDGE_AWARE_PATTERNS) {
+        pattern.lastIndex = 0;
+        const match = pattern.exec(text);
+        if (match && !isPrecededByHedge(text, match.index)) {
+          issues.push(`Item ${i}: unhedged certainty phrase "${match[0]}" found in text (add 'may'/'can'/'helps' to soften)`);
+        }
+      }
+
       // Dynamic do_not_say from brief
       for (const { pattern, source } of dynamicPatterns) {
         pattern.lastIndex = 0;
