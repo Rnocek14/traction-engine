@@ -22,6 +22,18 @@ export type StoryType =
 
 export type ContentGoal = "reach" | "sell" | "authority" | "brand" | "retain";
 export type EmotionalIntensity = "low" | "medium" | "high" | "extreme";
+export type Pacing = "fast" | "moderate" | "slow";
+
+// ─── Hook Categories ────────────────────────────────────────
+
+export type HookCategory =
+  | "curiosity"
+  | "novelty"
+  | "shock"
+  | "fear"
+  | "authority"
+  | "promise"
+  | "social_proof";
 
 // ─── Verticals ──────────────────────────────────────────────
 

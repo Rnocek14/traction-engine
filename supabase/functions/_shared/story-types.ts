@@ -1,5 +1,5 @@
 /**
- * Story Types v1.0
+ * Story Types v1.1
  * 
  * Performance-driven story formats, independent of vertical.
  * Vertical determines guardrails; story type determines structure.
@@ -13,6 +13,11 @@
  * - before_after: transformation reveal
  * - trend_hijack: cultural moment capture
  * - myth: cinematic/symbolic brand building (existing engine)
+ * 
+ * v1.1 changes:
+ * - Added max_words per template (Fix #1: chars vs tokens)
+ * - Added default_hook_categories per template (Fix #3: hook ban wiring)
+ * - Pacing type is now a union enum (Fix #7: drift prevention)
  */
 
 // ─── Story Type Enum ────────────────────────────────────────
@@ -34,6 +39,21 @@ export type ContentGoal = "reach" | "sell" | "authority" | "brand" | "retain";
 // ─── Emotional Intensity ────────────────────────────────────
 
 export type EmotionalIntensity = "low" | "medium" | "high" | "extreme";
+
+// ─── Pacing (Fix #7: explicit enum, not freeform string) ───
+
+export type Pacing = "fast" | "moderate" | "slow";
+
+// ─── Hook Categories (shared with vertical-profiles) ────────
+
+export type HookCategory =
+  | "curiosity"
+  | "novelty"
+  | "shock"
+  | "fear"
+  | "authority"
+  | "promise"
+  | "social_proof";
 
 // ─── Scene Beat Definition ──────────────────────────────────
 
@@ -62,6 +82,8 @@ export interface StoryTemplate {
   // Prompt compilation mode
   prompt_mode: "viral" | "cinematic";
   prompt_char_limit: number;
+  /** Fix #1: Word-level budget to prevent token bloat */
+  prompt_max_words: number;
   
   // Feature flags
   hook_scoring_required: boolean;
@@ -76,6 +98,9 @@ export interface StoryTemplate {
   
   // Emotional range
   intensity_range: [EmotionalIntensity, EmotionalIntensity]; // [min, max]
+  
+  /** Fix #3: Default hook categories this format uses. Intersected with vertical allowed hooks. */
+  default_hook_categories: HookCategory[];
 }
 
 // ─── Template Definitions ───────────────────────────────────
@@ -98,6 +123,7 @@ export const STORY_TEMPLATES: Record<StoryType, StoryTemplate> = {
     total_duration_range: [10, 16],
     prompt_mode: "viral",
     prompt_char_limit: 300,
+    prompt_max_words: 50,
     hook_scoring_required: true,
     director_brief: false,
     escalation_logic: false,
@@ -106,6 +132,7 @@ export const STORY_TEMPLATES: Record<StoryType, StoryTemplate> = {
     text_overlay_default: true,
     preferred_goals: ["reach", "retain"],
     intensity_range: ["medium", "extreme"],
+    default_hook_categories: ["curiosity", "novelty", "shock"],
   },
 
   // ── 2. Problem-Agitate-Solution ────────────────────────
@@ -124,6 +151,7 @@ export const STORY_TEMPLATES: Record<StoryType, StoryTemplate> = {
     total_duration_range: [11, 17],
     prompt_mode: "viral",
     prompt_char_limit: 300,
+    prompt_max_words: 50,
     hook_scoring_required: true,
     director_brief: false,
     escalation_logic: false,
@@ -132,6 +160,7 @@ export const STORY_TEMPLATES: Record<StoryType, StoryTemplate> = {
     text_overlay_default: true,
     preferred_goals: ["sell"],
     intensity_range: ["medium", "high"],
+    default_hook_categories: ["fear", "curiosity", "promise"],
   },
 
   // ── 3. Authority Breakdown ─────────────────────────────
@@ -150,6 +179,7 @@ export const STORY_TEMPLATES: Record<StoryType, StoryTemplate> = {
     total_duration_range: [11, 18],
     prompt_mode: "viral",
     prompt_char_limit: 350,
+    prompt_max_words: 55,
     hook_scoring_required: true,
     director_brief: false,
     escalation_logic: false,
@@ -158,6 +188,7 @@ export const STORY_TEMPLATES: Record<StoryType, StoryTemplate> = {
     text_overlay_default: true,
     preferred_goals: ["authority", "reach"],
     intensity_range: ["low", "medium"],
+    default_hook_categories: ["authority", "curiosity", "novelty"],
   },
 
   // ── 4. Listicle ────────────────────────────────────────
@@ -176,6 +207,7 @@ export const STORY_TEMPLATES: Record<StoryType, StoryTemplate> = {
     total_duration_range: [11, 18],
     prompt_mode: "viral",
     prompt_char_limit: 250,
+    prompt_max_words: 40,
     hook_scoring_required: true,
     director_brief: false,
     escalation_logic: false,
@@ -184,6 +216,7 @@ export const STORY_TEMPLATES: Record<StoryType, StoryTemplate> = {
     text_overlay_default: true,
     preferred_goals: ["reach", "retain"],
     intensity_range: ["low", "high"],
+    default_hook_categories: ["curiosity", "novelty", "promise"],
   },
 
   // ── 5. Micro-Story ─────────────────────────────────────
@@ -202,6 +235,7 @@ export const STORY_TEMPLATES: Record<StoryType, StoryTemplate> = {
     total_duration_range: [12, 19],
     prompt_mode: "viral",
     prompt_char_limit: 350,
+    prompt_max_words: 55,
     hook_scoring_required: false,
     director_brief: false,
     escalation_logic: false,
@@ -210,6 +244,7 @@ export const STORY_TEMPLATES: Record<StoryType, StoryTemplate> = {
     text_overlay_default: false,
     preferred_goals: ["reach", "brand"],
     intensity_range: ["medium", "extreme"],
+    default_hook_categories: ["curiosity", "social_proof"],
   },
 
   // ── 6. Before / After ─────────────────────────────────
@@ -228,6 +263,7 @@ export const STORY_TEMPLATES: Record<StoryType, StoryTemplate> = {
     total_duration_range: [10, 17],
     prompt_mode: "viral",
     prompt_char_limit: 300,
+    prompt_max_words: 50,
     hook_scoring_required: true,
     director_brief: false,
     escalation_logic: false,
@@ -236,6 +272,7 @@ export const STORY_TEMPLATES: Record<StoryType, StoryTemplate> = {
     text_overlay_default: true,
     preferred_goals: ["sell", "reach"],
     intensity_range: ["medium", "high"],
+    default_hook_categories: ["shock", "curiosity", "promise"],
   },
 
   // ── 7. Trend Hijack ───────────────────────────────────
@@ -253,6 +290,7 @@ export const STORY_TEMPLATES: Record<StoryType, StoryTemplate> = {
     total_duration_range: [8, 12],
     prompt_mode: "viral",
     prompt_char_limit: 250,
+    prompt_max_words: 40,
     hook_scoring_required: false,
     director_brief: false,
     escalation_logic: false,
@@ -261,6 +299,7 @@ export const STORY_TEMPLATES: Record<StoryType, StoryTemplate> = {
     text_overlay_default: true,
     preferred_goals: ["reach"],
     intensity_range: ["medium", "high"],
+    default_hook_categories: ["novelty", "curiosity"],
   },
 
   // ── 8. Myth Mode (Cinematic) ──────────────────────────
@@ -280,6 +319,7 @@ export const STORY_TEMPLATES: Record<StoryType, StoryTemplate> = {
     total_duration_range: [22, 35],
     prompt_mode: "cinematic",
     prompt_char_limit: 1000,
+    prompt_max_words: 150,
     hook_scoring_required: false,
     director_brief: true,
     escalation_logic: true,
@@ -288,6 +328,7 @@ export const STORY_TEMPLATES: Record<StoryType, StoryTemplate> = {
     text_overlay_default: false,
     preferred_goals: ["brand"],
     intensity_range: ["high", "extreme"],
+    default_hook_categories: ["novelty", "fear"],
   },
 };
 
