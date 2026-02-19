@@ -182,7 +182,23 @@ export function resolveDebugPersist(
 }
 
 /**
+ * Truncate a string to maxLen characters to prevent payload bloat.
+ */
+function truncateStr(s: string, maxLen = 300): string {
+  return s.length > maxLen ? s.slice(0, maxLen) + "…" : s;
+}
+
+/**
+ * Cap an array to maxItems and truncate each string entry.
+ */
+function capArray(arr: string[] | undefined, maxItems = 200, maxStrLen = 300): string[] | undefined {
+  if (!arr) return undefined;
+  return arr.slice(0, maxItems).map(s => truncateStr(s, maxStrLen));
+}
+
+/**
  * Build a capped debug persist payload from audit data.
+ * All array fields are capped to 200 items and each string truncated to 300 chars.
  */
 export function buildDebugPayload(
   audit: StoryEngineAudit,
@@ -197,16 +213,16 @@ export function buildDebugPayload(
     audit: {
       version: audit.version,
       compliance: {
-        disclaimer: audit.compliance.disclaimer,
+        disclaimer: audit.compliance.disclaimer ? truncateStr(audit.compliance.disclaimer, 500) : undefined,
         total_replacements: audit.compliance.total_replacements,
-        sanitized_terms: audit.compliance.sanitized_terms?.slice(0, 200),
+        sanitized_terms: capArray(audit.compliance.sanitized_terms),
         has_hard_blocks: audit.compliance.has_hard_blocks,
-        hard_blocks: audit.compliance.hard_blocks?.slice(0, 200),
+        hard_blocks: capArray(audit.compliance.hard_blocks),
       },
       preflight: {
         valid: audit.preflight.valid,
-        warnings: audit.preflight.warnings.slice(0, 200),
-        errors: audit.preflight.errors.slice(0, 200),
+        warnings: capArray(audit.preflight.warnings) || [],
+        errors: capArray(audit.preflight.errors) || [],
       },
       timing: audit.timing,
     },

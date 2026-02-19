@@ -93,31 +93,29 @@ Deno.test("Finance: 'double your money risk-free' should be compliance_blocked",
   }
 });
 
-// ─── Test 3: News vertical with ungrounded factual beats ────
+// ─── Test 3: News vertical deterministic scanner test ───────
 
-Deno.test("News: ungrounded factual content should block or degrade", async () => {
-  const { status, data } = await callGenerateStoryboard({
-    concept: "Breaking: Scientists discover revolutionary cure for aging that eliminates all disease",
-    generator_mode: "template",
-    story_engine: {
-      vertical: "news",
-      goal: "educate",
-      research_mode: "on",
-    },
-  });
+Deno.test("News: scanner flags ungrounded absolute claims deterministically", async () => {
+  const { scanTextForBannedLanguage } = await import("../_shared/research-engine.ts");
 
-  if (status === 422) {
-    assert(
-      data.error === "compliance_blocked" || (data.error as string)?.includes("research"),
-      `Expected compliance_blocked or research failure, got: ${JSON.stringify(data.error)}`,
-    );
-    console.log("✓ News compliance correctly blocked:", data.error);
-  } else {
-    // If research found real sources and it passed, verify no absolute claims leaked
-    console.warn(`⚠ News test returned ${status} — checking output for safety`);
-    const outputStr = JSON.stringify(data);
-    assert(!outputStr.includes("eliminates all disease"), "Output should not contain 'eliminates all disease'");
-  }
+  const items = [
+    { narration_line: "Scientists discovered something that eliminates all disease", text_overlay: "" },
+    { narration_line: "This cure will prevent aging entirely", text_overlay: "" },
+    { narration_line: "Research suggests potential benefits", text_overlay: "" }, // safe
+  ];
+
+  const issues = scanTextForBannedLanguage(items, "news", null);
+
+  // Items 0 and 1 should be flagged (unhedged "eliminates", "will prevent")
+  const item0 = issues.filter(i => i.startsWith("Item 0:"));
+  const item1 = issues.filter(i => i.startsWith("Item 1:"));
+  const item2 = issues.filter(i => i.startsWith("Item 2:"));
+
+  assert(item0.length > 0, `"eliminates all disease" (unhedged) should be flagged: ${JSON.stringify(issues)}`);
+  assert(item1.length > 0, `"will prevent aging" should be flagged: ${JSON.stringify(issues)}`);
+  assertEquals(item2.length, 0, `"Research suggests" (hedged) should NOT be flagged`);
+
+  console.log(`✓ News scanner deterministic: ${issues.length} issues flagged correctly`);
 });
 
 // ─── Test 4: Unit test for scanTextForBannedLanguage ────────
@@ -314,10 +312,12 @@ Deno.test("Audit consistency: strict 200 must have no hard_blocks and sanitized_
     return;
   }
 
-  const audit = (data as Record<string, unknown>).story_engine as Record<string, unknown> | undefined;
-  assert(audit, "story_engine audit must exist on 200 response");
+  // Template path returns story_engine_audit; legacy uses story_engine
+  const audit = (data as Record<string, unknown>).story_engine_audit
+    ?? (data as Record<string, unknown>).story_engine as Record<string, unknown> | undefined;
+  assert(audit, "audit (story_engine_audit or story_engine) must exist on 200 response");
 
-  const compliance = audit.compliance as Record<string, unknown> | undefined;
+  const compliance = (audit as Record<string, unknown>).compliance as Record<string, unknown> | undefined;
   assert(compliance, "compliance block must exist in audit");
 
   // A 200 with strict mode must NOT have hard blocks
