@@ -653,6 +653,21 @@ GOOD alignment:
 
 Make every visual a LITERAL or DRAMATIC illustration of the fact. Never default to generic "person at desk" shots.
 
+═══ TONE CONSISTENCY (CRITICAL) ═══
+The LAST scene (CTA/closing) MUST maintain the same mood and visual tone as the rest of the story.
+If scenes 1-3 are dark/eerie/mysterious, the CTA must ALSO be dark/eerie/mysterious — NOT suddenly cheerful or festive.
+If scenes 1-3 are high-energy/exciting, the CTA must match that energy.
+
+BAD tone shift (NEVER do this):
+- Scenes 1-3: spooky haunted mansions, shadowy creatures → CTA: "happy children in colorful parade" ← JARRING tone break!
+- Scenes 1-3: intense financial data → CTA: "sunny beach vacation" ← completely off-topic vibe
+
+GOOD tone consistency:
+- Scenes 1-3: eerie haunted locations → CTA: same eerie atmosphere with a final chilling fact
+- Scenes 1-3: dramatic space visuals → CTA: dramatic cosmic reveal for the closing fact
+
+The closing scene should feel like the CLIMAX of the same movie, not a scene spliced in from a different film.
+
 ═══ NARRATION LINE RULES (CRITICAL) ═══
 Every narration_line MUST be:
 1. SPECIFIC and FACTUAL — include real numbers, statistics, or concrete details (not vague filler)
