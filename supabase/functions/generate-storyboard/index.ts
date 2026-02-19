@@ -849,15 +849,15 @@ Return ONLY valid JSON array:
           };
         });
 
-        // 5b. Narration-aware duration adjustment
-        // Uses realistic speech model + proportional distribution + provider snapping
+        // 5b. Narration-aware duration adjustment (v2)
+        // Realistic speech model + proportional distribution + bucket-aware snapping
         const SPEECH_WPS = 2.9; // ~175 WPM, typical TikTok/Reels VO pace
-        const COMMA_PAUSE = 0.15; // slight pause per comma
-        const SENTENCE_PAUSE = 0.25; // pause per sentence-ending punctuation
+        const COMMA_PAUSE = 0.15;
+        const SENTENCE_PAUSE = 0.25;
         const MIN_CLIP_DURATION = 3;
         const MAX_CLIP_DURATION = 12; // Sora max
 
-        // Provider snap buckets (same as queue-video-smart)
+        // Provider snap buckets (mirrors queue-video-smart)
         const PROVIDER_BUCKETS: Record<string, number[]> = {
           sora: [4, 8, 12],
           runway: [4, 6, 8],
@@ -866,11 +866,11 @@ Return ONLY valid JSON array:
 
         function snapToProvider(seconds: number, provider: string): number {
           const buckets = PROVIDER_BUCKETS[provider] || PROVIDER_BUCKETS.sora;
-          // Find the smallest bucket >= seconds, or the largest bucket
-          return buckets.find(b => b >= seconds) || buckets[buckets.length - 1];
+          const clamped = Math.max(MIN_CLIP_DURATION, Math.min(MAX_CLIP_DURATION, seconds));
+          return buckets.find(b => b >= clamped) || buckets[buckets.length - 1];
         }
 
-        // Upgrade 1: Realistic speech duration estimator
+        // Realistic speech duration estimator (fix #1)
         function estimateNarrationDuration(text: string): number {
           if (!text || text.trim().length === 0) return 0;
           const words = text.trim().split(/\s+/).filter(Boolean).length;
@@ -879,83 +879,165 @@ Return ONLY valid JSON array:
           return (words / SPEECH_WPS) + (commas * COMMA_PAUSE) + (sentences * SENTENCE_PAUSE);
         }
 
-        // Determine default provider for snapping (tier-based)
-        const defaultProvider = tier === "hero" ? "sora" : "sora"; // could vary by tier later
+        // Bucket-aware redistribution (fix #2)
+        function bucketAwareRebalance(durations: number[], targetTotal: number, provider: string): number[] {
+          const buckets = PROVIDER_BUCKETS[provider] || PROVIDER_BUCKETS.sora;
+          const result = [...durations];
+          const MAX_ITERATIONS = 10;
+
+          for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
+            const currentTotal = result.reduce((s, d) => s + d, 0);
+            const delta = targetTotal - currentTotal;
+            if (Math.abs(delta) < 2) break; // close enough (within one bucket step)
+
+            if (delta > 0) {
+              // Need to increase: find scene where bump to next bucket costs least
+              let bestIdx = -1;
+              let bestCost = Infinity;
+              for (let i = 0; i < result.length; i++) {
+                const nextBucket = buckets.find(b => b > result[i]);
+                if (nextBucket) {
+                  const cost = nextBucket - result[i];
+                  if (cost <= delta + 1 && cost < bestCost) {
+                    bestCost = cost;
+                    bestIdx = i;
+                  }
+                }
+              }
+              if (bestIdx === -1) break; // no valid moves
+              const nextBucket = buckets.find(b => b > result[bestIdx]);
+              if (nextBucket) result[bestIdx] = nextBucket;
+            } else {
+              // Need to decrease: find scene where drop to previous bucket costs least
+              let bestIdx = -1;
+              let bestCost = Infinity;
+              for (let i = 0; i < result.length; i++) {
+                const prevBuckets = buckets.filter(b => b < result[i]);
+                if (prevBuckets.length > 0) {
+                  const prevBucket = prevBuckets[prevBuckets.length - 1];
+                  const cost = result[i] - prevBucket;
+                  if (cost <= Math.abs(delta) + 1 && cost < bestCost) {
+                    bestCost = cost;
+                    bestIdx = i;
+                  }
+                }
+              }
+              if (bestIdx === -1) break; // no valid moves
+              const prevBuckets = buckets.filter(b => b < result[bestIdx]);
+              result[bestIdx] = prevBuckets[prevBuckets.length - 1];
+            }
+          }
+          return result;
+        }
+
+        // Timing-light roles (fix #4) — roles where short/no narration is expected
+        const TIMING_LIGHT_ROLES = new Set([
+          "hook", "curiosity_hook", "trend_hook", "shock_hook", "symbolic_hook",
+          "contrarian_hook", "hook_pain", "in_media_res",
+          "reset", "atmosphere", "establish", "transition",
+        ]);
+
+        const defaultProvider = tier === "hero" ? "sora" : "sora";
 
         const narrationDurations = compiledScenes.map(s => {
           const est = estimateNarrationDuration(s.narration_line || "");
-          return est > 0 ? est : s.duration_target; // fallback to template if no narration
+          return est > 0 ? est : s.duration_target;
         });
 
         const totalEstimatedAudio = narrationDurations.reduce((sum, d) => sum + d, 0);
         const totalTemplateDuration = compiledScenes.reduce((sum, s) => sum + s.duration_target, 0);
-        const driftPct = Math.abs(totalEstimatedAudio - totalTemplateDuration) / totalTemplateDuration;
+        // Fix #5: division-by-zero guard
+        const driftPct = totalTemplateDuration > 0
+          ? Math.abs(totalEstimatedAudio - totalTemplateDuration) / totalTemplateDuration
+          : 1;
 
-        // Upgrade 5: Overflow guard — narration too long for template capacity
+        // Overflow guard — push to preflight warnings, not scene props (fix #3)
         const maxFeasibleTotal = compiledScenes.length * MAX_CLIP_DURATION;
+        let hasOverflowWarning = false;
         if (totalEstimatedAudio > maxFeasibleTotal * 1.15) {
-          console.warn(`[generate-storyboard] ⚠️ Narration overflow: ${totalEstimatedAudio.toFixed(1)}s estimated vs ${maxFeasibleTotal}s max capacity (${compiledScenes.length} beats × ${MAX_CLIP_DURATION}s). Narration may need shortening.`);
-          // Store warning for downstream (audit/preflight) — don't block, but flag it
-          compiledScenes.forEach(s => {
-            (s as any).narration_overflow_warning = true;
-          });
+          const msg = `Narration overflow: ${totalEstimatedAudio.toFixed(1)}s estimated vs ${maxFeasibleTotal}s max capacity (${compiledScenes.length} beats × ${MAX_CLIP_DURATION}s). Consider shortening narration.`;
+          console.warn(`[generate-storyboard] ⚠️ ${msg}`);
+          hasOverflowWarning = true;
+          // Will be added to preflight.warnings after preflight runs
         }
 
-        // Only adjust if drift > 15%
+        // Build timing diagnostics for audit
+        let timingDiagnostics: {
+          estimated_audio_total: number;
+          template_total: number;
+          final_total: number;
+          drift_pct: number;
+          adjusted: boolean;
+          provider_buckets: string;
+          per_scene: number[];
+          overflow_warning?: boolean;
+        };
+
         if (driftPct > 0.15) {
           console.log(`[generate-storyboard] Narration drift ${(driftPct * 100).toFixed(0)}% (est=${totalEstimatedAudio.toFixed(1)}s vs template=${totalTemplateDuration.toFixed(1)}s) — adjusting durations`);
 
-          // Upgrade 2: Proportional distribution preserving total
-          // Use blended target: weighted average of template total and estimated total
+          // Proportional distribution with blended target
           const targetTotal = Math.min(
             Math.round((totalTemplateDuration * 0.3 + totalEstimatedAudio * 0.7)),
             maxFeasibleTotal
           );
-          const totalWeight = narrationDurations.reduce((sum, d) => sum + d, 0);
+          const totalWeight = narrationDurations.reduce((sum, d) => sum + d, 0) || 1;
 
           // Allocate proportionally
           const rawAllocated = narrationDurations.map(d => (d / totalWeight) * targetTotal);
 
-          // Upgrade 4: Dead scene guardrail — cap short narration scenes
-          const TRANSITION_ROLES = ["reset", "atmosphere", "establish"];
+          // Dead scene guardrail (fix #4) — use TIMING_LIGHT_ROLES
           for (let i = 0; i < rawAllocated.length; i++) {
             const words = (compiledScenes[i].narration_line || "").trim().split(/\s+/).filter(Boolean).length;
-            const isTransition = TRANSITION_ROLES.includes(compiledScenes[i].beat_role || compiledScenes[i].role);
-            if (words < 4 && !isTransition) {
+            const beatRole = compiledScenes[i].beat_role || compiledScenes[i].role;
+            const isTimingLight = TIMING_LIGHT_ROLES.has(beatRole);
+            if (words < 4 && !isTimingLight) {
               rawAllocated[i] = Math.min(rawAllocated[i], MIN_CLIP_DURATION);
             }
           }
 
-          // Clamp to [MIN, MAX]
-          const clamped = rawAllocated.map(d => Math.max(MIN_CLIP_DURATION, Math.min(MAX_CLIP_DURATION, d)));
+          // Clamp then snap to provider buckets
+          const snapped = rawAllocated.map(d => snapToProvider(d, defaultProvider));
 
-          // Upgrade 3: Snap to provider buckets
-          const snapped = clamped.map(d => snapToProvider(d, defaultProvider));
-
-          // Rebalance: if snapping changed total, redistribute delta to largest scene
-          const snappedTotal = snapped.reduce((sum, d) => sum + d, 0);
-          const rebalanceDelta = targetTotal - snappedTotal;
-          if (Math.abs(rebalanceDelta) >= 2) {
-            // Find the scene with most narration (best candidate to absorb delta)
-            const longestIdx = narrationDurations.indexOf(Math.max(...narrationDurations));
-            const adjusted = snapped[longestIdx] + rebalanceDelta;
-            const resnapped = snapToProvider(Math.max(MIN_CLIP_DURATION, Math.min(MAX_CLIP_DURATION, adjusted)), defaultProvider);
-            snapped[longestIdx] = resnapped;
-          }
+          // Bucket-aware rebalance (fix #2) — converges in discrete bucket steps
+          const rebalanced = bucketAwareRebalance(snapped, targetTotal, defaultProvider);
 
           // Apply
           for (let i = 0; i < compiledScenes.length; i++) {
-            compiledScenes[i].duration_target = snapped[i];
+            compiledScenes[i].duration_target = rebalanced[i];
           }
 
-          const finalTotal = snapped.reduce((sum, d) => sum + d, 0);
-          console.log(`[generate-storyboard] Adjusted durations: [${snapped.join(", ")}] total=${finalTotal}s (target=${targetTotal}s)`);
+          const finalTotal = rebalanced.reduce((sum, d) => sum + d, 0);
+          console.log(`[generate-storyboard] Adjusted durations: [${rebalanced.join(", ")}] total=${finalTotal}s (target=${targetTotal}s)`);
+
+          timingDiagnostics = {
+            estimated_audio_total: Math.round(totalEstimatedAudio * 10) / 10,
+            template_total: totalTemplateDuration,
+            final_total: finalTotal,
+            drift_pct: Math.round(driftPct * 100),
+            adjusted: true,
+            provider_buckets: defaultProvider,
+            per_scene: rebalanced,
+            overflow_warning: hasOverflowWarning || undefined,
+          };
         } else {
-          console.log(`[generate-storyboard] Narration drift ${(driftPct * 100).toFixed(0)}% — within tolerance, keeping template durations`);
+          console.log(`[generate-storyboard] Narration drift ${(driftPct * 100).toFixed(0)}% — within tolerance, snapping template durations`);
           // Still snap template durations to provider buckets for consistency
           for (let i = 0; i < compiledScenes.length; i++) {
             compiledScenes[i].duration_target = snapToProvider(compiledScenes[i].duration_target, defaultProvider);
           }
+          const finalTotal = compiledScenes.reduce((sum, s) => sum + s.duration_target, 0);
+
+          timingDiagnostics = {
+            estimated_audio_total: Math.round(totalEstimatedAudio * 10) / 10,
+            template_total: totalTemplateDuration,
+            final_total: finalTotal,
+            drift_pct: Math.round(driftPct * 100),
+            adjusted: false,
+            provider_buckets: defaultProvider,
+            per_scene: compiledScenes.map(s => s.duration_target),
+            overflow_warning: hasOverflowWarning || undefined,
+          };
         }
 
         // 5c. Block if any hard blocks in strict verticals
@@ -991,6 +1073,11 @@ Return ONLY valid JSON array:
         }
         if (preflight.warnings.length > 0) {
           console.warn(`[generate-storyboard] Preflight warnings: ${preflight.warnings.join("; ")}`);
+        }
+
+        // Inject overflow warning into preflight (fix #3 — proper audit storage)
+        if (hasOverflowWarning) {
+          preflight.warnings.push(`Narration overflow: estimated ${totalEstimatedAudio.toFixed(1)}s audio exceeds ${maxFeasibleTotal}s max video capacity`);
         }
 
         // 6b. Claim coverage preflight (when research is active)
@@ -1066,6 +1153,7 @@ Return ONLY valid JSON array:
           research: researchBrief.activated ? researchBrief : undefined,
           research_intent: researchIntent,
           claim_coverage: claimCoverage,
+          timing: timingDiagnostics,
         });
 
         // 9. Generate title/spine/palette via tiny GPT call

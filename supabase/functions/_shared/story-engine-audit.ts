@@ -13,6 +13,17 @@ import type { ResearchBrief, ResearchIntentResult, ClaimCoveragePreflight } from
 
 // ─── Canonical Audit Shape ──────────────────────────────────
 
+export interface TimingDiagnostics {
+  estimated_audio_total: number;
+  template_total: number;
+  final_total: number;
+  drift_pct: number;
+  adjusted: boolean;
+  provider_buckets: string;
+  per_scene: number[];
+  overflow_warning?: boolean;
+}
+
 export interface StoryEngineAudit {
   /** Schema version — bump on breaking changes, never rename existing fields */
   version: string;
@@ -75,6 +86,9 @@ export interface StoryEngineAudit {
 
   /** Claim coverage preflight — stored when research is grounded */
   claim_coverage?: ClaimCoveragePreflight;
+
+  /** Timing diagnostics from narration-aware duration adjustment */
+  timing?: TimingDiagnostics;
 }
 
 // ─── Builder Helper ─────────────────────────────────────────
@@ -102,6 +116,7 @@ export function buildStoryEngineAudit(params: {
   research?: ResearchBrief;
   research_intent?: ResearchIntentResult;
   claim_coverage?: ClaimCoveragePreflight;
+  timing?: TimingDiagnostics;
 }): StoryEngineAudit {
   const audit: StoryEngineAudit = {
     version: "v1.1",
@@ -138,6 +153,9 @@ export function buildStoryEngineAudit(params: {
   }
   if (params.claim_coverage) {
     audit.claim_coverage = params.claim_coverage;
+  }
+  if (params.timing) {
+    audit.timing = params.timing;
   }
   return audit;
 }
