@@ -412,6 +412,15 @@ export function preflightValidate(
     }
   }
   
+  // ── Beat-role alignment: hook beats should be first ──
+  for (const scene of scenes) {
+    if (scene.beat_role === "hook" || scene.beat_role?.includes("hook")) {
+      if (scene.beat_index !== 0) {
+        warnings.push(`Scene ${scene.beat_index}: beat_role="${scene.beat_role}" but not at position 0`);
+      }
+    }
+  }
+  
   // ── Cheap heuristic warnings (NOT real moderation) ──
   if (vertical_profile.moderation === "strict") {
     for (const scene of scenes) {
