@@ -154,6 +154,7 @@ export function StoryCreationWizard({
           ...enginePayload,
           resolved_story_type: resolvedStoryType,
           compiler: data?.compiler,
+          selection_reason: data?.selection_reason,
         },
       };
       
