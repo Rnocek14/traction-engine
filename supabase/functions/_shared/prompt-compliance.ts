@@ -101,7 +101,11 @@ export function sanitizePromptText(
   vertical: ContentVertical
 ): ComplianceResult {
   const profile = getVerticalProfile(vertical);
-  let text = prompt;
+  // Normalize unicode dashes/quotes before pattern matching (same as scanner)
+  let text = prompt
+    .replace(/[\u2013\u2014\u2012\u2011\u2010]/g, "-")
+    .replace(/[\u2018\u2019\u201A\u201B]/g, "'")
+    .replace(/[\u201C\u201D\u201E\u201F]/g, '"');
   const replacements: string[] = [];
   const hard_blocks: string[] = [];
   

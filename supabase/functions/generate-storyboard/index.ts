@@ -885,7 +885,7 @@ Return ONLY valid JSON array:
             disclaimer: storyCompliance.disclaimer,
             total_replacements: storyCompliance.total_replacements,
             has_hard_blocks: storyCompliance.has_hard_blocks,
-            sanitized_terms: allSanitizedTerms.length > 0 ? allSanitizedTerms : undefined,
+            sanitized_terms: allSanitizedTerms.length > 0 ? allSanitizedTerms.slice(0, 200) : undefined,
           },
           rng_seed: tempId,
           research: researchBrief.activated ? researchBrief : undefined,
