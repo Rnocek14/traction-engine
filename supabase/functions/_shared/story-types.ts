@@ -101,6 +101,9 @@ export interface StoryTemplate {
   
   /** Fix #3: Default hook categories this format uses. Intersected with vertical allowed hooks. */
   default_hook_categories: HookCategory[];
+
+  /** If true, scene count MUST match beats.length — mismatch is an error, not a warning */
+  enforce_beat_count?: boolean;
 }
 
 // ─── Template Definitions ───────────────────────────────────
@@ -300,6 +303,7 @@ export const STORY_TEMPLATES: Record<StoryType, StoryTemplate> = {
     preferred_goals: ["reach"],
     intensity_range: ["medium", "high"],
     default_hook_categories: ["novelty", "curiosity"],
+    enforce_beat_count: true, // 3 beats exactly — mismatch = broken generator
   },
 
   // ── 8. Myth Mode (Cinematic) ──────────────────────────

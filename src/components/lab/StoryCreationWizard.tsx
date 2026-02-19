@@ -151,13 +151,26 @@ export function StoryCreationWizard({
         brutality_mode: brutalityMode,
         sanitization_level: brutalityMode ? "off" : "soft",
         story_engine: {
-          ...enginePayload,
-          resolved_story_type: resolvedStoryType,
-          compiler: data?.compiler,
-          selection_reason: data?.selection_reason,
-          effective_intensity: data?.effective_intensity,
-          preflight: data?.preflight,
-          compliance: data?.compliance,
+          request: {
+            vertical: enginePayload?.vertical,
+            goal: enginePayload?.goal,
+            emotional_intensity: enginePayload?.emotional_intensity,
+            requested_story_type: enginePayload?.requested_story_type,
+          },
+          selection: {
+            resolved_story_type: resolvedStoryType,
+            reason: data?.selection_reason,
+            effective_intensity: data?.effective_intensity,
+          },
+          constraints: {
+            compiler: data?.compiler,
+            moderation_level: data?.moderation_level,
+            allowed_tones: data?.allowed_tones,
+            allowed_hook_categories: data?.allowed_hook_categories,
+          },
+          preflight: data?.preflight || { valid: true, errors: [], warnings: [] },
+          compliance: data?.compliance || { total_replacements: 0, has_hard_blocks: false },
+          rng: { version: "v1" },
         },
       };
       
