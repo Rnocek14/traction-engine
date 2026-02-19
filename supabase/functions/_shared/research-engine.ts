@@ -522,14 +522,43 @@ const BANNED_ABSOLUTES = [
 
 /**
  * Scan narration_line and onscreen_text for banned absolute language.
+ * Checks both static BANNED_ABSOLUTES and dynamic do_not_say from the research brief.
  * Returns list of issues found.
  */
 export function scanTextForBannedLanguage(
   items: Array<{ narration_line?: string; text_overlay?: string; onscreen_text?: string }>,
   vertical: string,
+  brief?: ResearchBrief | null,
 ): string[] {
   const isStrict = STRICT_VERTICALS.includes(vertical);
   if (!isStrict) return [];
+
+  // Build dynamic patterns from brief do_not_say lists
+  const dynamicPatterns: Array<{ pattern: RegExp; source: string }> = [];
+  if (brief?.activated && brief.grounded) {
+    for (const phrase of (brief.do_not_say_global || [])) {
+      if (phrase.trim()) {
+        try {
+          dynamicPatterns.push({
+            pattern: new RegExp(`\\b${phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "gi"),
+            source: "global",
+          });
+        } catch { /* skip invalid regex */ }
+      }
+    }
+    for (const claim of (brief.claims || [])) {
+      for (const phrase of (claim.do_not_say || [])) {
+        if (phrase.trim()) {
+          try {
+            dynamicPatterns.push({
+              pattern: new RegExp(`\\b${phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "gi"),
+              source: `claim:${claim.claim_id}`,
+            });
+          } catch { /* skip invalid regex */ }
+        }
+      }
+    }
+  }
 
   const issues: string[] = [];
   for (let i = 0; i < items.length; i++) {
@@ -539,11 +568,20 @@ export function scanTextForBannedLanguage(
     ].filter(Boolean);
 
     for (const text of texts) {
+      // Static banned absolutes
       for (const pattern of BANNED_ABSOLUTES) {
         pattern.lastIndex = 0;
         const match = pattern.exec(text);
         if (match) {
           issues.push(`Item ${i}: banned phrase "${match[0]}" found in text`);
+        }
+      }
+      // Dynamic do_not_say from brief
+      for (const { pattern, source } of dynamicPatterns) {
+        pattern.lastIndex = 0;
+        const match = pattern.exec(text);
+        if (match) {
+          issues.push(`Item ${i}: do_not_say phrase "${match[0]}" (from ${source}) found in text`);
         }
       }
     }
@@ -562,8 +600,23 @@ export interface ClaimCoveragePreflight {
   errors: string[];
 }
 
+/** Beat roles that MUST reference claims in strict verticals (non-transition, non-hook, non-CTA) */
+const EVIDENCE_BEAT_ROLES = new Set([
+  "evidence", "solution", "after_reveal", "takeaway", "agitate",
+  "item_1", "item_2", "payoff", "conflict", "turning_point",
+  "story_a", "story_b", "problem",
+]);
+
+/** Beat roles that are allowed to be claim-light (framing/action only) */
+const CLAIM_LIGHT_ROLES = new Set([
+  "hook", "curiosity_hook", "trend_hook", "shock_hook", "symbolic_hook",
+  "contrarian_hook", "hook_pain", "in_media_res",
+  "cta", "credibility_cta", "proof_cta", "value_cta", "how_cta", "item_3_cta",
+  "reset", "transition", "atmosphere",
+]);
+
 export function checkClaimCoverage(
-  items: Array<{ claim_ids?: string[] }>,
+  items: Array<{ claim_ids?: string[]; beat_role?: string }>,
   brief: ResearchBrief,
   vertical: string,
 ): ClaimCoveragePreflight {
@@ -591,10 +644,22 @@ export function checkClaimCoverage(
     warnings.push(`${unreferenced.length} claim(s) not referenced by any item: ${unreferenced.join(", ")}`);
   }
 
+  // Overall coverage threshold
   if (isStrict && coveragePct < 50) {
     errors.push(`Strict vertical requires ≥50% of items to reference claims; got ${coveragePct}%`);
   } else if (coveragePct < 30) {
     warnings.push(`Low claim coverage: only ${coveragePct}% of items reference claims`);
+  }
+
+  // Beat-role-specific enforcement: evidence/solution/takeaway beats MUST have claims in strict verticals
+  if (isStrict) {
+    for (let i = 0; i < items.length; i++) {
+      const role = items[i].beat_role || "";
+      const hasClaims = (items[i].claim_ids || []).length > 0;
+      if (!hasClaims && EVIDENCE_BEAT_ROLES.has(role) && !CLAIM_LIGHT_ROLES.has(role)) {
+        errors.push(`Beat ${i} (role: ${role}) is an evidence/content beat and MUST reference claim_ids in strict vertical`);
+      }
+    }
   }
 
   return {

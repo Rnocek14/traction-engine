@@ -683,8 +683,13 @@ Return ONLY valid JSON array:
         }> = JSON.parse(jsonMatch[0]);
 
         // 4b. Validate claim_ids from GPT output (parse boundary enforcement)
+        // In strict verticals, validation errors → blocking preflight errors
+        let claimValidationErrors: string[] = [];
+        let bannedLanguageErrors: string[] = [];
+
         if (researchBrief.activated && researchBrief.grounded) {
           const claimValidation = validateClaimIds(sceneContents, researchBrief, vertical);
+          claimValidationErrors = claimValidation.errors;
           if (claimValidation.errors.length > 0) {
             console.error(`[generate-storyboard] Claim ID validation errors: ${claimValidation.errors.join("; ")}`);
           }
@@ -692,15 +697,40 @@ Return ONLY valid JSON array:
             console.warn(`[generate-storyboard] Claim ID validation warnings: ${claimValidation.warnings.join("; ")}`);
           }
 
-          // 4c. Scan narration/overlay for banned absolute language
-          const bannedLanguageIssues = scanTextForBannedLanguage(sceneContents, vertical);
-          if (bannedLanguageIssues.length > 0) {
-            console.error(`[generate-storyboard] Banned language in narration/overlay: ${bannedLanguageIssues.join("; ")}`);
+          // 4c. Scan narration/overlay for banned absolute language + brief do_not_say
+          bannedLanguageErrors = scanTextForBannedLanguage(sceneContents, vertical, researchBrief);
+          if (bannedLanguageErrors.length > 0) {
+            console.error(`[generate-storyboard] Banned language in narration/overlay: ${bannedLanguageErrors.join("; ")}`);
+          }
+
+          // 4d. STRICT BLOCKING: If strict vertical, these become hard errors
+          const isStrictVertical = ["health", "finance", "news"].includes(vertical);
+          if (isStrictVertical && (claimValidationErrors.length > 0 || bannedLanguageErrors.length > 0)) {
+            const allErrors = [...claimValidationErrors, ...bannedLanguageErrors];
+            console.error(`[generate-storyboard] STRICT VERTICAL BLOCK: ${allErrors.length} compliance errors`);
+
+            // Return compliance_blocked status with actionable detail
+            return new Response(
+              JSON.stringify({
+                error: "compliance_blocked",
+                message: `Strict vertical (${vertical}) blocked due to ${allErrors.length} compliance violation(s)`,
+                violations: allErrors,
+                story_engine: {
+                  version: "v1.1",
+                  compliance: {
+                    has_hard_blocks: true,
+                    hard_blocks: allErrors,
+                  },
+                },
+              }),
+              { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
           }
         }
 
         // 5. Compile each scene through viral compiler
         const storyboardId = crypto.randomUUID();
+        const compileHardBlocks: string[] = [];
         const compiledScenes = template.beats.map((beat, i) => {
           const content = sceneContents[i] || { subject: "A person", action: "interacts with the scene" };
 
@@ -722,9 +752,9 @@ Return ONLY valid JSON array:
           const compliance = sanitizePromptText(compiled.prompt, vertical);
           const finalPrompt = compliance.text;
 
-          // Hard-block check
-          if (compliance.hard_blocks.length > 0 && constraints.moderation_level === "strict") {
-            console.error(`[generate-storyboard] Hard block in scene ${i}: ${compliance.hard_blocks.join("; ")}`);
+          // Collect hard-block violations
+          if (compliance.hard_blocks.length > 0) {
+            compileHardBlocks.push(...compliance.hard_blocks.map(hb => `Scene ${i} (${beat.role}): ${hb}`));
           }
 
           return {
@@ -747,6 +777,23 @@ Return ONLY valid JSON array:
           };
         });
 
+        // 5b. Block if any hard blocks in strict verticals
+        if (compileHardBlocks.length > 0 && constraints.moderation_level === "strict") {
+          console.error(`[generate-storyboard] STRICT HARD BLOCKS from compliance: ${compileHardBlocks.join("; ")}`);
+          return new Response(
+            JSON.stringify({
+              error: "compliance_blocked",
+              message: `Strict vertical (${vertical}) blocked due to ${compileHardBlocks.length} hard-block violation(s) in compiled prompts`,
+              violations: compileHardBlocks,
+              story_engine: {
+                version: "v1.1",
+                compliance: { has_hard_blocks: true, hard_blocks: compileHardBlocks },
+              },
+            }),
+            { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
         // 6. Preflight validation
         const preflight = preflightValidate(constraints, {
           scenes: compiledScenes.map(s => ({
@@ -766,19 +813,45 @@ Return ONLY valid JSON array:
         }
 
         // 6b. Claim coverage preflight (when research is active)
+        // Now passes beat_role for per-role enforcement in strict verticals
         let claimCoverage = undefined;
         if (researchBrief.activated && researchBrief.grounded && researchBrief.claims.length > 0) {
-          claimCoverage = checkClaimCoverage(compiledScenes, researchBrief, vertical);
+          claimCoverage = checkClaimCoverage(
+            compiledScenes.map(s => ({ claim_ids: s.claim_ids, beat_role: s.beat_role })),
+            researchBrief,
+            vertical,
+          );
           if (claimCoverage.errors.length > 0) {
             console.error(`[generate-storyboard] Claim coverage errors: ${claimCoverage.errors.join("; ")}`);
-            preflight.warnings.push(...claimCoverage.warnings);
             preflight.errors.push(...claimCoverage.errors);
-            preflight.valid = preflight.valid && claimCoverage.errors.length === 0;
+            preflight.valid = false;
           }
           if (claimCoverage.warnings.length > 0) {
             console.warn(`[generate-storyboard] Claim coverage warnings: ${claimCoverage.warnings.join("; ")}`);
+            preflight.warnings.push(...claimCoverage.warnings);
           }
           console.log(`[generate-storyboard] Claim coverage: ${claimCoverage.coverage_pct}% (${claimCoverage.items_with_claims}/${claimCoverage.total_items} items)`);
+
+          // Block in strict verticals if coverage preflight fails
+          const isStrictVertical = ["health", "finance", "news"].includes(vertical);
+          if (isStrictVertical && claimCoverage.errors.length > 0) {
+            return new Response(
+              JSON.stringify({
+                error: "compliance_blocked",
+                message: `Strict vertical (${vertical}) blocked: insufficient claim coverage`,
+                violations: claimCoverage.errors,
+                coverage: {
+                  pct: claimCoverage.coverage_pct,
+                  unreferenced: claimCoverage.unreferenced_claim_ids,
+                },
+                story_engine: {
+                  version: "v1.1",
+                  compliance: { has_hard_blocks: true, hard_blocks: claimCoverage.errors },
+                },
+              }),
+              { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+          }
         }
 
         // 7. Run compliance on all scenes at once for summary
