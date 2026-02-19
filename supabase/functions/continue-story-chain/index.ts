@@ -269,6 +269,71 @@ Deno.serve(async (req) => {
       console.log(`[chain-continue] Manual retry: story=${story_job_id} scene=${scene_index} replace=${replace_job_id || "none"} ai_sanitized=${!!prompt_override}`);
     } else if (isDirectInvoke) {
       console.log(`[chain-continue] Direct invoke: story=${story_job_id}`);
+      
+      // Fire-and-forget: trigger voiceover pipeline (compile → generate) immediately
+      // This decouples VO from video generation — VO is ready even if video providers fail
+      void (async () => {
+        try {
+          // Check if VO already exists
+          const { data: existingVo } = await supabase
+            .from("story_voiceovers")
+            .select("id")
+            .eq("story_job_id", story_job_id)
+            .limit(1);
+          
+          if (existingVo?.length) {
+            console.log(`[chain-continue] VO already exists for ${story_job_id}, skipping early trigger`);
+            return;
+          }
+          
+          // Check if narration exists in storyboard
+          const { data: storyData } = await supabase
+            .from("story_jobs")
+            .select("storyboard_json")
+            .eq("id", story_job_id)
+            .single();
+          
+          const storyboardScenes = (storyData?.storyboard_json as { scenes?: Array<{ narration_line?: string }> })?.scenes || [];
+          const hasNarration = storyboardScenes.some(s => s.narration_line && s.narration_line.trim().length > 0);
+          
+          if (!hasNarration) {
+            console.log(`[chain-continue] No narration in storyboard for ${story_job_id}, skipping VO`);
+            return;
+          }
+          
+          // Step 1: Compile script (creates voiceover record with compiled_script)
+          console.log(`[chain-continue] Compiling VO script for ${story_job_id}`);
+          const compileResp = await fetch(`${supabaseUrl}/functions/v1/compile-story-script`, {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${supabaseServiceKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ story_job_id }),
+          });
+          const compileData = await compileResp.json();
+          
+          if (!compileResp.ok || !compileData.success || !compileData.voiceover_id) {
+            console.error(`[chain-continue] VO compile failed for ${story_job_id}:`, compileData.error || compileResp.status);
+            return;
+          }
+          
+          console.log(`[chain-continue] VO compiled, voiceover_id=${compileData.voiceover_id}`);
+          
+          // Step 2: Generate audio from compiled script
+          const genResp = await fetch(`${supabaseUrl}/functions/v1/generate-story-voiceover`, {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${supabaseServiceKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ voiceover_id: compileData.voiceover_id }),
+          });
+          console.log(`[chain-continue] VO generate response: ${genResp.status}`);
+        } catch (e) {
+          console.error(`[chain-continue] Early VO trigger failed:`, e);
+        }
+      })();
     }
 
     // Find stories that are generating (or specific story for retry/direct invoke)
@@ -525,22 +590,35 @@ Deno.serve(async (req) => {
             .limit(1);
           
           if (!existingVo?.length) {
-            console.log(`[chain-continue] Triggering voiceover for ${story.id} (fire-and-forget)`);
-            void fetch(`${supabaseUrl}/functions/v1/generate-story-voiceover`, {
-              method: "POST",
-              headers: {
-                "Authorization": `Bearer ${supabaseServiceKey}`,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({ story_job_id: story.id }),
-            })
-              .then(async (r) => {
-                const text = await r.text().catch(() => "");
-                console.log(`[chain-continue] generate-story-voiceover response for ${story.id}: ${r.status}`, text.slice(0, 200));
-              })
-              .catch((e) => {
-                console.error(`[chain-continue] VO fire-and-forget failed for ${story.id}:`, e);
-              });
+            console.log(`[chain-continue] Triggering VO pipeline for ${story.id} (compile → generate)`);
+            void (async () => {
+              try {
+                const compileResp = await fetch(`${supabaseUrl}/functions/v1/compile-story-script`, {
+                  method: "POST",
+                  headers: {
+                    "Authorization": `Bearer ${supabaseServiceKey}`,
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({ story_job_id: story.id }),
+                });
+                const compileData = await compileResp.json();
+                if (!compileResp.ok || !compileData.success || !compileData.voiceover_id) {
+                  console.error(`[chain-continue] VO compile failed for ${story.id}:`, compileData.error);
+                  return;
+                }
+                const genResp = await fetch(`${supabaseUrl}/functions/v1/generate-story-voiceover`, {
+                  method: "POST",
+                  headers: {
+                    "Authorization": `Bearer ${supabaseServiceKey}`,
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({ voiceover_id: compileData.voiceover_id }),
+                });
+                console.log(`[chain-continue] VO generate for ${story.id}: ${genResp.status}`);
+              } catch (e) {
+                console.error(`[chain-continue] VO pipeline failed for ${story.id}:`, e);
+              }
+            })();
           } else {
             console.log(`[chain-continue] VO already exists for ${story.id}, skipping`);
           }
@@ -1239,8 +1317,10 @@ Deno.serve(async (req) => {
           .update({
             story_job_id: story.id,
             sequence_index: nextSceneIndex,
+            scene_id: nextScene.id, // Critical: UI matches clips to scenes by scene_id
             original_prompt: nextRawPrompt,
             style_hints: JSON.stringify(auditData),
+            is_primary: true,
             // Track final provider used (may differ from selected if fallback occurred)
             provider: currentProvider,
           })

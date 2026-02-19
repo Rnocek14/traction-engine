@@ -300,8 +300,10 @@ Deno.serve(async (req) => {
         .update({
           story_job_id: story_job_id,
           sequence_index: 0,
+          scene_id: firstScene.id, // Critical: UI matches clips to scenes by scene_id
           original_prompt: firstScene.prompt,
           style_hints: JSON.stringify(anchors),
+          is_primary: true,
         })
         .eq("id", jobId);
     }
@@ -312,22 +314,36 @@ Deno.serve(async (req) => {
     // This decouples VO from video generation — VO is ready even if video providers fail
     const hasNarration = scenes.some(s => s.narration_line && s.narration_line.trim().length > 0);
     if (hasNarration) {
-      console.log(`[chained] Triggering voiceover for ${story_job_id} (fire-and-forget)`);
-      void fetch(`${supabaseUrl}/functions/v1/generate-story-voiceover`, {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${supabaseServiceKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ story_job_id }),
-      })
-        .then(async (r) => {
-          const text = await r.text().catch(() => "");
-          console.log(`[chained] generate-story-voiceover response: ${r.status}`, text.slice(0, 200));
-        })
-        .catch((e) => {
-          console.error(`[chained] VO fire-and-forget failed:`, e);
-        });
+      console.log(`[chained] Triggering VO pipeline for ${story_job_id} (compile → generate, fire-and-forget)`);
+      void (async () => {
+        try {
+          const compileResp = await fetch(`${supabaseUrl}/functions/v1/compile-story-script`, {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${supabaseServiceKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ story_job_id }),
+          });
+          const compileData = await compileResp.json();
+          if (!compileResp.ok || !compileData.success || !compileData.voiceover_id) {
+            console.error(`[chained] VO compile failed:`, compileData.error || compileResp.status);
+            return;
+          }
+          console.log(`[chained] VO compiled, generating audio for voiceover_id=${compileData.voiceover_id}`);
+          const genResp = await fetch(`${supabaseUrl}/functions/v1/generate-story-voiceover`, {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${supabaseServiceKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ voiceover_id: compileData.voiceover_id }),
+          });
+          console.log(`[chained] VO generate response: ${genResp.status}`);
+        } catch (e) {
+          console.error(`[chained] VO pipeline failed:`, e);
+        }
+      })();
     }
 
     return new Response(
