@@ -1,10 +1,18 @@
 /**
- * Research Engine v1.0
+ * Research Engine v1.1
  * 
  * Provides real web-retrieval-backed research for factual content.
  * Uses Perplexity API for grounded search with citations.
  * 
  * Pipeline: detectIntent → generateQueries → fetchSources → extractClaims → buildBrief
+ * 
+ * v1.1 changes:
+ * - Per-claim source_url from model (not positional citation mapping)
+ * - AbortController timeout on Perplexity fetch
+ * - perplexityKey always read from env (never accepted from caller)
+ * - Param renamed to `items` in checkClaimCoverage
+ * - validateClaimIds() for strict enforcement
+ * - narration/overlay scanning via scanTextForBannedLanguage()
  */
 
 // ─── Types ──────────────────────────────────────────────────
@@ -19,6 +27,7 @@ export interface ResearchClaim {
   evidence_level: EvidenceLevel;
   source_url?: string;
   source_title?: string;
+  supporting_excerpt?: string;
   do_not_say?: string[];
 }
 
@@ -42,6 +51,12 @@ export interface ResearchBrief {
   claims: ResearchClaim[];
   angles: string[];
   do_not_say_global: string[];
+}
+
+export interface ResearchIntentResult {
+  needs_research: boolean;
+  intent: string;
+  reason: string;
 }
 
 // ─── Vertical-specific research prompts ─────────────────────
@@ -82,7 +97,7 @@ const STRICT_VERTICALS = ["health", "finance", "news"];
 export function detectResearchIntent(
   concept: string,
   vertical: string,
-): { needs_research: boolean; intent: string; reason: string } {
+): ResearchIntentResult {
   const conceptLower = concept.toLowerCase();
 
   // Check for explicit narrative patterns (skip research)
@@ -123,13 +138,16 @@ export function detectResearchIntent(
 
 // ─── Research Brief Builder (Perplexity-backed) ─────────────
 
+const PERPLEXITY_TIMEOUT_MS = 25_000;
+
 export async function buildResearchBrief(params: {
   concept: string;
   vertical: string;
-  perplexityKey: string;
   mode: ResearchMode;
 }): Promise<ResearchBrief> {
-  const { concept, vertical, perplexityKey, mode } = params;
+  const { concept, vertical, mode } = params;
+  // SECURITY: Always read key from server env, never accept from caller
+  const perplexityKey = Deno.env.get("PERPLEXITY_API_KEY") || "";
 
   // Detect intent
   const intent = detectResearchIntent(concept, vertical);
@@ -193,11 +211,12 @@ VERTICAL RULES: ${verticalGuidance}
 Your job:
 1. Research the given topic using real, verifiable sources
 2. Extract 3-8 factual claims that can be safely used in short-form video content
-3. For each claim, provide the evidence level and source
+3. For each claim, provide the evidence level, source URL, source title, and a short supporting excerpt (≤25 words)
 4. Provide 3 punchy "angles" (hook-ready story bullets) derived from the claims
 5. List phrases that should NEVER be used (do_not_say)
 
 CRITICAL: Every claim must be tied to a real source. Do NOT invent sources or statistics.
+CRITICAL: Each claim MUST include its own source_url and source_title — do NOT rely on positional mapping.
 
 Respond in this exact JSON format:
 {
@@ -207,6 +226,8 @@ Respond in this exact JSON format:
       "statement": "Safe, hedged phrasing of the claim",
       "evidence_level": "strong|moderate|mixed|insufficient",
       "source_title": "Name of source document/page",
+      "source_url": "https://actual-source-url.com/page",
+      "supporting_excerpt": "Short quote or paraphrase (≤25 words)",
       "do_not_say": ["absolute phrases to avoid for this claim"]
     }
   ],
@@ -221,24 +242,33 @@ Respond in this exact JSON format:
   try {
     console.log(`[research-engine] Querying Perplexity for: "${concept.slice(0, 80)}..."`);
 
-    const response = await fetch("https://api.perplexity.ai/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${perplexityKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "sonar",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: `Research this topic for a short-form video: "${concept}"\n\nVertical: ${vertical}\nProvide verified claims with sources.` },
-        ],
-      }),
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), PERPLEXITY_TIMEOUT_MS);
+
+    let response: Response;
+    try {
+      response = await fetch("https://api.perplexity.ai/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${perplexityKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "sonar",
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: `Research this topic for a short-form video: "${concept}"\n\nVertical: ${vertical}\nProvide verified claims with per-claim source URLs.` },
+          ],
+        }),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     if (!response.ok) {
       const errText = await response.text();
-      console.error(`[research-engine] Perplexity API error ${response.status}: ${errText}`);
+      console.error(`[research-engine] Perplexity API error ${response.status}: ${errText.slice(0, 200)}`);
       if (mode === "on") {
         return {
           mode,
@@ -254,7 +284,6 @@ Respond in this exact JSON format:
           do_not_say_global: [],
         };
       }
-      // auto mode → degrade
       return {
         mode,
         activated: false,
@@ -282,6 +311,8 @@ Respond in this exact JSON format:
         statement: string;
         evidence_level?: string;
         source_title?: string;
+        source_url?: string;
+        supporting_excerpt?: string;
         do_not_say?: string[];
       }>;
       angles?: string[];
@@ -296,27 +327,28 @@ Respond in this exact JSON format:
       }
     }
 
-    // Build sources from Perplexity citations
+    // Build sources from Perplexity top-level citations (global list)
     const sources: ResearchSource[] = citations.map((url, i) => ({
       title: `Source ${i + 1}`,
       url,
       retrieved_at: new Date().toISOString(),
     }));
 
-    // Map claims with source URLs from citations
+    // Map claims — prefer per-claim source_url from model, fallback to global citations
     const claims: ResearchClaim[] = (parsed.claims || []).map((c, i) => ({
       claim_id: c.claim_id || `claim_${String(i + 1).padStart(3, "0")}`,
       statement: c.statement,
       evidence_level: (c.evidence_level as EvidenceLevel) || "moderate",
-      source_url: citations[i] || undefined,
+      source_url: c.source_url || citations[i] || undefined,
       source_title: c.source_title,
+      supporting_excerpt: c.supporting_excerpt,
       do_not_say: c.do_not_say,
     }));
 
     const brief: ResearchBrief = {
       mode,
       activated: true,
-      grounded: sources.length > 0,
+      grounded: sources.length > 0 || claims.some(c => !!c.source_url),
       retrieval: "web",
       concept_intent: intent.intent,
       queries: [concept],
@@ -330,8 +362,9 @@ Respond in this exact JSON format:
     return brief;
 
   } catch (err) {
-    console.error("[research-engine] Unexpected error:", err);
-    const errorMsg = err instanceof Error ? err.message : "Unknown error";
+    const isTimeout = err instanceof DOMException && err.name === "AbortError";
+    const errorMsg = isTimeout ? "Perplexity request timed out" : (err instanceof Error ? err.message : "Unknown error");
+    console.error(`[research-engine] ${isTimeout ? "Timeout" : "Unexpected error"}:`, errorMsg);
 
     if (mode === "on") {
       return {
@@ -375,7 +408,7 @@ export function buildClaimConstraintBlock(brief: ResearchBrief, vertical: string
   const isStrict = STRICT_VERTICALS.includes(vertical);
 
   const claimsBlock = brief.claims.map((c, i) =>
-    `- Claim ${i + 1} (${c.claim_id}): "${c.statement}"${c.source_title ? ` [source: ${c.source_title}]` : ""}${c.evidence_level ? ` [evidence: ${c.evidence_level}]` : ""}`
+    `- Claim ${i + 1} (${c.claim_id}): "${c.statement}"${c.source_title ? ` [source: ${c.source_title}]` : ""}${c.evidence_level ? ` [evidence: ${c.evidence_level}]` : ""}${c.supporting_excerpt ? ` [excerpt: "${c.supporting_excerpt}"]` : ""}`
   ).join("\n");
 
   const doNotSay = [
@@ -410,11 +443,119 @@ For each beat, also output:
 `;
 }
 
+// ─── Claim ID Validator (post-GPT parse boundary) ───────────
+
+export interface ClaimIdValidation {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+}
+
+/**
+ * Validate claim_ids returned by GPT against the actual research brief.
+ * Call this immediately after parsing GPT's scene JSON.
+ */
+export function validateClaimIds(
+  items: Array<{ claim_ids?: string[]; narration_line?: string; text_overlay?: string }>,
+  brief: ResearchBrief,
+  vertical: string,
+): ClaimIdValidation {
+  const isStrict = STRICT_VERTICALS.includes(vertical);
+  const validIds = new Set(brief.claims.map(c => c.claim_id));
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  // Patterns that indicate factual assertions (numbers, percentages, study references)
+  const FACTUAL_LANGUAGE = /\b(\d+%|\d+ out of|\d+ in \d+|studies? show|research (shows?|indicates?|suggests?)|according to|experts? say|proven|clinically)\b/i;
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const ids = item.claim_ids || [];
+
+    // Ensure claim_ids is array of strings
+    if (!Array.isArray(ids)) {
+      errors.push(`Item ${i}: claim_ids is not an array`);
+      continue;
+    }
+
+    // Check each id is valid
+    for (const id of ids) {
+      if (typeof id !== "string") {
+        errors.push(`Item ${i}: claim_id "${id}" is not a string`);
+      } else if (!validIds.has(id)) {
+        errors.push(`Item ${i}: claim_id "${id}" not found in research brief`);
+      }
+    }
+
+    // Strict vertical: if narration/overlay has factual language, require claim_ids
+    if (isStrict && ids.length === 0) {
+      const narration = item.narration_line || "";
+      const overlay = item.text_overlay || "";
+      if (FACTUAL_LANGUAGE.test(narration) || FACTUAL_LANGUAGE.test(overlay)) {
+        errors.push(`Item ${i}: strict vertical requires claim_ids for factual content — found factual language in narration/overlay`);
+      }
+    }
+  }
+
+  if (errors.length > 0 && !isStrict) {
+    // Downgrade to warnings for non-strict verticals
+    warnings.push(...errors.splice(0));
+  }
+
+  return { valid: errors.length === 0, errors, warnings };
+}
+
+// ─── Narration/Overlay banned-language scanner ──────────────
+
+const BANNED_ABSOLUTES = [
+  /\bguaranteed?\b/gi,
+  /\bwill cure\b/gi,
+  /\bcures?\b/gi,
+  /\balways works?\b/gi,
+  /\b100%\b/gi,
+  /\bdouble your money\b/gi,
+  /\brisk[- ]free\b/gi,
+  /\bno side effects?\b/gi,
+  /\bclinically proven\b/gi,
+  /\bproven to\b/gi,
+];
+
+/**
+ * Scan narration_line and onscreen_text for banned absolute language.
+ * Returns list of issues found.
+ */
+export function scanTextForBannedLanguage(
+  items: Array<{ narration_line?: string; text_overlay?: string; onscreen_text?: string }>,
+  vertical: string,
+): string[] {
+  const isStrict = STRICT_VERTICALS.includes(vertical);
+  if (!isStrict) return [];
+
+  const issues: string[] = [];
+  for (let i = 0; i < items.length; i++) {
+    const texts = [
+      items[i].narration_line || "",
+      items[i].text_overlay || items[i].onscreen_text || "",
+    ].filter(Boolean);
+
+    for (const text of texts) {
+      for (const pattern of BANNED_ABSOLUTES) {
+        pattern.lastIndex = 0;
+        const match = pattern.exec(text);
+        if (match) {
+          issues.push(`Item ${i}: banned phrase "${match[0]}" found in text`);
+        }
+      }
+    }
+  }
+  return issues;
+}
+
 // ─── Claim Coverage Preflight ───────────────────────────────
 
 export interface ClaimCoveragePreflight {
-  total_beats: number;
-  beats_with_claims: number;
+  total_items: number;
+  items_with_claims: number;
   coverage_pct: number;
   unreferenced_claim_ids: string[];
   warnings: string[];
@@ -422,43 +563,43 @@ export interface ClaimCoveragePreflight {
 }
 
 export function checkClaimCoverage(
-  beats: Array<{ claim_ids?: string[] }>,
+  items: Array<{ claim_ids?: string[] }>,
   brief: ResearchBrief,
   vertical: string,
 ): ClaimCoveragePreflight {
   const isStrict = STRICT_VERTICALS.includes(vertical);
   const allClaimIds = new Set(brief.claims.map(c => c.claim_id));
   const referencedClaimIds = new Set<string>();
-  let beatsWithClaims = 0;
+  let itemsWithClaims = 0;
 
-  for (const beat of beats) {
-    if (beat.claim_ids && beat.claim_ids.length > 0) {
-      beatsWithClaims++;
-      for (const id of beat.claim_ids) {
+  for (const item of items) {
+    if (item.claim_ids && item.claim_ids.length > 0) {
+      itemsWithClaims++;
+      for (const id of item.claim_ids) {
         referencedClaimIds.add(id);
       }
     }
   }
 
   const unreferenced = [...allClaimIds].filter(id => !referencedClaimIds.has(id));
-  const coveragePct = beats.length > 0 ? Math.round((beatsWithClaims / beats.length) * 100) : 0;
+  const coveragePct = items.length > 0 ? Math.round((itemsWithClaims / items.length) * 100) : 0;
 
   const warnings: string[] = [];
   const errors: string[] = [];
 
   if (unreferenced.length > 0) {
-    warnings.push(`${unreferenced.length} claim(s) not referenced by any beat: ${unreferenced.join(", ")}`);
+    warnings.push(`${unreferenced.length} claim(s) not referenced by any item: ${unreferenced.join(", ")}`);
   }
 
   if (isStrict && coveragePct < 50) {
-    errors.push(`Strict vertical requires ≥50% of beats to reference claims; got ${coveragePct}%`);
+    errors.push(`Strict vertical requires ≥50% of items to reference claims; got ${coveragePct}%`);
   } else if (coveragePct < 30) {
-    warnings.push(`Low claim coverage: only ${coveragePct}% of beats reference claims`);
+    warnings.push(`Low claim coverage: only ${coveragePct}% of items reference claims`);
   }
 
   return {
-    total_beats: beats.length,
-    beats_with_claims: beatsWithClaims,
+    total_items: items.length,
+    items_with_claims: itemsWithClaims,
     coverage_pct: coveragePct,
     unreferenced_claim_ids: unreferenced,
     warnings,

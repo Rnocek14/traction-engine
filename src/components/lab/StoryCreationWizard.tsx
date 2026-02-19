@@ -337,26 +337,28 @@ export function StoryCreationWizard({
           )}
           
           {/* Research Mode */}
-          <div className="flex items-center justify-between px-1">
-            <div className="flex items-center gap-2">
-              <Search className="h-3.5 w-3.5 text-muted-foreground" />
-              <div>
+          <div className="space-y-1.5 px-1">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Search className="h-3.5 w-3.5 text-muted-foreground" />
                 <Label className="text-xs">Research Mode</Label>
-                <p className="text-[10px] text-muted-foreground">
-                  {researchMode === "auto" ? "Auto-detects factual content" : researchMode === "on" ? "Always research sources" : "Skip research"}
-                </p>
               </div>
+              <Select value={researchMode} onValueChange={(v) => setResearchMode(v as ResearchMode)}>
+                <SelectTrigger className="h-8 text-xs w-24">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto" className="text-xs">⚡ Auto</SelectItem>
+                  <SelectItem value="on" className="text-xs">🔍 On</SelectItem>
+                  <SelectItem value="off" className="text-xs">✏️ Off</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-            <Select value={researchMode} onValueChange={(v) => setResearchMode(v as ResearchMode)}>
-              <SelectTrigger className="h-8 text-xs w-24">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="auto" className="text-xs">⚡ Auto</SelectItem>
-                <SelectItem value="on" className="text-xs">🔍 On</SelectItem>
-                <SelectItem value="off" className="text-xs">✏️ Off</SelectItem>
-              </SelectContent>
-            </Select>
+            <p className="text-[10px] text-muted-foreground pl-5.5">
+              {researchMode === "auto" && "Runs research only when content appears factual (e.g. health tips, finance)"}
+              {researchMode === "on" && "Required — generation fails if no sources are found"}
+              {researchMode === "off" && "Creative mode — no citations or claim constraints"}
+            </p>
           </div>
           
           {/* Advanced Settings */}

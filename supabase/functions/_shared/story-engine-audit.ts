@@ -1,16 +1,15 @@
 /**
- * Canonical Story Engine Audit Schema v1.0
+ * Canonical Story Engine Audit Schema v1.1
  * 
  * Single consistent shape persisted in storyboard_json.story_engine.
  * Used by: Wizard → generate-storyboard → continue-story-chain → UI
  * 
- * This is the "source of truth" contract — all pipeline stages read/write
- * into this shape so metadata never drifts.
+ * v1.1: Added research_intent + claim_coverage fields
  */
 
 import type { ContentVertical } from "./vertical-profiles.ts";
 import type { ContentGoal, StoryType, EmotionalIntensity } from "./story-types.ts";
-import type { ResearchBrief } from "./research-engine.ts";
+import type { ResearchBrief, ResearchIntentResult, ClaimCoveragePreflight } from "./research-engine.ts";
 
 // ─── Canonical Audit Shape ──────────────────────────────────
 
@@ -68,6 +67,12 @@ export interface StoryEngineAudit {
 
   /** Research brief (append-only, v1) — present when research pipeline was invoked */
   research?: ResearchBrief;
+
+  /** Research intent detection result — always stored when template mode is used */
+  research_intent?: ResearchIntentResult;
+
+  /** Claim coverage preflight — stored when research is grounded */
+  claim_coverage?: ClaimCoveragePreflight;
 }
 
 // ─── Builder Helper ─────────────────────────────────────────
@@ -93,9 +98,11 @@ export function buildStoryEngineAudit(params: {
   compliance: { disclaimer?: string; total_replacements: number; has_hard_blocks: boolean; hard_blocks?: string[] };
   rng_seed?: string;
   research?: ResearchBrief;
+  research_intent?: ResearchIntentResult;
+  claim_coverage?: ClaimCoveragePreflight;
 }): StoryEngineAudit {
   const audit: StoryEngineAudit = {
-    version: "v1",
+    version: "v1.1",
     request: {
       vertical: params.vertical,
       goal: params.goal,
@@ -123,6 +130,12 @@ export function buildStoryEngineAudit(params: {
   };
   if (params.research) {
     audit.research = params.research;
+  }
+  if (params.research_intent) {
+    audit.research_intent = params.research_intent;
+  }
+  if (params.claim_coverage) {
+    audit.claim_coverage = params.claim_coverage;
   }
   return audit;
 }

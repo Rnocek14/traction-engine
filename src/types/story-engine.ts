@@ -91,6 +91,7 @@ export interface ResearchClaim {
   evidence_level: EvidenceLevel;
   source_url?: string;
   source_title?: string;
+  supporting_excerpt?: string;
   do_not_say?: string[];
 }
 

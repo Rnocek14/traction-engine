@@ -541,7 +541,7 @@ Deno.serve(async (req) => {
       const compileViralPrompt = viralMod.compileViralPrompt;
       const { sanitizePromptText, selectWeightedHookCategory, getVerticalCTA, sanitizeStory } = await import("../_shared/prompt-compliance.ts");
       const { buildStoryEngineAudit, seededRng } = await import("../_shared/story-engine-audit.ts");
-      const { buildResearchBrief, buildClaimConstraintBlock, checkClaimCoverage } = await import("../_shared/research-engine.ts");
+      const { buildResearchBrief, buildClaimConstraintBlock, checkClaimCoverage, validateClaimIds, scanTextForBannedLanguage, detectResearchIntent } = await import("../_shared/research-engine.ts");
 
       const vertical = body.story_engine.vertical as ContentVertical;
       const goal = body.story_engine.goal as ContentGoal;
@@ -562,12 +562,14 @@ Deno.serve(async (req) => {
       const template = constraints.template;
       console.log(`[generate-storyboard] Resolved: type=${selection.type} compiler=${constraints.compiler} beats=${template.beats.length}`);
 
-      // 1b. Research step — runs BEFORE beat generation
-      const perplexityKey = Deno.env.get("PERPLEXITY_API_KEY") || "";
+      // 1b. Research intent detection (always stored in audit)
+      const researchIntent = detectResearchIntent(concept, vertical);
+      console.log(`[generate-storyboard] Research intent: needs=${researchIntent.needs_research} intent=${researchIntent.intent} reason=${researchIntent.reason}`);
+
+      // 1c. Research step — runs BEFORE beat generation
       const researchBrief = await buildResearchBrief({
         concept,
         vertical,
-        perplexityKey,
         mode: researchMode as "auto" | "on" | "off",
       });
 
@@ -680,6 +682,23 @@ Return ONLY valid JSON array:
           claim_ids?: string[];
         }> = JSON.parse(jsonMatch[0]);
 
+        // 4b. Validate claim_ids from GPT output (parse boundary enforcement)
+        if (researchBrief.activated && researchBrief.grounded) {
+          const claimValidation = validateClaimIds(sceneContents, researchBrief, vertical);
+          if (claimValidation.errors.length > 0) {
+            console.error(`[generate-storyboard] Claim ID validation errors: ${claimValidation.errors.join("; ")}`);
+          }
+          if (claimValidation.warnings.length > 0) {
+            console.warn(`[generate-storyboard] Claim ID validation warnings: ${claimValidation.warnings.join("; ")}`);
+          }
+
+          // 4c. Scan narration/overlay for banned absolute language
+          const bannedLanguageIssues = scanTextForBannedLanguage(sceneContents, vertical);
+          if (bannedLanguageIssues.length > 0) {
+            console.error(`[generate-storyboard] Banned language in narration/overlay: ${bannedLanguageIssues.join("; ")}`);
+          }
+        }
+
         // 5. Compile each scene through viral compiler
         const storyboardId = crypto.randomUUID();
         const compiledScenes = template.beats.map((beat, i) => {
@@ -759,7 +778,7 @@ Return ONLY valid JSON array:
           if (claimCoverage.warnings.length > 0) {
             console.warn(`[generate-storyboard] Claim coverage warnings: ${claimCoverage.warnings.join("; ")}`);
           }
-          console.log(`[generate-storyboard] Claim coverage: ${claimCoverage.coverage_pct}% (${claimCoverage.beats_with_claims}/${claimCoverage.total_beats} beats)`);
+          console.log(`[generate-storyboard] Claim coverage: ${claimCoverage.coverage_pct}% (${claimCoverage.items_with_claims}/${claimCoverage.total_items} items)`);
         }
 
         // 7. Run compliance on all scenes at once for summary
@@ -768,7 +787,7 @@ Return ONLY valid JSON array:
           vertical
         );
 
-        // 8. Build canonical audit (with research brief)
+        // 8. Build canonical audit (with research brief + intent + coverage)
         const audit = buildStoryEngineAudit({
           vertical,
           goal,
@@ -790,6 +809,8 @@ Return ONLY valid JSON array:
           },
           rng_seed: tempId,
           research: researchBrief.activated ? researchBrief : undefined,
+          research_intent: researchIntent,
+          claim_coverage: claimCoverage,
         });
 
         // 9. Generate title/spine/palette via tiny GPT call
