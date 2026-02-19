@@ -1,5 +1,5 @@
 /**
- * Viral Prompt Compiler v1.1
+ * Viral Prompt Compiler v1.2
  * 
  * Stripped-down prompt compiler for viral story types.
  * NO director briefs, NO escalation deltas, NO capture contracts.
@@ -10,11 +10,10 @@
  * - Style anchor (visual feel)
  * - Platform format (aspect ratio, aesthetic)
  * 
- * v1.1 changes:
- * - Fix #1: Truncates by word count first, then char count
- * - Fix #7: Uses Pacing type from story-types.ts
- * 
- * This replaces the cinematic prompt-compiler.ts for all viral modes.
+ * v1.2 fix:
+ * - Fix #5: Removed structural labels ("Setting:", "lighting.")
+ *   Prompts now flow as natural prose: "in a bright kitchen, lit with warm light"
+ * - Shortened style anchor ("9:16 vertical" instead of "Vertical 9:16")
  */
 
 import type { MergedConstraints } from "./story-type-router.ts";
@@ -24,7 +23,8 @@ import type { SceneBeat, Pacing } from "./story-types.ts";
 
 export interface ViralSceneInput {
   scene_id: string;
-  sequence_index: number;
+  /** 0-based beat index */
+  beat_index: number;
   beat: SceneBeat;           // From story template
   subject: string;           // "A person holding a supplement bottle"
   action: string;            // "turns to camera with surprised expression"
@@ -37,7 +37,7 @@ export interface ViralSceneInput {
 
 export interface ViralPromptOutput {
   scene_id: string;
-  sequence_index: number;
+  beat_index: number;
   prompt: string;
   char_count: number;
   word_count: number;
@@ -52,32 +52,28 @@ export interface ViralPromptOutput {
 // ─── Style Anchors (keyed by Pacing enum) ───────────────────
 
 const STYLE_ANCHORS: Record<Pacing, string> = {
-  fast: "Vertical 9:16. Energetic pacing. Handheld phone aesthetic. Punchy, scroll-stopping.",
-  moderate: "Vertical 9:16. Natural pacing. Clean framing. Engaging, authentic feel.",
-  slow: "Vertical 9:16. Deliberate pacing. Steady camera. Thoughtful, composed.",
+  fast: "9:16 vertical. Energetic, handheld phone aesthetic, punchy and scroll-stopping.",
+  moderate: "9:16 vertical. Natural pacing, clean framing, engaging and authentic.",
+  slow: "9:16 vertical. Deliberate pacing, steady camera, thoughtful and composed.",
 };
 
 // ─── Camera Direction Map ───────────────────────────────────
 
 const CAMERA_MAP: Record<string, string> = {
-  "close-up": "Tight close-up shot",
-  "medium": "Medium shot, waist-up framing",
+  "close-up": "Tight close-up",
+  "medium": "Medium shot, waist-up",
   "wide": "Wide establishing shot",
-  "dynamic": "Dynamic camera movement, slight push-in",
-  "pov": "First-person POV perspective",
+  "dynamic": "Dynamic push-in",
+  "pov": "First-person POV",
   "product-focus": "Product hero shot, shallow depth of field",
-  "tracking": "Smooth tracking shot following subject",
+  "tracking": "Smooth tracking shot",
   "dramatic": "Low angle dramatic framing",
 };
 
 // ═══════════════════════════════════════════════════════════
-// COMPILER
+// TRUNCATION
 // ═══════════════════════════════════════════════════════════
 
-/**
- * Truncate a prompt by word count first, then by char count.
- * Fix #1: Words are a better proxy for tokens than chars.
- */
 function truncatePrompt(
   prompt: string,
   maxWords: number,
@@ -91,7 +87,6 @@ function truncatePrompt(
   const words = text.split(/\s+/).filter(Boolean);
   if (words.length > maxWords) {
     text = words.slice(0, maxWords).join(" ");
-    // Try to end at a sentence
     const lastPeriod = text.lastIndexOf(".");
     if (lastPeriod > text.length * 0.5) {
       text = text.slice(0, lastPeriod + 1);
@@ -118,9 +113,13 @@ function truncatePrompt(
   return { text, wasTruncated, method };
 }
 
+// ═══════════════════════════════════════════════════════════
+// COMPILER
+// ═══════════════════════════════════════════════════════════
+
 /**
  * Compile a single viral scene prompt.
- * Target: 150-300 characters, 35-55 words. No structural labels. Pure visual prose.
+ * Fix #5: Natural prose flow — no structural labels.
  */
 export function compileViralPrompt(
   scene: ViralSceneInput,
@@ -130,7 +129,7 @@ export function compileViralPrompt(
   const charLimit = constraints.prompt_char_limit;
   const wordLimit = constraints.prompt_max_words;
   
-  // Build the style anchor (Fix #7: typed pacing key)
+  // Style anchor
   const styleAnchor = STYLE_ANCHORS[visual_style.pacing] || STYLE_ANCHORS.fast;
   
   // Camera direction
@@ -142,28 +141,43 @@ export function compileViralPrompt(
     (scene.beat.duration_range[0] + scene.beat.duration_range[1]) / 2
   );
   
-  // Mood modifier
-  const moodStr = scene.mood ? ` ${scene.mood} mood.` : "";
+  // Fix #5: Build as flowing prose — no "Setting:" or "lighting." labels
+  // Pattern: "[Camera]. [Subject] [action], [environment], [lighting], [mood]. [Style anchor]."
+  const parts: string[] = [cameraDir];
   
-  // Environment
-  const envStr = scene.environment ? ` Setting: ${scene.environment}.` : "";
+  // Core action
+  parts.push(`${scene.subject} ${scene.action}`);
   
-  // Lighting from vertical profile
-  const lightStr = visual_style.lighting ? ` ${visual_style.lighting} lighting.` : "";
+  // Environment (natural flow)
+  if (scene.environment) {
+    parts[parts.length - 1] += `, in a ${scene.environment}`;
+  }
   
-  // Assemble prompt as flowing prose (no structural labels)
-  let prompt = `${cameraDir}. ${scene.subject} ${scene.action}.${envStr}${lightStr}${moodStr} ${styleAnchor}`;
+  // Lighting (natural flow)
+  if (visual_style.lighting) {
+    parts[parts.length - 1] += `, lit with ${visual_style.lighting} light`;
+  }
   
-  // Clean up whitespace
-  prompt = prompt.replace(/\s+/g, " ").trim();
+  // Mood
+  if (scene.mood) {
+    parts[parts.length - 1] += `, ${scene.mood} mood`;
+  }
   
-  // Fix #1: Truncate by words first, then chars
+  // Close the action sentence
+  parts[parts.length - 1] += ".";
+  
+  // Style anchor
+  parts.push(styleAnchor);
+  
+  let prompt = parts.join(". ").replace(/\.\./g, ".").replace(/\s+/g, " ").trim();
+  
+  // Truncate (words first, then chars)
   const { text, wasTruncated, method } = truncatePrompt(prompt, wordLimit, charLimit);
   prompt = text;
   
   return {
     scene_id: scene.scene_id,
-    sequence_index: scene.sequence_index,
+    beat_index: scene.beat_index,
     prompt,
     char_count: prompt.length,
     word_count: prompt.split(/\s+/).filter(Boolean).length,
@@ -215,7 +229,6 @@ export function compileViralStory(
 
 /**
  * Quick-compile: generate a simple viral prompt from raw inputs.
- * For use when you don't have full MergedConstraints yet.
  */
 export function quickViralPrompt(
   subject: string,
@@ -229,12 +242,12 @@ export function quickViralPrompt(
   }
 ): string {
   const camera = CAMERA_MAP[options?.camera || "medium"] || "Medium shot";
-  const env = options?.environment ? ` Setting: ${options.environment}.` : "";
-  const mood = options?.mood ? ` ${options.mood} mood.` : "";
+  const env = options?.environment ? `, in a ${options.environment}` : "";
+  const mood = options?.mood ? `, ${options.mood} mood` : "";
   const maxChars = options?.max_chars || 300;
   const maxWords = options?.max_words || 50;
   
-  let prompt = `${camera}. ${subject} ${action}.${env}${mood} Vertical 9:16. Energetic pacing. Handheld phone aesthetic.`;
+  let prompt = `${camera}. ${subject} ${action}${env}${mood}. 9:16 vertical. Energetic, handheld phone aesthetic.`;
   prompt = prompt.replace(/\s+/g, " ").trim();
   
   const { text } = truncatePrompt(prompt, maxWords, maxChars);
