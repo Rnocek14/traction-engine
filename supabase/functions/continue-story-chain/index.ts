@@ -9,6 +9,7 @@
  * - Progression injection to prevent repeated actions
  * - Role-based provider routing
  * - Dimension-aware resize for Sora
+ * - Compliance hard-block enforcement for strict verticals
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -74,6 +75,8 @@ import {
   type LadderStage,
   type ModerationLadderContext,
 } from "../_shared/moderation-ladder.ts";
+import { sanitizePromptText } from "../_shared/prompt-compliance.ts";
+import type { ContentVertical } from "../_shared/vertical-profiles.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -365,6 +368,14 @@ Deno.serve(async (req) => {
         // Phase 8: Story-level settings
         brutality_mode?: boolean;
         sanitization_level?: SanitizationLevel;
+        // Story Engine metadata (from router)
+        story_engine?: {
+          vertical?: string;
+          goal?: string;
+          resolved_story_type?: string;
+          compiler?: string;
+          selection_reason?: string;
+        };
       };
       const scenes = storyboardData?.scenes || [];
       // Film Mode stories automatically get "hero" tier (unlimited Sora)
@@ -941,6 +952,39 @@ Deno.serve(async (req) => {
         }
       }
       
+      // === COMPLIANCE HARD-BLOCK ENFORCEMENT ===
+      // Run compliance check BEFORE generation. Hard-blocks in strict verticals → fail immediately.
+      const storyVertical = storyboardData?.story_engine?.vertical as ContentVertical | undefined;
+      let complianceResult: { hard_blocks: string[]; was_modified: boolean; replacements: string[] } | null = null;
+      
+      if (storyVertical) {
+        complianceResult = sanitizePromptText(finalPrompt, storyVertical);
+        
+        if (complianceResult.was_modified) {
+          console.log(`[compliance] Scene ${nextSceneIndex + 1}: ${complianceResult.replacements.length} replacements applied`);
+          finalPrompt = complianceResult.was_modified 
+            ? sanitizePromptText(finalPrompt, storyVertical).text 
+            : finalPrompt;
+        }
+        
+        if (complianceResult.hard_blocks.length > 0) {
+          console.error(`[compliance] ❌ Scene ${nextSceneIndex + 1} HARD-BLOCKED: ${complianceResult.hard_blocks.join("; ")}`);
+          
+          // Mark story as partial with compliance failure
+          await supabase
+            .from("story_jobs")
+            .update({ status: "partial" })
+            .eq("id", story.id);
+          
+          results.push({ 
+            storyId: story.id, 
+            action: "compliance_blocked", 
+            nextScene: nextSceneIndex,
+          });
+          continue;
+        }
+      }
+      
       // === MODERATION LADDER RETRY LOOP (v2 - FIXED) ===
       // Implements "AI sanitize first, then fallback" strategy for story-aware recovery
       // Uses explicit stages: 0=raw, 1=sanitize, 2=fallback, 3=fail
@@ -1108,6 +1152,9 @@ Deno.serve(async (req) => {
           capture_has_metal: hasMetalArmor,
           // Moderation ladder telemetry (NEW)
           ...(moderationTelemetry || {}),
+          // Compliance telemetry
+          compliance_modified: complianceResult?.was_modified || false,
+          compliance_replacements: complianceResult?.replacements?.length || 0,
         };
         await supabase
           .from("video_jobs")

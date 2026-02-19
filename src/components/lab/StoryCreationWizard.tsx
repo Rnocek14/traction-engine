@@ -155,6 +155,9 @@ export function StoryCreationWizard({
           resolved_story_type: resolvedStoryType,
           compiler: data?.compiler,
           selection_reason: data?.selection_reason,
+          effective_intensity: data?.effective_intensity,
+          preflight: data?.preflight,
+          compliance: data?.compliance,
         },
       };
       
