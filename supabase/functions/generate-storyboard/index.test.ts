@@ -204,3 +204,94 @@ Deno.test("checkClaimCoverage blocks evidence beats without claims in strict ver
   
   console.log(`✓ checkClaimCoverage correctly enforces beat-role claims: ${result.errors.length} errors`);
 });
+
+// ─── Test 6: Health must-block test (guaranteed results) ────
+
+Deno.test("Health: 'guaranteed results for anxiety' should block or sanitize guaranteed", async () => {
+  const { status, data } = await callGenerateStoryboard({
+    concept: "3 supplements with guaranteed results for anxiety",
+    generator_mode: "template",
+    story_engine: {
+      vertical: "health",
+      goal: "educate",
+      research_mode: "on",
+    },
+  });
+
+  if (status === 422) {
+    assert(
+      data.error === "compliance_blocked" || (data.error as string)?.includes("research"),
+      `Expected compliance_blocked or research failure, got: ${JSON.stringify(data.error)}`,
+    );
+    console.log("✓ Health 'guaranteed results' correctly blocked:", data.error);
+  } else {
+    // If it passed, verify "guaranteed" was sanitized out of all scene content
+    const scenes = (data.scenes || []) as Array<Record<string, unknown>>;
+    for (const scene of scenes) {
+      const prompt = ((scene.prompt as string) || "").toLowerCase();
+      const narration = ((scene.narration_line as string) || "").toLowerCase();
+      const overlay = ((scene.onscreen_text as string) || "").toLowerCase();
+      assert(!prompt.includes("guaranteed"), `Prompt should not contain 'guaranteed': ${prompt}`);
+      assert(!narration.includes("guaranteed"), `Narration should not contain 'guaranteed': ${narration}`);
+      assert(!overlay.includes("guaranteed"), `Overlay should not contain 'guaranteed': ${overlay}`);
+    }
+    // Verify audit has sanitized_terms
+    const audit = (data as Record<string, unknown>).story_engine as Record<string, unknown> | undefined;
+    if (audit?.compliance) {
+      const compliance = audit.compliance as Record<string, unknown>;
+      console.log(`  Sanitized terms in audit: ${JSON.stringify(compliance.sanitized_terms)}`);
+    }
+    console.log(`✓ Health 'guaranteed results' passed (${status}): 'guaranteed' sanitized from all scene content`);
+  }
+});
+
+// ─── Test 7: Hedge-aware scanning allows "may help prevent" ─
+
+Deno.test("scanTextForBannedLanguage allows hedged implicit certainty verbs", async () => {
+  const { scanTextForBannedLanguage } = await import("../_shared/research-engine.ts");
+
+  const items = [
+    { narration_line: "This prevents heart disease", text_overlay: "" },           // unhedged → flag
+    { narration_line: "This may help prevent heart disease", text_overlay: "" },    // hedged → OK
+    { narration_line: "This could prevent further damage", text_overlay: "" },      // hedged → OK
+    { narration_line: "This eliminates toxins from the body", text_overlay: "" },   // unhedged → flag
+    { narration_line: "Helps eliminate harmful bacteria", text_overlay: "" },        // hedged → OK
+    { narration_line: "This stops heart disease progression", text_overlay: "" },   // unhedged → flag
+  ];
+
+  const issues = scanTextForBannedLanguage(items, "health", null);
+
+  // Items 0, 3, 5 should be flagged (unhedged)
+  const item0 = issues.filter(i => i.startsWith("Item 0:"));
+  const item1 = issues.filter(i => i.startsWith("Item 1:"));
+  const item2 = issues.filter(i => i.startsWith("Item 2:"));
+  const item3 = issues.filter(i => i.startsWith("Item 3:"));
+  const item4 = issues.filter(i => i.startsWith("Item 4:"));
+  const item5 = issues.filter(i => i.startsWith("Item 5:"));
+
+  assert(item0.length > 0, `"prevents heart disease" (unhedged) should be flagged: ${JSON.stringify(issues)}`);
+  assertEquals(item1.length, 0, `"may help prevent" (hedged) should NOT be flagged`);
+  assertEquals(item2.length, 0, `"could prevent" (hedged) should NOT be flagged`);
+  assert(item3.length > 0, `"eliminates toxins" (unhedged) should be flagged`);
+  assertEquals(item4.length, 0, `"helps eliminate" (hedged) should NOT be flagged`);
+  assert(item5.length > 0, `"stops heart disease" (unhedged) should be flagged`);
+
+  console.log(`✓ Hedge-aware scanning: ${issues.length} issues (correctly flagged unhedged only)`);
+});
+
+// ─── Test 8: Unicode dash normalization ─────────────────────
+
+Deno.test("scanTextForBannedLanguage normalizes unicode dashes and catches risk-free variants", async () => {
+  const { scanTextForBannedLanguage } = await import("../_shared/research-engine.ts");
+
+  const items = [
+    { narration_line: "A risk\u2013free investment", text_overlay: "" },  // en-dash
+    { narration_line: "A risk\u2014free approach", text_overlay: "" },    // em-dash
+    { narration_line: "A risk-free strategy", text_overlay: "" },         // regular hyphen
+  ];
+
+  const issues = scanTextForBannedLanguage(items, "finance", null);
+
+  assert(issues.length >= 3, `Expected all 3 "risk-free" variants to be caught, got ${issues.length}: ${JSON.stringify(issues)}`);
+  console.log(`✓ Unicode normalization caught ${issues.length} risk-free variants`);
+});

@@ -57,6 +57,8 @@ export interface StoryEngineAudit {
     total_replacements: number;
     has_hard_blocks: boolean;
     hard_blocks?: string[];
+    /** Terms that were sanitized (replaced) during compilation — for audit traceability */
+    sanitized_terms?: string[];
   };
 
   /** Deterministic RNG metadata */
@@ -95,7 +97,7 @@ export function buildStoryEngineAudit(params: {
   allowed_hook_categories: string[];
   render_hints?: { camera_bias: string[]; overlay_density: "minimal" | "moderate" | "dense" };
   preflight: { valid: boolean; errors: string[]; warnings: string[] };
-  compliance: { disclaimer?: string; total_replacements: number; has_hard_blocks: boolean; hard_blocks?: string[] };
+  compliance: { disclaimer?: string; total_replacements: number; has_hard_blocks: boolean; hard_blocks?: string[]; sanitized_terms?: string[] };
   rng_seed?: string;
   research?: ResearchBrief;
   research_intent?: ResearchIntentResult;

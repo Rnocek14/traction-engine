@@ -731,6 +731,7 @@ Return ONLY valid JSON array:
         // 5. Compile each scene through viral compiler
         const storyboardId = crypto.randomUUID();
         const compileHardBlocks: string[] = [];
+        const allSanitizedTerms: string[] = [];
         const compiledScenes = template.beats.map((beat, i) => {
           const content = sceneContents[i] || { subject: "A person", action: "interacts with the scene" };
 
@@ -751,6 +752,11 @@ Return ONLY valid JSON array:
           // Run compliance on compiled prompt
           const compliance = sanitizePromptText(compiled.prompt, vertical);
           const finalPrompt = compliance.text;
+
+          // Track sanitized terms for audit
+          if (compliance.replacements.length > 0) {
+            allSanitizedTerms.push(...compliance.replacements.map(r => `Scene ${i}: ${r}`));
+          }
 
           // Collect hard-block violations
           if (compliance.hard_blocks.length > 0) {
@@ -879,6 +885,7 @@ Return ONLY valid JSON array:
             disclaimer: storyCompliance.disclaimer,
             total_replacements: storyCompliance.total_replacements,
             has_hard_blocks: storyCompliance.has_hard_blocks,
+            sanitized_terms: allSanitizedTerms.length > 0 ? allSanitizedTerms : undefined,
           },
           rng_seed: tempId,
           research: researchBrief.activated ? researchBrief : undefined,
