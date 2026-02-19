@@ -13,6 +13,7 @@ import {
   Star,
   Clock,
   Camera,
+  Volume2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -133,6 +134,21 @@ export function SceneInspector({
             Regenerate
           </Button>
         </div>
+
+        <Separator />
+
+        {/* Narration Line */}
+        {(scene.narration_line || (scene as any).narration) && (
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium flex items-center gap-1">
+              <Volume2 className="h-3 w-3" />
+              Narration
+            </Label>
+            <div className="p-2 rounded-md bg-muted/50 border text-xs leading-relaxed italic text-foreground/80">
+              "{scene.narration_line || (scene as any).narration}"
+            </div>
+          </div>
+        )}
 
         <Separator />
 
