@@ -629,13 +629,29 @@ BEAT STRUCTURE (generate content for each):
 ${beatPrompts.join("\n")}
 
 For each beat, return:
-- subject: Who/what is on screen (e.g., "A fitness coach", "A supplement bottle")
+- subject: Who/what is on screen — MUST directly illustrate the narration fact (see VISUAL-NARRATION ALIGNMENT below)
 - action: What they DO physically (use action verbs: grabs, slams, points, reveals)
-- environment: Where (e.g., "modern kitchen, morning light")
+- environment: Where — MUST match the setting implied by the fact (not a random location)
 - mood: Single word (energetic, calm, shocking, determined)
 - text_overlay: Short punchy text for on-screen overlay (MAX 6 words, attention-grabbing)
 - narration_line: REQUIRED voiceover line for this beat (see rules below)
 ${researchBrief.activated && researchBrief.grounded ? '- claim_ids: Array of claim IDs this beat references (e.g., ["claim_001"])' : ""}
+
+═══ VISUAL-NARRATION ALIGNMENT (CRITICAL) ═══
+The subject and environment MUST visually depict the specific fact in the narration_line.
+The viewer should SEE what they HEAR. Mismatched visuals destroy credibility.
+
+BAD alignment (NEVER do this):
+- narration: "A satellite made of plywood was launched into space" → subject: "wood grain on a desk" ← WRONG, show the satellite!
+- narration: "Octopuses have three hearts" → subject: "A person reading a book" ← WRONG, show an octopus!
+- narration: "Banks earn $34B from overdraft fees" → subject: "A calculator on a table" ← BORING, show towering stacks of money flooding out of a bank vault
+
+GOOD alignment:
+- narration: "A satellite made of plywood was launched into space" → subject: "A wooden satellite orbiting Earth", environment: "outer space with Earth below"
+- narration: "Octopuses have three hearts" → subject: "An octopus with glowing hearts visible through translucent body"
+- narration: "Banks earn $34B from overdraft fees" → subject: "Massive golden money waterfall pouring from a bank building"
+
+Make every visual a LITERAL or DRAMATIC illustration of the fact. Never default to generic "person at desk" shots.
 
 ═══ NARRATION LINE RULES (CRITICAL) ═══
 Every narration_line MUST be:
