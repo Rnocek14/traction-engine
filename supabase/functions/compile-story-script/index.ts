@@ -199,9 +199,14 @@ Deno.serve(async (req) => {
     const storyboard = story.storyboard_json as {
       scenes?: Array<{
         index?: number;
+        sequence_index?: number;
         narration?: string;
+        narration_line?: string;
         beat_type?: string;
+        beat_role?: string;
+        role?: string;
         duration_seconds?: number;
+        duration_target?: number;
       }>;
     };
 
@@ -209,14 +214,16 @@ Deno.serve(async (req) => {
       throw new Error("Story has no scenes");
     }
 
-    // Extract ALL scene narrations - DO NOT filter out empty ones
+    // Extract ALL scene narrations - check both field names (narration_line from template, narration from legacy)
     // This ensures segment count === scene count
     const sceneNarrations: SceneNarration[] = storyboard.scenes.map((scene, idx) => ({
-      scene_index: scene.index ?? idx,
-      narration: scene.narration || "(pause)", // Use placeholder for empty
-      beat_type: scene.beat_type,
-      duration_seconds: scene.duration_seconds,
+      scene_index: scene.sequence_index ?? scene.index ?? idx,
+      narration: scene.narration_line || scene.narration || "(pause)", // narration_line is the template field
+      beat_type: scene.beat_role || scene.beat_type || scene.role,
+      duration_seconds: scene.duration_target || scene.duration_seconds,
     }));
+
+    console.log(`[compile-script] Scene narrations extracted:`, sceneNarrations.map(s => `[${s.scene_index}] "${s.narration.slice(0, 60)}..."`));
 
     // Concatenate raw narration for storage
     const rawNarration = sceneNarrations.map(s => s.narration).join(" ");

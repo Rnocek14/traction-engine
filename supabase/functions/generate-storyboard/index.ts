@@ -618,7 +618,7 @@ Deno.serve(async (req) => {
           return `Beat ${i + 1} (${beat.role}): ${beat.description}${isHook ? ` [hook_category: ${hookCategory}]` : ""}${isCTA ? ` [CTA: "${ctaResult.phrase}"]` : ""}`;
         });
 
-        const templatePrompt = `You are a viral content strategist. Given a concept and beat structure, generate scene content.
+        const templatePrompt = `You are an elite short-form video scriptwriter who creates VIRAL, FASCINATING content. Given a concept and beat structure, generate scene content.
 
 CONCEPT: "${concept}"
 STORY TYPE: ${selection.type} (${template.name})
@@ -633,9 +633,30 @@ For each beat, return:
 - action: What they DO physically (use action verbs: grabs, slams, points, reveals)
 - environment: Where (e.g., "modern kitchen, morning light")
 - mood: Single word (energetic, calm, shocking, determined)
-- text_overlay: Short text for on-screen overlay (if beat requires it)
-- narration_line: Optional TTS voiceover line
+- text_overlay: Short punchy text for on-screen overlay (MAX 6 words, attention-grabbing)
+- narration_line: REQUIRED voiceover line for this beat (see rules below)
 ${researchBrief.activated && researchBrief.grounded ? '- claim_ids: Array of claim IDs this beat references (e.g., ["claim_001"])' : ""}
+
+═══ NARRATION LINE RULES (CRITICAL) ═══
+Every narration_line MUST be:
+1. SPECIFIC and FACTUAL — include real numbers, statistics, or concrete details (not vague filler)
+2. SURPRISING — reveal something the viewer didn't know or wouldn't expect
+3. CONVERSATIONAL — written as spoken word, not formal text
+4. 10-25 words each — enough to be substantive but short enough for the beat
+
+BAD narration examples (NEVER do this):
+- "Did you know that debt can spread like a virus?" ← vague, no actual fact
+- "It's scarier than you think!" ← empty filler, says nothing
+- "You won't believe these facts!" ← clickbait with zero substance
+- "Want to know more? Watch again!" ← CTA without value
+
+GOOD narration examples:
+- "The average American carries $104,215 in total debt — that's triple what it was in 2003."
+- "Your phone checks in with Google's servers over 900 times per day, even while you sleep."
+- "Banks earn $34 billion a year just from overdraft fees — more than Netflix makes total."
+
+The narration IS the content. Without specific, mind-blowing facts, the video has no value.
+${!researchBrief.activated || !researchBrief.grounded ? '\nSince no research data is available, use your training knowledge for well-known, verifiable facts. Prioritize surprising statistics and counterintuitive truths.' : ''}
 
 IMPORTANT: Subject must be concrete and visual. Action must be PHYSICAL, not emotional.
 
@@ -651,13 +672,13 @@ Return ONLY valid JSON array:
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            model: "gpt-4o-mini",
+            model: "gpt-4o",
             messages: [
-              { role: "system", content: "Return only valid JSON arrays. No markdown, no explanation." },
+              { role: "system", content: "You are a viral content scriptwriter. Return only valid JSON arrays. Every narration_line must contain a specific, surprising fact or statistic — never generic filler. No markdown, no explanation." },
               { role: "user", content: templatePrompt },
             ],
             temperature: 0.7,
-            max_tokens: 1200,
+            max_tokens: 2000,
           }),
         });
 
