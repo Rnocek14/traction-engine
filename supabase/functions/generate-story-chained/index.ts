@@ -308,12 +308,35 @@ Deno.serve(async (req) => {
 
     console.log(`[chained] ✓ Queued scene 1 as job ${jobId}. Cron will handle scenes 2-${scenes.length}`);
 
+    // Fire-and-forget: trigger voiceover generation immediately if narration exists
+    // This decouples VO from video generation — VO is ready even if video providers fail
+    const hasNarration = scenes.some(s => s.narration_line && s.narration_line.trim().length > 0);
+    if (hasNarration) {
+      console.log(`[chained] Triggering voiceover for ${story_job_id} (fire-and-forget)`);
+      void fetch(`${supabaseUrl}/functions/v1/generate-story-voiceover`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${supabaseServiceKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ story_job_id }),
+      })
+        .then(async (r) => {
+          const text = await r.text().catch(() => "");
+          console.log(`[chained] generate-story-voiceover response: ${r.status}`, text.slice(0, 200));
+        })
+        .catch((e) => {
+          console.error(`[chained] VO fire-and-forget failed:`, e);
+        });
+    }
+
     return new Response(
       JSON.stringify({
         success: true,
         message: `Scene 1 queued. Scenes 2-${scenes.length} will chain automatically via cron.`,
         jobId,
         totalScenes: scenes.length,
+        voiceover_triggered: hasNarration,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

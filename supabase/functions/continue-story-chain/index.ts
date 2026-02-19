@@ -497,7 +497,6 @@ Deno.serve(async (req) => {
           .eq("id", story.id);
         
         // Fire-and-forget: request analysis without blocking story completion
-        // Cron is the guarantee; this is just for faster feedback
         console.log(`[chain-continue] Requesting analysis for ${story.id} (fire-and-forget)`);
         void fetch(`${supabaseUrl}/functions/v1/auto-rate-story`, {
           method: "POST",
@@ -514,6 +513,38 @@ Deno.serve(async (req) => {
           .catch((e) => {
             console.error(`[chain-continue] auto-rate-story fire-and-forget failed for ${story.id} (cron will retry):`, e);
           });
+        
+        // Fire-and-forget: trigger voiceover generation if narration exists and no VO yet
+        const hasNarration = scenes.some((s: { narration_line?: string }) => s.narration_line && s.narration_line.trim().length > 0);
+        if (hasNarration) {
+          // Check if VO already exists
+          const { data: existingVo } = await supabase
+            .from("story_voiceovers")
+            .select("id")
+            .eq("story_job_id", story.id)
+            .limit(1);
+          
+          if (!existingVo?.length) {
+            console.log(`[chain-continue] Triggering voiceover for ${story.id} (fire-and-forget)`);
+            void fetch(`${supabaseUrl}/functions/v1/generate-story-voiceover`, {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${supabaseServiceKey}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ story_job_id: story.id }),
+            })
+              .then(async (r) => {
+                const text = await r.text().catch(() => "");
+                console.log(`[chain-continue] generate-story-voiceover response for ${story.id}: ${r.status}`, text.slice(0, 200));
+              })
+              .catch((e) => {
+                console.error(`[chain-continue] VO fire-and-forget failed for ${story.id}:`, e);
+              });
+          } else {
+            console.log(`[chain-continue] VO already exists for ${story.id}, skipping`);
+          }
+        }
         
         results.push({ storyId: story.id, action: "completed" });
         continue;
@@ -983,19 +1014,37 @@ Deno.serve(async (req) => {
         }
       }
       
-      // === MODERATION LADDER RETRY LOOP (v2 - FIXED) ===
+      // === PROVIDER FALLBACK ORDER ===
+      // When a provider fails with credits/quota, try the next one
+      const PROVIDER_FALLBACK_ORDER: VideoProvider[] = ["runway", "luma", "sora"];
+      
+      function isProviderCreditsError(errorMsg: string): boolean {
+        const msg = (errorMsg || "").toLowerCase();
+        return (
+          msg.includes("no credits") ||
+          msg.includes("insufficient credits") ||
+          msg.includes("payment required") ||
+          msg.includes("credits") ||
+          msg.includes("quota") ||
+          msg.includes("rate limit")
+        );
+      }
+      
+      function getNextFallbackProvider(current: VideoProvider, attempted: Set<string>): VideoProvider | null {
+        for (const p of PROVIDER_FALLBACK_ORDER) {
+          if (p !== current && !attempted.has(p)) return p;
+        }
+        return null;
+      }
+
+      // === MODERATION LADDER RETRY LOOP (v3 - WITH PROVIDER FALLBACK) ===
       // Implements "AI sanitize first, then fallback" strategy for story-aware recovery
-      // Uses explicit stages: 0=raw, 1=sanitize, 2=fallback, 3=fail
-      // 
-      // FIX #3: locked_provider comes from story settings, not character continuity mode
-      // FIX #4: Chain layer owns retry - queue functions should skip their internal retry for story_mode
+      // NEW: Also handles credits/quota errors by falling back to next provider
       
       const storyMode: StoryMode = (story as { story_type?: string }).story_type === "myth" ? "myth" : 
         isFilmMode ? "film" : "short_story";
       
-      // FIX #3: locked_provider is a story-level setting, independent from character continuity
-      // Read from storyboard_json.locked_provider OR story_jobs.locked_provider if we add that column
-      const storyLockedProvider = lockedProviderName; // Already read from storyboard_json.locked_provider
+      const storyLockedProvider = lockedProviderName;
       
       let queueSuccess = false;
       let data: { success: boolean; job?: { id: string }; error?: string } = { success: false };
@@ -1004,124 +1053,154 @@ Deno.serve(async (req) => {
       let currentProviderEndpoint = providerEndpoint;
       let currentStartingFrame = startingFrameUrl;
       let moderationTelemetry: Record<string, unknown> | null = null;
-      let currentStage: LadderStage = 0; // Start at stage 0 (raw)
+      let currentStage: LadderStage = 0;
+      const attemptedProviders = new Set<string>([selectedProvider]);
+      const providerAttemptLog: string[] = [selectedProvider];
+      let providerFailReason: string | null = null;
       
-      // Max iterations = 4 (stages 0, 1, 2, then fail at 3)
       const MAX_LADDER_ITERATIONS = 4;
+      // Outer loop: provider fallback; Inner loop: moderation ladder per provider
+      let providerExhausted = false;
       
-      for (let iteration = 0; iteration < MAX_LADDER_ITERATIONS && !queueSuccess; iteration++) {
-        // Stage 0: Use prompt as-is (queue-video has its own retry, but we'll skip it for stories)
-        // Stage 1+: Use moderation ladder for story-aware recovery
+      while (!queueSuccess && !providerExhausted) {
+        // Reset moderation stage for each new provider attempt
+        currentStage = 0;
         
-        if (currentStage > 0) {
-          const ladderCtx: ModerationLadderContext = {
-            storyMode,
-            // FIX #3: Use story-level locked provider, not character continuity gated
-            lockedProvider: storyLockedProvider,
-            currentProvider,
-            // FIX #2: Pass original provider for correct fallback chain lookup
-            originalProvider: selectedProvider,
-            // FIX #1: Use explicit stage instead of attempt math
-            stage: currentStage,
-            originalPrompt: finalPrompt,
-            lastError: data.error,
-            sceneRole,
-            brutalityMode,
-          };
-          
-          const ladderResult = processModerationLadder(ladderCtx);
-          logModerationLadderDecision(nextSceneIndex, story.id, ladderResult);
-          
-          if (ladderResult.action === "fail") {
-            console.log(`[chain-continue] Moderation ladder exhausted for scene ${nextSceneIndex + 1}`);
+        for (let iteration = 0; iteration < MAX_LADDER_ITERATIONS && !queueSuccess; iteration++) {
+          if (currentStage > 0) {
+            const ladderCtx: ModerationLadderContext = {
+              storyMode,
+              lockedProvider: storyLockedProvider,
+              currentProvider,
+              originalProvider: selectedProvider,
+              stage: currentStage,
+              originalPrompt: finalPrompt,
+              lastError: data.error,
+              sceneRole,
+              brutalityMode,
+            };
+            
+            const ladderResult = processModerationLadder(ladderCtx);
+            logModerationLadderDecision(nextSceneIndex, story.id, ladderResult);
+            
+            if (ladderResult.action === "fail") {
+              console.log(`[chain-continue] Moderation ladder exhausted for scene ${nextSceneIndex + 1} on ${currentProvider}`);
+              moderationTelemetry = buildModerationTelemetryForDb(ladderResult.telemetry);
+              break; // Break inner loop, try next provider
+            }
+            
+            currentPrompt = ladderResult.prompt;
+            // Don't let moderation ladder switch provider - we handle that in outer loop
+            
+            if (ladderResult.dropReference) {
+              currentStartingFrame = undefined;
+              console.log(`[chain-continue] Moderation ladder: dropping reference frame for scene ${nextSceneIndex + 1}`);
+            }
+            
             moderationTelemetry = buildModerationTelemetryForDb(ladderResult.telemetry);
-            break;
+            console.log(`[chain-continue] Moderation stage ${currentStage}: ${ladderResult.action} on ${currentProvider}`);
           }
           
-          currentPrompt = ladderResult.prompt;
-          currentProvider = ladderResult.provider;
-          currentProviderEndpoint = {
-            sora: "queue-video",
-            runway: "queue-video-runway",
-            luma: "queue-video-luma",
-          }[currentProvider];
+          const attemptDuration = processDuration(nextScene.duration_target || 5, sceneRole, currentProvider);
           
-          // Drop reference frame if ladder says so (nuclear option)
-          if (ladderResult.dropReference) {
-            currentStartingFrame = undefined;
-            console.log(`[chain-continue] Moderation ladder: dropping reference frame for scene ${nextSceneIndex + 1}`);
+          const response = await fetch(`${supabaseUrl}/functions/v1/${currentProviderEndpoint}`, {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${supabaseServiceKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              script_run_id: scriptRunId,
+              prompt: currentPrompt,
+              settings: {
+                size: "720x1280",
+                seconds: attemptDuration,
+              },
+              starting_frame_url: currentStartingFrame,
+              motif_context: motifContext,
+              skip_internal_retry: storyMode !== "default",
+            }),
+          });
+
+          data = await response.json();
+
+          if (response.ok && data.success) {
+            queueSuccess = true;
+            console.log(`[chain-continue] ✓ Queue success at stage ${currentStage} on ${currentProvider}`);
+          } else {
+            const errorMsg = data.error || `HTTP ${response.status}`;
+            console.error(`[chain-continue] Queue stage ${currentStage} failed on ${currentProvider}: ${errorMsg}`);
+            
+            // Credits/quota error → try next provider (skip moderation ladder)
+            if (isProviderCreditsError(errorMsg)) {
+              providerFailReason = errorMsg;
+              console.warn(`[chain-continue] Credits/quota error on ${currentProvider} — attempting provider fallback`);
+              break; // Break inner moderation loop, try next provider
+            }
+            
+            // Non-moderation error → stop
+            if (!isModerationRelatedError(errorMsg)) {
+              console.log(`[chain-continue] Non-moderation error, not retrying via ladder: ${errorMsg}`);
+              providerExhausted = true;
+              break;
+            }
+            
+            currentStage = (currentStage + 1) as LadderStage;
+            console.log(`[chain-continue] Advancing to moderation stage ${currentStage}`);
           }
-          
-          // Track telemetry for DB
-          moderationTelemetry = buildModerationTelemetryForDb(ladderResult.telemetry);
-          
-          console.log(`[chain-continue] Moderation stage ${currentStage}: ${ladderResult.action} on ${currentProvider}`);
         }
         
-        // Recalculate duration for potentially new provider
-        const attemptDuration = processDuration(nextScene.duration_target || 5, sceneRole, currentProvider);
+        // If success or non-retryable failure, stop
+        if (queueSuccess || providerExhausted) break;
         
-        const response = await fetch(`${supabaseUrl}/functions/v1/${currentProviderEndpoint}`, {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${supabaseServiceKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            script_run_id: scriptRunId,
-            prompt: currentPrompt,
-            settings: {
-              size: "720x1280",
-              seconds: attemptDuration,
-            },
-            starting_frame_url: currentStartingFrame,
-            motif_context: motifContext,
-            // FIX #4: Tell queue-video to skip its internal retry for story mode
-            // (chain layer owns the moderation ladder for stories)
-            skip_internal_retry: storyMode !== "default",
-          }),
-        });
-
-        data = await response.json();
-
-        if (response.ok && data.success) {
-          queueSuccess = true;
-          console.log(`[chain-continue] ✓ Queue success at stage ${currentStage}`);
+        // Try next provider fallback (only for credits/quota errors)
+        if (providerFailReason && !storyLockedProvider) {
+          const nextProvider = getNextFallbackProvider(currentProvider, attemptedProviders);
+          if (nextProvider) {
+            console.log(`[chain-continue] Provider fallback: ${currentProvider} → ${nextProvider}`);
+            currentProvider = nextProvider;
+            currentProviderEndpoint = {
+              sora: "queue-video",
+              runway: "queue-video-runway",
+              luma: "queue-video-luma",
+            }[currentProvider];
+            attemptedProviders.add(currentProvider);
+            providerAttemptLog.push(currentProvider);
+            currentPrompt = finalPrompt; // Reset prompt for new provider
+            currentStartingFrame = startingFrameUrl; // Reset frame
+            providerFailReason = null;
+            // Continue outer while loop with new provider
+          } else {
+            console.error(`[chain-continue] All providers exhausted for scene ${nextSceneIndex + 1}`);
+            providerExhausted = true;
+          }
+        } else if (providerFailReason && storyLockedProvider) {
+          console.error(`[chain-continue] Credits error on locked provider ${currentProvider} — cannot fallback`);
+          providerExhausted = true;
         } else {
-          const errorMsg = data.error || `HTTP ${response.status}`;
-          console.error(`[chain-continue] Queue stage ${currentStage} failed: ${errorMsg}`);
-          
-          // Check if this is a credits/quota error - stop immediately
-          const isQuotaError = errorMsg.includes("credits") || 
-                               errorMsg.includes("quota") || 
-                               errorMsg.includes("rate limit");
-          
-          if (isQuotaError) {
-            console.error(`[chain-continue] Quota/credits error detected - marking story as partial`);
-            await supabase
-              .from("story_jobs")
-              .update({ status: "partial" })
-              .eq("id", story.id);
-            results.push({ storyId: story.id, action: "quota_failed", nextScene: nextSceneIndex });
-            break;
-          }
-          
-          // Check if this is a moderation error worth retrying
-          if (!isModerationRelatedError(errorMsg)) {
-            console.log(`[chain-continue] Non-moderation error, not retrying via ladder: ${errorMsg}`);
-            break;
-          }
-          
-          // Advance to next stage for moderation retry
-          currentStage = (currentStage + 1) as LadderStage;
-          console.log(`[chain-continue] Advancing to moderation stage ${currentStage}`);
+          // Moderation exhausted on this provider, no credits error → stop
+          providerExhausted = true;
         }
       }
       
-      // Handle final failure
+      // Handle final failure — DON'T mark story as partial, just skip this scene
+      // The chain will retry on next cron tick if provider recovers
       if (!queueSuccess) {
-        console.error(`[chain-continue] Failed to queue scene ${nextSceneIndex + 1} after exhausting moderation ladder (stage ${currentStage})`);
-        results.push({ storyId: story.id, action: "queue_failed", nextScene: nextSceneIndex });
+        console.error(`[chain-continue] Failed to queue scene ${nextSceneIndex + 1} (providers attempted: ${providerAttemptLog.join("→")})`);
+        
+        // Only mark partial if ALL providers are exhausted (credits on all)
+        if (providerExhausted && providerFailReason) {
+          await supabase
+            .from("story_jobs")
+            .update({ status: "partial" })
+            .eq("id", story.id);
+        }
+        
+        results.push({ 
+          storyId: story.id, 
+          action: "queue_failed", 
+          nextScene: nextSceneIndex,
+        });
         continue;
       }
 
@@ -1134,6 +1213,7 @@ Deno.serve(async (req) => {
           had_starting_frame: !!currentStartingFrame,
           provider_selected: currentProvider,
           provider_original: selectedProvider,
+          provider_attempts: providerAttemptLog, // NEW: track fallback chain
           scene_role: sceneRole,
           // Spectacle and coverage audit fields
           is_spectacle: spectacleHandling.isSpectacle,
@@ -1148,7 +1228,7 @@ Deno.serve(async (req) => {
           capture_difficulty: difficulty,
           capture_is_interior: isInterior,
           capture_has_metal: hasMetalArmor,
-          // Moderation ladder telemetry (NEW)
+          // Moderation ladder telemetry
           ...(moderationTelemetry || {}),
           // Compliance telemetry
           compliance_modified: complianceResult?.was_modified || false,
@@ -1173,7 +1253,7 @@ Deno.serve(async (req) => {
         .update({ completed_clips: highestDoneIndex + 1 })
         .eq("id", story.id);
 
-      console.log(`[chain-continue] ✓ Queued scene ${nextSceneIndex + 1} as job ${jobId}`);
+      console.log(`[chain-continue] ✓ Queued scene ${nextSceneIndex + 1} as job ${jobId} (provider: ${currentProvider}${providerAttemptLog.length > 1 ? ` after fallback from ${providerAttemptLog.slice(0, -1).join("→")}` : ""})`);
       results.push({ storyId: story.id, action: "queued", nextScene: nextSceneIndex });
     }
 
