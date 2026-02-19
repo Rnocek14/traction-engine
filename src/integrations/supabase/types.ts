@@ -923,6 +923,33 @@ export type Database = {
           },
         ]
       }
+      story_engine_debug_runs: {
+        Row: {
+          account_id: string | null
+          created_at: string
+          debug_tag: string | null
+          id: string
+          job_id: string | null
+          payload: Json
+        }
+        Insert: {
+          account_id?: string | null
+          created_at?: string
+          debug_tag?: string | null
+          id?: string
+          job_id?: string | null
+          payload?: Json
+        }
+        Update: {
+          account_id?: string | null
+          created_at?: string
+          debug_tag?: string | null
+          id?: string
+          job_id?: string | null
+          payload?: Json
+        }
+        Relationships: []
+      }
       story_jobs: {
         Row: {
           account_id: string
