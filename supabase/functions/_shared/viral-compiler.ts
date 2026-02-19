@@ -37,6 +37,8 @@ export interface ViralSceneInput {
 
 // ─── Compiled Output ────────────────────────────────────────
 
+export type CameraLeadSource = "type_role" | "beat_suggestion" | "default";
+
 export interface ViralPromptOutput {
   scene_id: string;
   beat_index: number;
@@ -47,6 +49,8 @@ export interface ViralPromptOutput {
   truncation_method?: "words" | "chars";
   beat_role: string;
   camera_suggestion: string;
+  /** How the camera lead was resolved */
+  camera_lead_source: CameraLeadSource;
   duration_target: number;
   text_overlay?: string;
   hook_category?: string;
@@ -212,7 +216,18 @@ export function compileViralPrompt(
   const storyType = constraints.story_type;
   const typeLeads = STORY_TYPE_CAMERA_LEADS[storyType];
   const beatLead = typeLeads?.[scene.beat.role];
-  const cameraLead = beatLead || `${cameraDir}:`;
+  let cameraLead: string;
+  let cameraLeadSource: CameraLeadSource;
+  if (beatLead) {
+    cameraLead = beatLead;
+    cameraLeadSource = "type_role";
+  } else if (CAMERA_MAP[camera]) {
+    cameraLead = `${cameraDir}:`;
+    cameraLeadSource = "beat_suggestion";
+  } else {
+    cameraLead = `${CAMERA_MAP["medium"]}:`;
+    cameraLeadSource = "default";
+  }
   
   // Front-load camera + subject + action as a single sentence (first ~12 words)
   let coreSentence = `${cameraLead} ${scene.subject} ${scene.action}`;
@@ -259,6 +274,7 @@ export function compileViralPrompt(
     truncation_method: method,
     beat_role: scene.beat.role,
     camera_suggestion: camera,
+    camera_lead_source: cameraLeadSource,
     duration_target: duration,
     text_overlay: scene.text_overlay,
     hook_category: scene.hook_category,

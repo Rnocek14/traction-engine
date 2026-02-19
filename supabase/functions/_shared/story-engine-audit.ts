@@ -14,6 +14,9 @@ import type { ContentGoal, StoryType, EmotionalIntensity } from "./story-types.t
 // ─── Canonical Audit Shape ──────────────────────────────────
 
 export interface StoryEngineAudit {
+  /** Schema version — bump on breaking changes, never rename existing fields */
+  version: string;
+
   /** What the user/system requested */
   request: {
     vertical: ContentVertical;
@@ -87,6 +90,7 @@ export function buildStoryEngineAudit(params: {
   rng_seed?: string;
 }): StoryEngineAudit {
   return {
+    version: "v1",
     request: {
       vertical: params.vertical,
       goal: params.goal,
