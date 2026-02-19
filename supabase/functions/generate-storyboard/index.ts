@@ -880,15 +880,17 @@ Return ONLY valid JSON array:
         }
 
         // Bucket-aware redistribution (fix #2)
+        // Always takes the smallest valid step in the needed direction; stops when close enough or no moves remain.
         function bucketAwareRebalance(durations: number[], targetTotal: number, provider: string): number[] {
           const buckets = PROVIDER_BUCKETS[provider] || PROVIDER_BUCKETS.sora;
+          const minBucketStep = Math.min(...buckets.slice(1).map((b, i) => b - buckets[i]));
           const result = [...durations];
           const MAX_ITERATIONS = 10;
 
           for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
             const currentTotal = result.reduce((s, d) => s + d, 0);
             const delta = targetTotal - currentTotal;
-            if (Math.abs(delta) < 2) break; // close enough (within one bucket step)
+            if (Math.abs(delta) < minBucketStep) break; // close enough
 
             if (delta > 0) {
               // Need to increase: find scene where bump to next bucket costs least
@@ -898,7 +900,7 @@ Return ONLY valid JSON array:
                 const nextBucket = buckets.find(b => b > result[i]);
                 if (nextBucket) {
                   const cost = nextBucket - result[i];
-                  if (cost <= delta + 1 && cost < bestCost) {
+                  if (cost < bestCost) {
                     bestCost = cost;
                     bestIdx = i;
                   }
@@ -916,7 +918,7 @@ Return ONLY valid JSON array:
                 if (prevBuckets.length > 0) {
                   const prevBucket = prevBuckets[prevBuckets.length - 1];
                   const cost = result[i] - prevBucket;
-                  if (cost <= Math.abs(delta) + 1 && cost < bestCost) {
+                  if (cost < bestCost) {
                     bestCost = cost;
                     bestIdx = i;
                   }
@@ -951,14 +953,12 @@ Return ONLY valid JSON array:
           ? Math.abs(totalEstimatedAudio - totalTemplateDuration) / totalTemplateDuration
           : 1;
 
-        // Overflow guard — push to preflight warnings, not scene props (fix #3)
+        // Overflow guard — store warning message for later injection into preflight (fix #3 — scope-safe)
         const maxFeasibleTotal = compiledScenes.length * MAX_CLIP_DURATION;
-        let hasOverflowWarning = false;
+        let overflowWarningMsg: string | undefined;
         if (totalEstimatedAudio > maxFeasibleTotal * 1.15) {
-          const msg = `Narration overflow: ${totalEstimatedAudio.toFixed(1)}s estimated vs ${maxFeasibleTotal}s max capacity (${compiledScenes.length} beats × ${MAX_CLIP_DURATION}s). Consider shortening narration.`;
-          console.warn(`[generate-storyboard] ⚠️ ${msg}`);
-          hasOverflowWarning = true;
-          // Will be added to preflight.warnings after preflight runs
+          overflowWarningMsg = `Narration overflow: ${totalEstimatedAudio.toFixed(1)}s estimated vs ${maxFeasibleTotal}s max capacity (${compiledScenes.length} beats × ${MAX_CLIP_DURATION}s). Consider shortening narration.`;
+          console.warn(`[generate-storyboard] ⚠️ ${overflowWarningMsg}`);
         }
 
         // Build timing diagnostics for audit
@@ -1016,9 +1016,9 @@ Return ONLY valid JSON array:
             final_total: finalTotal,
             drift_pct: Math.round(driftPct * 100),
             adjusted: true,
-            provider_buckets: defaultProvider,
+            provider_buckets: `${defaultProvider}:${(PROVIDER_BUCKETS[defaultProvider]||[]).join(",")}`,
             per_scene: rebalanced,
-            overflow_warning: hasOverflowWarning || undefined,
+            overflow_warning: !!overflowWarningMsg || undefined,
           };
         } else {
           console.log(`[generate-storyboard] Narration drift ${(driftPct * 100).toFixed(0)}% — within tolerance, snapping template durations`);
@@ -1034,9 +1034,9 @@ Return ONLY valid JSON array:
             final_total: finalTotal,
             drift_pct: Math.round(driftPct * 100),
             adjusted: false,
-            provider_buckets: defaultProvider,
+            provider_buckets: `${defaultProvider}:${(PROVIDER_BUCKETS[defaultProvider]||[]).join(",")}`,
             per_scene: compiledScenes.map(s => s.duration_target),
-            overflow_warning: hasOverflowWarning || undefined,
+            overflow_warning: !!overflowWarningMsg || undefined,
           };
         }
 
@@ -1075,9 +1075,9 @@ Return ONLY valid JSON array:
           console.warn(`[generate-storyboard] Preflight warnings: ${preflight.warnings.join("; ")}`);
         }
 
-        // Inject overflow warning into preflight (fix #3 — proper audit storage)
-        if (hasOverflowWarning) {
-          preflight.warnings.push(`Narration overflow: estimated ${totalEstimatedAudio.toFixed(1)}s audio exceeds ${maxFeasibleTotal}s max video capacity`);
+        // Inject overflow warning into preflight (fix #3 — scope-safe string reference)
+        if (overflowWarningMsg) {
+          preflight.warnings.push(overflowWarningMsg);
         }
 
         // 6b. Claim coverage preflight (when research is active)
