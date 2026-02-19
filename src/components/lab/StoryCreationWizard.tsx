@@ -39,6 +39,7 @@ import {
   ArrowRight,
   Zap,
   Info,
+  Search,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
@@ -47,6 +48,7 @@ import {
   type ContentVertical,
   type ContentGoal,
   type EmotionalIntensity,
+  type ResearchMode,
   STORY_TYPE_META,
   VERTICAL_META,
   GOAL_META,
@@ -85,6 +87,7 @@ export function StoryCreationWizard({
   const [goal, setGoal] = useState<ContentGoal>("reach");
   const [storyTypeOverride, setStoryTypeOverride] = useState<StoryType | "auto">("auto");
   const [intensity, setIntensity] = useState<EmotionalIntensity | "unset">("unset");
+  const [researchMode, setResearchMode] = useState<ResearchMode>("auto");
   
   // Legacy settings (still needed for some modes)
   const [tier, setTier] = useState<"volume" | "hero">("volume");
@@ -107,6 +110,7 @@ export function StoryCreationWizard({
         goal,
         emotional_intensity: intensity === "unset" ? undefined : intensity,
         requested_story_type: storyTypeOverride === "auto" ? undefined : storyTypeOverride,
+        research_mode: researchMode,
       };
       
       // Single edge function call — backend runs routeStory() and decides compiler
@@ -331,6 +335,29 @@ export function StoryCreationWizard({
               <span>Story type will be selected automatically based on your vertical + goal. Override only if you have a specific format in mind.</span>
             </div>
           )}
+          
+          {/* Research Mode */}
+          <div className="flex items-center justify-between px-1">
+            <div className="flex items-center gap-2">
+              <Search className="h-3.5 w-3.5 text-muted-foreground" />
+              <div>
+                <Label className="text-xs">Research Mode</Label>
+                <p className="text-[10px] text-muted-foreground">
+                  {researchMode === "auto" ? "Auto-detects factual content" : researchMode === "on" ? "Always research sources" : "Skip research"}
+                </p>
+              </div>
+            </div>
+            <Select value={researchMode} onValueChange={(v) => setResearchMode(v as ResearchMode)}>
+              <SelectTrigger className="h-8 text-xs w-24">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="auto" className="text-xs">⚡ Auto</SelectItem>
+                <SelectItem value="on" className="text-xs">🔍 On</SelectItem>
+                <SelectItem value="off" className="text-xs">✏️ Off</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
           
           {/* Advanced Settings */}
           <Collapsible>

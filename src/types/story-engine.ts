@@ -79,6 +79,43 @@ export const GOAL_META: Record<ContentGoal, { label: string; icon: string }> = {
   retain:    { label: "Retain",    icon: "🔁" },
 };
 
+// ─── Research Types (Frontend Mirror) ───────────────────────
+
+export type ResearchMode = "auto" | "on" | "off";
+export type RetrievalMethod = "web" | "provided_sources" | "none";
+export type EvidenceLevel = "strong" | "moderate" | "mixed" | "insufficient";
+
+export interface ResearchClaim {
+  claim_id: string;
+  statement: string;
+  evidence_level: EvidenceLevel;
+  source_url?: string;
+  source_title?: string;
+  do_not_say?: string[];
+}
+
+export interface ResearchSource {
+  title: string;
+  url: string;
+  publisher?: string;
+  excerpt?: string;
+  retrieved_at: string;
+}
+
+export interface ResearchBrief {
+  mode: ResearchMode;
+  activated: boolean;
+  grounded: boolean;
+  retrieval: RetrievalMethod;
+  failure_reason?: string;
+  concept_intent: string;
+  queries: string[];
+  sources: ResearchSource[];
+  claims: ResearchClaim[];
+  angles: string[];
+  do_not_say_global: string[];
+}
+
 // ─── Helpers ────────────────────────────────────────────────
 
 export function isViralStoryType(type: StoryType): boolean {
