@@ -139,6 +139,31 @@ export function StoryCreationWizard({
         "viral_hook";
       
       // Build the storyboard with engine config persisted
+      // If template mode returned a canonical audit, use it verbatim
+      const storyEngineAudit = data?.story_engine_audit || {
+        version: "v1",
+        request: {
+          vertical: enginePayload?.vertical,
+          goal: enginePayload?.goal,
+          emotional_intensity: enginePayload?.emotional_intensity,
+          requested_story_type: enginePayload?.requested_story_type,
+        },
+        selection: {
+          resolved_story_type: resolvedStoryType,
+          reason: data?.selection_reason,
+          effective_intensity: data?.effective_intensity,
+        },
+        constraints: {
+          compiler: data?.compiler,
+          moderation_level: data?.moderation_level,
+          allowed_tones: data?.allowed_tones,
+          allowed_hook_categories: data?.allowed_hook_categories,
+        },
+        preflight: data?.preflight || { valid: true, errors: [], warnings: [] },
+        compliance: data?.compliance || { total_replacements: 0, has_hard_blocks: false },
+        rng: { version: "v1" },
+      };
+
       const fullStoryboard = {
         scenes: data.scenes || [],
         tier,
@@ -150,29 +175,8 @@ export function StoryCreationWizard({
         soft_continuity: true,
         brutality_mode: brutalityMode,
         sanitization_level: brutalityMode ? "off" : "soft",
-        story_engine: {
-          version: "v1",
-          request: {
-            vertical: enginePayload?.vertical,
-            goal: enginePayload?.goal,
-            emotional_intensity: enginePayload?.emotional_intensity,
-            requested_story_type: enginePayload?.requested_story_type,
-          },
-          selection: {
-            resolved_story_type: resolvedStoryType,
-            reason: data?.selection_reason,
-            effective_intensity: data?.effective_intensity,
-          },
-          constraints: {
-            compiler: data?.compiler,
-            moderation_level: data?.moderation_level,
-            allowed_tones: data?.allowed_tones,
-            allowed_hook_categories: data?.allowed_hook_categories,
-          },
-          preflight: data?.preflight || { valid: true, errors: [], warnings: [] },
-          compliance: data?.compliance || { total_replacements: 0, has_hard_blocks: false },
-          rng: { version: "v1" },
-        },
+        generator_mode: data?.generator_mode || "legacy",
+        story_engine: storyEngineAudit,
       };
       
       const { data: newStory, error: insertError } = await supabase
