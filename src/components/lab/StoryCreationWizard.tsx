@@ -1,15 +1,15 @@
 /**
- * StoryCreationWizard
+ * StoryCreationWizard v2.0
  * 
- * A simplified story creation flow that funnels directly to Story Studio.
- * This replaces the monolithic StoryBuilderPanel for the creation step only.
+ * Integrated with Story Type Router architecture.
+ * Replaces old style presets with proper vertical/goal/story-type selection.
  * 
- * Features:
- * - Concept input
- * - Story type selector
- * - Scene count selector
- * - Style presets (replacing 5+ confusing toggles)
- * - Single "Build Story" action that navigates to /story/:id
+ * Flow:
+ * 1. Enter concept
+ * 2. Select vertical (guardrails)
+ * 3. Select goal (determines story type)
+ * 4. Optionally override story type or intensity
+ * 5. Build Story → navigates to /stories/:id
  */
 
 import { useState } from "react";
@@ -37,48 +37,21 @@ import {
   Loader2,
   Sparkles,
   ArrowRight,
+  Zap,
+  Info,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { STORY_TYPE_CONFIGS, type StoryType } from "@/lib/continuity-scoring";
-
-// Style presets that replace multiple confusing toggles
-const STYLE_PRESETS = {
-  standard: {
-    label: "Standard",
-    description: "Default multi-provider routing for best quality per scene",
-    emoji: "🎥",
-    filmMode: false,
-    mythMode: false,
-    characterContinuityMode: false,
-  },
-  cinematic: {
-    label: "Cinematic",
-    description: "Film-first I2V chaining for professional visual continuity",
-    emoji: "🎬",
-    filmMode: true,
-    mythMode: false,
-    characterContinuityMode: false,
-  },
-  storybook: {
-    label: "Storybook",
-    description: "Symbolic silhouettes, no faces, fable-like aesthetic",
-    emoji: "📜",
-    filmMode: false,
-    mythMode: true,
-    characterContinuityMode: false,
-  },
-  character: {
-    label: "Character Focus",
-    description: "Single provider for consistent character appearance",
-    emoji: "🔗",
-    filmMode: false,
-    mythMode: false,
-    characterContinuityMode: true,
-  },
-} as const;
-
-type StylePreset = keyof typeof STYLE_PRESETS;
+import {
+  type StoryType,
+  type ContentVertical,
+  type ContentGoal,
+  type EmotionalIntensity,
+  STORY_TYPE_META,
+  VERTICAL_META,
+  GOAL_META,
+  isViralStoryType,
+} from "@/types/story-engine";
 
 const DEFAULT_ACCOUNT_ID = "lab_sandbox";
 
@@ -96,24 +69,23 @@ export function StoryCreationWizard({
 
   // Core inputs
   const [concept, setConcept] = useState("");
-  const [storyType, setStoryType] = useState<StoryType>("short_story");
-  const [sceneCount, setSceneCount] = useState<number>(5);
+  
+  // New: Story Engine inputs
+  const [vertical, setVertical] = useState<ContentVertical>("entertainment");
+  const [goal, setGoal] = useState<ContentGoal>("reach");
+  const [storyTypeOverride, setStoryTypeOverride] = useState<StoryType | "auto">("auto");
+  const [intensity, setIntensity] = useState<EmotionalIntensity | "unset">("unset");
+  
+  // Legacy settings (still needed for some modes)
   const [tier, setTier] = useState<"volume" | "hero">("volume");
-  
-  // Style preset (replaces multiple toggles)
-  const [stylePreset, setStylePreset] = useState<StylePreset>("standard");
-  
-  // Advanced settings (collapsed)
   const [lockedProvider, setLockedProvider] = useState<"sora" | "runway" | "luma">("sora");
+  const [characterContinuityMode, setCharacterContinuityMode] = useState(false);
   const [brutalityMode, setBrutalityMode] = useState(false);
   
   const [isGenerating, setIsGenerating] = useState(false);
 
-  // Derive mode flags from preset
-  const presetConfig = STYLE_PRESETS[stylePreset];
-  const filmMode = presetConfig.filmMode;
-  const mythMode = presetConfig.mythMode;
-  const characterContinuityMode = presetConfig.characterContinuityMode;
+  // Determine if this is a cinematic/myth override
+  const isMythOverride = storyTypeOverride === "myth";
 
   // Generate story mutation
   const generateStory = useMutation({
@@ -122,56 +94,42 @@ export function StoryCreationWizard({
       
       setIsGenerating(true);
       
+      // Build the story engine payload
+      const enginePayload = {
+        vertical,
+        goal,
+        emotional_intensity: intensity === "unset" ? undefined : intensity,
+        requested_story_type: storyTypeOverride === "auto" ? undefined : storyTypeOverride,
+      };
+      
       // Myth Mode uses the storybook-style generator
-      if (mythMode) {
+      if (isMythOverride) {
         const { data, error } = await supabase.functions.invoke("create-story-myth-mode", {
           body: {
             account_id: DEFAULT_ACCOUNT_ID,
             premise: concept.trim(),
-            scene_count: sceneCount,
+            scene_count: 5,
+            story_engine: enginePayload,
           },
         });
         
         if (error) throw error;
         if (data?.error) throw new Error(data.error);
         
-        return {
-          story_job_id: data.story?.id,
-          myth_mode: true,
-        };
+        return { story_job_id: data.story?.id };
       }
       
-      // Film Mode uses the film-first generator
-      if (filmMode) {
-        const { data, error } = await supabase.functions.invoke("create-story-film-mode", {
-          body: {
-            account_id: DEFAULT_ACCOUNT_ID,
-            premise: concept.trim(),
-            scene_count: sceneCount,
-            tier,
-          },
-        });
-        
-        if (error) throw error;
-        if (data?.error) throw new Error(data.error);
-        
-        return {
-          story_job_id: data.story?.id,
-          film_mode: true,
-        };
-      }
-      
-      // Standard/Character Focus: use generate-storyboard
+      // Standard path: use generate-storyboard with story engine config
       const { data, error } = await supabase.functions.invoke("generate-storyboard", {
         body: {
           concept: concept.trim(),
-          story_type: storyType,
+          story_type: storyTypeOverride === "auto" ? undefined : storyTypeOverride,
           tier,
-          scene_count: sceneCount,
-          // Character continuity settings
+          // Story Engine config (new)
+          story_engine: enginePayload,
+          // Legacy settings
           character_continuity_mode: characterContinuityMode,
           locked_provider: characterContinuityMode ? lockedProvider : undefined,
-          // Brutality mode for intense content
           brutality_mode: brutalityMode,
           sanitization_level: brutalityMode ? "off" : "soft",
         },
@@ -197,14 +155,18 @@ export function StoryCreationWizard({
         soft_continuity: true,
         brutality_mode: brutalityMode,
         sanitization_level: brutalityMode ? "off" : "soft",
+        // Persist story engine config
+        story_engine: enginePayload,
       };
+      
+      const resolvedStoryType = data.resolved_story_type || storyTypeOverride || "viral_hook";
       
       const { data: newStory, error: insertError } = await supabase
         .from("story_jobs")
         .insert([{
           account_id: DEFAULT_ACCOUNT_ID,
           title: data.title || `Story ${new Date().toLocaleDateString()}`,
-          story_type: storyType,
+          story_type: resolvedStoryType === "auto" ? "viral_hook" : resolvedStoryType,
           storyboard_json: JSON.parse(JSON.stringify(fullStoryboard)),
           continuity_anchors: JSON.parse(JSON.stringify(data.anchors || {})),
           total_clips: (data.scenes || []).length,
@@ -221,6 +183,7 @@ export function StoryCreationWizard({
       setIsGenerating(false);
       queryClient.invalidateQueries({ queryKey: ["story-jobs"] });
       queryClient.invalidateQueries({ queryKey: ["recent-story"] });
+      queryClient.invalidateQueries({ queryKey: ["stories-list"] });
       
       toast({
         title: "Story ready!",
@@ -243,7 +206,6 @@ export function StoryCreationWizard({
 
   return (
     <div className={`flex flex-col h-full p-4 ${className}`}>
-      {/* Main Creation Card */}
       <Card className="border-primary/30 bg-primary/5 max-w-xl mx-auto w-full">
         <CardContent className="p-4 space-y-4">
           {/* Header */}
@@ -258,41 +220,64 @@ export function StoryCreationWizard({
             <Textarea
               value={concept}
               onChange={(e) => setConcept(e.target.value)}
-              placeholder="E.g., A lonely astronaut discovers a garden growing on Mars..."
+              placeholder="E.g., 3 supplement mistakes that are wasting your money..."
               className="h-24 text-sm resize-none"
             />
           </div>
           
-          {/* Quick Settings Row */}
-          <div className="grid grid-cols-3 gap-3">
-            {/* Story Type */}
+          {/* Vertical + Goal Row */}
+          <div className="grid grid-cols-2 gap-3">
+            {/* Vertical */}
             <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">Type</Label>
-              <Select value={storyType} onValueChange={(v) => setStoryType(v as StoryType)}>
+              <Label className="text-xs text-muted-foreground">Vertical</Label>
+              <Select value={vertical} onValueChange={(v) => setVertical(v as ContentVertical)}>
                 <SelectTrigger className="h-9 text-xs">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {Object.entries(STORY_TYPE_CONFIGS).map(([key, cfg]) => (
+                  {Object.entries(VERTICAL_META).map(([key, meta]) => (
                     <SelectItem key={key} value={key} className="text-xs">
-                      {cfg.name}
+                      {meta.icon} {meta.label}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
             
-            {/* Scene Count */}
+            {/* Goal */}
             <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">Scenes</Label>
-              <Select value={String(sceneCount)} onValueChange={(v) => setSceneCount(Number(v))}>
+              <Label className="text-xs text-muted-foreground">Goal</Label>
+              <Select value={goal} onValueChange={(v) => setGoal(v as ContentGoal)}>
                 <SelectTrigger className="h-9 text-xs">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {[3, 5, 7, 10].map(n => (
-                    <SelectItem key={n} value={String(n)} className="text-xs">
-                      {n} scenes
+                  {Object.entries(GOAL_META).map(([key, meta]) => (
+                    <SelectItem key={key} value={key} className="text-xs">
+                      {meta.icon} {meta.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          
+          {/* Story Type + Tier Row */}
+          <div className="grid grid-cols-2 gap-3">
+            {/* Story Type */}
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Story Type</Label>
+              <Select value={storyTypeOverride} onValueChange={(v) => setStoryTypeOverride(v as StoryType | "auto")}>
+                <SelectTrigger className="h-9 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto" className="text-xs">
+                    ⚡ Auto (recommended)
+                  </SelectItem>
+                  {Object.entries(STORY_TYPE_META).map(([key, meta]) => (
+                    <SelectItem key={key} value={key} className="text-xs">
+                      {meta.icon} {meta.label}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -307,61 +292,83 @@ export function StoryCreationWizard({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="volume" className="text-xs">
-                    📦 Volume
-                  </SelectItem>
-                  <SelectItem value="hero" className="text-xs">
-                    ⭐ Hero
-                  </SelectItem>
+                  <SelectItem value="volume" className="text-xs">📦 Volume</SelectItem>
+                  <SelectItem value="hero" className="text-xs">⭐ Hero</SelectItem>
                 </SelectContent>
               </Select>
             </div>
           </div>
           
-          {/* Style Preset */}
-          <div className="space-y-2">
-            <Label className="text-xs text-muted-foreground">Style</Label>
-            <div className="grid grid-cols-2 gap-2">
-              {Object.entries(STYLE_PRESETS).map(([key, preset]) => (
-                <button
-                  key={key}
-                  onClick={() => setStylePreset(key as StylePreset)}
-                  className={`p-3 rounded-lg border text-left transition-all ${
-                    stylePreset === key
-                      ? "border-primary bg-primary/10 ring-1 ring-primary/30"
-                      : "border-border hover:border-primary/50 hover:bg-accent/50"
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="text-lg">{preset.emoji}</span>
-                    <span className="text-sm font-medium">{preset.label}</span>
-                  </div>
-                  <p className="text-[10px] text-muted-foreground mt-1 leading-snug">
-                    {preset.description}
-                  </p>
-                </button>
-              ))}
+          {/* Story type description */}
+          {storyTypeOverride !== "auto" && STORY_TYPE_META[storyTypeOverride] && (
+            <div className="flex items-start gap-2 px-3 py-2 rounded-md bg-muted/50 text-xs text-muted-foreground">
+              <Info className="h-3 w-3 mt-0.5 shrink-0" />
+              <span>{STORY_TYPE_META[storyTypeOverride].description}</span>
             </div>
-          </div>
+          )}
           
-          {/* Advanced Settings (collapsed) */}
+          {storyTypeOverride === "auto" && (
+            <div className="flex items-start gap-2 px-3 py-2 rounded-md bg-muted/50 text-xs text-muted-foreground">
+              <Zap className="h-3 w-3 mt-0.5 shrink-0" />
+              <span>Story type will be selected automatically based on your vertical + goal. Override only if you have a specific format in mind.</span>
+            </div>
+          )}
+          
+          {/* Advanced Settings */}
           <Collapsible>
             <CollapsibleTrigger asChild>
               <button className="flex items-center gap-2 w-full pt-2 border-t border-border/50 text-xs text-muted-foreground hover:text-foreground transition-colors">
                 <ChevronDown className="h-3 w-3" />
                 <span>Advanced Settings</span>
-                {brutalityMode && (
-                  <Badge variant="outline" className="text-[9px] h-4 ml-1 bg-destructive/10 text-destructive border-destructive/30">
-                    Brutality
+                {(intensity !== "unset" || characterContinuityMode || brutalityMode) && (
+                  <Badge variant="outline" className="text-[9px] h-4 ml-1">
+                    Modified
                   </Badge>
                 )}
               </button>
             </CollapsibleTrigger>
             <CollapsibleContent className="pt-3 space-y-3">
-              {/* Provider Lock (only for Character Focus) */}
+              {/* Emotional Intensity */}
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Emotional Intensity</Label>
+                <Select value={intensity} onValueChange={(v) => setIntensity(v as EmotionalIntensity | "unset")}>
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="unset" className="text-xs">Unset (auto)</SelectItem>
+                    <SelectItem value="low" className="text-xs">🌊 Low</SelectItem>
+                    <SelectItem value="medium" className="text-xs">⚡ Medium</SelectItem>
+                    <SelectItem value="high" className="text-xs">🔥 High</SelectItem>
+                    <SelectItem value="extreme" className="text-xs">💥 Extreme</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-[10px] text-muted-foreground">
+                  Clamped by vertical safety rules. Health/Finance cap at medium.
+                </p>
+              </div>
+              
+              {/* Character Continuity */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="text-xs">Character Continuity</Label>
+                  <p className="text-[10px] text-muted-foreground">Lock all scenes to one provider</p>
+                </div>
+                <button
+                  onClick={() => setCharacterContinuityMode(!characterContinuityMode)}
+                  className={`w-10 h-5 rounded-full transition-colors ${
+                    characterContinuityMode ? "bg-primary" : "bg-muted"
+                  }`}
+                >
+                  <div className={`w-4 h-4 rounded-full bg-white shadow transition-transform ${
+                    characterContinuityMode ? "translate-x-5" : "translate-x-0.5"
+                  }`} />
+                </button>
+              </div>
+              
               {characterContinuityMode && (
-                <div className="flex items-center justify-between">
-                  <Label className="text-xs">Lock ALL scenes to:</Label>
+                <div className="flex items-center justify-between pl-4">
+                  <Label className="text-xs">Provider:</Label>
                   <Select value={lockedProvider} onValueChange={(v) => setLockedProvider(v as "sora" | "runway" | "luma")}>
                     <SelectTrigger className="h-8 text-xs w-28">
                       <SelectValue />
@@ -375,27 +382,23 @@ export function StoryCreationWizard({
                 </div>
               )}
               
-              {/* Brutality Mode (only for Cinematic/Standard) */}
-              {(filmMode || stylePreset === "standard") && (
-                <div className="flex items-center justify-between">
-                  <div>
-                    <Label className="text-xs">Brutality Mode</Label>
-                    <p className="text-[10px] text-muted-foreground">
-                      Reduces sanitization for intense content (higher failure risk)
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => setBrutalityMode(!brutalityMode)}
-                    className={`w-10 h-5 rounded-full transition-colors ${
-                      brutalityMode ? "bg-destructive" : "bg-muted"
-                    }`}
-                  >
-                    <div className={`w-4 h-4 rounded-full bg-white shadow transition-transform ${
-                      brutalityMode ? "translate-x-5" : "translate-x-0.5"
-                    }`} />
-                  </button>
+              {/* Brutality Mode */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="text-xs">Brutality Mode</Label>
+                  <p className="text-[10px] text-muted-foreground">Reduce sanitization for intense content</p>
                 </div>
-              )}
+                <button
+                  onClick={() => setBrutalityMode(!brutalityMode)}
+                  className={`w-10 h-5 rounded-full transition-colors ${
+                    brutalityMode ? "bg-destructive" : "bg-muted"
+                  }`}
+                >
+                  <div className={`w-4 h-4 rounded-full bg-white shadow transition-transform ${
+                    brutalityMode ? "translate-x-5" : "translate-x-0.5"
+                  }`} />
+                </button>
+              </div>
             </CollapsibleContent>
           </Collapsible>
           
@@ -424,4 +427,3 @@ export function StoryCreationWizard({
     </div>
   );
 }
-
