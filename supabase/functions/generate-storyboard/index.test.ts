@@ -295,3 +295,47 @@ Deno.test("scanTextForBannedLanguage normalizes unicode dashes and catches risk-
   assert(issues.length >= 3, `Expected all 3 "risk-free" variants to be caught, got ${issues.length}: ${JSON.stringify(issues)}`);
   console.log(`✓ Unicode normalization caught ${issues.length} risk-free variants`);
 });
+
+// ─── Test 9: Audit consistency on 200 responses ─────────────
+
+Deno.test("Audit consistency: strict 200 must have no hard_blocks and sanitized_terms if replacements > 0", async () => {
+  const { status, data } = await callGenerateStoryboard({
+    concept: "5 healthy morning habits for better sleep",
+    generator_mode: "template",
+    story_engine: {
+      vertical: "health",
+      goal: "educate",
+      research_mode: "on",
+    },
+  });
+
+  if (status !== 200) {
+    console.log(`⚠ Audit consistency test skipped (status ${status})`);
+    return;
+  }
+
+  const audit = (data as Record<string, unknown>).story_engine as Record<string, unknown> | undefined;
+  assert(audit, "story_engine audit must exist on 200 response");
+
+  const compliance = audit.compliance as Record<string, unknown> | undefined;
+  assert(compliance, "compliance block must exist in audit");
+
+  // A 200 with strict mode must NOT have hard blocks
+  assert(
+    compliance.has_hard_blocks !== true,
+    `Strict 200 must not have has_hard_blocks=true, got: ${JSON.stringify(compliance)}`,
+  );
+
+  // If there were replacements, sanitized_terms must be populated
+  const totalReplacements = compliance.total_replacements as number;
+  if (totalReplacements > 0) {
+    const terms = compliance.sanitized_terms as string[] | undefined;
+    assert(
+      terms && terms.length > 0,
+      `total_replacements=${totalReplacements} but sanitized_terms is empty/missing`,
+    );
+    console.log(`✓ Audit consistency: ${totalReplacements} replacements, ${terms!.length} sanitized_terms tracked`);
+  } else {
+    console.log(`✓ Audit consistency: 0 replacements, no sanitized_terms needed`);
+  }
+});
