@@ -429,7 +429,7 @@ export function StorySyncPreview({
         <video
           ref={videoARef}
           className={cn(
-            "absolute inset-0 w-full h-full object-contain transition-opacity duration-150",
+            "absolute inset-0 w-full h-full object-contain transition-opacity duration-500 ease-in-out",
             activeVideo === "A" ? "opacity-100 z-10" : "opacity-0 z-0"
           )}
           onEnded={handleVideoEnded}
@@ -439,7 +439,7 @@ export function StorySyncPreview({
         <video
           ref={videoBRef}
           className={cn(
-            "absolute inset-0 w-full h-full object-contain transition-opacity duration-150",
+            "absolute inset-0 w-full h-full object-contain transition-opacity duration-500 ease-in-out",
             activeVideo === "B" ? "opacity-100 z-10" : "opacity-0 z-0"
           )}
           onEnded={handleVideoEnded}
