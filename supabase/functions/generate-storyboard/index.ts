@@ -233,17 +233,17 @@ Return ONLY valid JSON: {"beats":[{...}]}`;
           }
 
           // Banned language scan
-          const bannedScan = scanTextForBannedLanguage(
+          const bannedIssues = scanTextForBannedLanguage(
             sceneContents.map(c => c.narration_line),
             vertical,
             researchBrief
           );
-          if (bannedScan.errors.length > 0) {
-            console.warn(`[generate-storyboard] Banned language: ${bannedScan.errors.join("; ")}`);
+          if (bannedIssues.length > 0) {
+            console.warn(`[generate-storyboard] Banned language: ${bannedIssues.join("; ")}`);
           }
 
           // Strict compliance block
-          const strictCheck = checkStrictComplianceBlock(vertical, claimValidation.errors, bannedScan.errors);
+          const strictCheck = checkStrictComplianceBlock(vertical, claimValidation.errors, bannedIssues);
           if (strictCheck.blocked) return strictCheck.response;
         }
 
