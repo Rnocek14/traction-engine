@@ -255,14 +255,14 @@ Return ONLY valid JSON: {"beats":[{...}]}`;
         const compiledScenes = template.beats.map((beat, i) => {
           const content = sceneContents[i];
           const sceneInput = {
-            beat_role: beat.role,
-            beat_description: beat.description,
+            scene_id: `scene_pre_${i}`,
+            beat_index: i,
+            beat,
             subject: content.subject,
             action: content.action,
             environment: content.environment,
-            narration_line: content.narration_line,
-            mood: content.mood,
             text_overlay: content.text_overlay,
+            mood: content.mood,
             hook_category: beat.is_hook ? hookCategory : undefined,
           };
 
