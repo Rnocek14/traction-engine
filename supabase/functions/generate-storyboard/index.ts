@@ -226,15 +226,10 @@ Return ONLY valid JSON: {"beats":[{...}]}`;
 
         // 5. Validate claim IDs
         if (researchBrief.activated && researchBrief.grounded) {
-          const validIds = new Set(researchBrief.claims.map(c => c.id));
-          for (const content of sceneContents) {
-            if (content.claim_ids) {
-              const validation = validateClaimIds(content.claim_ids, validIds);
-              if (validation.invalid.length > 0) {
-                console.warn(`[generate-storyboard] Invalid claim IDs removed: ${validation.invalid.join(", ")}`);
-                content.claim_ids = validation.valid;
-              }
-            }
+          // Validate claim IDs against research brief
+          const claimValidation = validateClaimIds(sceneContents, researchBrief, vertical);
+          if (claimValidation.warnings.length > 0) {
+            console.warn(`[generate-storyboard] Claim ID warnings: ${claimValidation.warnings.join("; ")}`);
           }
 
           // Banned language scan
@@ -248,10 +243,6 @@ Return ONLY valid JSON: {"beats":[{...}]}`;
           }
 
           // Strict compliance block
-          const claimValidation = validateClaimIds(
-            sceneContents.flatMap(c => c.claim_ids || []),
-            new Set(researchBrief.claims.map(c => c.id))
-          );
           const strictCheck = checkStrictComplianceBlock(vertical, claimValidation.errors, bannedScan.errors);
           if (strictCheck.blocked) return strictCheck.response;
         }
