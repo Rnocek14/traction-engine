@@ -1,8 +1,8 @@
 /**
  * StoryVideoPlayer
  * 
- * Simple sequential video player for story clips.
- * Plays completed clips in order with basic controls.
+ * Sequential video player for story clips with crossfade transitions.
+ * Uses dual A/B video elements for gapless playback with smooth dissolves.
  */
 
 import { useState, useRef, useEffect, useCallback } from "react";
@@ -41,12 +41,14 @@ export function StoryVideoPlayer({
   isAssembling,
   assembledUrl,
 }: StoryVideoPlayerProps) {
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const videoARef = useRef<HTMLVideoElement>(null);
+  const videoBRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [activeVideo, setActiveVideo] = useState<"A" | "B">("A");
   const shouldAutoPlayRef = useRef(false);
 
   // Get only completed clips sorted by sequence
@@ -69,33 +71,40 @@ export function StoryVideoPlayer({
     }
   }, [currentIndex, completedClips.length]);
 
-  // Load video source when clip changes - always set src immediately
+  // Load video into next element and crossfade when clip changes
   useEffect(() => {
-    const video = videoRef.current;
-    if (!video || !currentClip?.output_url) return;
-    
-    // Always set the source so the video element has content to display
-    video.src = currentClip.output_url;
-    video.load();
-  }, [currentClip?.output_url]);
+    if (!currentClip?.output_url) return;
 
-  // Handle auto-play when transitioning between clips
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video || !currentClip?.output_url) return;
-    
-    // Play if we should auto-play (from handleEnded)
-    if (shouldAutoPlayRef.current) {
-      video.play()
-        .then(() => {
-          setIsPlaying(true);
-          shouldAutoPlayRef.current = false;
-        })
-        .catch(() => {
-          setIsPlaying(false);
-          shouldAutoPlayRef.current = false;
-        });
+    const activeEl = activeVideo === "A" ? videoARef.current : videoBRef.current;
+    const nextEl = activeVideo === "A" ? videoBRef.current : videoARef.current;
+    if (!nextEl) return;
+
+    // If the active element already has this clip loaded, just play it
+    if (activeEl?.src === currentClip.output_url) {
+      if (shouldAutoPlayRef.current) {
+        activeEl.play().then(() => { setIsPlaying(true); shouldAutoPlayRef.current = false; }).catch(() => { shouldAutoPlayRef.current = false; });
+      }
+      return;
     }
+
+    // Load into next (hidden) element
+    nextEl.src = currentClip.output_url;
+    nextEl.load();
+    nextEl.currentTime = 0;
+
+    const handleCanPlay = () => {
+      if (shouldAutoPlayRef.current || isPlaying) {
+        nextEl.play().then(() => { setIsPlaying(true); shouldAutoPlayRef.current = false; }).catch(() => { shouldAutoPlayRef.current = false; });
+      }
+      // Crossfade: swap active
+      setActiveVideo(prev => prev === "A" ? "B" : "A");
+      // Pause the old element after the transition
+      setTimeout(() => { activeEl?.pause(); }, 550);
+      nextEl.removeEventListener("canplaythrough", handleCanPlay);
+    };
+
+    nextEl.addEventListener("canplaythrough", handleCanPlay);
+    return () => { nextEl.removeEventListener("canplaythrough", handleCanPlay); };
   }, [currentIndex, currentClip?.output_url]);
 
   // Fullscreen handling
@@ -118,45 +127,50 @@ export function StoryVideoPlayer({
 
   // Update progress
   useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
+    const activeEl = activeVideo === "A" ? videoARef.current : videoBRef.current;
+    if (!activeEl) return;
 
     const updateProgress = () => {
-      if (video.duration) {
-        const clipProgress = video.currentTime / video.duration;
+      if (activeEl.duration) {
+        const clipProgress = activeEl.currentTime / activeEl.duration;
         const overallProgress = ((currentIndex + clipProgress) / completedClips.length) * 100;
         setProgress(overallProgress);
       }
     };
 
-    video.addEventListener("timeupdate", updateProgress);
-    return () => video.removeEventListener("timeupdate", updateProgress);
-  }, [currentIndex, completedClips.length]);
+    activeEl.addEventListener("timeupdate", updateProgress);
+    return () => activeEl.removeEventListener("timeupdate", updateProgress);
+  }, [currentIndex, completedClips.length, activeVideo]);
+
+  // Sync play/pause state
+  useEffect(() => {
+    const activeEl = activeVideo === "A" ? videoARef.current : videoBRef.current;
+    if (!activeEl) return;
+    if (isPlaying) {
+      activeEl.play().catch(() => {});
+    } else {
+      activeEl.pause();
+    }
+  }, [isPlaying, activeVideo]);
 
   const togglePlay = useCallback(() => {
-    const video = videoRef.current;
-    if (!video || !currentClip?.output_url) return;
-
-    if (isPlaying) {
-      video.pause();
-      setIsPlaying(false);
-    } else {
-      video.src = currentClip.output_url;
-      video.play().then(() => setIsPlaying(true)).catch(() => {});
-    }
-  }, [isPlaying, currentClip?.output_url]);
+    if (!currentClip?.output_url) return;
+    setIsPlaying(prev => !prev);
+  }, [currentClip?.output_url]);
 
   const skipPrev = useCallback(() => {
     if (currentIndex > 0) {
+      shouldAutoPlayRef.current = isPlaying;
       setCurrentIndex(prev => prev - 1);
     }
-  }, [currentIndex]);
+  }, [currentIndex, isPlaying]);
 
   const skipNext = useCallback(() => {
     if (currentIndex < completedClips.length - 1) {
+      shouldAutoPlayRef.current = isPlaying;
       setCurrentIndex(prev => prev + 1);
     }
-  }, [currentIndex, completedClips.length]);
+  }, [currentIndex, completedClips.length, isPlaying]);
 
   if (!hasClips) {
     return (
@@ -213,15 +227,26 @@ export function StoryVideoPlayer({
       ref={containerRef}
       className={cn("relative bg-black rounded-lg overflow-hidden group", className)}
     >
-      {/* Video element */}
+      {/* Dual video elements for crossfade transitions */}
       <video
-        ref={videoRef}
-        className="w-full h-full object-contain"
+        ref={videoARef}
+        className={cn(
+          "absolute inset-0 w-full h-full object-contain transition-opacity duration-500 ease-in-out",
+          activeVideo === "A" ? "opacity-100 z-10" : "opacity-0 z-0"
+        )}
         onEnded={handleEnded}
-        onPlay={() => setIsPlaying(true)}
-        onPause={() => setIsPlaying(false)}
-        poster={currentClip?.thumbnail_url || undefined}
         playsInline
+        muted
+      />
+      <video
+        ref={videoBRef}
+        className={cn(
+          "absolute inset-0 w-full h-full object-contain transition-opacity duration-500 ease-in-out",
+          activeVideo === "B" ? "opacity-100 z-10" : "opacity-0 z-0"
+        )}
+        onEnded={handleEnded}
+        playsInline
+        muted
       />
 
       {/* Big centered play button - shown when paused */}
@@ -247,7 +272,7 @@ export function StoryVideoPlayer({
       </div>
 
       {/* Controls overlay */}
-      <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-t from-black/80 to-transparent">
+      <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-t from-black/80 to-transparent z-20">
         {/* Progress bar */}
         <Progress value={progress} className="h-1 mb-2" />
 
@@ -318,11 +343,14 @@ export function StoryVideoPlayer({
       </div>
 
       {/* Thumbnail strip */}
-      <div className="absolute left-2 right-2 top-10 flex gap-1 overflow-x-auto pb-1">
+      <div className="absolute left-2 right-2 top-10 flex gap-1 overflow-x-auto pb-1 z-20">
         {completedClips.map((clip, idx) => (
           <button
             key={clip.id}
-            onClick={() => setCurrentIndex(idx)}
+            onClick={() => {
+              shouldAutoPlayRef.current = isPlaying;
+              setCurrentIndex(idx);
+            }}
             className={cn(
               "flex-shrink-0 w-10 h-6 rounded overflow-hidden border-2 transition-all",
               idx === currentIndex 
