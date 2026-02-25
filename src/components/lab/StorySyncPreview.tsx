@@ -246,8 +246,8 @@ export function StorySyncPreview({
 
     // Check if clip is already loaded in active element
     if (activeEl?.src === clip.output_url) {
-      // Already showing correct clip
-      if (isPlaying) {
+      // Already showing correct clip — but DON'T restart if video has ended (would cause looping)
+      if (isPlaying && !activeEl.ended) {
         activeEl.play().catch(() => {});
       }
       return;
