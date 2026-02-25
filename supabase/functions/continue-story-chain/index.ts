@@ -480,6 +480,32 @@ Deno.serve(async (req) => {
         .order("sequence_index", { ascending: true })
         .order("created_at", { ascending: false });
 
+      // Load voiceover actual_timing if available — use real segment durations instead of estimates
+      let voiceoverSceneDurations: Record<number, number> | null = null;
+      {
+        const { data: activeVo } = await supabase
+          .from("story_voiceovers")
+          .select("actual_timing, status")
+          .eq("story_job_id", story.id)
+          .eq("is_active", true)
+          .limit(1)
+          .single();
+        
+        if (activeVo?.status === "done" && activeVo.actual_timing) {
+          const timing = activeVo.actual_timing as Array<{ start_ms: number; end_ms: number }>;
+          if (Array.isArray(timing) && timing.length > 0) {
+            voiceoverSceneDurations = {};
+            for (let i = 0; i < timing.length; i++) {
+              const segDur = (timing[i].end_ms - timing[i].start_ms) / 1000;
+              if (segDur > 0) {
+                voiceoverSceneDurations[i] = segDur;
+              }
+            }
+            console.log(`[chain-continue] VO actual_timing loaded: ${timing.length} segments, durations=[${Object.values(voiceoverSceneDurations).map(d => d.toFixed(1)).join(",")}]`);
+          }
+        }
+      }
+
       if (clipsError) {
         console.error(`[chain-continue] Failed to fetch clips for ${story.id}: ${clipsError.message}`);
         continue;
@@ -1246,7 +1272,12 @@ Deno.serve(async (req) => {
             console.log(`[chain-continue] Moderation stage ${currentStage}: ${ladderResult.action} on ${currentProvider}`);
           }
           
-          const attemptDuration = processDuration(nextScene.duration_target || 5, sceneRole, currentProvider);
+          // Use voiceover actual_timing if available, otherwise fall back to storyboard estimate
+          const rawNarrationDuration = voiceoverSceneDurations?.[nextSceneIndex] ?? (nextScene.duration_target || 5);
+          const attemptDuration = processDuration(rawNarrationDuration, sceneRole, currentProvider);
+          // requested_seconds = exact narration segment duration (for trim/assembly)
+          // provider_seconds = provider-bucketed duration (for API request)
+          const requestedSeconds = voiceoverSceneDurations?.[nextSceneIndex] ?? (nextScene.duration_target || attemptDuration);
           
           const response = await fetch(`${supabaseUrl}/functions/v1/${currentProviderEndpoint}`, {
             method: "POST",
@@ -1259,7 +1290,8 @@ Deno.serve(async (req) => {
               prompt: currentPrompt,
               settings: {
                 size: "720x1280",
-                seconds: attemptDuration,
+                provider_seconds: attemptDuration,
+                requested_seconds: requestedSeconds,
               },
               starting_frame_url: currentStartingFrame,
               motif_context: motifContext,
