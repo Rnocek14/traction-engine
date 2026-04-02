@@ -183,10 +183,12 @@ export function buildFiltergraph(
     );
 
     if (req.mix.duck_video_audio) {
+      // Split [vo] so it can feed both sidechaincompress (key) and amix (audio)
+      filterParts.push(`[vo]asplit=2[vo_sc][vo_mix]`);
       filterParts.push(
-        `[vid_a][vo]sidechaincompress=threshold=0.02:ratio=8:attack=5:release=250[ducked]`
+        `[vid_a][vo_sc]sidechaincompress=threshold=0.02:ratio=8:attack=5:release=250[ducked]`
       );
-      filterParts.push(`[ducked][vo]amix=inputs=2:normalize=0,alimiter=limit=0.98[ao]`);
+      filterParts.push(`[ducked][vo_mix]amix=inputs=2:normalize=0,alimiter=limit=0.98[ao]`);
     } else {
       filterParts.push(`[vid_a][vo]amix=inputs=2:normalize=0,alimiter=limit=0.98[ao]`);
     }
