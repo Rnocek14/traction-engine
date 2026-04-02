@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import type { Tables } from "@/integrations/supabase/types";
 
 // ============================================
 // Types
@@ -10,7 +9,8 @@ import type { Tables } from "@/integrations/supabase/types";
 export type AssemblyStatus = "none" | "queued" | "rendering" | "succeeded" | "failed";
 
 export interface AssembleReelParams {
-  scriptRunId: string;
+  scriptRunId?: string;
+  storyJobId?: string;
   transitionType?: "cut" | "crossfade" | "fade" | "wipe";
   transitionDuration?: number;
   outputWidth?: number;
@@ -38,15 +38,8 @@ export interface AssemblyMeta {
   clip_ids?: string[];
   expected_duration?: number;
   voiceover_available?: boolean;
-  transition?: {
-    type: string;
-    duration: number;
-  };
-  output?: {
-    width: number;
-    height: number;
-    fps: number;
-  };
+  transition?: { type: string; duration: number };
+  output?: { width: number; height: number; fps: number };
   ffmpeg_job_id?: string;
   ffmpeg_status?: string;
   eta_seconds?: number;
@@ -59,9 +52,6 @@ export interface AssemblyMeta {
 // Assembly Mutation Hook
 // ============================================
 
-/**
- * Hook for triggering reel assembly via FFmpeg service
- */
 export function useAssembleReel() {
   const queryClient = useQueryClient();
 
@@ -75,6 +65,7 @@ export function useAssembleReel() {
           headers: pipelineKey ? { "x-pipeline-key": pipelineKey } : undefined,
           body: {
             script_run_id: params.scriptRunId,
+            story_job_id: params.storyJobId,
             transition_type: params.transitionType || "crossfade",
             transition_duration: params.transitionDuration || 0.2,
             output_width: params.outputWidth || 1080,
@@ -84,17 +75,9 @@ export function useAssembleReel() {
         }
       );
 
-      if (error) {
-        throw new Error(error.message || "Failed to start assembly");
-      }
-
-      if (!data) {
-        throw new Error("No response from assembly service");
-      }
-
-      if (!data.success && data.error) {
-        throw new Error(data.error);
-      }
+      if (error) throw new Error(error.message || "Failed to start assembly");
+      if (!data) throw new Error("No response from assembly service");
+      if (!data.success && data.error) throw new Error(data.error);
 
       return data;
     },
@@ -105,15 +88,14 @@ export function useAssembleReel() {
         });
       } else if (result.status === "queued" || result.status === "rendering") {
         toast.info("Assembly started", {
-          description: result.eta_seconds
-            ? `Estimated time: ${result.eta_seconds}s`
-            : "Processing...",
+          description: result.eta_seconds ? `Estimated time: ${result.eta_seconds}s` : "Processing...",
         });
       }
 
-      // Invalidate script run to refresh status
-      queryClient.invalidateQueries({ queryKey: ["script-run", params.scriptRunId] });
-      queryClient.invalidateQueries({ queryKey: ["assembly-status", params.scriptRunId] });
+      const key = params.storyJobId || params.scriptRunId;
+      if (key) {
+        queryClient.invalidateQueries({ queryKey: ["assembly-status", key] });
+      }
     },
     onError: (error) => {
       toast.error("Assembly failed", {
@@ -125,23 +107,23 @@ export function useAssembleReel() {
 
 // ============================================
 // Assembly Status Query Hook
+// Supports both script_run_id and story_job_id modes
 // ============================================
 
-/**
- * Hook for polling assembly status with active polling via edge function
- */
-export function useAssemblyStatus(scriptRunId: string | undefined) {
+export function useAssemblyStatus(id: string | undefined, mode: "script" | "story" = "script") {
   const queryClient = useQueryClient();
 
   return useQuery({
-    queryKey: ["assembly-status", scriptRunId],
+    queryKey: ["assembly-status", id],
     queryFn: async () => {
-      if (!scriptRunId) return null;
+      if (!id) return null;
+
+      const table = mode === "story" ? "story_jobs" : "script_runs";
 
       const { data, error } = await supabase
-        .from("script_runs")
+        .from(table)
         .select("assembled_status, assembled_video_url, assembled_at, assembled_meta")
-        .eq("id", scriptRunId)
+        .eq("id", id)
         .single();
 
       if (error) {
@@ -152,22 +134,25 @@ export function useAssemblyStatus(scriptRunId: string | undefined) {
       const status = (data.assembled_status || "none") as AssemblyStatus;
       const meta = data.assembled_meta as AssemblyMeta | null;
 
-      // If status is queued/rendering, poll the FFmpeg service for updates
+      // If rendering, poll FFmpeg service
       if (status === "queued" || status === "rendering") {
         try {
           const pipelineKey = import.meta.env.VITE_PIPELINE_KEY;
+          const pollBody = mode === "story"
+            ? { story_job_id: id }
+            : { script_run_id: id };
+
           const { data: pollData } = await supabase.functions.invoke<AssemblyResult>(
             "poll-assembly-status",
             {
               headers: pipelineKey ? { "x-pipeline-key": pipelineKey } : undefined,
-              body: { script_run_id: scriptRunId },
+              body: pollBody,
             }
           );
 
           if (pollData) {
-            // If status changed, invalidate to get fresh data
             if (pollData.status !== status) {
-              queryClient.invalidateQueries({ queryKey: ["script-run", scriptRunId] });
+              queryClient.invalidateQueries({ queryKey: ["assembly-status", id] });
             }
 
             return {
@@ -194,13 +179,10 @@ export function useAssemblyStatus(scriptRunId: string | undefined) {
         meta,
       };
     },
-    enabled: !!scriptRunId,
+    enabled: !!id,
     refetchInterval: (query) => {
-      // Poll every 3 seconds while rendering
       const status = query.state.data?.status;
-      if (status === "queued" || status === "rendering") {
-        return 3000;
-      }
+      if (status === "queued" || status === "rendering") return 3000;
       return false;
     },
     staleTime: 2000,
@@ -211,44 +193,36 @@ export function useAssemblyStatus(scriptRunId: string | undefined) {
 // Assembly Controls Hook
 // ============================================
 
-/**
- * Combines assembly trigger + status polling for UI components
- */
-export function useReelAssembly(scriptRunId: string | undefined) {
+export function useReelAssembly(id: string | undefined, mode: "script" | "story" = "script") {
   const assembleMutation = useAssembleReel();
-  const statusQuery = useAssemblyStatus(scriptRunId);
+  const statusQuery = useAssemblyStatus(id, mode);
 
   const isAssembling =
     assembleMutation.isPending ||
     statusQuery.data?.status === "queued" ||
     statusQuery.data?.status === "rendering";
 
-  const canAssemble =
-    !!scriptRunId &&
-    !isAssembling &&
-    statusQuery.data?.status !== "rendering";
+  const canAssemble = !!id && !isAssembling && statusQuery.data?.status !== "rendering";
 
-  const hasAssembledVideo =
-    statusQuery.data?.status === "succeeded" &&
-    !!statusQuery.data?.videoUrl;
+  const hasAssembledVideo = statusQuery.data?.status === "succeeded" && !!statusQuery.data?.videoUrl;
 
   return {
-    // Mutation
-    assemble: (params?: Omit<AssembleReelParams, "scriptRunId">) => {
-      if (!scriptRunId) return;
-      return assembleMutation.mutateAsync({ scriptRunId, ...params });
+    assemble: (params?: Omit<AssembleReelParams, "scriptRunId" | "storyJobId">) => {
+      if (!id) return;
+      const baseParams = mode === "story"
+        ? { storyJobId: id, ...params }
+        : { scriptRunId: id, ...params };
+      return assembleMutation.mutateAsync(baseParams);
     },
     assembleAsync: assembleMutation.mutateAsync,
     isPending: assembleMutation.isPending,
     error: assembleMutation.error,
 
-    // Status
     status: statusQuery.data?.status || "none",
     videoUrl: statusQuery.data?.videoUrl,
     meta: statusQuery.data?.meta,
     isLoading: statusQuery.isLoading,
 
-    // Computed
     isAssembling,
     canAssemble,
     hasAssembledVideo,

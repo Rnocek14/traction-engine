@@ -2,13 +2,12 @@
  * StudioPreview - Center panel with unified audio-master preview
  */
 
-import { useMemo, useState } from "react";
-import { Play, Download, Film, Volume2, VolumeX, Loader2 } from "lucide-react";
+import { useState } from "react";
+import { Film, Download, Volume2, VolumeX, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { supabase } from "@/integrations/supabase/client";
-import { useToast } from "@/hooks/use-toast";
+import { useReelAssembly } from "@/hooks/use-reel-assembly";
 import { cn } from "@/lib/utils";
 import { StorySyncPreview } from "@/components/lab/StorySyncPreview";
 import { StoryVideoPlayer } from "@/components/lab/StoryVideoPlayer";
@@ -33,9 +32,14 @@ export function StudioPreview({
   storyId,
   clipsBySceneId,
 }: StudioPreviewProps) {
-  const { toast } = useToast();
-  const [isAssembling, setIsAssembling] = useState(false);
-  const [assembledUrl, setAssembledUrl] = useState<string | null>(null);
+  const {
+    assemble,
+    isAssembling,
+    hasAssembledVideo,
+    videoUrl: assembledUrl,
+    status: assemblyStatus,
+    meta: assemblyMeta,
+  } = useReelAssembly(storyId, "story");
 
   // Completed clips count
   const completedClips = clips.filter(c => c.status === "done" && c.output_url);
@@ -47,35 +51,7 @@ export function StudioPreview({
     ? Math.round((completedClips.length / scenes.length) * 100) 
     : 0;
 
-  // Assembly handler
-  const handleAssemble = async () => {
-    if (!storyId) return;
-    
-    setIsAssembling(true);
-    toast({ title: "Starting export...", description: "Assembling final video" });
-
-    try {
-      const { data, error } = await supabase.functions.invoke("assemble-reel", {
-        body: { story_job_id: storyId },
-      });
-
-      if (error) throw error;
-      if (data?.output_url) {
-        setAssembledUrl(data.output_url);
-        toast({ title: "Export complete!", description: "Your video is ready" });
-      } else {
-        throw new Error("No output URL returned");
-      }
-    } catch (err) {
-      toast({ 
-        title: "Export failed", 
-        description: String(err), 
-        variant: "destructive" 
-      });
-    } finally {
-      setIsAssembling(false);
-    }
-  };
+  const handleAssemble = () => assemble();
 
   // Empty state
   if (!hasCompletedClips && !hasVoiceover) {
@@ -99,7 +75,6 @@ export function StudioPreview({
   if (hasCompletedClips && hasVoiceover) {
     return (
       <div className="h-full flex flex-col">
-        {/* Header */}
         <div className="px-4 py-2 border-b bg-muted/30 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Badge variant="secondary" className="text-[10px]">
@@ -109,6 +84,11 @@ export function StudioPreview({
             <span className="text-[10px] text-muted-foreground">
               {completedClips.length}/{scenes.length} clips
             </span>
+            {assemblyStatus === "rendering" && (
+              <Badge variant="outline" className="text-[10px] animate-pulse">
+                Rendering...
+              </Badge>
+            )}
           </div>
           <Button
             size="sm"
@@ -126,7 +106,6 @@ export function StudioPreview({
           </Button>
         </div>
 
-        {/* Preview */}
         <div className="flex-1 min-h-0 overflow-y-auto p-4 bg-black/90">
           <div className="max-w-lg mx-auto">
             <StorySyncPreview
@@ -134,7 +113,7 @@ export function StudioPreview({
               voiceover={voiceover}
               onAssemble={handleAssemble}
               isAssembling={isAssembling}
-              assembledUrl={assembledUrl}
+              assembledUrl={assembledUrl || null}
               className="w-full aspect-[9/16]"
             />
           </div>
@@ -143,10 +122,9 @@ export function StudioPreview({
     );
   }
 
-  // Video-only preview (no voiceover yet)
+  // Video-only preview
   return (
     <div className="h-full flex flex-col">
-      {/* Header */}
       <div className="px-4 py-2 border-b bg-muted/30 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Badge variant="outline" className="text-[10px]">
@@ -173,21 +151,19 @@ export function StudioPreview({
         </Button>
       </div>
 
-      {/* Progress bar when generating */}
       {progressPct < 100 && progressPct > 0 && (
         <div className="px-4 py-1 border-b">
           <Progress value={progressPct} className="h-1" />
         </div>
       )}
 
-      {/* Preview */}
       <div className="flex-1 min-h-0 overflow-y-auto p-4 bg-black/90">
         <div className="max-w-lg mx-auto">
           <StoryVideoPlayer
             clips={clips}
             onAssemble={handleAssemble}
             isAssembling={isAssembling}
-            assembledUrl={assembledUrl}
+            assembledUrl={assembledUrl || null}
             className="w-full aspect-[9/16]"
           />
         </div>
