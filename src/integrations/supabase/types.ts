@@ -954,6 +954,10 @@ export type Database = {
         Row: {
           account_id: string
           active_voiceover_id: string | null
+          assembled_at: string | null
+          assembled_meta: Json | null
+          assembled_status: string | null
+          assembled_video_url: string | null
           completed_clips: number | null
           continuity_anchors: Json | null
           continuity_score: number | null
@@ -970,6 +974,10 @@ export type Database = {
         Insert: {
           account_id: string
           active_voiceover_id?: string | null
+          assembled_at?: string | null
+          assembled_meta?: Json | null
+          assembled_status?: string | null
+          assembled_video_url?: string | null
           completed_clips?: number | null
           continuity_anchors?: Json | null
           continuity_score?: number | null
@@ -986,6 +994,10 @@ export type Database = {
         Update: {
           account_id?: string
           active_voiceover_id?: string | null
+          assembled_at?: string | null
+          assembled_meta?: Json | null
+          assembled_status?: string | null
+          assembled_video_url?: string | null
           completed_clips?: number | null
           continuity_anchors?: Json | null
           continuity_score?: number | null
