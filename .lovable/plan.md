@@ -1,84 +1,154 @@
 
 
-# Fix 3 Remaining Prompt Compilation Issues in Myth Mode
+# Execution Plan: Fix the Content Engine End-to-End
 
-## Summary
+## The Root Problem
 
-"Descent of Shadows" was generated with the latest code, and while action duplication is fixed, 3 systemic issues remain that affect every scene.
+The `assemble-reel` edge function has a **critical bug in story mode**: all DB status updates and the upload file path reference `script_run_id`, which is **undefined** when called in story mode (where only `story_job_id` is provided). This means:
 
-## Issues
+- Status is never written (`.eq("id", undefined)` matches nothing)
+- Upload path becomes `assembled/undefined.mp4`
+- The FFmpeg service may render successfully but the result is lost
 
-### 1. ALLCAPS Verbs in silhouette_action (affects all 5 scenes)
+This is why **zero assembled videos exist** despite having complete stories with 4 clips + voiceover each.
 
-The storyboard's `silhouette_action` field contains ALLCAPS verbs from GPT-4o formatting (EXPANDS, PULSES, CLASHES, CLATTERS, BURSTS). The previous fix lowercased `environment_motion` but not the action itself.
+Additionally, the `StudioPreview` component calls `assemble-reel` with `{ story_job_id: storyId }` but never gets back a working URL because the function silently fails on the DB side.
 
-**Examples:**
-- Scene 1: `"sword's light EXPANDS then PULSES with each swing"`
-- Scene 2: `"sword arcs and CLASHES against spectral forms"`
-- Scene 4: `"light BURSTS around the warrior forth"`
+---
 
-**Fix:** In `buildMythMotionBeats`, apply a regex to strip ALLCAPS words down to lowercase in the `actionClean` variable, right after `truncateClean`. Target pattern: any word that is 4+ chars and entirely uppercase.
+## Phase 1: Fix Assembly (THE Critical Blocker)
 
-### 2. auditSubject Creates Broken Grammar (affects 4 of 5 scenes)
+### 1A. Fix `assemble-reel` story mode DB writes
 
-The anticipation phrases from `ANTICIPATION_BY_BEAT` use body-part subjects ("muscles coil", "body leans", "posture buckles", "tension gathers"). When `auditSubject` prepends "The warrior", it produces "The warrior muscles coil" instead of "The warrior's muscles coil".
+**File:** `supabase/functions/assemble-reel/index.ts`
 
-**Fix:** Update `auditSubject` to detect when the first word after the archetype would be a body-part noun (muscles, body, posture, tension, chest, weight, shadow, silhouette, form, outline). In that case, insert possessive `'s` after the archetype: "The warrior's muscles coil".
+Every place that references `script_run_id` after the mode split needs to use `primaryId` instead, and write to the correct table:
 
-### 3. auditSubject Injects Archetype Mid-Sentence (Scene 4)
+- **Lines 583-592** (FFmpeg not configured error): Write to `story_jobs` when `isStoryMode`, not `script_runs`
+- **Lines 610-619** (mark as rendering): Same — use `story_jobs` table + `primaryId`
+- **Line 654** (upload path): Change to `assembled/${primaryId}.mp4`
+- **Lines 703-718** (success update): Write to `story_jobs` table when `isStoryMode`
+- **Lines 733-743** (async job update): Same
+- **Lines 769-779** (error update): Same
 
-When `silhouette_action` starts with a non-character subject like "light BURSTS forth", the audit tries to inject the archetype but places it in the wrong position, producing "light BURSTS around the warrior forth".
+For story mode, the updates should target `story_jobs` and set fields like `assembled_video_url`, `assembled_status`, `assembled_at`, `assembled_meta` — which may require adding these columns if they don't exist on `story_jobs`.
 
-**Fix:** The audit should only prepend the archetype at the very start of the full prompt (which it already does for the motion beats). The issue is that `auditSubject` also has fallback mid-sentence injection logic that fires incorrectly. Remove or constrain the mid-sentence injection so it only fires if the archetype is completely absent from the surrounding context. Since the motion beats already start with anticipation phrases that get the archetype prepended, mid-sentence injection is unnecessary.
+### 1B. Check/add assembly columns to `story_jobs`
 
-## Technical Implementation
+Run a query to check if `story_jobs` has `assembled_video_url`, `assembled_status`, `assembled_at`, `assembled_meta` columns. If not, create a migration to add them.
 
-### File: `supabase/functions/_shared/myth-continuity.ts`
+### 1C. Fix voiceover ID mismatch
 
-**Change 1: Lowercase ALLCAPS in silhouette_action (in `buildMythMotionBeats`, ~line 1030)**
+The story `542539bb` has `active_voiceover_id = 726ba302` in `story_jobs`, but the voiceover marked `is_active = true` in `story_voiceovers` is `3f6dd04f`. The code fetches by `active_voiceover_id` from `story_jobs`, so verify this voiceover exists and has audio.
 
-After `truncateClean`, add:
-```typescript
-// Strip ALLCAPS words (4+ chars) to lowercase — LLM formatting artifacts
-const actionNorm = actionClean.replace(/\b[A-Z]{4,}\b/g, w => w.toLowerCase());
+### 1D. Deploy and test
+
+- Deploy the fixed `assemble-reel`
+- Call it via `curl_edge_functions` with `story_job_id: "542539bb-6a70-4e86-b70e-7fc4013f3bbe"` (which has 4 complete clips + voiceover)
+- Verify FFmpeg service receives the request and the upload path is correct
+
+---
+
+## Phase 2: Fix the Client-Side Assembly Flow
+
+### 2A. Update `StudioPreview` to use `useReelAssembly` hook
+
+The `StudioPreview` currently does a raw `supabase.functions.invoke("assemble-reel")` with no status polling. Replace with the existing `useReelAssembly` hook which already handles polling.
+
+### 2B. Update `useReelAssembly` for story mode
+
+The `useReelAssembly` hook currently queries `script_runs` for status. Add a story mode path that queries `story_jobs` instead.
+
+---
+
+## Phase 3: Generate a Real Video (Post-Fix)
+
+Once assembly works:
+
+1. The story `542539bb` already has 4 completed clips + voiceover — trigger assembly from the UI
+2. For NEW videos: refill credits on ONE provider (Runway recommended — cheapest per clip)
+3. Create a new story, let the chain run, then assemble
+
+---
+
+## Phase 4: Publishing Pipeline (TikTok)
+
+### Why TikTok first
+- Content Upload API is simpler than Instagram's (no Facebook Business setup)
+- Direct video upload endpoint
+- Better organic reach for new accounts in 2026
+
+### Implementation
+- New edge function `publish-video` that takes an assembled video URL + caption + account config
+- Uses TikTok Content Posting API v2
+- New `published_posts` table to track what was posted where
+- Requires: TikTok developer app + OAuth token per account (stored as secrets)
+
+---
+
+## Phase 5: Basic Analytics
+
+- New edge function `ingest-tiktok-analytics` (cron, daily)
+- Pulls views/likes/shares per video via TikTok API
+- Stores in `post_performance` table
+- Dashboard card showing top performers
+
+---
+
+## Phase 6: Simplification (Cut List)
+
+Systems to **disable/ignore** right now:
+- Video comparison queue (`queue-comparisons`, `process-compare-queue`)
+- Provider routing intelligence (`provider_cluster_stats`)  
+- Auto-promote routing tags
+- Lab/Compare panels in UI
+- QA Review Inbox (premature)
+- Multi-provider A/B testing
+
+Focus: Runway only → Assembly → Post → Measure
+
+---
+
+## 14-Day Execution Plan
+
+```text
+Day 1-2:  Fix assemble-reel story mode bug + add story_jobs columns
+          Test with existing story 542539bb (has clips + VO)
+          Verify assembled MP4 lands in Supabase storage
+
+Day 3-4:  Fix client-side assembly flow (useReelAssembly for stories)
+          Refill Runway credits
+          Generate 2-3 new stories end-to-end
+
+Day 5-6:  Watch assembled videos critically
+          Fix any clip/VO sync issues
+          Tune transitions
+
+Day 7-8:  Set up TikTok developer app
+          Build publish-video edge function
+          Post first video manually via API
+
+Day 9-10: Build basic scheduling (post queue table + cron)
+          Post 5-10 videos to one account
+
+Day 11-12: Build basic analytics ingestion
+           Track views/retention on posted videos
+
+Day 13-14: Evaluate what's working
+           Iterate on hooks/scripts based on data
+           Plan next batch
 ```
-Then use `actionNorm` instead of `actionClean` in the return template.
 
-**Change 2: Possessive insertion in `auditSubject` (~line 1120-1140)**
+---
 
-Add a body-part detection step after the archetype prepend:
-```typescript
-const BODY_PARTS = new Set([
-  "muscles", "body", "posture", "tension", "chest", 
-  "weight", "shadow", "silhouette", "form", "outline",
-  "stance", "frame", "limbs", "arms", "hands"
-]);
+## Estimated Changes
 
-// After prepending archetype, check if next word is a body part
-const firstWord = textAfterArchetype.split(/\s/)[0].toLowerCase();
-if (BODY_PARTS.has(firstWord)) {
-  // Insert possessive: "The warrior muscles" -> "The warrior's muscles"
-  result = result.replace(archetype, `${archetype}'s`);
-}
-```
-
-**Change 3: Disable mid-sentence archetype injection in `auditSubject`**
-
-Remove or guard the fallback that injects "around the warrior" mid-sentence. The prepend-at-start logic is sufficient since the motion beats are the sole action carrier.
-
-### Deployment
-
-- Deploy `continue-story-myth-mode` (imports myth-continuity)
-- Regenerate "Descent of Shadows" to verify
-
-### Expected Results
-
-**Scene 0 before:** `"The warrior shadow sharpens into form"`
-**Scene 0 after:** `"The warrior's shadow sharpens into form"`
-
-**Scene 1 before:** `"sword's light EXPANDS then PULSES"`
-**Scene 1 after:** `"sword's light expands then pulses"`
-
-**Scene 4 before:** `"light BURSTS around the warrior forth"`
-**Scene 4 after:** `"The warrior's tension gathers one last time, chest lifts — then grasps sword, lifts it high — light bursts forth, scattering shadows"`
+| File | Change |
+|------|--------|
+| `supabase/functions/assemble-reel/index.ts` | Fix all `script_run_id` refs to use `primaryId` + correct table |
+| Migration | Add assembly columns to `story_jobs` if missing |
+| `src/hooks/use-reel-assembly.ts` | Add story mode query path |
+| `src/components/story-studio/StudioPreview.tsx` | Use `useReelAssembly` hook |
+| New: `supabase/functions/publish-video/index.ts` | TikTok upload (Phase 4) |
+| New: migration for `published_posts` table | Phase 4 |
 
