@@ -27,6 +27,9 @@ interface AssembledVideoCardProps {
 
 export function AssembledVideoCard({ video, onApprove, onReject, onReassemble }: AssembledVideoCardProps) {
   const [playing, setPlaying] = useState(false);
+  const meta = (video.assembled_meta && typeof video.assembled_meta === 'object' && !Array.isArray(video.assembled_meta))
+    ? video.assembled_meta as Record<string, unknown>
+    : null;
 
   const statusColor = {
     succeeded: "text-success border-success/30 bg-success/10",
