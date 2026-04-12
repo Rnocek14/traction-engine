@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
 import { CheckCircle, XCircle, RotateCcw, Play, Clock, Film } from "lucide-react";
 
 interface AssembledVideo {
@@ -11,6 +12,7 @@ interface AssembledVideo {
   assembled_status: string;
   assembled_video_url: string | null;
   assembled_at: string | null;
+  assembled_meta: unknown;
   total_clips: number | null;
   continuity_score: number | null;
   account_id: string;
@@ -25,6 +27,9 @@ interface AssembledVideoCardProps {
 
 export function AssembledVideoCard({ video, onApprove, onReject, onReassemble }: AssembledVideoCardProps) {
   const [playing, setPlaying] = useState(false);
+  const meta = (video.assembled_meta && typeof video.assembled_meta === 'object' && !Array.isArray(video.assembled_meta))
+    ? video.assembled_meta as Record<string, unknown>
+    : null;
 
   const statusColor = {
     succeeded: "text-success border-success/30 bg-success/10",
@@ -143,12 +148,24 @@ export function AssembledVideoCard({ video, onApprove, onReject, onReassemble }:
               </div>
             )}
 
-            {video.assembled_status === "rendering" && (
-              <div className="mt-4 pt-4 border-t border-border/50">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <RotateCcw className="w-4 h-4 animate-spin" />
-                  Rendering in progress…
+            {(video.assembled_status === "rendering" || video.assembled_status === "queued") && (
+              <div className="mt-4 pt-4 border-t border-border/50 space-y-2">
+                <div className="flex items-center justify-between text-sm text-muted-foreground">
+                  <span className="flex items-center gap-2">
+                    <RotateCcw className="w-4 h-4 animate-spin" />
+                    {video.assembled_status === "queued" ? "Queued…" : "Rendering…"}
+                  </span>
+                  <span className="font-mono text-xs">
+                    {meta?.progress != null
+                      ? `${Math.round(Number(meta.progress) * 100)}%`
+                      : meta?.eta_seconds != null
+                        ? `ETA ${meta.eta_seconds}s`
+                        : "Starting…"}
+                  </span>
                 </div>
+                {meta?.progress != null && (
+                  <Progress value={Math.round(Number(meta.progress) * 100)} className="h-2" />
+                )}
               </div>
             )}
           </div>
