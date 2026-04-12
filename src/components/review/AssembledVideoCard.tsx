@@ -27,10 +27,10 @@ export function AssembledVideoCard({ video, onApprove, onReject, onReassemble }:
   const [playing, setPlaying] = useState(false);
 
   const statusColor = {
-    succeeded: "text-green-500 border-green-500/30 bg-green-500/10",
-    rendering: "text-yellow-500 border-yellow-500/30 bg-yellow-500/10",
-    failed: "text-red-500 border-red-500/30 bg-red-500/10",
-    queued: "text-blue-500 border-blue-500/30 bg-blue-500/10",
+    succeeded: "text-success border-success/30 bg-success/10",
+    rendering: "text-warning border-warning/30 bg-warning/10",
+    failed: "text-destructive border-destructive/30 bg-destructive/10",
+    queued: "text-primary border-primary/30 bg-primary/10",
   }[video.assembled_status] || "text-muted-foreground border-border";
 
   return (
