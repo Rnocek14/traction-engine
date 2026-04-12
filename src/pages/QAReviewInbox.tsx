@@ -80,58 +80,10 @@ export default function QAReviewInbox() {
   const canTakeActions = DEV_SKIP_AUTH || userHasAccess === true;
 
   return (
-    <div className="min-h-screen bg-background">
-      <GlobalNav />
+    <div className="bg-background">
+      {/* GlobalNav removed — rendered by parent Review page */}
       
-      {/* Header */}
-      <header className="border-b border-border/50 bg-background/80">
-        <div className="container mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-xl font-semibold flex items-center gap-2">
-                <ShieldCheck className="w-5 h-5 text-warning" />
-                QA Review Inbox
-              </h1>
-              <p className="text-sm text-muted-foreground">
-                {statsLoading ? (
-                  <Skeleton className="h-4 w-32 inline-block" />
-                ) : (
-                  `${stats?.total || 0} scripts pending review`
-                )}
-              </p>
-            </div>
-
-            {/* Right side: Stats + Auth */}
-            <div className="flex items-center gap-4 text-sm">
-              <Badge 
-                variant="outline" 
-                className="gap-1 text-destructive border-destructive/50"
-              >
-                <ShieldAlert className="w-3 h-3" />
-                Hard Blocks: {stats?.hardBlocks || 0}
-              </Badge>
-              <Badge 
-                variant="outline" 
-                className="gap-1 text-warning border-warning/50"
-              >
-                <ShieldCheck className="w-3 h-3" />
-                Overridable: {stats?.overridable || 0}
-              </Badge>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => refetch()}
-                className="gap-2"
-              >
-                <RefreshCw className={cn("w-4 h-4", itemsLoading && "animate-spin")} />
-                Refresh
-              </Button>
-              <div className="h-6 w-px bg-border" />
-              <AuthHeader />
-            </div>
-          </div>
-        </div>
-      </header>
+      {/* Header stripped — parent Review page provides header */}
 
       <main className="container mx-auto px-6 py-8 space-y-6">
         {/* Auth state banners */}
