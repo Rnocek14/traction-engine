@@ -2,25 +2,24 @@
  * GlobalNav - Persistent top navigation bar
  * 
  * Always visible. Never clever. Four workspaces.
- * Dashboard | Stories | Scripts | Settings
+ * Dashboard | Produce | Review | Settings
  */
 
 import { Link, useLocation } from "react-router-dom";
-import { Zap, LayoutDashboard, Film, FileText, Settings } from "lucide-react";
+import { Zap, LayoutDashboard, Clapperboard, ShieldCheck, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AuthHeader } from "@/components/auth/AuthHeader";
 
 const NAV_ITEMS = [
   { label: "Dashboard", path: "/", icon: LayoutDashboard },
-  { label: "Stories", path: "/stories", icon: Film },
-  { label: "Scripts", path: "/scripts", icon: FileText },
+  { label: "Produce", path: "/produce", icon: Clapperboard },
+  { label: "Review", path: "/review", icon: ShieldCheck },
   { label: "Settings", path: "/settings", icon: Settings },
 ] as const;
 
 export function GlobalNav() {
   const location = useLocation();
   
-  // Determine active nav item
   const isActive = (path: string) => {
     if (path === "/") return location.pathname === "/";
     return location.pathname.startsWith(path);
