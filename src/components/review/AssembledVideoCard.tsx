@@ -168,6 +168,25 @@ export function AssembledVideoCard({ video, onApprove, onReject, onReassemble }:
                 )}
               </div>
             )}
+
+            {video.assembled_status === "failed" && (
+              <div className="mt-4 pt-4 border-t border-border/50">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-destructive">
+                    {meta?.error ? String(meta.error) : "Assembly failed"}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1.5"
+                    onClick={() => onReassemble?.(video.id)}
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    Reassemble
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </CardContent>
