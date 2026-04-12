@@ -12,7 +12,7 @@ interface AssembledVideo {
   assembled_status: string;
   assembled_video_url: string | null;
   assembled_at: string | null;
-  assembled_meta: Record<string, unknown> | null;
+  assembled_meta: unknown;
   total_clips: number | null;
   continuity_score: number | null;
   account_id: string;
