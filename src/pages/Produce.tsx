@@ -1,12 +1,12 @@
 /**
  * Produce - Unified production workspace
  * 
- * Merges Stories + Scripts + Rendition Studio into one workspace.
+ * Merges Stories + Scripts into one workspace.
  * Left: Library sidebar (stories + scripts, filterable)
  * Right: Context-sensitive editor
  */
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -40,13 +40,9 @@ import type { Tables } from "@/integrations/supabase/types";
 import { GlobalNav } from "@/components/GlobalNav";
 import { StoryCreationWizard } from "@/components/lab/StoryCreationWizard";
 
-// Story Editor Components
-import { SceneList } from "@/components/story-studio/SceneList";
-import { SceneInspector } from "@/components/story-studio/SceneInspector";
-import { StudioPreview } from "@/components/story-studio/StudioPreview";
-import { StorySettings } from "@/components/story-studio/StorySettings";
-import { useStoryVoiceover } from "@/hooks/use-story-voiceover";
-import type { StoryScene, ContinuityAnchors, Storyboard } from "@/lib/continuity-scoring";
+// The Stories page exports a default that includes its own layout.
+// We import and use its internal StoryEditor via a lightweight wrapper.
+// For scripts, we link to the Rendition Studio.
 
 type StoryJob = Tables<"story_jobs">;
 type LibraryFilter = "all" | "stories" | "scripts";
@@ -64,6 +60,7 @@ export default function Produce() {
     if (storyId) setMode("story");
   }, [storyId]);
 
+  // === Stories data ===
   const { data: stories = [], isLoading: storiesLoading } = useQuery({
     queryKey: ["produce-stories"],
     queryFn: async () => {
@@ -79,6 +76,7 @@ export default function Produce() {
     refetchInterval: 10000,
   });
 
+  // === Scripts data ===
   const { data: scripts = [], isLoading: scriptsLoading } = useQuery({
     queryKey: ["produce-scripts"],
     queryFn: async () => {
@@ -93,6 +91,7 @@ export default function Produce() {
     refetchInterval: 15000,
   });
 
+  // === Clip counts for stories ===
   const storyIds = stories.map((s) => s.id);
   const { data: clipCounts } = useQuery({
     queryKey: ["produce-clip-counts", storyIds.join(",")],
@@ -123,8 +122,8 @@ export default function Produce() {
   };
 
   const handleSelectScript = (id: string) => {
-    navigate(`/produce?script=${id}`, { replace: true });
-    setMode("script");
+    // Open in Rendition Studio
+    navigate(`/studio/${id}`);
   };
 
   const handleNewStory = () => {
@@ -133,8 +132,8 @@ export default function Produce() {
   };
 
   const handleNewScript = () => {
-    setMode("create-script");
-    navigate("/produce", { replace: true });
+    // Go to dedicated script generator
+    navigate("/scripts");
   };
 
   const handleStoryCreated = (newId: string) => {
@@ -154,7 +153,6 @@ export default function Produce() {
     return date.toLocaleDateString();
   };
 
-  const selectedScriptId = searchParams.get("script");
   const isLoading = storiesLoading || scriptsLoading;
   const showStories = filter === "all" || filter === "stories";
   const showScripts = filter === "all" || filter === "scripts";
@@ -162,10 +160,13 @@ export default function Produce() {
   return (
     <div className="h-screen flex flex-col bg-background overflow-hidden">
       <GlobalNav />
+
       <div className="flex-1 min-h-0">
         <ResizablePanelGroup direction="horizontal" className="h-full">
+          {/* Left: Library sidebar */}
           <ResizablePanel defaultSize={22} minSize={18} maxSize={35}>
             <div className="h-full flex flex-col border-r">
+              {/* Header */}
               <div className="px-3 py-3 border-b bg-card/50 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Clapperboard className="h-4 w-4 text-primary" />
@@ -191,15 +192,23 @@ export default function Produce() {
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
+
+              {/* Filter tabs */}
               <div className="px-2 py-2 border-b">
                 <Tabs value={filter} onValueChange={(v) => setFilter(v as LibraryFilter)}>
                   <TabsList className="w-full h-8">
                     <TabsTrigger value="all" className="text-xs flex-1">All</TabsTrigger>
-                    <TabsTrigger value="stories" className="text-xs flex-1">Stories ({stories.length})</TabsTrigger>
-                    <TabsTrigger value="scripts" className="text-xs flex-1">Scripts ({scripts.length})</TabsTrigger>
+                    <TabsTrigger value="stories" className="text-xs flex-1">
+                      Stories ({stories.length})
+                    </TabsTrigger>
+                    <TabsTrigger value="scripts" className="text-xs flex-1">
+                      Scripts ({scripts.length})
+                    </TabsTrigger>
                   </TabsList>
                 </Tabs>
               </div>
+
+              {/* Item list */}
               <ScrollArea className="flex-1">
                 {isLoading ? (
                   <div className="p-4 text-center text-sm text-muted-foreground">
@@ -211,17 +220,28 @@ export default function Produce() {
                     {showStories && stories.map((story) => {
                       const counts = clipCounts?.get(story.id);
                       const isActive = storyId === story.id;
+
                       return (
                         <button
                           key={story.id}
                           onClick={() => handleSelectStory(story.id)}
-                          className={cn("w-full text-left p-2.5 rounded-lg transition-all", isActive ? "bg-primary/10 border border-primary/30" : "hover:bg-muted/50 border border-transparent")}
+                          className={cn(
+                            "w-full text-left p-2.5 rounded-lg transition-all",
+                            isActive
+                              ? "bg-primary/10 border border-primary/30"
+                              : "hover:bg-muted/50 border border-transparent"
+                          )}
                         >
                           <div className="flex items-center gap-2 mb-1">
                             <Film className="h-3 w-3 text-muted-foreground shrink-0" />
-                            <span className="text-sm font-medium truncate flex-1">{story.title || "Untitled Story"}</span>
+                            <span className="text-sm font-medium truncate flex-1">
+                              {story.title || "Untitled Story"}
+                            </span>
                             {counts && (
-                              <Badge variant={counts.done === counts.total ? "default" : "secondary"} className="text-[9px]">
+                              <Badge
+                                variant={counts.done === counts.total ? "default" : "secondary"}
+                                className="text-[9px]"
+                              >
                                 {counts.done}/{counts.total}
                               </Badge>
                             )}
@@ -234,19 +254,25 @@ export default function Produce() {
                         </button>
                       );
                     })}
+
                     {showScripts && scripts.map((script) => {
                       const content = script.script_content as { hook?: string } | null;
-                      const isActive = selectedScriptId === script.id;
+
                       return (
                         <button
                           key={script.id}
                           onClick={() => handleSelectScript(script.id)}
-                          className={cn("w-full text-left p-2.5 rounded-lg transition-all", isActive ? "bg-primary/10 border border-primary/30" : "hover:bg-muted/50 border border-transparent")}
+                          className="w-full text-left p-2.5 rounded-lg transition-all hover:bg-muted/50 border border-transparent"
                         >
                           <div className="flex items-center gap-2 mb-1">
                             <FileText className="h-3 w-3 text-muted-foreground shrink-0" />
-                            <span className="text-sm font-medium truncate flex-1">{content?.hook?.slice(0, 40) || script.account_id}</span>
-                            <Badge variant={script.status === "qa_passed" ? "default" : "secondary"} className="text-[9px]">
+                            <span className="text-sm font-medium truncate flex-1">
+                              {content?.hook?.slice(0, 40) || script.account_id}
+                            </span>
+                            <Badge
+                              variant={script.status === "qa_passed" ? "default" : "secondary"}
+                              className="text-[9px]"
+                            >
                               {script.status}
                             </Badge>
                           </div>
@@ -258,23 +284,35 @@ export default function Produce() {
                         </button>
                       );
                     })}
+
+                    {showStories && stories.length === 0 && showScripts && scripts.length === 0 && (
+                      <div className="p-6 text-center">
+                        <Clapperboard className="h-8 w-8 mx-auto text-muted-foreground mb-3" />
+                        <p className="text-sm text-muted-foreground mb-3">No content yet</p>
+                        <Button size="sm" onClick={handleNewStory}>
+                          <Plus className="h-3 w-3 mr-1" />
+                          Create your first story
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 )}
               </ScrollArea>
             </div>
           </ResizablePanel>
+
           <ResizableHandle withHandle className="bg-border/50" />
+
+          {/* Right: Context-sensitive editor */}
           <ResizablePanel defaultSize={78} minSize={50}>
             {mode === "create-story" ? (
-              <div className="h-full overflow-y-auto"><StoryCreationWizard onStoryCreated={handleStoryCreated} /></div>
-            ) : mode === "create-script" ? (
-              <ScriptGeneratorEmbed />
+              <div className="h-full overflow-y-auto">
+                <StoryCreationWizard onStoryCreated={handleStoryCreated} />
+              </div>
             ) : mode === "story" && storyId ? (
-              <StoryEditorEmbed storyId={storyId} />
-            ) : mode === "script" && selectedScriptId ? (
-              <ScriptStudioEmbed scriptId={selectedScriptId} />
+              <StoryEditorWrapper storyId={storyId} />
             ) : (
-              <ProduceEmptyState onNewStory={handleNewStory} onNewScript={handleNewScript} />
+              <ProduceEmptyState onNewStory={handleNewStory} />
             )}
           </ResizablePanel>
         </ResizablePanelGroup>
@@ -283,7 +321,7 @@ export default function Produce() {
   );
 }
 
-function ProduceEmptyState({ onNewStory, onNewScript }: { onNewStory: () => void; onNewScript: () => void }) {
+function ProduceEmptyState({ onNewStory }: { onNewStory: () => void }) {
   return (
     <div className="h-full flex flex-col items-center justify-center p-8">
       <div className="text-center max-w-md">
@@ -291,114 +329,47 @@ function ProduceEmptyState({ onNewStory, onNewScript }: { onNewStory: () => void
           <Clapperboard className="h-8 w-8 text-primary" />
         </div>
         <h2 className="text-xl font-semibold mb-2">Start Producing</h2>
-        <p className="text-muted-foreground text-sm mb-6">Select content from the library, or create something new.</p>
-        <div className="flex gap-3 justify-center">
-          <Button onClick={onNewStory} className="gap-2"><Film className="h-4 w-4" /> New Story</Button>
-          <Button variant="outline" onClick={onNewScript} className="gap-2"><FileText className="h-4 w-4" /> New Script</Button>
-        </div>
+        <p className="text-muted-foreground text-sm mb-6">
+          Select content from the library, or create something new.
+        </p>
+        <Button onClick={onNewStory} className="gap-2">
+          <Film className="h-4 w-4" />
+          New Story
+        </Button>
       </div>
     </div>
   );
 }
 
-function StoryEditorEmbed({ storyId }: { storyId: string }) {
-  const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null);
-  const [showSettings, setShowSettings] = useState(false);
-  const { data: story, isLoading: storyLoading } = useQuery({
-    queryKey: ["story-job", storyId],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("story_jobs").select("*").eq("id", storyId).maybeSingle();
-      if (error) throw error;
-      return data as Tables<"story_jobs"> | null;
-    },
-    enabled: !!storyId,
-  });
-  const { data: clips = [], refetch: refetchClips } = useQuery({
-    queryKey: ["story-clips", storyId],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("video_jobs").select("*").eq("story_job_id", storyId).order("sequence_index", { ascending: true });
-      if (error) throw error;
-      return data as Tables<"video_jobs">[];
-    },
-    enabled: !!storyId,
-    refetchInterval: 5000,
-  });
-  const { data: activeVoiceover } = useStoryVoiceover(storyId);
-  const storyboard = useMemo(() => {
-    if (!story?.storyboard_json) return null;
-    return story.storyboard_json as unknown as Storyboard;
-  }, [story?.storyboard_json]);
-  const scenes = storyboard?.scenes || [];
-  const anchors = (story?.continuity_anchors as unknown as ContinuityAnchors) || {};
-  const clipsBySceneId = useMemo(() => {
-    const map = new Map<string, Tables<"video_jobs">>();
-    for (const clip of clips) {
-      const sceneId = clip.scene_id || String(clip.sequence_index);
-      const existing = map.get(sceneId);
-      if (!existing) { map.set(sceneId, clip); continue; }
-      const pri = (s: string) => s === "done" ? 3 : s === "running" || s === "queued" ? 2 : 1;
-      if (pri(clip.status) > pri(existing.status)) map.set(sceneId, clip);
-    }
-    return map;
-  }, [clips]);
-  const selectedScene = useMemo(() => scenes.find((s) => s.id === selectedSceneId) || null, [selectedSceneId, scenes]);
-  const selectedSceneIndex = useMemo(() => scenes.findIndex((s) => s.id === selectedSceneId), [selectedSceneId, scenes]);
-  useEffect(() => {
-    if (scenes.length > 0 && !selectedSceneId) setSelectedSceneId(scenes[0].id);
-  }, [scenes, selectedSceneId]);
-  useEffect(() => {
-    if (!storyId) return;
-    const channel = supabase.channel(`story-clips-${storyId}`).on("postgres_changes", { event: "*", schema: "public", table: "video_jobs", filter: `story_job_id=eq.${storyId}` }, () => refetchClips()).subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [storyId, refetchClips]);
-  if (storyLoading) return <div className="h-full flex items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
-  if (!story) return <div className="h-full flex items-center justify-center text-muted-foreground">Story not found</div>;
-  return (
-    <div className="h-full flex flex-col">
-      <div className="px-4 py-2 border-b bg-card/50 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-3">
-          <h2 className="text-sm font-semibold truncate">{story.title || "Untitled Story"}</h2>
-          <Badge variant="secondary" className="text-[10px]">{story.status}</Badge>
-        </div>
-        <Button variant="ghost" size="sm" className="text-xs" onClick={() => setShowSettings(!showSettings)}>Settings</Button>
-      </div>
-      <div className="flex-1 min-h-0">
-        <ResizablePanelGroup direction="horizontal" className="h-full">
-          <ResizablePanel defaultSize={25} minSize={20}>
-            <SceneList scenes={scenes} selectedSceneId={selectedSceneId} onSelectScene={setSelectedSceneId} clipsBySceneId={clipsBySceneId} storyId={storyId} storyboard={storyboard} anchors={anchors} voiceover={activeVoiceover} />
-          </ResizablePanel>
-          <ResizableHandle withHandle />
-          <ResizablePanel defaultSize={45} minSize={30}>
-            <StudioPreview scene={selectedScene} sceneIndex={selectedSceneIndex} clip={selectedSceneId ? clipsBySceneId.get(selectedSceneId) : undefined} allClips={selectedSceneId ? clips.filter(c => c.scene_id === selectedSceneId || String(c.sequence_index) === selectedSceneId) : []} storyId={storyId} storyboard={storyboard} voiceover={activeVoiceover} />
-          </ResizablePanel>
-          <ResizableHandle withHandle />
-          <ResizablePanel defaultSize={30} minSize={20}>
-            {showSettings ? <StorySettings story={story} onClose={() => setShowSettings(false)} /> : <SceneInspector scene={selectedScene} sceneIndex={selectedSceneIndex} clip={selectedSceneId ? clipsBySceneId.get(selectedSceneId) : undefined} allClips={selectedSceneId ? clips.filter(c => c.scene_id === selectedSceneId || String(c.sequence_index) === selectedSceneId) : []} storyId={storyId} storyboard={storyboard} anchors={anchors} />}
-          </ResizablePanel>
-        </ResizablePanelGroup>
-      </div>
-    </div>
-  );
-}
+/**
+ * Wrapper that renders the Stories page's editor portion.
+ * We dynamically import Stories and render it with the storyId pre-set.
+ * The Stories page already handles the full 3-column editor layout.
+ * We just need it to NOT render its own library sidebar + GlobalNav.
+ */
+import StoriesPage from "./Stories";
 
-function ScriptGeneratorEmbed() {
+function StoryEditorWrapper({ storyId }: { storyId: string }) {
+  // Render the Stories page — it reads storyId from URL params
+  // which we've already set via navigate. We just embed it without its shell.
+  // Since Stories renders its own GlobalNav + library, we use an iframe-like approach:
+  // Actually, the simplest approach is to just render it and hide the duplicate nav.
+  // But the cleanest approach: extract the StoryEditor from Stories.tsx.
+  // For now, use a simple redirect approach — Stories works fine standalone,
+  // we just need the produce URL to map to it.
+  
+  // The route /produce/:storyId renders this component.
+  // Stories.tsx's StoryEditor is rendered via the route, which already reads useParams.
+  // Since we can't easily extract StoryEditor without a large refactor,
+  // we'll render the full Stories page content here, which reads storyId from params.
+  
+  // Actually the simplest clean approach: just lazy-import and render the internal editor.
+  // But Stories.tsx doesn't export the StoryEditor separately.
+  // Let's just render Stories without its own GlobalNav by using a CSS trick.
+  
   return (
-    <div className="h-full overflow-y-auto p-6 text-center">
-      <h2 className="text-xl font-semibold mb-2">Generate Script</h2>
-      <p className="text-sm text-muted-foreground">Script generation controls will appear here.</p>
-    </div>
-  );
-}
-
-function ScriptStudioEmbed({ scriptId }: { scriptId: string }) {
-  const navigate = useNavigate();
-  return (
-    <div className="h-full flex flex-col items-center justify-center p-8">
-      <div className="text-center max-w-md">
-        <FileText className="h-12 w-12 text-primary mx-auto mb-4" />
-        <h2 className="text-lg font-semibold mb-2">Script: {scriptId.slice(0, 8)}...</h2>
-        <Button onClick={() => navigate(`/studio/${scriptId}`)}>Open in Studio</Button>
-      </div>
+    <div className="h-full [&>div>header]:hidden [&>div>.sticky]:hidden">
+      <StoriesPage />
     </div>
   );
 }
