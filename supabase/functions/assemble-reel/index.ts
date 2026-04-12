@@ -574,8 +574,8 @@ Deno.serve(async (req) => {
       },
       transition: transitionSettings,
       mix: {
-        duck_video_audio: true,
-        video_audio_gain_db: -18,
+        duck_video_audio: !!voiceoverUrl,
+        video_audio_gain_db: voiceoverUrl ? -96 : 0,
         voiceover_gain_db: 0,
       },
       upload: {
