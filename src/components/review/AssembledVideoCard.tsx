@@ -156,15 +156,15 @@ export function AssembledVideoCard({ video, onApprove, onReject, onReassemble }:
                     {video.assembled_status === "queued" ? "Queued…" : "Rendering…"}
                   </span>
                   <span className="font-mono text-xs">
-                    {video.assembled_meta?.progress != null
-                      ? `${Math.round(Number(video.assembled_meta.progress) * 100)}%`
-                      : video.assembled_meta?.eta_seconds != null
-                        ? `ETA ${video.assembled_meta.eta_seconds}s`
+                    {meta?.progress != null
+                      ? `${Math.round(Number(meta.progress) * 100)}%`
+                      : meta?.eta_seconds != null
+                        ? `ETA ${meta.eta_seconds}s`
                         : "Starting…"}
                   </span>
                 </div>
-                {video.assembled_meta?.progress != null && (
-                  <Progress value={Math.round(Number(video.assembled_meta.progress) * 100)} className="h-2" />
+                {meta?.progress != null && (
+                  <Progress value={Math.round(Number(meta.progress) * 100)} className="h-2" />
                 )}
               </div>
             )}
