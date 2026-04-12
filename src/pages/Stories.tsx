@@ -339,7 +339,7 @@ interface StoryEditorProps {
   setShowSettings: (show: boolean) => void;
 }
 
-function StoryEditor({
+export function StoryEditor({
   storyId,
   selectedSceneId,
   setSelectedSceneId,

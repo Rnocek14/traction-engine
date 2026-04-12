@@ -3,11 +3,11 @@
  * 
  * Merges Stories + Scripts into one workspace.
  * Left: Library sidebar (stories + scripts, filterable)
- * Right: Context-sensitive editor
+ * Right: Context-sensitive editor (StoryEditor or creation wizard)
  */
 
 import { useState, useEffect } from "react";
-import { useParams, useNavigate, useSearchParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   Film,
@@ -36,28 +36,31 @@ import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import type { Tables } from "@/integrations/supabase/types";
 
-// Components
 import { GlobalNav } from "@/components/GlobalNav";
 import { StoryCreationWizard } from "@/components/lab/StoryCreationWizard";
-
-// The Stories page exports a default that includes its own layout.
-// We import and use its internal StoryEditor via a lightweight wrapper.
-// For scripts, we link to the Rendition Studio.
+import { StoryEditor } from "@/pages/Stories";
 
 type StoryJob = Tables<"story_jobs">;
 type LibraryFilter = "all" | "stories" | "scripts";
-type ProduceMode = "empty" | "story" | "script" | "create-story" | "create-script";
+type ProduceMode = "empty" | "story" | "create-story";
 
 export default function Produce() {
   const { storyId } = useParams<{ storyId?: string }>();
-  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
   const [filter, setFilter] = useState<LibraryFilter>("all");
   const [mode, setMode] = useState<ProduceMode>(storyId ? "story" : "empty");
+  const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
 
   useEffect(() => {
     if (storyId) setMode("story");
+  }, [storyId]);
+
+  // Reset scene selection when story changes
+  useEffect(() => {
+    setSelectedSceneId(null);
+    setShowSettings(false);
   }, [storyId]);
 
   // === Stories data ===
@@ -91,7 +94,7 @@ export default function Produce() {
     refetchInterval: 15000,
   });
 
-  // === Clip counts for stories ===
+  // === Clip counts ===
   const storyIds = stories.map((s) => s.id);
   const { data: clipCounts } = useQuery({
     queryKey: ["produce-clip-counts", storyIds.join(",")],
@@ -122,18 +125,12 @@ export default function Produce() {
   };
 
   const handleSelectScript = (id: string) => {
-    // Open in Rendition Studio
     navigate(`/studio/${id}`);
   };
 
   const handleNewStory = () => {
     setMode("create-story");
     navigate("/produce", { replace: true });
-  };
-
-  const handleNewScript = () => {
-    // Go to dedicated script generator
-    navigate("/scripts");
   };
 
   const handleStoryCreated = (newId: string) => {
@@ -185,7 +182,7 @@ export default function Produce() {
                       <Film className="h-4 w-4 mr-2" />
                       New Story
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={handleNewScript}>
+                    <DropdownMenuItem onClick={() => navigate("/scripts")}>
                       <FileText className="h-4 w-4 mr-2" />
                       New Script
                     </DropdownMenuItem>
@@ -310,7 +307,13 @@ export default function Produce() {
                 <StoryCreationWizard onStoryCreated={handleStoryCreated} />
               </div>
             ) : mode === "story" && storyId ? (
-              <StoryEditorWrapper storyId={storyId} />
+              <StoryEditor
+                storyId={storyId}
+                selectedSceneId={selectedSceneId}
+                setSelectedSceneId={setSelectedSceneId}
+                showSettings={showSettings}
+                setShowSettings={setShowSettings}
+              />
             ) : (
               <ProduceEmptyState onNewStory={handleNewStory} />
             )}
@@ -337,39 +340,6 @@ function ProduceEmptyState({ onNewStory }: { onNewStory: () => void }) {
           New Story
         </Button>
       </div>
-    </div>
-  );
-}
-
-/**
- * Wrapper that renders the Stories page's editor portion.
- * We dynamically import Stories and render it with the storyId pre-set.
- * The Stories page already handles the full 3-column editor layout.
- * We just need it to NOT render its own library sidebar + GlobalNav.
- */
-import StoriesPage from "./Stories";
-
-function StoryEditorWrapper({ storyId }: { storyId: string }) {
-  // Render the Stories page — it reads storyId from URL params
-  // which we've already set via navigate. We just embed it without its shell.
-  // Since Stories renders its own GlobalNav + library, we use an iframe-like approach:
-  // Actually, the simplest approach is to just render it and hide the duplicate nav.
-  // But the cleanest approach: extract the StoryEditor from Stories.tsx.
-  // For now, use a simple redirect approach — Stories works fine standalone,
-  // we just need the produce URL to map to it.
-  
-  // The route /produce/:storyId renders this component.
-  // Stories.tsx's StoryEditor is rendered via the route, which already reads useParams.
-  // Since we can't easily extract StoryEditor without a large refactor,
-  // we'll render the full Stories page content here, which reads storyId from params.
-  
-  // Actually the simplest clean approach: just lazy-import and render the internal editor.
-  // But Stories.tsx doesn't export the StoryEditor separately.
-  // Let's just render Stories without its own GlobalNav by using a CSS trick.
-  
-  return (
-    <div className="h-full [&>div>header]:hidden [&>div>.sticky]:hidden">
-      <StoriesPage />
     </div>
   );
 }
