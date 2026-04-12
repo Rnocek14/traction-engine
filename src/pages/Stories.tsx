@@ -64,26 +64,26 @@ export default function Stories() {
 
   // Handle story selection from library
   const handleSelectStory = (id: string) => {
-    navigate(`/stories/${id}`, { replace: true });
+    navigate(`/produce/${id}`, { replace: true });
     setMode("editor");
   };
 
   // Handle new story creation
   const handleNewStory = () => {
     setMode("create");
-    navigate("/stories", { replace: true });
+    navigate("/produce", { replace: true });
   };
 
   // Handle story created
   const handleStoryCreated = (newStoryId: string) => {
-    navigate(`/stories/${newStoryId}`, { replace: true });
+    navigate(`/produce/${newStoryId}`, { replace: true });
     setMode("editor");
   };
 
   // Back to library
   const handleBackToLibrary = () => {
     setMode("library");
-    navigate("/stories", { replace: true });
+    navigate("/produce", { replace: true });
     setSelectedSceneId(null);
   };
 
@@ -339,7 +339,7 @@ interface StoryEditorProps {
   setShowSettings: (show: boolean) => void;
 }
 
-function StoryEditor({
+export function StoryEditor({
   storyId,
   selectedSceneId,
   setSelectedSceneId,

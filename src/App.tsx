@@ -7,11 +7,9 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import Index from "./pages/Index";
 import AccountDetail from "./pages/AccountDetail";
 import ScriptGenerator from "./pages/ScriptGenerator";
-import QAReviewInbox from "./pages/QAReviewInbox";
+import Produce from "./pages/Produce";
+import Review from "./pages/Review";
 import Studio from "./pages/Studio";
-import Lab from "./pages/Lab";
-import StoryStudio from "./pages/StoryStudio";
-import Stories from "./pages/Stories";
 import Settings from "./pages/Settings";
 import RoutingAnalytics from "./pages/RoutingAnalytics";
 import Login from "./pages/Login";
@@ -29,25 +27,30 @@ const App = () => (
           <Routes>
             {/* Core Workspaces */}
             <Route path="/" element={<Index />} />
-            <Route path="/stories" element={<Stories />} />
-            <Route path="/stories/:storyId" element={<Stories />} />
-            <Route path="/scripts" element={<ScriptGenerator />} />
-            <Route path="/qa-review" element={<QAReviewInbox />} />
+            <Route path="/produce" element={<Produce />} />
+            <Route path="/produce/:storyId" element={<Produce />} />
+            <Route path="/review" element={<Review />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/settings/:tab" element={<Settings />} />
             <Route path="/account/:accountId" element={<AccountDetail />} />
-            
-            {/* Legacy routes - redirect to new structure */}
-            <Route path="/story/:storyId" element={<StoryRedirect />} />
-            <Route path="/studio/lab/story/:storyId" element={<StoryRedirect />} />
-            <Route path="/studio/lab/story" element={<Navigate to="/stories" replace />} />
-            <Route path="/studio/lab" element={<Navigate to="/stories" replace />} />
-            
-            {/* Rendition Studio (script-based) - still separate */}
+
+            {/* Scripts generator (accessible from Produce "New Script") */}
+            <Route path="/scripts" element={<ScriptGenerator />} />
+
+            {/* Rendition Studio (script timeline editor) */}
             <Route path="/studio" element={<Studio />} />
             <Route path="/studio/:scriptRunId" element={<Studio />} />
             <Route path="/studio/analytics" element={<RoutingAnalytics />} />
-            
+
+            {/* Legacy redirects */}
+            <Route path="/stories" element={<Navigate to="/produce" replace />} />
+            <Route path="/stories/:storyId" element={<StoryRedirect />} />
+            <Route path="/story/:storyId" element={<StoryRedirect />} />
+            <Route path="/studio/lab/story/:storyId" element={<StoryRedirect />} />
+            <Route path="/studio/lab/story" element={<Navigate to="/produce" replace />} />
+            <Route path="/studio/lab" element={<Navigate to="/produce" replace />} />
+            <Route path="/qa-review" element={<Navigate to="/review" replace />} />
+
             <Route path="/login" element={<Login />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
@@ -58,10 +61,10 @@ const App = () => (
   </QueryClientProvider>
 );
 
-/** Redirect from old story routes to new unified /stories workspace */
+/** Redirect from old story routes to new /produce/:storyId */
 function StoryRedirect() {
   const storyId = window.location.pathname.split("/").pop();
-  return <Navigate to={`/stories/${storyId}`} replace />;
+  return <Navigate to={`/produce/${storyId}`} replace />;
 }
 
 export default App;
