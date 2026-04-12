@@ -72,13 +72,13 @@ export default function Review() {
             </div>
             <div className="flex items-center gap-3">
               {succeededCount > 0 && (
-                <Badge variant="outline" className="gap-1 text-green-500 border-green-500/30">
+                <Badge variant="outline" className="gap-1 text-success border-success/30">
                   <Film className="w-3 h-3" />
                   {succeededCount} ready
                 </Badge>
               )}
               {renderingCount > 0 && (
-                <Badge variant="outline" className="gap-1 text-yellow-500 border-yellow-500/30">
+                <Badge variant="outline" className="gap-1 text-warning border-warning/30">
                   <RefreshCw className="w-3 h-3 animate-spin" />
                   {renderingCount} rendering
                 </Badge>
