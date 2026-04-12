@@ -80,8 +80,8 @@ export default function QAReviewInbox() {
   const canTakeActions = DEV_SKIP_AUTH || userHasAccess === true;
 
   return (
-    <div className="min-h-screen bg-background">
-      <GlobalNav />
+    <div className="bg-background">
+      {/* GlobalNav removed — rendered by parent Review page */}
       
       {/* Header */}
       <header className="border-b border-border/50 bg-background/80">
