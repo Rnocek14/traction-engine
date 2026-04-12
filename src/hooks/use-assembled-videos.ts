@@ -7,7 +7,7 @@ export function useAssembledVideos() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("story_jobs")
-        .select("id, title, story_type, assembled_status, assembled_video_url, assembled_at, total_clips, continuity_score, account_id, status")
+        .select("id, title, story_type, assembled_status, assembled_video_url, assembled_at, assembled_meta, total_clips, continuity_score, account_id, status")
         .in("assembled_status", ["succeeded", "rendering", "queued", "failed"])
         .order("assembled_at", { ascending: false, nullsFirst: false });
 
