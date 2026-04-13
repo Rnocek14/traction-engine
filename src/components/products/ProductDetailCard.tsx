@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ExternalLink, TrendingUp, Package, Search, Loader2, Sparkles, ChevronDown, ChevronUp, Lightbulb, Film, Users } from "lucide-react";
+import { ExternalLink, TrendingUp, Package, Search, Loader2, Sparkles, ChevronDown, ChevronUp, Lightbulb, Film, Users, ImageIcon, ChevronLeft, ChevronRight } from "lucide-react";
 import { type ProductWithAnalysis, type ProductStatus, useUpdateProductStatus, useResearchProduct, useGenerateProductPlan, useProductLinkedIdeas, useAssignProductAccounts } from "@/hooks/use-products";
 import { ProductScoringForm } from "./ProductScoringForm";
 import { ProductMarketingPlan } from "./ProductMarketingPlan";
@@ -26,7 +26,9 @@ const NEXT_STATUS: Partial<Record<ProductStatus, ProductStatus>> = {
 
 export function ProductDetailCard({ product }: { product: ProductWithAnalysis }) {
   const [showPlan, setShowPlan] = useState(false);
+  const [imgIdx, setImgIdx] = useState(0);
   const analysis = product.product_analysis?.[0];
+  const images = product.product_images || [];
   const updateStatus = useUpdateProductStatus();
   const researchProduct = useResearchProduct();
   const generatePlan = useGenerateProductPlan();
@@ -45,14 +47,35 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
       <CardHeader className="pb-2">
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
-            {product.image_url ? (
-              <img src={product.image_url} alt={product.name} className="w-10 h-10 rounded object-cover flex-shrink-0" />
+            {images.length > 0 ? (
+              <div className="relative w-10 h-10 flex-shrink-0">
+                <img
+                  src={images[0]?.url}
+                  alt={product.name}
+                  className="w-10 h-10 rounded object-cover"
+                  onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                />
+              </div>
+            ) : product.image_url ? (
+              <img
+                src={product.image_url}
+                alt={product.name}
+                className="w-10 h-10 rounded object-cover flex-shrink-0"
+                onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+              />
             ) : (
               <div className="w-10 h-10 rounded bg-muted flex items-center justify-center flex-shrink-0">
                 <Package className="w-5 h-5 text-muted-foreground" />
               </div>
             )}
-            <CardTitle className="text-sm truncate">{product.name}</CardTitle>
+            <div className="min-w-0">
+              <CardTitle className="text-sm truncate">{product.name}</CardTitle>
+              {images.length > 0 && (
+                <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
+                  <ImageIcon className="w-2.5 h-2.5" /> {images.length} photos
+                </span>
+              )}
+            </div>
           </div>
           <div className="flex items-center gap-1 flex-shrink-0">
             {linkedIdeas && linkedIdeas.length > 0 && (
@@ -68,6 +91,42 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
         </div>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
+        {/* Image gallery */}
+        {images.length > 1 && (
+          <div className="relative rounded-md overflow-hidden bg-muted/30">
+            <img
+              src={images[imgIdx]?.url}
+              alt={`${product.name} - ${images[imgIdx]?.label}`}
+              className="w-full h-32 object-contain"
+              onError={(e) => { (e.target as HTMLImageElement).src = "/placeholder.svg"; }}
+            />
+            <div className="absolute bottom-1 left-1/2 -translate-x-1/2 flex items-center gap-1">
+              <Button
+                variant="secondary"
+                size="sm"
+                className="h-5 w-5 p-0 rounded-full opacity-80"
+                onClick={() => setImgIdx((imgIdx - 1 + images.length) % images.length)}
+              >
+                <ChevronLeft className="w-3 h-3" />
+              </Button>
+              <span className="text-[10px] bg-background/80 px-1.5 rounded-full">
+                {imgIdx + 1}/{images.length}
+              </span>
+              <Button
+                variant="secondary"
+                size="sm"
+                className="h-5 w-5 p-0 rounded-full opacity-80"
+                onClick={() => setImgIdx((imgIdx + 1) % images.length)}
+              >
+                <ChevronRight className="w-3 h-3" />
+              </Button>
+            </div>
+            <Badge variant="outline" className="absolute top-1 right-1 text-[9px] bg-background/80">
+              {images[imgIdx]?.source} · {images[imgIdx]?.label}
+            </Badge>
+          </div>
+        )}
+
         {/* Price row */}
         <div className="flex items-center gap-3 text-xs">
           {priceDollars && <span className="font-medium">${priceDollars}</span>}

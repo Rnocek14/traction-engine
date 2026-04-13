@@ -44,8 +44,18 @@ export interface ProductAnalysis {
   analyzed_at: string | null;
 }
 
+export interface ProductImage {
+  id: string;
+  url: string;
+  source: string;
+  label: string;
+  is_primary: boolean;
+  verified: boolean;
+}
+
 export interface ProductWithAnalysis extends Product {
   product_analysis: ProductAnalysis[] | null;
+  product_images: ProductImage[] | null;
 }
 
 export function useProducts(statusFilter?: ProductStatus) {
@@ -54,7 +64,7 @@ export function useProducts(statusFilter?: ProductStatus) {
     queryFn: async () => {
       let query = supabase
         .from("products")
-        .select("*, product_analysis(*)")
+        .select("*, product_analysis(*), product_images(*)")
         .order("created_at", { ascending: false });
 
       if (statusFilter) {
@@ -131,7 +141,7 @@ export function useResearchProduct() {
     },
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["products"] });
-      toast.success(`Research complete — Score: ${data.overall_score}/100`);
+      toast.success(`Research complete — Score: ${data.overall_score}/100, ${data.images_found || 0} images found`);
     },
     onError: (e) => toast.error(`Research failed: ${e.message}`),
   });

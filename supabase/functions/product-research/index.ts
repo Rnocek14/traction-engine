@@ -135,6 +135,70 @@ Deno.serve(async (req) => {
       }
     }
 
+    // 2b. Perplexity image search - find real product images
+    let foundImageUrls: { url: string; source: string; label: string }[] = [];
+    if (perplexityKey && productName) {
+      try {
+        const imgSearch = await perplexityResearch(
+          `"${productName}" product photo image high quality. Find direct image URLs for this exact product. Include Amazon, AliExpress, or official product page images.`,
+          perplexityKey
+        );
+        // Extract image URLs from citations and content
+        const allText = imgSearch.content + " " + imgSearch.citations.join(" ");
+        const imgRegex = /https?:\/\/[^\s"'<>]+\.(?:jpg|jpeg|png|webp|gif)(?:\?[^\s"'<>]*)?/gi;
+        const imgMatches = allText.match(imgRegex) || [];
+        // Also check citations for product page URLs (Amazon, AliExpress etc)
+        for (const citation of imgSearch.citations) {
+          if (citation.match(/amazon\.|aliexpress\.|walmart\.|temu\.|etsy\./i)) {
+            // Try to extract og:image from product pages
+            try {
+              const pageResp = await fetch(citation, {
+                headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+                redirect: "follow",
+              });
+              if (pageResp.ok) {
+                const html = await pageResp.text();
+                const ogMatch = html.match(/property="og:image"\s+content="([^"]+)"/i) || 
+                                html.match(/content="([^"]+)"\s+property="og:image"/i);
+                if (ogMatch?.[1]) {
+                  const domain = new URL(citation).hostname.replace("www.", "");
+                  foundImageUrls.push({ url: ogMatch[1], source: domain, label: "hero" });
+                }
+                // Also grab additional product images
+                const imgTags = html.match(/data-a-dynamic-image="([^"]+)"/i) || // Amazon
+                                html.match(/"imageUrl":"([^"]+)"/g); // AliExpress
+                if (imgTags) {
+                  for (const tag of imgTags.slice(0, 3)) {
+                    const urlMatch = tag.match(/https?:\/\/[^"\\]+/);
+                    if (urlMatch) {
+                      const domain2 = new URL(citation).hostname.replace("www.", "");
+                      foundImageUrls.push({ url: urlMatch[0], source: domain2, label: "detail" });
+                    }
+                  }
+                }
+              }
+            } catch { /* page fetch failed, skip */ }
+          }
+        }
+        // Add direct image URLs from Perplexity content
+        for (const imgUrl of imgMatches.slice(0, 5)) {
+          if (!foundImageUrls.some(f => f.url === imgUrl)) {
+            foundImageUrls.push({ url: imgUrl, source: "perplexity", label: "reference" });
+          }
+        }
+        // Deduplicate
+        const seen = new Set<string>();
+        foundImageUrls = foundImageUrls.filter(img => {
+          if (seen.has(img.url)) return false;
+          seen.add(img.url);
+          return true;
+        }).slice(0, 8); // Max 8 images
+        console.log(`[product-research] Found ${foundImageUrls.length} product images`);
+      } catch (err) {
+        console.warn("[product-research] Image search failed:", err);
+      }
+    }
+
     const combined = researchParts.join("\n\n---\n\n").slice(0, 15000);
     if (combined.length < 50) {
       return new Response(JSON.stringify({ error: "Could not gather enough product data" }), {
@@ -320,6 +384,37 @@ Also suggest:
       await supabase.from("product_analysis").insert(analysisRow);
     }
 
+    // Save found product images
+    if (foundImageUrls.length > 0 && productId) {
+      // Clear old AI-found images for this product (keep manually verified ones)
+      await supabase
+        .from("product_images")
+        .delete()
+        .eq("product_id", productId)
+        .eq("verified", false);
+
+      // Insert new images
+      const imageRows = foundImageUrls.map((img, i) => ({
+        product_id: productId,
+        url: img.url,
+        source: img.source,
+        label: img.label,
+        is_primary: i === 0,
+        verified: false,
+      }));
+      
+      const { error: imgErr } = await supabase.from("product_images").insert(imageRows);
+      if (imgErr) {
+        console.warn("[product-research] Failed to save images:", imgErr);
+      } else {
+        // Update product's primary image_url to the first found image
+        await supabase.from("products")
+          .update({ image_url: foundImageUrls[0].url })
+          .eq("id", productId);
+      }
+      console.log(`[product-research] Saved ${foundImageUrls.length} images for product`);
+    }
+
     console.log(`[product-research] Scored "${analysis.product_name}": ${overallScore}/100`);
 
     return new Response(
@@ -327,6 +422,7 @@ Also suggest:
         success: true,
         product_id: productId,
         overall_score: overallScore,
+        images_found: foundImageUrls.length,
         analysis,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
