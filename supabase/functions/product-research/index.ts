@@ -1493,8 +1493,10 @@ Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, s
           console.warn(`[product-research] Economics calculation returned ${econResp.status}`);
         }
       } catch (e) { console.warn("[product-research] Economics calculation error:", e); }
-    } else {
-      console.log("[product-research] Skipping economics — no accepted evidence yet");
+    } else if (productId) {
+      await supabase.from("product_unit_economics").delete().eq("product_id", productId);
+      await supabase.from("product_market_snapshots").delete().eq("product_id", productId);
+      console.log("[product-research] Skipping economics — no accepted evidence yet; cleared stale economics");
     }
 
     console.log(`[product-research] ===== COMPLETE v3: "${analysis.product_name}" score=${overallScore}/100, ${acceptedLinks.length} accepted / ${rejectedLinks.length} rejected links, ${foundImageUrls.length} images =====`);
