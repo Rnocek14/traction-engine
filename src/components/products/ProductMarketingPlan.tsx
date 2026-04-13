@@ -1,5 +1,5 @@
 import { Badge } from "@/components/ui/badge";
-import { Target, Megaphone, ShoppingCart, HelpCircle, FileText } from "lucide-react";
+import { Target, Megaphone, ShoppingCart, HelpCircle, FileText, Zap, Play } from "lucide-react";
 
 interface MarketingPlan {
   marketing_plan?: {
@@ -54,6 +54,26 @@ export function ProductMarketingPlan({ plan }: { plan: MarketingPlan }) {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Best Hook & First 3 Seconds */}
+      {(mp?.best_hook_type || mp?.best_first_3_seconds) && (
+        <div className="bg-primary/5 border border-primary/20 rounded-lg p-2 space-y-1">
+          {mp.best_hook_type && (
+            <div className="flex items-center gap-1">
+              <Zap className="w-3 h-3 text-primary" />
+              <span className="font-medium text-primary">Best Hook:</span>
+              <span className="text-foreground">{mp.best_hook_type}</span>
+            </div>
+          )}
+          {mp.best_first_3_seconds && (
+            <div className="flex items-start gap-1">
+              <Play className="w-3 h-3 text-primary mt-0.5" />
+              <span className="font-medium text-primary">First 3s:</span>
+              <span className="text-foreground italic">"{mp.best_first_3_seconds}"</span>
+            </div>
+          )}
         </div>
       )}
 

@@ -99,6 +99,8 @@ Your output must include three sections:
 - recommended_accounts: What type of accounts should push this? (e.g., "gadget review", "home hacks", "gift ideas")
 - key_selling_points: 3-5 bullet points for why someone should buy NOW
 - objection_handling: 2-3 common objections and how to address them
+- best_hook_type: The single best hook type for this product (visual_reveal, problem_agitation, shocking_stat, before_after, etc.)
+- best_first_3_seconds: Exact script and visual description for the opening 3 seconds of the highest-converting video concept
 
 2. CONTENT IDEAS (5-10):
 Each idea should be a specific video concept with:
@@ -139,8 +141,10 @@ Each idea should be a specific video concept with:
                       recommended_accounts: { type: "array", items: { type: "string" } },
                       key_selling_points: { type: "array", items: { type: "string" } },
                       objection_handling: { type: "array", items: { type: "object", properties: { objection: { type: "string" }, response: { type: "string" } }, required: ["objection", "response"] } },
+                      best_hook_type: { type: "string", description: "The single best hook type for this product (e.g., 'visual_reveal', 'problem_agitation', 'shocking_stat', 'before_after')" },
+                      best_first_3_seconds: { type: "string", description: "Exact script/visual description for the first 3 seconds of the best video for this product" },
                     },
-                    required: ["target_audience", "winning_angles", "cta_strategy", "key_selling_points"],
+                    required: ["target_audience", "winning_angles", "cta_strategy", "key_selling_points", "best_hook_type", "best_first_3_seconds"],
                   },
                   content_ideas: {
                     type: "array",

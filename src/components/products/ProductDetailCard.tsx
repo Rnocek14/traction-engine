@@ -2,10 +2,12 @@ import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ExternalLink, TrendingUp, Package, Search, Loader2, Sparkles, ChevronDown, ChevronUp, Lightbulb, Image } from "lucide-react";
+import { ExternalLink, TrendingUp, Package, Search, Loader2, Sparkles, ChevronDown, ChevronUp, Lightbulb, Film } from "lucide-react";
 import { type ProductWithAnalysis, type ProductStatus, useUpdateProductStatus, useResearchProduct, useGenerateProductPlan, useProductLinkedIdeas } from "@/hooks/use-products";
 import { ProductScoringForm } from "./ProductScoringForm";
 import { ProductMarketingPlan } from "./ProductMarketingPlan";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
 const STATUS_COLORS: Record<ProductStatus, string> = {
   discovered: "bg-blue-500/10 text-blue-500",
@@ -118,6 +120,41 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
 
         {showPlan && hasPlan && (
           <ProductMarketingPlan plan={product.marketing_plan} />
+        )}
+
+        {/* Linked Ideas */}
+        {linkedIdeas && linkedIdeas.length > 0 && showPlan && (
+          <div className="border-t pt-2 space-y-1">
+            <p className="text-xs font-medium text-muted-foreground">Linked Ideas</p>
+            {linkedIdeas.map((idea) => (
+              <div key={idea.id} className="flex items-center justify-between text-xs bg-muted/30 rounded px-2 py-1">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <Badge variant="outline" className="text-[10px] shrink-0">{idea.status}</Badge>
+                  <span className="truncate">{idea.title}</span>
+                </div>
+                {idea.status === "approved" && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 text-[10px] gap-1 shrink-0"
+                    onClick={async () => {
+                      try {
+                        const { error } = await supabase.functions.invoke("create-story", {
+                          body: { idea_id: idea.id, product_id: product.id },
+                        });
+                        if (error) throw error;
+                        toast.success("Story created from idea");
+                      } catch (e: any) {
+                        toast.error(`Story creation failed: ${e.message}`);
+                      }
+                    }}
+                  >
+                    <Film className="w-3 h-3" /> Story
+                  </Button>
+                )}
+              </div>
+            ))}
+          </div>
         )}
 
         {/* Actions */}
