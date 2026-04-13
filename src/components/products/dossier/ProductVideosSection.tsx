@@ -117,7 +117,8 @@ export function ProductVideosSection({ productId }: { productId: string }) {
           <Button
             size="sm"
             onClick={handleGenerate}
-            disabled={generateMutation.isPending}
+            disabled={generateMutation.isPending || !hasImages}
+            title={!hasImages ? "Run AI Research first to get product images" : undefined}
           >
             {generateMutation.isPending ? (
               <Loader2 className="w-4 h-4 animate-spin mr-1" />
