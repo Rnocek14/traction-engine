@@ -14,6 +14,8 @@ const TABS: { value: ProductStatus | "all"; label: string }[] = [
   { value: "researching", label: "Researching" },
   { value: "approved", label: "Approved" },
   { value: "active", label: "Active" },
+  { value: "test_listing", label: "🧪 Testing" },
+  { value: "scaled_listing", label: "🚀 Scaled" },
   { value: "dead", label: "Dead" },
 ];
 
