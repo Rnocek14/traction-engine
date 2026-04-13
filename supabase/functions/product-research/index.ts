@@ -1,13 +1,15 @@
 /**
- * product-research v2
+ * product-research v3 — Evidence-Based Verification Pipeline
  * 
- * Multi-phase deep research:
- * Phase 1: Retail search — find where this product is actually sold (Amazon, Walmart, TikTok Shop)
- * Phase 2: Wholesale search — find supplier/wholesale pricing (AliExpress, 1688, DHgate, Temu)
- * Phase 3: Image search — find real product photos with AI validation
- * Phase 4: AI scoring — score for viral potential with verified data
- * 
- * All URLs are validated before storage. Nothing hallucinated.
+ * Multi-phase deep research with bulletproof link verification:
+ * Phase 1: Retail search (Amazon, Walmart, TikTok Shop)
+ * Phase 2: Wholesale search (AliExpress, 1688, DHgate, Temu)
+ * Phase 3: Social proof (TikTok views, creator competition)
+ * Phase 4: Image search with AI validation
+ * Phase 5: URL verification — staged evidence-based pipeline
+ * Phase 6: AI scoring with all verified data
+ * Phase 7: Supplier data extraction
+ * Phase 8: Unit economics auto-calculation
  */
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -23,6 +25,642 @@ interface ResearchRequest {
   name?: string;
 }
 
+// ─── STOPWORDS & LOW-SIGNAL COMMERCE WORDS ───
+const STOPWORDS = new Set([
+  "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by",
+  "from", "is", "it", "this", "that", "was", "are", "be", "has", "had", "do", "does",
+  "new", "best", "top", "pro", "mini", "max", "ultra", "plus", "super", "great",
+  "buy", "shop", "store", "sale", "deal", "price", "cheap", "free", "online",
+  "product", "item", "set", "kit", "pack", "piece", "unit", "size", "color", "style",
+]);
+
+// ─── RETAIL DOMAIN ALLOWLIST ───
+const RETAIL_DOMAINS = new Set([
+  "amazon.com", "amazon.co.uk", "amazon.ca", "amazon.de",
+  "walmart.com", "ebay.com", "etsy.com", "target.com",
+  "aliexpress.com", "alibaba.com", "1688.com", "dhgate.com", "temu.com",
+  "tiktok.com", "shopify.com", "myshopify.com",
+]);
+
+function isRetailDomain(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.replace("www.", "").toLowerCase();
+    for (const d of RETAIL_DOMAINS) {
+      if (host === d || host.endsWith("." + d)) return true;
+    }
+    // Shopify stores
+    if (host.endsWith(".myshopify.com") || host.includes("shopify")) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+// ─── TOKEN ANALYSIS ───
+interface TokenAnalysis {
+  allTokens: string[];
+  distinctiveTokens: string[];
+  genericTokens: string[];
+}
+
+function analyzeProductTokens(name: string): TokenAnalysis {
+  const raw = name.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(w => w.length > 1);
+  const allTokens = raw.filter(w => !STOPWORDS.has(w));
+  const distinctiveTokens: string[] = [];
+  const genericTokens: string[] = [];
+  
+  for (const t of allTokens) {
+    // Distinctive: uncommon words, brand-like tokens, compound words, or words > 6 chars
+    const isDistinctive = t.length > 6 || /\d/.test(t) || !isCommonWord(t);
+    if (isDistinctive) distinctiveTokens.push(t);
+    else genericTokens.push(t);
+  }
+  return { allTokens, distinctiveTokens, genericTokens };
+}
+
+const COMMON_WORDS = new Set([
+  "phone", "case", "stand", "holder", "mount", "light", "lamp", "water", "bottle",
+  "bag", "cover", "cable", "charger", "screen", "tool", "brush", "mat", "pad",
+  "ring", "band", "watch", "clip", "hook", "shelf", "rack", "box", "tape",
+  "grip", "lock", "head", "ball", "wheel", "board", "block", "wall", "desk",
+  "chair", "table", "door", "window", "glass", "metal", "wood", "plastic",
+  "black", "white", "blue", "red", "green", "pink", "gold", "silver",
+  "small", "large", "portable", "wireless", "electric", "smart", "digital",
+]);
+
+function isCommonWord(w: string): boolean {
+  return COMMON_WORDS.has(w);
+}
+
+// ─── WEIGHTED RELEVANCE SCORING ───
+function computeWeightedRelevance(productTokens: TokenAnalysis, pageText: string): {
+  score: number;
+  matchedTokens: string[];
+  distinctiveMatched: string[];
+} {
+  const lower = pageText.toLowerCase();
+  const matchedTokens: string[] = [];
+  const distinctiveMatched: string[] = [];
+  let weightedScore = 0;
+  let maxPossible = 0;
+  
+  for (const t of productTokens.distinctiveTokens) {
+    maxPossible += 3; // distinctive worth 3x
+    if (lower.includes(t)) {
+      weightedScore += 3;
+      matchedTokens.push(t);
+      distinctiveMatched.push(t);
+    }
+  }
+  for (const t of productTokens.genericTokens) {
+    maxPossible += 1;
+    if (lower.includes(t)) {
+      weightedScore += 1;
+      matchedTokens.push(t);
+    }
+  }
+  
+  const score = maxPossible > 0 ? Math.round((weightedScore / maxPossible) * 100) : 0;
+  return { score, matchedTokens, distinctiveMatched };
+}
+
+// ─── STRUCTURED DATA EXTRACTION ───
+interface StructuredPageData {
+  title: string;
+  jsonLdProductName: string | null;
+  jsonLdPrice: number | null;
+  jsonLdBrand: string | null;
+  schemaType: string | null;
+  ogTitle: string | null;
+  canonicalUrl: string | null;
+  metaDescription: string | null;
+  h1: string | null;
+  breadcrumbs: string[];
+  bodyText: string;
+  contentLength: number;
+  html: string;
+}
+
+function extractStructuredData(html: string, url: string): StructuredPageData {
+  const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+  const title = (titleMatch?.[1] || "").trim();
+  
+  // JSON-LD Product schema
+  let jsonLdProductName: string | null = null;
+  let jsonLdPrice: number | null = null;
+  let jsonLdBrand: string | null = null;
+  let schemaType: string | null = null;
+  
+  const jsonLdMatches = html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);
+  for (const m of jsonLdMatches) {
+    try {
+      const data = JSON.parse(m[1]);
+      const items = Array.isArray(data) ? data : [data];
+      for (const item of items) {
+        if (item["@type"] === "Product" || item["@type"]?.includes?.("Product")) {
+          schemaType = "Product";
+          jsonLdProductName = item.name || null;
+          jsonLdBrand = item.brand?.name || item.brand || null;
+          const offers = item.offers || item.offer;
+          if (offers) {
+            const offer = Array.isArray(offers) ? offers[0] : offers;
+            const p = parseFloat(offer.price || offer.lowPrice || "0");
+            if (p > 0) jsonLdPrice = Math.round(p * 100);
+          }
+        }
+      }
+    } catch { /* invalid JSON-LD */ }
+  }
+  
+  // OG title
+  const ogMatch = html.match(/<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["']/i)
+    || html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:title["']/i);
+  const ogTitle = ogMatch?.[1]?.trim() || null;
+  
+  // Canonical URL
+  const canonMatch = html.match(/<link[^>]*rel=["']canonical["'][^>]*href=["']([^"']+)["']/i);
+  const canonicalUrl = canonMatch?.[1]?.trim() || null;
+  
+  // Meta description
+  const metaMatch = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i);
+  const metaDescription = metaMatch?.[1]?.trim() || null;
+  
+  // H1
+  const h1Match = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
+  const h1 = h1Match ? h1Match[1].replace(/<[^>]+>/g, "").trim() : null;
+  
+  // Breadcrumbs (common patterns)
+  const breadcrumbs: string[] = [];
+  const bcMatch = html.match(/class=["'][^"']*breadcrumb[^"']*["'][^>]*>([\s\S]*?)<\/(?:nav|ul|ol|div)>/i);
+  if (bcMatch) {
+    const items = bcMatch[1].match(/<(?:a|li|span)[^>]*>([^<]+)</g) || [];
+    for (const i of items) {
+      const text = i.replace(/<[^>]+>/, "").trim();
+      if (text && text.length > 1 && text !== ">") breadcrumbs.push(text);
+    }
+  }
+  
+  // Body text (cleaned)
+  let bodyText = html.replace(/<script[\s\S]*?<\/script>/gi, "");
+  bodyText = bodyText.replace(/<style[\s\S]*?<\/style>/gi, "");
+  bodyText = bodyText.replace(/<[^>]+>/g, " ");
+  bodyText = bodyText.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&nbsp;/g, " ");
+  bodyText = bodyText.replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+  
+  return {
+    title,
+    jsonLdProductName,
+    jsonLdPrice,
+    jsonLdBrand,
+    schemaType,
+    ogTitle,
+    canonicalUrl,
+    metaDescription,
+    h1,
+    breadcrumbs,
+    bodyText: bodyText.slice(0, 10000),
+    contentLength: bodyText.length,
+    html,
+  };
+}
+
+// ─── MARKETPLACE-SPECIFIC HEURISTICS ───
+interface MarketplaceHeuristic {
+  deadPageSignals: RegExp[];
+  titleSelector?: RegExp;
+  priceSelector?: RegExp;
+}
+
+const MARKETPLACE_HEURISTICS: Record<string, MarketplaceHeuristic> = {
+  "amazon": {
+    deadPageSignals: [/looking for something\?/i, /dog.*page/i, /we couldn.*find/i],
+    titleSelector: /id="productTitle"[^>]*>([^<]+)/i,
+    priceSelector: /class="a-price-whole"[^>]*>([^<]+)/i,
+  },
+  "aliexpress": {
+    deadPageSignals: [/page not found/i, /item is no longer available/i, /sorry.*removed/i],
+  },
+  "dhgate": {
+    deadPageSignals: [/page not found/i, /this product is no longer available/i, /sorry.*can't find/i],
+  },
+  "temu": {
+    deadPageSignals: [/page not found/i, /out of stock/i],
+  },
+  "walmart": {
+    deadPageSignals: [/this page could not be found/i, /we couldn.*find this page/i],
+    titleSelector: /<h1[^>]*itemprop="name"[^>]*>([^<]+)/i,
+  },
+  "ebay": {
+    deadPageSignals: [/this listing has ended/i, /this item is out of stock/i],
+  },
+};
+
+function getMarketplace(url: string): string | null {
+  const host = new URL(url).hostname.toLowerCase();
+  if (host.includes("amazon")) return "amazon";
+  if (host.includes("aliexpress")) return "aliexpress";
+  if (host.includes("dhgate")) return "dhgate";
+  if (host.includes("temu")) return "temu";
+  if (host.includes("walmart")) return "walmart";
+  if (host.includes("ebay")) return "ebay";
+  return null;
+}
+
+// ─── FAKE URL PATTERNS ───
+const FAKE_URL_PATTERNS = [
+  /aliexpress\.com\/item\/100500678912345/,
+  /amazon\.com\/dp\/B0[A-Z0-9]{8}FAKE/,
+  /example\.com/,
+  /placeholder/i,
+];
+
+// ─── CONFIDENCE SCORE COMPOSITION ───
+interface VerificationEvidence {
+  domainTrust: number;        // 0-15
+  structuredDataPresent: number; // 0-20
+  weightedRelevance: number;  // 0-20
+  urlSlugRelevance: number;   // 0-10
+  contentRelevance: number;   // 0-10
+  aiVerdict: number;          // 0-20
+  priceExtracted: number;     // 0-5
+}
+
+function composeConfidence(ev: VerificationEvidence): number {
+  return Math.min(100, Math.max(0,
+    ev.domainTrust + ev.structuredDataPresent + ev.weightedRelevance +
+    ev.urlSlugRelevance + ev.contentRelevance + ev.aiVerdict + ev.priceExtracted
+  ));
+}
+
+function confidenceToStatus(confidence: number): string {
+  if (confidence >= 80) return "verified";
+  if (confidence >= 60) return "probable";
+  if (confidence >= 50) return "candidate";
+  return "rejected";
+}
+
+// ─── STAGED VERIFICATION PIPELINE ───
+interface VerifiedLink {
+  url: string;
+  platform: string;
+  linkType: string;
+  title?: string;
+  priceCents?: number;
+  matchConfidence: number;
+  validationStatus: string;
+  validationReasons: string[];
+  matchedTokens: string[];
+  distinctiveTokensMatched: string[];
+  aiVerdict?: boolean;
+  aiConfidence?: number;
+  fetchMethod: string;
+  extractedProductName?: string;
+  structuredPriceCents?: number;
+  schemaType?: string;
+  canonicalUrl?: string;
+  contentQualityScore: number;
+  evidenceSummary: VerificationEvidence;
+}
+
+async function verifyLink(
+  candidateUrl: string,
+  linkType: string,
+  platform: string,
+  productName: string,
+  productTokens: TokenAnalysis,
+  openaiKey: string,
+  firecrawlKey: string | null,
+): Promise<VerifiedLink | null> {
+  const reasons: string[] = [];
+  const evidence: VerificationEvidence = {
+    domainTrust: 0, structuredDataPresent: 0, weightedRelevance: 0,
+    urlSlugRelevance: 0, contentRelevance: 0, aiVerdict: 0, priceExtracted: 0,
+  };
+  
+  // STAGE 1: Reject known fake patterns
+  if (FAKE_URL_PATTERNS.some(p => p.test(candidateUrl))) {
+    reasons.push("rejected:hallucinated_url_pattern");
+    return null;
+  }
+  
+  // STAGE 2: Domain trust
+  if (isRetailDomain(candidateUrl)) {
+    evidence.domainTrust = 15;
+    reasons.push("domain:retail_allowlist");
+  } else {
+    evidence.domainTrust = 5;
+    reasons.push("domain:unknown_retail");
+  }
+  
+  // STAGE 3: URL slug relevance
+  try {
+    const urlPath = new URL(candidateUrl).pathname.toLowerCase();
+    const slugRelevance = computeWeightedRelevance(productTokens, urlPath);
+    if (slugRelevance.distinctiveMatched.length > 0) {
+      evidence.urlSlugRelevance = 10;
+      reasons.push(`slug:distinctive_match(${slugRelevance.distinctiveMatched.join(",")})`);
+    } else if (slugRelevance.matchedTokens.length >= 2) {
+      evidence.urlSlugRelevance = 5;
+      reasons.push(`slug:partial_match(${slugRelevance.matchedTokens.join(",")})`);
+    }
+  } catch { /* invalid URL */ }
+  
+  // STAGE 4: Fetch page
+  let fetchMethod = "native";
+  let pageData: StructuredPageData | null = null;
+  
+  try {
+    const resp = await fetch(candidateUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        Accept: "text/html,application/xhtml+xml",
+      },
+      redirect: "follow",
+    });
+    
+    if (!resp.ok) {
+      reasons.push(`fetch:http_${resp.status}`);
+      return null;
+    }
+    
+    // Detect redirect to error pages
+    const finalUrl = resp.url;
+    if (finalUrl.match(/\/errors?\/|\/404|\/not-found|\/page-not-found/i)) {
+      reasons.push("fetch:redirected_to_error");
+      return null;
+    }
+    
+    const html = await resp.text();
+    
+    // STAGE 5: Thin content / anti-bot / redirect detection
+    if (html.length < 500) {
+      // Try Firecrawl for JS-heavy pages
+      if (firecrawlKey) {
+        const fcData = await firecrawlFetch(candidateUrl, firecrawlKey);
+        if (fcData) {
+          pageData = extractStructuredData(fcData, candidateUrl);
+          fetchMethod = "firecrawl";
+          reasons.push("fetch:firecrawl_fallback");
+        }
+      }
+      if (!pageData) {
+        reasons.push("fetch:thin_content");
+        return null;
+      }
+    } else {
+      pageData = extractStructuredData(html, candidateUrl);
+    }
+    
+    // Marketplace-specific dead page detection
+    const marketplace = getMarketplace(candidateUrl);
+    if (marketplace && MARKETPLACE_HEURISTICS[marketplace]) {
+      const heuristic = MARKETPLACE_HEURISTICS[marketplace];
+      const bodyLower = html.slice(0, 8000).toLowerCase();
+      for (const sig of heuristic.deadPageSignals) {
+        if (sig.test(bodyLower)) {
+          reasons.push(`fetch:dead_page(${marketplace})`);
+          return null;
+        }
+      }
+    }
+    
+    // Generic dead page detection
+    const bodyLower = html.slice(0, 5000).toLowerCase();
+    if (bodyLower.includes("page not found") || bodyLower.includes("item is no longer available") ||
+        bodyLower.includes("this item cannot be found") || bodyLower.includes("this listing has ended") ||
+        bodyLower.includes("no longer exists") || bodyLower.includes("sorry, this video is removed")) {
+      reasons.push("fetch:dead_page_generic");
+      return null;
+    }
+  } catch {
+    reasons.push("fetch:network_error");
+    return null;
+  }
+  
+  if (!pageData) return null;
+  
+  // STAGE 6: Structured data signals
+  const bestProductName = pageData.jsonLdProductName || pageData.h1 || pageData.ogTitle || pageData.title;
+  
+  if (pageData.jsonLdProductName) {
+    evidence.structuredDataPresent = 20;
+    reasons.push(`structured:jsonld_product("${pageData.jsonLdProductName.slice(0, 50)}")`);
+  } else if (pageData.h1) {
+    evidence.structuredDataPresent = 10;
+    reasons.push(`structured:h1("${pageData.h1.slice(0, 50)}")`);
+  } else if (pageData.ogTitle) {
+    evidence.structuredDataPresent = 8;
+    reasons.push(`structured:og_title("${pageData.ogTitle.slice(0, 50)}")`);
+  }
+  
+  // If structured product name CLEARLY doesn't match, reject fast
+  if (bestProductName) {
+    const nameRelevance = computeWeightedRelevance(productTokens, bestProductName);
+    if (nameRelevance.distinctiveMatched.length === 0 && nameRelevance.score < 20) {
+      // Check if it's a completely unrelated product
+      reasons.push(`structured:no_distinctive_match_in_product_name`);
+      // Don't hard-reject yet — let AI decide for borderline cases
+    }
+  }
+  
+  // STAGE 7: Weighted lexical relevance
+  const titleText = [pageData.title, pageData.ogTitle, pageData.h1, pageData.jsonLdProductName]
+    .filter(Boolean).join(" ");
+  const titleRelevance = computeWeightedRelevance(productTokens, titleText);
+  evidence.weightedRelevance = Math.round(titleRelevance.score * 0.2); // Scale to 0-20
+  reasons.push(`relevance:weighted_score=${titleRelevance.score},matched=[${titleRelevance.matchedTokens.join(",")}]`);
+  
+  // Content body relevance
+  const bodyRelevance = computeWeightedRelevance(productTokens, pageData.bodyText.slice(0, 3000));
+  evidence.contentRelevance = Math.round(bodyRelevance.score * 0.1); // Scale to 0-10
+  
+  // Price extracted
+  const extractedPrice = pageData.jsonLdPrice || parsePriceFromText(pageData.bodyText);
+  if (extractedPrice) {
+    evidence.priceExtracted = 5;
+    reasons.push(`price:extracted(${extractedPrice})`);
+  }
+  
+  // Content quality
+  const contentQuality = Math.min(100, Math.round(pageData.contentLength / 100));
+  
+  // STAGE 8: Decide if AI verification is needed
+  const preAiConfidence = composeConfidence(evidence);
+  
+  let aiVerdict: boolean | undefined;
+  let aiConfidenceVal: number | undefined;
+  
+  if (preAiConfidence >= 75 && titleRelevance.distinctiveMatched.length > 0) {
+    // Clearly right — skip AI
+    evidence.aiVerdict = 15;
+    aiVerdict = true;
+    aiConfidenceVal = 90;
+    reasons.push("ai:skipped_high_confidence");
+  } else if (preAiConfidence < 25 && titleRelevance.matchedTokens.length === 0) {
+    // Clearly wrong — skip AI
+    evidence.aiVerdict = 0;
+    aiVerdict = false;
+    aiConfidenceVal = 10;
+    reasons.push("ai:skipped_clearly_wrong");
+  } else {
+    // Ambiguous — use AI
+    try {
+      const aiResult = await aiVerifyLink(
+        productName, productTokens,
+        bestProductName || pageData.title,
+        pageData.canonicalUrl || candidateUrl,
+        extractedPrice,
+        pageData.bodyText.slice(0, 2000),
+        pageData.breadcrumbs,
+        openaiKey,
+      );
+      aiVerdict = aiResult.sameProduct;
+      aiConfidenceVal = aiResult.confidence;
+      evidence.aiVerdict = aiResult.sameProduct ? Math.round(aiResult.confidence * 0.2) : 0;
+      reasons.push(`ai:verdict=${aiResult.sameProduct},confidence=${aiResult.confidence},reason="${aiResult.reason}"`);
+      if (aiResult.matchedAttributes.length > 0) {
+        reasons.push(`ai:matched=[${aiResult.matchedAttributes.join(",")}]`);
+      }
+      if (aiResult.mismatchedAttributes.length > 0) {
+        reasons.push(`ai:mismatched=[${aiResult.mismatchedAttributes.join(",")}]`);
+      }
+    } catch (e) {
+      reasons.push(`ai:error(${e})`);
+      evidence.aiVerdict = 5; // Neutral
+    }
+  }
+  
+  const finalConfidence = composeConfidence(evidence);
+  const status = confidenceToStatus(finalConfidence);
+  
+  if (status === "rejected") {
+    reasons.push(`final:rejected(confidence=${finalConfidence})`);
+    // Still return the link so we can store the rejection evidence
+  }
+  
+  return {
+    url: candidateUrl,
+    platform,
+    linkType,
+    title: pageData.title,
+    priceCents: extractedPrice || undefined,
+    matchConfidence: finalConfidence,
+    validationStatus: status,
+    validationReasons: reasons,
+    matchedTokens: titleRelevance.matchedTokens,
+    distinctiveTokensMatched: titleRelevance.distinctiveMatched,
+    aiVerdict,
+    aiConfidence: aiConfidenceVal,
+    fetchMethod,
+    extractedProductName: bestProductName || undefined,
+    structuredPriceCents: pageData.jsonLdPrice || undefined,
+    schemaType: pageData.schemaType || undefined,
+    canonicalUrl: pageData.canonicalUrl || undefined,
+    contentQualityScore: contentQuality,
+    evidenceSummary: evidence,
+  };
+}
+
+// ─── AI SEMANTIC VERIFICATION ───
+interface AiVerifyResult {
+  sameProduct: boolean;
+  confidence: number;
+  reason: string;
+  matchedAttributes: string[];
+  mismatchedAttributes: string[];
+}
+
+async function aiVerifyLink(
+  productName: string,
+  productTokens: TokenAnalysis,
+  pageTitle: string,
+  pageUrl: string,
+  price: number | null | undefined,
+  bodyExcerpt: string,
+  breadcrumbs: string[],
+  openaiKey: string,
+): Promise<AiVerifyResult> {
+  const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${openaiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: `You verify whether a web page is selling a SPECIFIC target product. Be STRICT — similar products are NOT matches. A "magnetic phone stand" is NOT a "bomber jacket". Compare product type, brand terms, and distinctive features.`,
+        },
+        {
+          role: "user",
+          content: `TARGET PRODUCT: "${productName}"
+Distinctive tokens: [${productTokens.distinctiveTokens.join(", ")}]
+
+PAGE DATA:
+- Title: "${pageTitle}"
+- URL: ${pageUrl}
+- Price: ${price ? `$${(price / 100).toFixed(2)}` : "unknown"}
+- Breadcrumbs: [${breadcrumbs.join(" > ")}]
+- Body excerpt (first 500 chars): "${bodyExcerpt.slice(0, 500)}"
+
+Is this page selling the TARGET product? Consider: product type match, brand/model match, feature match. A completely different product category is an obvious NO.`,
+        },
+      ],
+      tools: [{
+        type: "function",
+        function: {
+          name: "verify_product_match",
+          parameters: {
+            type: "object",
+            properties: {
+              same_product: { type: "boolean", description: "Is this page about the target product?" },
+              confidence: { type: "integer", minimum: 0, maximum: 100 },
+              reason: { type: "string", description: "Short explanation (under 80 chars)" },
+              matched_attributes: { type: "array", items: { type: "string" }, description: "Product attributes that match" },
+              mismatched_attributes: { type: "array", items: { type: "string" }, description: "Product attributes that DON'T match" },
+            },
+            required: ["same_product", "confidence", "reason", "matched_attributes", "mismatched_attributes"],
+          },
+        },
+      }],
+      tool_choice: { type: "function", function: { name: "verify_product_match" } },
+      temperature: 0.1,
+    }),
+  });
+  
+  if (!resp.ok) throw new Error(`AI verify failed: ${resp.status}`);
+  const data = await resp.json();
+  const call = data.choices?.[0]?.message?.tool_calls?.[0];
+  if (!call) throw new Error("No tool call");
+  const result = JSON.parse(call.function.arguments);
+  return {
+    sameProduct: result.same_product,
+    confidence: result.confidence,
+    reason: result.reason,
+    matchedAttributes: result.matched_attributes || [],
+    mismatchedAttributes: result.mismatched_attributes || [],
+  };
+}
+
+// ─── FIRECRAWL FALLBACK ───
+async function firecrawlFetch(url: string, apiKey: string): Promise<string | null> {
+  try {
+    const resp = await fetch("https://api.firecrawl.dev/v1/scrape", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ url, formats: ["html"], onlyMainContent: true }),
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    return data.data?.html || data.html || null;
+  } catch {
+    return null;
+  }
+}
+
+// ─── HELPERS ───
 async function fetchPageContent(url: string): Promise<string> {
   try {
     const resp = await fetch(url, {
@@ -77,70 +715,6 @@ async function perplexitySearch(query: string, systemPrompt: string, perplexityK
   }
 }
 
-/** Known-fake URL patterns that AI hallucinates */
-const FAKE_URL_PATTERNS = [
-  /aliexpress\.com\/item\/100500678912345/,  // common hallucinated ID
-  /amazon\.com\/dp\/B0[A-Z0-9]{8}FAKE/,
-  /example\.com/,
-  /placeholder/i,
-];
-
-/** Validate a URL actually loads and optionally check title relevance */
-async function validateUrl(url: string, productName: string): Promise<{ valid: boolean; title: string; price?: string }> {
-  try {
-    // Reject known hallucinated patterns
-    if (FAKE_URL_PATTERNS.some(p => p.test(url))) {
-      console.log(`[product-research] Rejected hallucinated URL pattern: ${url}`);
-      return { valid: false, title: "hallucinated" };
-    }
-
-    const resp = await fetch(url, {
-      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
-      redirect: "follow",
-    });
-    if (!resp.ok) return { valid: false, title: `HTTP ${resp.status}` };
-    
-    const finalUrl = resp.url;
-    // Detect redirect to error/home pages
-    if (finalUrl.match(/\/errors?\/|\/404|\/not-found|\/page-not-found/i)) {
-      return { valid: false, title: "redirected to error page" };
-    }
-    
-    const html = await resp.text();
-    
-    // Check for "page not found" / "item not available" in body
-    const bodyLower = html.slice(0, 5000).toLowerCase();
-    if (bodyLower.includes("page not found") || bodyLower.includes("item is no longer available") ||
-        bodyLower.includes("this item cannot be found") || bodyLower.includes("sorry, this video is removed") ||
-        bodyLower.includes("this listing has ended") || bodyLower.includes("no longer exists")) {
-      return { valid: false, title: "dead page" };
-    }
-    
-    const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
-    const title = (titleMatch?.[1] || "").trim();
-    
-    // Check title relevance
-    const productWords = productName.toLowerCase().split(/\s+/).filter(w => w.length > 3);
-    const titleLower = title.toLowerCase();
-    const relevant = productWords.some(w => titleLower.includes(w));
-    
-    // Try to extract price
-    const priceMatch = html.match(/\$\s*([\d,]+\.?\d{0,2})/);
-    
-    return { valid: relevant, title, price: priceMatch?.[0] };
-  } catch {
-    return { valid: false, title: "fetch failed" };
-  }
-}
-
-interface FoundLink {
-  url: string;
-  platform: string;
-  linkType: string;
-  title?: string;
-  priceCents?: number;
-}
-
 function detectPlatform(url: string): string {
   const u = url.toLowerCase();
   if (u.includes("amazon.")) return "Amazon";
@@ -155,7 +729,7 @@ function detectPlatform(url: string): string {
   if (u.includes("etsy.")) return "Etsy";
   if (u.includes("shopify") || u.includes("myshopify")) return "Shopify Store";
   if (u.includes("alibaba.")) return "Alibaba";
-  return new URL(url).hostname.replace("www.", "");
+  try { return new URL(url).hostname.replace("www.", ""); } catch { return "unknown"; }
 }
 
 function parsePriceFromText(text: string): number | undefined {
@@ -164,6 +738,7 @@ function parsePriceFromText(text: string): number | undefined {
   return Math.round(parseFloat(match[1].replace(",", "")) * 100);
 }
 
+// ─── MAIN HANDLER ───
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -174,6 +749,7 @@ Deno.serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const openaiKey = Deno.env.get("OPENAI_API_KEY")!;
     const perplexityKey = Deno.env.get("PERPLEXITY_API_KEY");
+    const firecrawlKey = Deno.env.get("FIRECRAWL_API_KEY") || null;
 
     if (!perplexityKey) {
       return new Response(JSON.stringify({ error: "PERPLEXITY_API_KEY not configured" }), {
@@ -202,11 +778,15 @@ Deno.serve(async (req) => {
       });
     }
 
-    console.log(`[product-research] ===== DEEP RESEARCH: "${productName}" =====`);
+    console.log(`[product-research] ===== DEEP RESEARCH v3: "${productName}" =====`);
+    const productTokens = analyzeProductTokens(productName);
+    console.log(`[product-research] Tokens: distinctive=[${productTokens.distinctiveTokens}] generic=[${productTokens.genericTokens}]`);
 
     const researchParts: string[] = [];
     const allCitations: string[] = [];
-    const foundLinks: FoundLink[] = [];
+    
+    // Candidate URLs from Perplexity (discovery only — NOT verified)
+    const candidateLinks: { url: string; platform: string; linkType: string }[] = [];
 
     // ==========================================
     // PHASE 1: RETAIL — Where is it being sold?
@@ -220,10 +800,9 @@ Deno.serve(async (req) => {
     if (retailSearch.content) {
       researchParts.push(`RETAIL LISTINGS:\n${retailSearch.content}`);
       allCitations.push(...retailSearch.citations);
-      // Categorize retail citations
       for (const c of retailSearch.citations) {
         if (c.match(/amazon\.|walmart\.|ebay\.|etsy\.|tiktok\.com.*shop|shopify|myshopify/i)) {
-          foundLinks.push({ url: c, platform: detectPlatform(c), linkType: "retail" });
+          candidateLinks.push({ url: c, platform: detectPlatform(c), linkType: "retail" });
         }
       }
     }
@@ -243,14 +822,14 @@ Deno.serve(async (req) => {
       allCitations.push(...wholesaleSearch.citations);
       for (const c of wholesaleSearch.citations) {
         if (c.match(/aliexpress\.|alibaba\.|1688\.|dhgate\.|temu\./i)) {
-          foundLinks.push({ url: c, platform: detectPlatform(c), linkType: "wholesale" });
+          candidateLinks.push({ url: c, platform: detectPlatform(c), linkType: "wholesale" });
         }
       }
     }
     await new Promise(r => setTimeout(r, 1200));
 
     // ==========================================
-    // PHASE 3: SOCIAL PROOF — TikTok/reviews
+    // PHASE 3: SOCIAL PROOF
     // ==========================================
     console.log("[product-research] Phase 3: Social proof & competition");
     const socialSearch = await perplexitySearch(
@@ -276,12 +855,10 @@ Deno.serve(async (req) => {
     );
 
     const candidateImgs: { url: string; source: string; label: string }[] = [];
-    
-    // Extract images from retailer pages in ALL citations
-    const allRetailerCitations = [...new Set([...allCitations, ...imgSearch.citations])].filter(c => 
+    const allRetailerCitations = [...new Set([...allCitations, ...imgSearch.citations])].filter(c =>
       c.match(/amazon\.|aliexpress\.|walmart\.|temu\.|etsy\.|ebay\.|shopify|myshopify/i)
     );
-    
+
     for (const citation of allRetailerCitations.slice(0, 6)) {
       try {
         const pageResp = await fetch(citation, {
@@ -290,24 +867,22 @@ Deno.serve(async (req) => {
         });
         if (!pageResp.ok) continue;
         const html = await pageResp.text();
-        
-        // Verify page title relevance
+
         const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
         const pageTitle = (titleMatch?.[1] || "").toLowerCase();
-        const productWords = productName.toLowerCase().split(/\s+/).filter(w => w.length > 3);
-        if (!productWords.some(w => pageTitle.includes(w))) {
-          console.log(`[product-research] Skipping irrelevant image page: "${titleMatch?.[1]}"`);
+        // Use weighted relevance instead of single-word match
+        const titleRel = computeWeightedRelevance(productTokens, pageTitle);
+        if (titleRel.score < 20 && titleRel.distinctiveMatched.length === 0) {
+          console.log(`[product-research] Skipping irrelevant image page: "${titleMatch?.[1]}" (score=${titleRel.score})`);
           continue;
         }
-        
+
         const domain = new URL(citation).hostname.replace("www.", "");
-        
-        // og:image
-        const ogMatch = html.match(/property="og:image"\s+content="([^"]+)"/i) || 
+
+        const ogMatch = html.match(/property="og:image"\s+content="([^"]+)"/i) ||
                         html.match(/content="([^"]+)"\s+property="og:image"/i);
         if (ogMatch?.[1]) candidateImgs.push({ url: ogMatch[1], source: domain, label: "hero" });
-        
-        // Amazon dynamic images
+
         const dynamicImg = html.match(/data-a-dynamic-image="\{([^}]+)\}"/i);
         if (dynamicImg) {
           const amazonUrls = dynamicImg[1].match(/https?:\/\/[^"]+/g) || [];
@@ -315,18 +890,9 @@ Deno.serve(async (req) => {
             candidateImgs.push({ url: au.replace(/\._[^.]+_\./, "."), source: domain, label: "detail" });
           }
         }
-        
-        // Extract price from retailer page for link records
-        const priceMatch = html.match(/\$\s*([\d,]+\.?\d{0,2})/);
-        const existingLink = foundLinks.find(l => l.url === citation);
-        if (existingLink && priceMatch) {
-          existingLink.priceCents = Math.round(parseFloat(priceMatch[1].replace(",", "")) * 100);
-          existingLink.title = titleMatch?.[1]?.trim();
-        }
       } catch { /* skip */ }
     }
 
-    // Extract direct image URLs from all search content
     const allSearchText = [retailSearch.content, wholesaleSearch.content, imgSearch.content].join(" ");
     const imgRegex = /https?:\/\/[^\s"'<>]+\.(?:jpg|jpeg|png|webp)(?:\?[^\s"'<>]*)?/gi;
     const directImgs = allSearchText.match(imgRegex) || [];
@@ -334,19 +900,17 @@ Deno.serve(async (req) => {
       candidateImgs.push({ url: imgUrl, source: "search", label: "reference" });
     }
 
-    // Deduplicate and filter
     const seenImgs = new Set<string>();
     const uniqueImgs = candidateImgs.filter(img => {
       if (seenImgs.has(img.url)) return false;
       const lower = img.url.toLowerCase();
-      if (lower.includes("gift-card") || lower.includes("giftcard") || lower.includes("logo") || 
+      if (lower.includes("gift-card") || lower.includes("giftcard") || lower.includes("logo") ||
           lower.includes("banner") || lower.includes("icon") || lower.includes("sprite") ||
           lower.includes("placeholder") || lower.includes("loading")) return false;
       seenImgs.add(img.url);
       return true;
     });
 
-    // AI validation of images
     if (uniqueImgs.length > 0) {
       try {
         const valResp = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -356,7 +920,7 @@ Deno.serve(async (req) => {
             model: "gpt-4o-mini",
             messages: [{
               role: "system",
-              content: `You validate product image URLs. Given a product name and image URLs, return ONLY indices of URLs that likely show this EXACT product. Reject: gift cards, unrelated products, logos, banners, category images, or navigation elements. Be strict — only approve images that match the specific product name.`,
+              content: `You validate product image URLs. Given a product name and image URLs, return ONLY indices of URLs that likely show this EXACT product. Reject: gift cards, unrelated products, logos, banners, category images, or navigation elements. Be strict.`,
             }, {
               role: "user",
               content: `Product: "${productName}"\n\nCandidate URLs:\n${uniqueImgs.map((c, i) => `[${i}] ${c.url} (from: ${c.source})`).join("\n")}`,
@@ -381,7 +945,7 @@ Deno.serve(async (req) => {
           }
         }
       } catch (e) { console.warn("[product-research] Image validation error:", e); }
-      
+
       if (foundImageUrls.length === 0) {
         foundImageUrls = uniqueImgs.filter(c => c.source !== "search").slice(0, 4);
       }
@@ -389,39 +953,55 @@ Deno.serve(async (req) => {
     console.log(`[product-research] Found ${foundImageUrls.length} validated images from ${uniqueImgs.length} candidates`);
 
     // ==========================================
-    // PHASE 5: URL VALIDATION — verify top links
+    // PHASE 5: EVIDENCE-BASED URL VERIFICATION
     // ==========================================
-    console.log("[product-research] Phase 5: Validating URLs");
-    const validatedLinks: FoundLink[] = [];
-    for (const link of foundLinks.slice(0, 8)) {
+    console.log("[product-research] Phase 5: Evidence-based URL verification");
+    
+    // Deduplicate candidates
+    const seenUrls = new Set<string>();
+    const uniqueCandidates = candidateLinks.filter(l => {
+      if (seenUrls.has(l.url)) return false;
+      seenUrls.add(l.url);
+      return true;
+    });
+    
+    console.log(`[product-research] Verifying ${uniqueCandidates.length} candidate URLs`);
+    
+    const allVerifiedLinks: VerifiedLink[] = [];
+    for (const candidate of uniqueCandidates.slice(0, 10)) {
       try {
-        const check = await validateUrl(link.url, productName);
-        if (check.valid) {
-          link.title = check.title;
-          if (check.price && !link.priceCents) {
-            link.priceCents = parsePriceFromText(check.price);
-          }
-          validatedLinks.push(link);
-          console.log(`[product-research] ✓ Valid: ${link.platform} — ${check.title?.slice(0, 60)}`);
-        } else {
-          console.log(`[product-research] ✗ Invalid: ${link.url} — title: "${check.title?.slice(0, 60)}"`);
+        const result = await verifyLink(
+          candidate.url, candidate.linkType, candidate.platform,
+          productName, productTokens, openaiKey, firecrawlKey,
+        );
+        if (result) {
+          allVerifiedLinks.push(result);
+          const icon = result.validationStatus === "rejected" ? "✗" : 
+                      result.validationStatus === "verified" ? "✓" : "~";
+          console.log(`[product-research] ${icon} ${result.platform}: confidence=${result.matchConfidence} status=${result.validationStatus} distinctive=[${result.distinctiveTokensMatched}]`);
         }
-      } catch { /* skip */ }
+      } catch (e) {
+        console.warn(`[product-research] Verify error for ${candidate.url}:`, e);
+      }
     }
-    console.log(`[product-research] ${validatedLinks.length}/${foundLinks.length} links validated`);
+    
+    // Only use links that passed verification (candidate or better)
+    const acceptedLinks = allVerifiedLinks.filter(l => l.validationStatus !== "rejected");
+    const rejectedLinks = allVerifiedLinks.filter(l => l.validationStatus === "rejected");
+    
+    console.log(`[product-research] Accepted: ${acceptedLinks.length}, Rejected: ${rejectedLinks.length}`);
 
     // ==========================================
-    // PHASE 6: AI SCORING with all data
+    // PHASE 6: AI SCORING with all verified data
     // ==========================================
     console.log("[product-research] Phase 6: AI scoring");
-    
-    // Add verified links to research data
-    if (validatedLinks.length > 0) {
-      researchParts.push(`\nVERIFIED PRODUCT LINKS:\n${validatedLinks.map(l => 
-        `${l.linkType.toUpperCase()} - ${l.platform}: ${l.url} ${l.priceCents ? `($${(l.priceCents/100).toFixed(2)})` : ""} ${l.title || ""}`
+
+    if (acceptedLinks.length > 0) {
+      researchParts.push(`\nVERIFIED PRODUCT LINKS:\n${acceptedLinks.map(l =>
+        `${l.linkType.toUpperCase()} - ${l.platform}: ${l.url} (confidence=${l.matchConfidence}, status=${l.validationStatus}) ${l.priceCents ? `($${(l.priceCents / 100).toFixed(2)})` : ""}`
       ).join("\n")}`);
     }
-    researchParts.push(`\nAll Source URLs:\n${allCitations.map((c, i) => `[${i+1}] ${c}`).join("\n")}`);
+    researchParts.push(`\nAll Source URLs:\n${allCitations.map((c, i) => `[${i + 1}] ${c}`).join("\n")}`);
 
     const combined = researchParts.join("\n\n---\n\n").slice(0, 18000);
     if (combined.length < 50) {
@@ -430,9 +1010,8 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Find best retail and wholesale URLs from validated links
-    const bestRetailLink = validatedLinks.find(l => l.linkType === "retail");
-    const bestWholesaleLink = validatedLinks.find(l => l.linkType === "wholesale");
+    const bestRetailLink = acceptedLinks.find(l => l.linkType === "retail");
+    const bestWholesaleLink = acceptedLinks.find(l => l.linkType === "wholesale");
 
     const scoringResp = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -472,7 +1051,7 @@ Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, s
               type: "object",
               properties: {
                 product_name: { type: "string" },
-                source_url: { type: "string", description: "A VERIFIED retail product page URL. Must be from the research data." },
+                source_url: { type: "string", description: "A VERIFIED retail product page URL from the research data." },
                 supplier_url: { type: "string", description: "A VERIFIED wholesale/supplier URL from research data. Empty string if none." },
                 category: { type: "string" },
                 subcategory: { type: "string" },
@@ -513,7 +1092,6 @@ Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, s
 
     const analysis = JSON.parse(toolCall.function.arguments);
 
-    // Compute overall score
     const competitionInv = 6 - (analysis.competition_level || 3);
     const overallScore = Math.round(
       ((analysis.wow_factor || 3) * 0.30 +
@@ -523,15 +1101,13 @@ Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, s
         competitionInv * 0.10) / 5 * 100
     );
 
-    // Prefer verified URLs over AI-suggested ones
     const finalSourceUrl = bestRetailLink?.url || analysis.source_url || allCitations[0] || productUrl || null;
     const finalSupplierUrl = bestWholesaleLink?.url || analysis.supplier_url || null;
 
     // ==========================================
     // SAVE TO DATABASE
     // ==========================================
-    
-    // Create or update product
+
     if (!productId) {
       const { data: newProduct, error: insertErr } = await supabase
         .from("products")
@@ -588,7 +1164,7 @@ Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, s
       emotional_triggers: analysis.emotional_triggers || [],
       price_sweet_spot: analysis.price_sweet_spot ?? false,
       overall_score: overallScore,
-      analyzed_by: "ai_v2",
+      analyzed_by: "ai_v3",
       analyzed_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -599,23 +1175,36 @@ Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, s
       await supabase.from("product_analysis").insert(analysisRow);
     }
 
-    // Save verified links
-    if (validatedLinks.length > 0 && productId) {
-      // Clear old unverified links
-      await supabase.from("product_links").delete().eq("product_id", productId).eq("verified", false);
-      
-      const linkRows = validatedLinks.map(l => ({
+    // Save ALL verified links with full evidence (including rejected ones for audit)
+    if (allVerifiedLinks.length > 0 && productId) {
+      await supabase.from("product_links").delete().eq("product_id", productId);
+
+      const linkRows = allVerifiedLinks.map(l => ({
         product_id: productId,
         url: l.url,
         link_type: l.linkType,
         platform: l.platform,
         price_cents: l.priceCents || null,
         title: l.title || null,
-        verified: true,
+        verified: l.validationStatus === "verified",
+        match_confidence: l.matchConfidence,
+        validation_status: l.validationStatus,
+        validation_reasons: l.validationReasons,
+        matched_tokens: l.matchedTokens,
+        distinctive_tokens_matched: l.distinctiveTokensMatched,
+        ai_verdict: l.aiVerdict ?? null,
+        ai_confidence: l.aiConfidence ?? null,
+        fetch_method: l.fetchMethod,
+        extracted_product_name: l.extractedProductName || null,
+        structured_price_cents: l.structuredPriceCents || null,
+        schema_type: l.schemaType || null,
+        canonical_url: l.canonicalUrl || null,
+        content_quality_score: l.contentQualityScore,
+        evidence_summary: l.evidenceSummary,
       }));
       const { error: linkErr } = await supabase.from("product_links").insert(linkRows);
       if (linkErr) console.warn("[product-research] Failed to save links:", linkErr);
-      else console.log(`[product-research] Saved ${linkRows.length} verified links`);
+      else console.log(`[product-research] Saved ${linkRows.length} links (${acceptedLinks.length} accepted, ${rejectedLinks.length} rejected)`);
     }
 
     // Save images
@@ -641,9 +1230,8 @@ Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, s
     // PHASE 7: EXTRACT SUPPLIER DATA
     // ==========================================
     console.log("[product-research] Phase 7: Extracting supplier data");
-    const wholesaleLinks = validatedLinks.filter(l => l.linkType === "wholesale");
-    if (productId && wholesaleLinks.length > 0) {
-      // Use AI to extract structured supplier info from wholesale search results
+    const wholesaleVerified = acceptedLinks.filter(l => l.linkType === "wholesale");
+    if (productId && wholesaleVerified.length > 0) {
       try {
         const supplierResp = await fetch("https://api.openai.com/v1/chat/completions", {
           method: "POST",
@@ -652,10 +1240,10 @@ Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, s
             model: "gpt-4o-mini",
             messages: [{
               role: "system",
-              content: `You are a dropshipping supplier analyst. Extract structured supplier data from wholesale research. Be conservative with estimates — mark anything uncertain. For shipping, separate processing time from delivery time.`,
+              content: `You are a dropshipping supplier analyst. Extract structured supplier data from wholesale research. Be conservative — mark anything uncertain.`,
             }, {
               role: "user",
-              content: `Product: "${productName}"\n\nWholesale research:\n${wholesaleSearch.content}\n\nVerified wholesale links:\n${wholesaleLinks.map(l => `${l.platform}: ${l.url} ${l.priceCents ? `($${(l.priceCents/100).toFixed(2)})` : ""}`).join("\n")}`,
+              content: `Product: "${productName}"\n\nWholesale research:\n${wholesaleSearch.content}\n\nVerified wholesale links:\n${wholesaleVerified.map(l => `${l.platform}: ${l.url} (confidence=${l.matchConfidence}) ${l.priceCents ? `($${(l.priceCents / 100).toFixed(2)})` : ""}`).join("\n")}`,
             }],
             tools: [{ type: "function", function: {
               name: "store_suppliers",
@@ -669,16 +1257,16 @@ Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, s
                       properties: {
                         supplier_name: { type: "string" },
                         platform: { type: "string", enum: ["AliExpress", "Alibaba", "1688", "DHgate", "Temu", "direct", "other"] },
-                        unit_cost_cents: { type: "integer", description: "Unit cost in cents" },
-                        shipping_cost_cents: { type: "integer", description: "Estimated shipping cost in cents to US" },
-                        shipping_country: { type: "string", description: "Where product ships from, e.g. CN, US" },
-                        processing_days: { type: "integer", description: "Days to process/prepare order" },
-                        delivery_days: { type: "integer", description: "Days for delivery after processing" },
-                        moq: { type: "integer", description: "Minimum order quantity, 1 if single-unit" },
-                        reliability_score: { type: "integer", minimum: 1, maximum: 5, description: "1=unknown/risky, 3=average, 5=established/trusted" },
-                        defect_risk: { type: "integer", minimum: 1, maximum: 5, description: "1=low risk, 5=high risk" },
+                        unit_cost_cents: { type: "integer" },
+                        shipping_cost_cents: { type: "integer" },
+                        shipping_country: { type: "string" },
+                        processing_days: { type: "integer" },
+                        delivery_days: { type: "integer" },
+                        moq: { type: "integer" },
+                        reliability_score: { type: "integer", minimum: 1, maximum: 5 },
+                        defect_risk: { type: "integer", minimum: 1, maximum: 5 },
                         stock_status: { type: "string", enum: ["in_stock", "low_stock", "out_of_stock", "unknown"] },
-                        expected_return_rate_pct: { type: "number", description: "Expected return rate 0-100" },
+                        expected_return_rate_pct: { type: "number" },
                         verification_status: { type: "string", enum: ["estimated", "partially_verified", "verified"] },
                         notes: { type: "string" },
                       },
@@ -699,20 +1287,19 @@ Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, s
           const supplierCall = supplierData.choices?.[0]?.message?.tool_calls?.[0];
           if (supplierCall) {
             const { suppliers } = JSON.parse(supplierCall.function.arguments);
-            // Clear old estimated suppliers, keep verified ones
             await supabase.from("product_suppliers")
               .delete()
               .eq("product_id", productId)
               .neq("verification_status", "verified");
 
             for (const s of (suppliers || []).slice(0, 5)) {
-              const supplierUrl = wholesaleLinks.find(l => 
+              const supplierUrl = wholesaleVerified.find(l =>
                 l.platform.toLowerCase() === s.platform.toLowerCase()
               )?.url || null;
 
               const reliabilityScore = s.reliability_score || 3;
               const defectRisk = s.defect_risk || 3;
-              const commScore = 3; // Default, can't know from search
+              const commScore = 3;
               const overallSupplierScore = Math.round(
                 (reliabilityScore * 0.4 + (6 - defectRisk) * 0.3 + commScore * 0.3) / 5 * 100
               );
@@ -740,13 +1327,12 @@ Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, s
                 is_preferred: false,
               });
             }
-            // Mark BEST OVERALL supplier as preferred (not cheapest!)
+            // Mark best supplier as preferred
             const { data: allSuppliers } = await supabase
               .from("product_suppliers")
               .select("id, unit_cost_cents, reliability_score, defect_risk, delivery_days, processing_days, overall_supplier_score")
               .eq("product_id", productId);
             if (allSuppliers && allSuppliers.length > 0) {
-              // Weighted score: cost 30%, reliability 30%, delivery speed 20%, defect inverse 20%
               const maxCost = Math.max(...allSuppliers.map(s => s.unit_cost_cents || 9999));
               const scored = allSuppliers.map(s => {
                 const costScore = maxCost > 0 ? (1 - ((s.unit_cost_cents || maxCost) / maxCost)) * 5 : 2.5;
@@ -758,10 +1344,8 @@ Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, s
                 return { id: s.id, weighted };
               });
               scored.sort((a, b) => b.weighted - a.weighted);
-              // Reset all, then set best
               await supabase.from("product_suppliers").update({ is_preferred: false }).eq("product_id", productId);
               await supabase.from("product_suppliers").update({ is_preferred: true }).eq("id", scored[0].id);
-              console.log(`[product-research] Preferred supplier selected by weighted score (not cheapest)`);
             }
             console.log(`[product-research] Saved ${suppliers?.length || 0} suppliers`);
           }
@@ -792,7 +1376,7 @@ Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, s
       } catch (e) { console.warn("[product-research] Economics calculation error:", e); }
     }
 
-    console.log(`[product-research] ===== COMPLETE: "${analysis.product_name}" score=${overallScore}/100, ${validatedLinks.length} links, ${foundImageUrls.length} images =====`);
+    console.log(`[product-research] ===== COMPLETE v3: "${analysis.product_name}" score=${overallScore}/100, ${acceptedLinks.length} accepted / ${rejectedLinks.length} rejected links, ${foundImageUrls.length} images =====`);
 
     return new Response(
       JSON.stringify({
@@ -800,11 +1384,19 @@ Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, s
         product_id: productId,
         overall_score: overallScore,
         images_found: foundImageUrls.length,
-        links_found: validatedLinks.length,
-        retail_links: validatedLinks.filter(l => l.linkType === "retail").length,
-        wholesale_links: validatedLinks.filter(l => l.linkType === "wholesale").length,
+        links_accepted: acceptedLinks.length,
+        links_rejected: rejectedLinks.length,
+        retail_links: acceptedLinks.filter(l => l.linkType === "retail").length,
+        wholesale_links: acceptedLinks.filter(l => l.linkType === "wholesale").length,
         suppliers_extracted: true,
         economics_calculated: true,
+        verification_summary: {
+          total_candidates: uniqueCandidates.length,
+          verified: allVerifiedLinks.filter(l => l.validationStatus === "verified").length,
+          probable: allVerifiedLinks.filter(l => l.validationStatus === "probable").length,
+          candidate: allVerifiedLinks.filter(l => l.validationStatus === "candidate").length,
+          rejected: rejectedLinks.length,
+        },
         analysis,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }

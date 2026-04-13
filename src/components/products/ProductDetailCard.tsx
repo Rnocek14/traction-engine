@@ -2,8 +2,8 @@ import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ExternalLink, TrendingUp, Package, Search, Loader2, Sparkles, ChevronDown, ChevronUp, Lightbulb, Film, Users, ImageIcon, ChevronLeft, ChevronRight, Trash2, CheckCircle2, ShoppingCart, Warehouse, DollarSign, Truck, Star, Calculator, AlertTriangle } from "lucide-react";
-import { type ProductWithAnalysis, type ProductStatus, useUpdateProductStatus, useResearchProduct, useGenerateProductPlan, useProductLinkedIdeas, useAssignProductAccounts } from "@/hooks/use-products";
+import { ExternalLink, TrendingUp, Package, Search, Loader2, Sparkles, ChevronDown, ChevronUp, Lightbulb, Film, Users, ImageIcon, ChevronLeft, ChevronRight, Trash2, CheckCircle2, ShoppingCart, Warehouse, DollarSign, Truck, Star, Calculator, AlertTriangle, ShieldCheck, ShieldAlert, ShieldQuestion, ThumbsUp, ThumbsDown, Eye } from "lucide-react";
+import { type ProductWithAnalysis, type ProductStatus, type ProductLink, useUpdateProductStatus, useResearchProduct, useGenerateProductPlan, useProductLinkedIdeas, useAssignProductAccounts } from "@/hooks/use-products";
 import { ProductScoringForm } from "./ProductScoringForm";
 import { ProductMarketingPlan } from "./ProductMarketingPlan";
 import { ConversionTracker } from "./ConversionTracker";
@@ -30,6 +30,7 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
   const [showPlan, setShowPlan] = useState(false);
   const [showSuppliers, setShowSuppliers] = useState(false);
   const [showEconomics, setShowEconomics] = useState(false);
+  const [showRejected, setShowRejected] = useState(false);
   const [imgIdx, setImgIdx] = useState(0);
   const [calcPending, setCalcPending] = useState(false);
   const analysis = product.product_analysis?.[0];
@@ -37,8 +38,10 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
   const links = product.product_links || [];
   const suppliers = product.product_suppliers || [];
   const economics = product.product_unit_economics?.[0] || null;
-  const retailLinks = links.filter(l => l.link_type === "retail");
-  const wholesaleLinks = links.filter(l => l.link_type === "wholesale");
+  const acceptedLinks = links.filter(l => l.validation_status !== "rejected");
+  const rejectedLinks = links.filter(l => l.validation_status === "rejected");
+  const retailLinks = acceptedLinks.filter(l => l.link_type === "retail");
+  const wholesaleLinks = acceptedLinks.filter(l => l.link_type === "wholesale");
   const updateStatus = useUpdateProductStatus();
   const researchProduct = useResearchProduct();
   const generatePlan = useGenerateProductPlan();
@@ -233,7 +236,7 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
         {product.category && <p className="text-xs text-muted-foreground">{product.category}{product.subcategory ? ` / ${product.subcategory}` : ""}</p>}
         {product.notes && <p className="text-xs text-muted-foreground line-clamp-2">{product.notes}</p>}
 
-        {/* Verified Links */}
+        {/* Verified Links with Confidence */}
         {(retailLinks.length > 0 || wholesaleLinks.length > 0) && (
           <div className="space-y-1.5 border-t pt-2">
             {retailLinks.length > 0 && (
@@ -242,18 +245,7 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
                   <ShoppingCart className="w-3 h-3" /> Where to Buy ({retailLinks.length})
                 </p>
                 {retailLinks.map(link => (
-                  <a key={link.id} href={link.url} target="_blank" rel="noopener noreferrer"
-                    className="flex items-center justify-between text-xs bg-muted/30 rounded px-2 py-1 mb-0.5 hover:bg-muted/50 transition-colors">
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <Badge variant="outline" className="text-[10px] shrink-0">{link.platform}</Badge>
-                      {link.verified && <CheckCircle2 className="w-3 h-3 text-green-500 shrink-0" />}
-                      <span className="truncate text-muted-foreground">{link.title?.slice(0, 40) || link.url.slice(0, 40)}</span>
-                    </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      {link.price_cents && <span className="font-medium">${(link.price_cents / 100).toFixed(2)}</span>}
-                      <ExternalLink className="w-3 h-3 text-muted-foreground" />
-                    </div>
-                  </a>
+                  <LinkRow key={link.id} link={link} productId={product.id} qc={qc} />
                 ))}
               </div>
             )}
@@ -263,18 +255,26 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
                   <Warehouse className="w-3 h-3" /> Wholesale Sources ({wholesaleLinks.length})
                 </p>
                 {wholesaleLinks.map(link => (
-                  <a key={link.id} href={link.url} target="_blank" rel="noopener noreferrer"
-                    className="flex items-center justify-between text-xs bg-muted/30 rounded px-2 py-1 mb-0.5 hover:bg-muted/50 transition-colors">
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <Badge variant="outline" className="text-[10px] shrink-0">{link.platform}</Badge>
-                      {link.verified && <CheckCircle2 className="w-3 h-3 text-green-500 shrink-0" />}
-                      <span className="truncate text-muted-foreground">{link.title?.slice(0, 40) || "View listing"}</span>
-                    </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      {link.price_cents && <span className="font-medium">${(link.price_cents / 100).toFixed(2)}</span>}
-                      <ExternalLink className="w-3 h-3 text-muted-foreground" />
-                    </div>
-                  </a>
+                  <LinkRow key={link.id} link={link} productId={product.id} qc={qc} />
+                ))}
+              </div>
+            )}
+            {rejectedLinks.length > 0 && (
+              <div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="w-full justify-between text-xs h-6 text-muted-foreground"
+                  onClick={() => setShowRejected(!showRejected)}
+                >
+                  <span className="flex items-center gap-1">
+                    <ShieldAlert className="w-3 h-3" />
+                    {rejectedLinks.length} rejected link{rejectedLinks.length > 1 ? "s" : ""}
+                  </span>
+                  {showRejected ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                </Button>
+                {showRejected && rejectedLinks.map(link => (
+                  <LinkRow key={link.id} link={link} productId={product.id} qc={qc} rejected />
                 ))}
               </div>
             )}
@@ -566,3 +566,94 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
     </Card>
   );
 }
+
+// ─── LINK ROW WITH CONFIDENCE + MANUAL OVERRIDE ───
+function ConfidenceBadge({ confidence, status }: { confidence: number | null; status: string | null }) {
+  if (!status || status === "pending") return null;
+  
+  const conf = confidence ?? 0;
+  const icon = status === "verified" ? <ShieldCheck className="w-3 h-3" /> :
+               status === "probable" ? <ShieldQuestion className="w-3 h-3" /> :
+               status === "candidate" ? <Eye className="w-3 h-3" /> :
+               <ShieldAlert className="w-3 h-3" />;
+  
+  const colorClass = status === "verified" ? "text-green-500 border-green-500/30" :
+                     status === "probable" ? "text-yellow-500 border-yellow-500/30" :
+                     status === "candidate" ? "text-orange-500 border-orange-500/30" :
+                     "text-destructive border-destructive/30";
+  
+  return (
+    <Badge variant="outline" className={`text-[9px] ${colorClass} shrink-0 gap-0.5`} title={`${status} (${conf}%)`}>
+      {icon} {conf}%
+    </Badge>
+  );
+}
+
+function LinkRow({ link, productId, qc, rejected }: { 
+  link: ProductLink; 
+  productId: string; 
+  qc: ReturnType<typeof useQueryClient>;
+  rejected?: boolean;
+}) {
+  const handleOverride = async (newStatus: string) => {
+    const { error } = await supabase
+      .from("product_links")
+      .update({ 
+        validation_status: newStatus, 
+        verified: newStatus === "verified",
+        validation_reasons: [
+          ...(link.validation_reasons || []),
+          `manual_override:${newStatus}_by_operator`,
+        ],
+      })
+      .eq("id", link.id);
+    if (error) { toast.error("Override failed"); return; }
+    toast.success(`Link ${newStatus === "rejected" ? "rejected" : "approved"}`);
+    qc.invalidateQueries({ queryKey: ["products"] });
+  };
+
+  return (
+    <div className={`flex items-center justify-between text-xs rounded px-2 py-1 mb-0.5 transition-colors ${
+      rejected ? "bg-destructive/5 opacity-60" : "bg-muted/30 hover:bg-muted/50"
+    }`}>
+      <div className="flex items-center gap-1.5 min-w-0">
+        <Badge variant="outline" className="text-[10px] shrink-0">{link.platform}</Badge>
+        <ConfidenceBadge confidence={link.match_confidence} status={link.validation_status} />
+        <a href={link.url} target="_blank" rel="noopener noreferrer" 
+          className="truncate text-muted-foreground hover:text-foreground hover:underline">
+          {link.extracted_product_name?.slice(0, 35) || link.title?.slice(0, 35) || link.url.slice(0, 35)}
+        </a>
+      </div>
+      <div className="flex items-center gap-1 shrink-0">
+        {link.price_cents && <span className="font-medium">${(link.price_cents / 100).toFixed(2)}</span>}
+        {/* Manual override buttons */}
+        {link.validation_status !== "verified" && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-5 w-5 p-0 hover:bg-green-500/20"
+            onClick={(e) => { e.preventDefault(); handleOverride("verified"); }}
+            title="Approve — this is the correct product"
+          >
+            <ThumbsUp className="w-3 h-3 text-green-500" />
+          </Button>
+        )}
+        {link.validation_status !== "rejected" && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-5 w-5 p-0 hover:bg-destructive/20"
+            onClick={(e) => { e.preventDefault(); handleOverride("rejected"); }}
+            title="Reject — wrong product"
+          >
+            <ThumbsDown className="w-3 h-3 text-destructive" />
+          </Button>
+        )}
+        <a href={link.url} target="_blank" rel="noopener noreferrer">
+          <ExternalLink className="w-3 h-3 text-muted-foreground" />
+        </a>
+      </div>
+    </div>
+  );
+}
+

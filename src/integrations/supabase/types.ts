@@ -785,36 +785,78 @@ export type Database = {
       }
       product_links: {
         Row: {
+          ai_confidence: number | null
+          ai_verdict: boolean | null
+          canonical_url: string | null
+          content_quality_score: number | null
           created_at: string
+          distinctive_tokens_matched: string[] | null
+          evidence_summary: Json | null
+          extracted_product_name: string | null
+          fetch_method: string | null
           id: string
           link_type: string
+          match_confidence: number | null
+          matched_tokens: string[] | null
           platform: string
           price_cents: number | null
           product_id: string
+          schema_type: string | null
+          structured_price_cents: number | null
           title: string | null
           url: string
+          validation_reasons: string[] | null
+          validation_status: string | null
           verified: boolean
         }
         Insert: {
+          ai_confidence?: number | null
+          ai_verdict?: boolean | null
+          canonical_url?: string | null
+          content_quality_score?: number | null
           created_at?: string
+          distinctive_tokens_matched?: string[] | null
+          evidence_summary?: Json | null
+          extracted_product_name?: string | null
+          fetch_method?: string | null
           id?: string
           link_type?: string
+          match_confidence?: number | null
+          matched_tokens?: string[] | null
           platform?: string
           price_cents?: number | null
           product_id: string
+          schema_type?: string | null
+          structured_price_cents?: number | null
           title?: string | null
           url: string
+          validation_reasons?: string[] | null
+          validation_status?: string | null
           verified?: boolean
         }
         Update: {
+          ai_confidence?: number | null
+          ai_verdict?: boolean | null
+          canonical_url?: string | null
+          content_quality_score?: number | null
           created_at?: string
+          distinctive_tokens_matched?: string[] | null
+          evidence_summary?: Json | null
+          extracted_product_name?: string | null
+          fetch_method?: string | null
           id?: string
           link_type?: string
+          match_confidence?: number | null
+          matched_tokens?: string[] | null
           platform?: string
           price_cents?: number | null
           product_id?: string
+          schema_type?: string | null
+          structured_price_cents?: number | null
           title?: string | null
           url?: string
+          validation_reasons?: string[] | null
+          validation_status?: string | null
           verified?: boolean
         }
         Relationships: [
