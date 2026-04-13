@@ -197,6 +197,7 @@ Deno.serve(async (req) => {
       } catch (err) {
         console.warn("[product-research] Image search failed:", err);
       }
+    }
 
     const combined = researchParts.join("\n\n---\n\n").slice(0, 15000);
     if (combined.length < 50) {
