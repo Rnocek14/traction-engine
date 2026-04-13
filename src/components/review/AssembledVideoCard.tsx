@@ -17,6 +17,7 @@ interface AssembledVideo {
   total_clips: number | null;
   continuity_score: number | null;
   account_id: string;
+  enrichment?: EnrichmentMeta;
 }
 
 interface AssembledVideoCardProps {
