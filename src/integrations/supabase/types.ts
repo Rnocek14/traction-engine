@@ -214,6 +214,74 @@ export type Database = {
           },
         ]
       }
+      content_ideas: {
+        Row: {
+          account_id: string
+          angle: string | null
+          created_at: string
+          emotional_triggers: string[]
+          generated_by: string
+          id: string
+          opportunity_score: number | null
+          reasoning: string | null
+          status: string
+          story_job_id: string | null
+          subject: string
+          suggested_format: string | null
+          suggested_hook_type: string | null
+          title: string
+          trend_source_ids: string[]
+          updated_at: string
+          vertical: string | null
+        }
+        Insert: {
+          account_id: string
+          angle?: string | null
+          created_at?: string
+          emotional_triggers?: string[]
+          generated_by?: string
+          id?: string
+          opportunity_score?: number | null
+          reasoning?: string | null
+          status?: string
+          story_job_id?: string | null
+          subject: string
+          suggested_format?: string | null
+          suggested_hook_type?: string | null
+          title: string
+          trend_source_ids?: string[]
+          updated_at?: string
+          vertical?: string | null
+        }
+        Update: {
+          account_id?: string
+          angle?: string | null
+          created_at?: string
+          emotional_triggers?: string[]
+          generated_by?: string
+          id?: string
+          opportunity_score?: number | null
+          reasoning?: string | null
+          status?: string
+          story_job_id?: string | null
+          subject?: string
+          suggested_format?: string | null
+          suggested_hook_type?: string | null
+          title?: string
+          trend_source_ids?: string[]
+          updated_at?: string
+          vertical?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "content_ideas_story_job_id_fkey"
+            columns: ["story_job_id"]
+            isOneToOne: false
+            referencedRelation: "story_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       content_policies: {
         Row: {
           banned_phrases: string[]
