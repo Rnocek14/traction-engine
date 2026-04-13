@@ -9,7 +9,7 @@ export function useProductDetail(productId: string | undefined) {
       if (!productId) throw new Error("No product ID");
       const { data, error } = await supabase
         .from("products")
-        .select("*, product_analysis(*), product_images(*), product_links(*), product_suppliers(*), product_unit_economics(*)")
+        .select("*, product_analysis(*), product_images(*), product_links(*), product_suppliers!product_suppliers_product_id_fkey(*), product_unit_economics(*)")
         .eq("id", productId)
         .single();
       if (error) throw error;
