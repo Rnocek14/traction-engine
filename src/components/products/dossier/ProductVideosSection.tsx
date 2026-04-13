@@ -265,7 +265,9 @@ export function ProductVideosSection({ productId }: { productId: string }) {
 
         {concepts.length === 0 && jobs.length === 0 && !generateMutation.isPending && (
           <p className="text-sm text-muted-foreground text-center py-4">
-            Generate AI video concepts from this product's images and marketing plan.
+            {hasImages
+              ? "Generate AI video concepts from this product's images and marketing plan."
+              : "No product images found. Run AI Research on this product first to scrape images, then generate video concepts."}
           </p>
         )}
       </CardContent>
