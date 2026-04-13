@@ -1,6 +1,7 @@
 /// <reference types="https://esm.sh/@supabase/functions-js/src/edge-runtime.d.ts" />
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { logExperiment, logScore } from "../_shared/prompt-experiment-logger.ts";
+import { fetchTrendEnrichment, type TrendEnrichment } from "../_shared/trend-enrichment.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -72,6 +73,7 @@ interface GenerateRequest {
   mode: 'ai' | 'template';
   regenerated_from_id?: string; // Links to original failed script
   constraint?: string; // Additional guidance for LLM (e.g., fix specific issues)
+  enrichment_mode?: 'none' | 'light' | 'trend_driven'; // Scraped intelligence mode
 }
 
 interface GenerateResponse {
