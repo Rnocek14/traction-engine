@@ -6,7 +6,7 @@ import { z } from "zod";
 // ============================================
 // Enums (matching database)
 // ============================================
-export type ContentVertical = "privacy" | "education" | "health" | "hyperlocal" | "ecommerce";
+export type ContentVertical = "privacy" | "education" | "health" | "hyperlocal" | "ecommerce" | "gadgets" | "home" | "toys";
 export type ClaimPolicyLevel = "standard" | "moderate" | "strict" | "medical";
 export type CtaStyle = "soft" | "direct" | "hard_offer";
 export type ScriptStatus = "draft" | "qa_passed" | "qa_failed" | "generating" | "published" | "rejected";

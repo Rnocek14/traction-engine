@@ -45,7 +45,10 @@ export type ContentVertical =
   | "entertainment"
   | "ecommerce"
   | "lifestyle"
-  | "news";
+  | "news"
+  | "gadgets"
+  | "home"
+  | "toys";
 
 // ─── Display Metadata ───────────────────────────────────────
 
