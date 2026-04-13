@@ -4,9 +4,8 @@
  * Accepts post-publish performance metrics and writes them to prompt_outcomes.
  * Links back to the experiment via story_jobs.script_experiment_id.
  * 
- * Input: { story_job_id, platform?, external_post_id?, views?, impressions?,
- *          likes?, shares?, saves?, comments?, avg_watch_time?, watch_3s_rate?,
- *          watch_15s_rate?, ctr?, revenue?, conversions? }
+ * NEW: Also traces back to scraped_insights that influenced this content,
+ * updating insight performance data for the feedback loop.
  */
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -38,10 +37,10 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    // Look up story_job to get experiment_id
+    // Look up story_job to get experiment_id + continuity_anchors (for trend tracing)
     const { data: job, error: jobErr } = await supabase
       .from("story_jobs")
-      .select("id, script_experiment_id, account_id")
+      .select("id, script_experiment_id, account_id, continuity_anchors")
       .eq("id", storyJobId)
       .single();
 
@@ -82,16 +81,16 @@ Deno.serve(async (req) => {
     const revenue = num(body.revenue);
     const conversions = num(body.conversions);
 
-    // Compute a simple outcome_score (0-100) based on available metrics
+    // Compute outcome_score (0-100)
     let outcomeScore: number | null = null;
     if (views != null && views > 0) {
       const engagementRate = ((likes || 0) + (shares || 0) + (saves || 0) + (comments || 0)) / views;
       const retentionBonus = watch3sRate != null ? watch3sRate * 30 : 0;
-      const engagementPoints = Math.min(engagementRate * 500, 50); // cap at 50
+      const engagementPoints = Math.min(engagementRate * 500, 50);
       outcomeScore = Math.round(Math.min(engagementPoints + retentionBonus + (views > 1000 ? 20 : views > 100 ? 10 : 0), 100));
     }
 
-    // Upsert into prompt_outcomes (one outcome per experiment+platform)
+    // Upsert into prompt_outcomes
     const { data: outcome, error: outcomeErr } = await supabase
       .from("prompt_outcomes")
       .upsert(
@@ -122,7 +121,6 @@ Deno.serve(async (req) => {
 
     if (outcomeErr) {
       console.error("[ingest-performance] Upsert error:", outcomeErr);
-      // Fallback to insert if upsert fails (no unique constraint on experiment_id)
       const { data: inserted, error: insertErr } = await supabase
         .from("prompt_outcomes")
         .insert({
@@ -130,18 +128,11 @@ Deno.serve(async (req) => {
           story_job_id: storyJobId,
           platform,
           external_post_id: externalPostId,
-          views,
-          impressions,
-          likes,
-          shares,
-          saves,
-          comments,
+          views, impressions, likes, shares, saves, comments,
           avg_watch_time: avgWatchTime,
           watch_3s_rate: watch3sRate,
           watch_15s_rate: watch15sRate,
-          ctr,
-          revenue,
-          conversions,
+          ctr, revenue, conversions,
           outcome_score: outcomeScore,
         })
         .select("id")
@@ -154,11 +145,17 @@ Deno.serve(async (req) => {
         );
       }
 
+      // Still try feedback loop even on fallback insert
+      await updateInsightPerformance(supabase, job, outcomeScore);
+
       return new Response(
         JSON.stringify({ success: true, outcome_id: inserted?.id, outcome_score: outcomeScore }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+
+    // ── FEEDBACK LOOP: trace back to scraped insights ──
+    await updateInsightPerformance(supabase, job, outcomeScore);
 
     console.log(`[ingest-performance] Stored outcome for job=${storyJobId} score=${outcomeScore}`);
 
@@ -174,3 +171,61 @@ Deno.serve(async (req) => {
     );
   }
 });
+
+/**
+ * Traces the story back to the scraped insights that influenced it,
+ * and updates the insight_performance table so the system learns
+ * which trends actually produce winners.
+ */
+// deno-lint-ignore no-explicit-any
+async function updateInsightPerformance(supabase: any, job: any, outcomeScore: number | null) {
+  try {
+    // Extract insight IDs from continuity_anchors._trend_enrichment
+    const anchors = job.continuity_anchors as Record<string, unknown> | null;
+    const trendData = anchors?._trend_enrichment as { insight_ids?: string[] } | undefined;
+    const insightIds = trendData?.insight_ids;
+
+    if (!insightIds || insightIds.length === 0) {
+      // Also check content_ideas for trend_source_ids
+      const { data: idea } = await supabase
+        .from("content_ideas")
+        .select("trend_source_ids")
+        .eq("story_job_id", job.id)
+        .maybeSingle();
+
+      const ideaInsightIds = idea?.trend_source_ids as string[] | undefined;
+      if (!ideaInsightIds || ideaInsightIds.length === 0) {
+        console.log("[ingest-performance] No trend insight IDs to trace back");
+        return;
+      }
+
+      // Use idea's insight IDs
+      await writeInsightPerformance(supabase, ideaInsightIds, job.id, outcomeScore);
+      return;
+    }
+
+    await writeInsightPerformance(supabase, insightIds, job.id, outcomeScore);
+  } catch (err) {
+    // Non-blocking: don't fail the main response
+    console.warn("[ingest-performance] Feedback loop error (non-blocking):", err);
+  }
+}
+
+// deno-lint-ignore no-explicit-any
+async function writeInsightPerformance(supabase: any, insightIds: string[], storyJobId: string, outcomeScore: number | null) {
+  const rows = insightIds.map(insightId => ({
+    scraped_insight_id: insightId,
+    story_job_id: storyJobId,
+    outcome_score: outcomeScore,
+  }));
+
+  const { error } = await supabase
+    .from("insight_performance")
+    .upsert(rows, { onConflict: "scraped_insight_id,story_job_id" });
+
+  if (error) {
+    console.warn("[ingest-performance] insight_performance upsert error:", error.message);
+  } else {
+    console.log(`[ingest-performance] Linked ${insightIds.length} insights to outcome score ${outcomeScore}`);
+  }
+}
