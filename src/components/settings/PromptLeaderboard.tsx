@@ -231,10 +231,21 @@ export function PromptLeaderboard() {
       {/* Recent experiments */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base flex items-center gap-2">
-            <TrendingUp className="h-4 w-4 text-primary" />
-            Recent Experiments — {stageFilter}
-          </CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base flex items-center gap-2">
+              <TrendingUp className="h-4 w-4 text-primary" />
+              Recent Experiments — {stageFilter}
+            </CardTitle>
+            <Button
+              variant={enrichedOnly ? "default" : "outline"}
+              size="sm"
+              className="gap-1.5 text-xs"
+              onClick={() => setEnrichedOnly(!enrichedOnly)}
+            >
+              <Flame className="h-3.5 w-3.5" />
+              {enrichedOnly ? "Enriched Only" : "All"}
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           {experimentsLoading ? (
