@@ -83,7 +83,32 @@ export function ProductIdentitySection({ product }: { product: ProductWithAnalys
               </div>
             )}
 
-          </div>
+            {/* Identity confidence summary */}
+            <div className="bg-muted/30 rounded-lg p-3 space-y-1.5">
+              <p className="text-xs font-medium">Identity Confidence</p>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Retail links matched</span>
+                  <span className="font-medium">{retailMatched}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Wholesale matched</span>
+                  <span className="font-medium">{wholesaleMatched}</span>
+                </div>
+                {analysis?.overall_score != null && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Analysis score</span>
+                    <span className="font-medium">{analysis.overall_score}/100</span>
+                  </div>
+                )}
+                {analysis?.trending_status && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Trend</span>
+                    <span className="font-medium">{analysis.trending_status}</span>
+                  </div>
+                )}
+              </div>
+            </div>
         </div>
       </CardContent>
     </Card>
