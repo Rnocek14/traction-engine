@@ -122,12 +122,17 @@ Deno.serve(async (req) => {
     }
 
     // 2. Perplexity deep research
+    let perplexityCitations: string[] = [];
     if (perplexityKey) {
       const searchQuery = productName
         ? `"${productName}" product review TikTok viral dropshipping price competition`
         : `product at ${productUrl} - reviews, pricing, competition, viral potential, TikTok`;
       const research = await perplexityResearch(searchQuery, perplexityKey);
-      if (research) researchParts.push(`Market research:\n${research}`);
+      if (research.content) researchParts.push(`Market research:\n${research.content}`);
+      perplexityCitations = research.citations;
+      if (perplexityCitations.length > 0) {
+        researchParts.push(`\nReal Source URLs from research (USE THESE):\n${perplexityCitations.map((c, i) => `[${i+1}] ${c}`).join("\n")}`);
+      }
     }
 
     const combined = researchParts.join("\n\n---\n\n").slice(0, 15000);
