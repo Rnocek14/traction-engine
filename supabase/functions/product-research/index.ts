@@ -611,6 +611,7 @@ Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, s
     // PHASE 7: EXTRACT SUPPLIER DATA
     // ==========================================
     console.log("[product-research] Phase 7: Extracting supplier data");
+    const wholesaleLinks = validatedLinks.filter(l => l.linkType === "wholesale");
     if (productId && wholesaleLinks.length > 0) {
       // Use AI to extract structured supplier info from wholesale search results
       try {
@@ -709,17 +710,28 @@ Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, s
                 is_preferred: false,
               });
             }
-            // Mark cheapest as preferred
+            // Mark BEST OVERALL supplier as preferred (not cheapest!)
             const { data: allSuppliers } = await supabase
               .from("product_suppliers")
-              .select("id, unit_cost_cents")
-              .eq("product_id", productId)
-              .order("unit_cost_cents", { ascending: true })
-              .limit(1);
-            if (allSuppliers?.[0]) {
-              await supabase.from("product_suppliers")
-                .update({ is_preferred: true })
-                .eq("id", allSuppliers[0].id);
+              .select("id, unit_cost_cents, reliability_score, defect_risk, delivery_days, processing_days, overall_supplier_score")
+              .eq("product_id", productId);
+            if (allSuppliers && allSuppliers.length > 0) {
+              // Weighted score: cost 30%, reliability 30%, delivery speed 20%, defect inverse 20%
+              const maxCost = Math.max(...allSuppliers.map(s => s.unit_cost_cents || 9999));
+              const scored = allSuppliers.map(s => {
+                const costScore = maxCost > 0 ? (1 - ((s.unit_cost_cents || maxCost) / maxCost)) * 5 : 2.5;
+                const reliabilityScore = s.reliability_score || 2;
+                const totalDays = (s.processing_days || 7) + (s.delivery_days || 14);
+                const deliveryScore = totalDays <= 7 ? 5 : totalDays <= 12 ? 4 : totalDays <= 20 ? 2.5 : 1;
+                const defectInverse = 6 - (s.defect_risk || 3);
+                const weighted = costScore * 0.3 + reliabilityScore * 0.3 + deliveryScore * 0.2 + defectInverse * 0.2;
+                return { id: s.id, weighted };
+              });
+              scored.sort((a, b) => b.weighted - a.weighted);
+              // Reset all, then set best
+              await supabase.from("product_suppliers").update({ is_preferred: false }).eq("product_id", productId);
+              await supabase.from("product_suppliers").update({ is_preferred: true }).eq("id", scored[0].id);
+              console.log(`[product-research] Preferred supplier selected by weighted score (not cheapest)`);
             }
             console.log(`[product-research] Saved ${suppliers?.length || 0} suppliers`);
           }
