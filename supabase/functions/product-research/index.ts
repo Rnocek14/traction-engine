@@ -1151,7 +1151,7 @@ Deno.serve(async (req) => {
       } catch { /* skip */ }
     }
 
-    const allSearchText = [retailSearch.content, wholesaleSearch.content, imgSearch.content].join(" ");
+    const allSearchText = [retailSearchContent, wholesaleSearchContent, imgSearch.content].join(" ");
     const imgRegex = /https?:\/\/[^\s"'<>]+\.(?:jpg|jpeg|png|webp)(?:\?[^\s"'<>]*)?/gi;
     const directImgs = allSearchText.match(imgRegex) || [];
     for (const imgUrl of directImgs.slice(0, 5)) {
@@ -1515,7 +1515,7 @@ Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, s
               content: `You are a dropshipping supplier analyst. Extract structured supplier data from wholesale research. Be conservative — mark anything uncertain.`,
             }, {
               role: "user",
-              content: `Product: "${productName}"\n\nWholesale research:\n${wholesaleSearch.content}\n\nVerified wholesale links:\n${wholesaleVerified.map(l => `${l.platform}: ${l.url} (confidence=${l.matchConfidence}) ${l.priceCents ? `($${(l.priceCents / 100).toFixed(2)})` : ""}`).join("\n")}`,
+              content: `Product: "${productName}"\n\nWholesale research:\n${wholesaleSearchContent}\n\nVerified wholesale links:\n${wholesaleVerified.map(l => `${l.platform}: ${l.url} (confidence=${l.matchConfidence}) ${l.priceCents ? `($${(l.priceCents / 100).toFixed(2)})` : ""}`).join("\n")}`,
             }],
             tools: [{ type: "function", function: {
               name: "store_suppliers",
