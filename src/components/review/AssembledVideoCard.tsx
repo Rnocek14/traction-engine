@@ -18,6 +18,7 @@ interface AssembledVideo {
   continuity_score: number | null;
   account_id: string;
   enrichment?: EnrichmentMeta;
+  confidence?: ConfidenceScore;
 }
 
 interface AssembledVideoCardProps {
