@@ -86,7 +86,14 @@ export function WholesaleEvidenceSection({ product }: { product: ProductWithAnal
           .neq("id", supplier.id);
       }
 
-      toast.success(`Supplier listing pinned from ${platform}`);
+      // Scrape images from pinned supplier listing
+      try {
+        await supabase.functions.invoke("product-research", {
+          body: { product_id: product.id, scrape_supplier_images: true, supplier_url: url },
+        });
+      } catch { /* non-blocking */ }
+
+      toast.success(`Supplier listing pinned from ${platform} — scraping images`);
       setManualUrl("");
       qc.invalidateQueries({ queryKey: ["product-detail"] });
     } catch (e: any) {
@@ -134,7 +141,14 @@ export function WholesaleEvidenceSection({ product }: { product: ProductWithAnal
         override_action: "approve",
       }).eq("id", link.id);
 
-      toast.success("Pinned as preferred supplier");
+      // Scrape images from pinned supplier listing
+      try {
+        await supabase.functions.invoke("product-research", {
+          body: { product_id: product.id, scrape_supplier_images: true, supplier_url: link.url },
+        });
+      } catch { /* non-blocking */ }
+
+      toast.success("Pinned as preferred supplier — scraping images");
       qc.invalidateQueries({ queryKey: ["product-detail"] });
     } catch (e: any) {
       toast.error(e.message);
