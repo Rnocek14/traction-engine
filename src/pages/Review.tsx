@@ -42,28 +42,41 @@ export default function Review() {
   };
 
   const handleReassemble = async (id: string) => {
-    try {
-      const { data, error } = await supabase.functions.invoke("assemble-reel", {
+    const runAssemble = () =>
+      supabase.functions.invoke("assemble-reel", {
         body: { story_job_id: id },
       });
 
-      // supabase-js treats non-2xx as an error, but 409 means render is already running
-      if (error) {
-        const parsed = typeof error === "object" && "context" in error
-          ? error
-          : null;
-        const statusCode = (parsed as any)?.context?.status ?? 0;
-        const bodyText = typeof data === "object" && data?.status === "rendering"
-          ? "rendering"
-          : typeof data === "string" && data.includes("already in progress")
-            ? "rendering"
-            : null;
+    try {
+      let { data, error } = await runAssemble();
 
-        if (statusCode === 409 || bodyText === "rendering") {
+      if (error) {
+        const statusCode = (error as any)?.context?.status ?? 0;
+        const alreadyRendering =
+          statusCode === 409 ||
+          (typeof data === "object" && data !== null && (data as any).status === "rendering");
+
+        if (alreadyRendering) {
+          const { data: pollData } = await supabase.functions.invoke("poll-assembly-status", {
+            body: { story_job_id: id },
+          });
+
+          const pollStatus = typeof pollData === "object" && pollData !== null ? String((pollData as any).status ?? "") : "";
+          const pollError = typeof pollData === "object" && pollData !== null ? String((pollData as any).error ?? "") : "";
+
+          if (pollStatus === "failed" && pollError.includes("Job not found")) {
+            const retry = await runAssemble();
+            if (retry.error) throw retry.error;
+            toast.success("Lost render was restarted.");
+            queryClient.invalidateQueries({ queryKey: ["assembled-videos"] });
+            return;
+          }
+
           toast.info("Assembly is already in progress — check back shortly.");
           queryClient.invalidateQueries({ queryKey: ["assembled-videos"] });
           return;
         }
+
         throw error;
       }
 
@@ -71,11 +84,6 @@ export default function Review() {
       queryClient.invalidateQueries({ queryKey: ["assembled-videos"] });
     } catch (err: any) {
       const msg = err?.message || String(err);
-      if (msg.includes("already in progress")) {
-        toast.info("Assembly is already in progress — check back shortly.");
-        queryClient.invalidateQueries({ queryKey: ["assembled-videos"] });
-        return;
-      }
       toast.error(`Reassembly failed: ${msg}`);
     }
   };
