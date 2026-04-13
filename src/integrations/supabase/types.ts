@@ -482,6 +482,173 @@ export type Database = {
           },
         ]
       }
+      prompt_experiments: {
+        Row: {
+          account_id: string | null
+          created_at: string
+          family: string
+          generation_round: number
+          id: string
+          input_context: Json
+          model: string | null
+          output_summary: Json
+          parent_experiment_id: string | null
+          platform: string | null
+          prompt_text: string
+          prompt_variables: Json
+          provider: string | null
+          script_run_id: string | null
+          stage: string
+          status: string
+          story_job_id: string | null
+          template_id: string | null
+          updated_at: string
+          vertical: string | null
+        }
+        Insert: {
+          account_id?: string | null
+          created_at?: string
+          family: string
+          generation_round?: number
+          id?: string
+          input_context?: Json
+          model?: string | null
+          output_summary?: Json
+          parent_experiment_id?: string | null
+          platform?: string | null
+          prompt_text: string
+          prompt_variables?: Json
+          provider?: string | null
+          script_run_id?: string | null
+          stage: string
+          status?: string
+          story_job_id?: string | null
+          template_id?: string | null
+          updated_at?: string
+          vertical?: string | null
+        }
+        Update: {
+          account_id?: string | null
+          created_at?: string
+          family?: string
+          generation_round?: number
+          id?: string
+          input_context?: Json
+          model?: string | null
+          output_summary?: Json
+          parent_experiment_id?: string | null
+          platform?: string | null
+          prompt_text?: string
+          prompt_variables?: Json
+          provider?: string | null
+          script_run_id?: string | null
+          stage?: string
+          status?: string
+          story_job_id?: string | null
+          template_id?: string | null
+          updated_at?: string
+          vertical?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "prompt_experiments_parent_experiment_id_fkey"
+            columns: ["parent_experiment_id"]
+            isOneToOne: false
+            referencedRelation: "prompt_experiments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "prompt_experiments_script_run_id_fkey"
+            columns: ["script_run_id"]
+            isOneToOne: false
+            referencedRelation: "script_runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "prompt_experiments_story_job_id_fkey"
+            columns: ["story_job_id"]
+            isOneToOne: false
+            referencedRelation: "story_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "prompt_experiments_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "prompt_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      prompt_family_stats: {
+        Row: {
+          approval_rate: number | null
+          avg_human_score: number | null
+          avg_output_score: number | null
+          avg_performance_score: number | null
+          avg_preflight_score: number | null
+          created_at: string
+          family: string
+          fatigue_score: number | null
+          hard_fail_rate: number | null
+          id: string
+          last_used_at: string | null
+          platform: string | null
+          promoted: boolean
+          provider: string | null
+          rejection_rate: number | null
+          retired: boolean
+          sample_size: number
+          stage: string
+          updated_at: string
+          vertical: string | null
+        }
+        Insert: {
+          approval_rate?: number | null
+          avg_human_score?: number | null
+          avg_output_score?: number | null
+          avg_performance_score?: number | null
+          avg_preflight_score?: number | null
+          created_at?: string
+          family: string
+          fatigue_score?: number | null
+          hard_fail_rate?: number | null
+          id?: string
+          last_used_at?: string | null
+          platform?: string | null
+          promoted?: boolean
+          provider?: string | null
+          rejection_rate?: number | null
+          retired?: boolean
+          sample_size?: number
+          stage: string
+          updated_at?: string
+          vertical?: string | null
+        }
+        Update: {
+          approval_rate?: number | null
+          avg_human_score?: number | null
+          avg_output_score?: number | null
+          avg_performance_score?: number | null
+          avg_preflight_score?: number | null
+          created_at?: string
+          family?: string
+          fatigue_score?: number | null
+          hard_fail_rate?: number | null
+          id?: string
+          last_used_at?: string | null
+          platform?: string | null
+          promoted?: boolean
+          provider?: string | null
+          rejection_rate?: number | null
+          retired?: boolean
+          sample_size?: number
+          stage?: string
+          updated_at?: string
+          vertical?: string | null
+        }
+        Relationships: []
+      }
       prompt_learnings: {
         Row: {
           average_rating: number | null
@@ -533,6 +700,221 @@ export type Database = {
           successful_uses?: number
           total_uses?: number
           updated_at?: string
+        }
+        Relationships: []
+      }
+      prompt_outcomes: {
+        Row: {
+          avg_watch_time: number | null
+          comments: number | null
+          conversions: number | null
+          created_at: string
+          ctr: number | null
+          experiment_id: string
+          external_post_id: string | null
+          id: string
+          impressions: number | null
+          likes: number | null
+          outcome_score: number | null
+          platform: string | null
+          revenue: number | null
+          saves: number | null
+          shares: number | null
+          story_job_id: string | null
+          updated_at: string
+          views: number | null
+          watch_15s_rate: number | null
+          watch_3s_rate: number | null
+        }
+        Insert: {
+          avg_watch_time?: number | null
+          comments?: number | null
+          conversions?: number | null
+          created_at?: string
+          ctr?: number | null
+          experiment_id: string
+          external_post_id?: string | null
+          id?: string
+          impressions?: number | null
+          likes?: number | null
+          outcome_score?: number | null
+          platform?: string | null
+          revenue?: number | null
+          saves?: number | null
+          shares?: number | null
+          story_job_id?: string | null
+          updated_at?: string
+          views?: number | null
+          watch_15s_rate?: number | null
+          watch_3s_rate?: number | null
+        }
+        Update: {
+          avg_watch_time?: number | null
+          comments?: number | null
+          conversions?: number | null
+          created_at?: string
+          ctr?: number | null
+          experiment_id?: string
+          external_post_id?: string | null
+          id?: string
+          impressions?: number | null
+          likes?: number | null
+          outcome_score?: number | null
+          platform?: string | null
+          revenue?: number | null
+          saves?: number | null
+          shares?: number | null
+          story_job_id?: string | null
+          updated_at?: string
+          views?: number | null
+          watch_15s_rate?: number | null
+          watch_3s_rate?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "prompt_outcomes_experiment_id_fkey"
+            columns: ["experiment_id"]
+            isOneToOne: false
+            referencedRelation: "prompt_experiments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "prompt_outcomes_story_job_id_fkey"
+            columns: ["story_job_id"]
+            isOneToOne: false
+            referencedRelation: "story_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      prompt_scores: {
+        Row: {
+          clarity: number | null
+          coherence: number | null
+          confidence: number | null
+          continuity: number | null
+          created_at: string
+          experiment_id: string
+          hard_fail: boolean
+          hook_strength: number | null
+          id: string
+          notes: string | null
+          novelty: number | null
+          overall_score: number | null
+          pacing: number | null
+          postability: number | null
+          risk_score: number | null
+          score_layer: string
+          score_payload: Json
+          scored_by: string
+          specificity: number | null
+          visuality: number | null
+        }
+        Insert: {
+          clarity?: number | null
+          coherence?: number | null
+          confidence?: number | null
+          continuity?: number | null
+          created_at?: string
+          experiment_id: string
+          hard_fail?: boolean
+          hook_strength?: number | null
+          id?: string
+          notes?: string | null
+          novelty?: number | null
+          overall_score?: number | null
+          pacing?: number | null
+          postability?: number | null
+          risk_score?: number | null
+          score_layer: string
+          score_payload?: Json
+          scored_by?: string
+          specificity?: number | null
+          visuality?: number | null
+        }
+        Update: {
+          clarity?: number | null
+          coherence?: number | null
+          confidence?: number | null
+          continuity?: number | null
+          created_at?: string
+          experiment_id?: string
+          hard_fail?: boolean
+          hook_strength?: number | null
+          id?: string
+          notes?: string | null
+          novelty?: number | null
+          overall_score?: number | null
+          pacing?: number | null
+          postability?: number | null
+          risk_score?: number | null
+          score_layer?: string
+          score_payload?: Json
+          scored_by?: string
+          specificity?: number | null
+          visuality?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "prompt_scores_experiment_id_fkey"
+            columns: ["experiment_id"]
+            isOneToOne: false
+            referencedRelation: "prompt_experiments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      prompt_templates: {
+        Row: {
+          created_at: string
+          description: string | null
+          family: string
+          id: string
+          is_active: boolean
+          name: string
+          platforms: string[]
+          scoring_weights: Json
+          stage: string
+          system_instructions: string | null
+          template_text: string
+          updated_at: string
+          variables_schema: Json
+          version: number
+          verticals: string[]
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          family: string
+          id?: string
+          is_active?: boolean
+          name: string
+          platforms?: string[]
+          scoring_weights?: Json
+          stage: string
+          system_instructions?: string | null
+          template_text: string
+          updated_at?: string
+          variables_schema?: Json
+          version?: number
+          verticals?: string[]
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          family?: string
+          id?: string
+          is_active?: boolean
+          name?: string
+          platforms?: string[]
+          scoring_weights?: Json
+          stage?: string
+          system_instructions?: string | null
+          template_text?: string
+          updated_at?: string
+          variables_schema?: Json
+          version?: number
+          verticals?: string[]
         }
         Relationships: []
       }
@@ -962,14 +1344,18 @@ export type Database = {
           continuity_anchors: Json | null
           continuity_score: number | null
           created_at: string
+          hook_experiment_id: string | null
           id: string
           review_status: string
+          script_experiment_id: string | null
           status: string
           story_type: string
           storyboard_json: Json | null
           title: string | null
+          topic_experiment_id: string | null
           total_clips: number | null
           updated_at: string
+          visual_experiment_id: string | null
           weakest_clip_id: string | null
         }
         Insert: {
@@ -983,14 +1369,18 @@ export type Database = {
           continuity_anchors?: Json | null
           continuity_score?: number | null
           created_at?: string
+          hook_experiment_id?: string | null
           id?: string
           review_status?: string
+          script_experiment_id?: string | null
           status?: string
           story_type?: string
           storyboard_json?: Json | null
           title?: string | null
+          topic_experiment_id?: string | null
           total_clips?: number | null
           updated_at?: string
+          visual_experiment_id?: string | null
           weakest_clip_id?: string | null
         }
         Update: {
@@ -1004,14 +1394,18 @@ export type Database = {
           continuity_anchors?: Json | null
           continuity_score?: number | null
           created_at?: string
+          hook_experiment_id?: string | null
           id?: string
           review_status?: string
+          script_experiment_id?: string | null
           status?: string
           story_type?: string
           storyboard_json?: Json | null
           title?: string | null
+          topic_experiment_id?: string | null
           total_clips?: number | null
           updated_at?: string
+          visual_experiment_id?: string | null
           weakest_clip_id?: string | null
         }
         Relationships: [
@@ -1020,6 +1414,34 @@ export type Database = {
             columns: ["active_voiceover_id"]
             isOneToOne: false
             referencedRelation: "story_voiceovers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "story_jobs_hook_experiment_id_fkey"
+            columns: ["hook_experiment_id"]
+            isOneToOne: false
+            referencedRelation: "prompt_experiments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "story_jobs_script_experiment_id_fkey"
+            columns: ["script_experiment_id"]
+            isOneToOne: false
+            referencedRelation: "prompt_experiments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "story_jobs_topic_experiment_id_fkey"
+            columns: ["topic_experiment_id"]
+            isOneToOne: false
+            referencedRelation: "prompt_experiments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "story_jobs_visual_experiment_id_fkey"
+            columns: ["visual_experiment_id"]
+            isOneToOne: false
+            referencedRelation: "prompt_experiments"
             referencedColumns: ["id"]
           },
         ]
@@ -1501,6 +1923,7 @@ export type Database = {
           thumbnail_url: string | null
           thumbnail_width: number | null
           updated_at: string
+          visual_experiment_id: string | null
         }
         Insert: {
           accuracy_notes?: string | null
@@ -1558,6 +1981,7 @@ export type Database = {
           thumbnail_url?: string | null
           thumbnail_width?: number | null
           updated_at?: string
+          visual_experiment_id?: string | null
         }
         Update: {
           accuracy_notes?: string | null
@@ -1615,6 +2039,7 @@ export type Database = {
           thumbnail_url?: string | null
           thumbnail_width?: number | null
           updated_at?: string
+          visual_experiment_id?: string | null
         }
         Relationships: [
           {
@@ -1629,6 +2054,13 @@ export type Database = {
             columns: ["story_job_id"]
             isOneToOne: false
             referencedRelation: "story_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "video_jobs_visual_experiment_id_fkey"
+            columns: ["visual_experiment_id"]
+            isOneToOne: false
+            referencedRelation: "prompt_experiments"
             referencedColumns: ["id"]
           },
         ]
