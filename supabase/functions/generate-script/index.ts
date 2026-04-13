@@ -1,6 +1,7 @@
 /// <reference types="https://esm.sh/@supabase/functions-js/src/edge-runtime.d.ts" />
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { logExperiment, logScore } from "../_shared/prompt-experiment-logger.ts";
+import { fetchTrendEnrichment, type TrendEnrichment } from "../_shared/trend-enrichment.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -72,6 +73,7 @@ interface GenerateRequest {
   mode: 'ai' | 'template';
   regenerated_from_id?: string; // Links to original failed script
   constraint?: string; // Additional guidance for LLM (e.g., fix specific issues)
+  enrichment_mode?: 'none' | 'light' | 'trend_driven'; // Scraped intelligence mode
 }
 
 interface GenerateResponse {
@@ -321,7 +323,7 @@ OUTPUT RULES:
 7. Return ONLY valid JSON, no markdown`;
 }
 
-function buildUserPrompt(topic: Topic, config: AccountConfig, constraint?: string): string {
+function buildUserPrompt(topic: Topic, config: AccountConfig, constraint?: string, trendBlock?: string): string {
   const hookOptions = topic.hook_variants.length > 0
     ? `\n\nHook inspiration:\n${topic.hook_variants.map((h, i) => `${i + 1}. ${h}`).join("\n")}`
     : "";
@@ -330,12 +332,14 @@ function buildUserPrompt(topic: Topic, config: AccountConfig, constraint?: strin
     ? `\n\nCRITICAL CONSTRAINTS (must follow):\n${constraint}`
     : "";
 
+  const trendSection = trendBlock ? `\n\n${trendBlock}` : "";
+
   return `Generate a script for this topic:
 
 TOPIC: ${topic.topic_prompt}
 PILLAR: ${topic.pillar}
 VISUAL HINTS: ${topic.motif_hints.join(", ") || "none specified"}
-${hookOptions}${constraintSection}
+${hookOptions}${constraintSection}${trendSection}
 
 Return JSON in this exact schema:
 {
@@ -355,10 +359,11 @@ async function generateWithOpenAI(
   config: AccountConfig,
   topic: Topic,
   apiKey: string,
-  constraint?: string
+  constraint?: string,
+  trendBlock?: string
 ): Promise<ScriptContent> {
   const systemPrompt = buildSystemPrompt(config);
-  const userPrompt = buildUserPrompt(topic, config, constraint);
+  const userPrompt = buildUserPrompt(topic, config, constraint, trendBlock);
 
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -534,7 +539,7 @@ Deno.serve(async (req) => {
     console.log({ requestId, event: "auth_passed", path: authPath, user_id: authUserId, internal_caller: internalCaller });
 
     const supabaseAdmin = getSupabaseAdmin();
-    const { account_id, preferred_pillar, topic_id: forcedTopicId, mode, regenerated_from_id, constraint }: GenerateRequest = await req.json();
+    const { account_id, preferred_pillar, topic_id: forcedTopicId, mode, regenerated_from_id, constraint, enrichment_mode }: GenerateRequest = await req.json();
 
     if (!account_id) {
       return new Response(
@@ -666,6 +671,18 @@ Deno.serve(async (req) => {
 
     console.log(`[pipeline] Topic selected: ${topic.topic_prompt.substring(0, 50)}...`);
 
+    // 3.5. Fetch trend enrichment from scraped insights
+    const trendEnrichment: TrendEnrichment = await fetchTrendEnrichment(supabaseAdmin, {
+      vertical: config.vertical,
+      pillar: topic.pillar,
+      topic_prompt: topic.topic_prompt,
+      mode: enrichment_mode || "light",
+    });
+
+    if (trendEnrichment.enabled) {
+      console.log(`[pipeline] Trend enrichment: ${trendEnrichment.mode}, ${trendEnrichment.insight_ids.length} insights, hooks=${trendEnrichment.hook_patterns.length}`);
+    }
+
     // 4. Generate content
     let content: ScriptContent;
     let generationCost = 1;
@@ -679,9 +696,9 @@ Deno.serve(async (req) => {
         );
       }
 
-      content = await generateWithOpenAI(config, topic, apiKey, constraint);
+      content = await generateWithOpenAI(config, topic, apiKey, constraint, trendEnrichment.prompt_block || undefined);
       generationCost = 3;
-      console.log("[pipeline] AI generation complete", { hasConstraint: !!constraint });
+      console.log("[pipeline] AI generation complete", { hasConstraint: !!constraint, enriched: trendEnrichment.enabled });
     } else {
       content = generateTemplateContent(config, topic);
       console.log("[pipeline] Template generation complete");
@@ -756,12 +773,21 @@ Deno.serve(async (req) => {
 
     // ── Prompt R&D: log hook + script experiments ──
     const hookFamily = content.hook.length < 20 ? "curiosity" : "value_first"; // heuristic family
+    const enrichmentMeta = trendEnrichment.enabled ? {
+      used_scraped_insights: true,
+      scraped_insight_ids: trendEnrichment.insight_ids,
+      enrichment_mode: trendEnrichment.mode,
+      used_hooks: trendEnrichment.hook_patterns,
+      used_emotions: trendEnrichment.emotional_triggers,
+      used_format: trendEnrichment.format_suggestion,
+    } : { used_scraped_insights: false };
+
     const hookExpId = await logExperiment({
       stage: "hook",
       family: hookFamily,
       promptText: content.hook,
       promptVariables: { topic: topic.topic_prompt, pillar: topic.pillar },
-      inputContext: { account_id, vertical: config.vertical, topic_id: topic.id },
+      inputContext: { account_id, vertical: config.vertical, topic_id: topic.id, ...enrichmentMeta },
       outputSummary: { hook: content.hook, char_count: content.hook.length },
       vertical: config.vertical,
       model: mode === "ai" ? "gpt-4o" : "template",
@@ -775,7 +801,7 @@ Deno.serve(async (req) => {
       family: mode === "ai" ? "fast_explainer" : "template",
       promptText: content.voiceover,
       promptVariables: { topic: topic.topic_prompt, pillar: topic.pillar, hook: content.hook },
-      inputContext: { account_id, vertical: config.vertical, topic_id: topic.id, mode },
+      inputContext: { account_id, vertical: config.vertical, topic_id: topic.id, mode, ...enrichmentMeta },
       outputSummary: {
         scene_count: content.scene_prompts.length,
         word_count: content.voiceover.split(/\s+/).length,
