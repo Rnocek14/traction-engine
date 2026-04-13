@@ -111,34 +111,69 @@ Return ONLY a valid JSON array, no markdown.`;
       );
     }
 
-    const aiRes = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${openaiKey}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [
-          { role: "system", content: "You are a viral content strategist. Return only valid JSON arrays." },
-          { role: "user", content: prompt },
-        ],
-        temperature: 0.9,
-        max_tokens: 3000,
-      }),
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 55000);
 
-    if (!aiRes.ok) {
-      const errText = await aiRes.text();
-      console.error("[generate-ideas] OpenAI error:", errText);
+    let aiRes: Response;
+    try {
+      aiRes = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${openaiKey}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: [
+            { role: "system", content: "You are a viral content strategist. Return only valid JSON arrays." },
+            { role: "user", content: prompt },
+          ],
+          temperature: 0.9,
+          max_tokens: 3000,
+        }),
+        signal: controller.signal,
+      });
+    } catch (fetchErr) {
+      clearTimeout(timeout);
+      console.error("[generate-ideas] OpenAI fetch error:", fetchErr);
       return new Response(
-        JSON.stringify({ error: "AI generation failed" }),
-        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({ error: "AI request failed", fallback: true }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+    clearTimeout(timeout);
+
+    // Read body once as text to avoid stream errors
+    let responseText: string;
+    try {
+      responseText = await aiRes.text();
+    } catch (bodyErr) {
+      console.error("[generate-ideas] Failed to read AI response body:", bodyErr);
+      return new Response(
+        JSON.stringify({ error: "Failed to read AI response", fallback: true }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    const aiData = await aiRes.json();
-    const rawContent = aiData.choices?.[0]?.message?.content || "[]";
+    if (!aiRes.ok) {
+      console.error("[generate-ideas] OpenAI error:", aiRes.status, responseText.slice(0, 500));
+      return new Response(
+        JSON.stringify({ error: "AI generation failed", fallback: true }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    let aiData: Record<string, unknown>;
+    try {
+      aiData = JSON.parse(responseText);
+    } catch {
+      console.error("[generate-ideas] Failed to parse OpenAI JSON:", responseText.slice(0, 200));
+      return new Response(
+        JSON.stringify({ error: "Invalid AI response", fallback: true }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+    const rawContent = (aiData as any).choices?.[0]?.message?.content || "[]";
     
     // Parse JSON (strip markdown fences if present)
     const cleaned = rawContent.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
