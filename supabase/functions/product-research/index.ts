@@ -183,6 +183,7 @@ Also suggest:
                 type: "object",
                 properties: {
                   product_name: { type: "string" },
+                  image_url: { type: "string", description: "Direct URL to a product image if found in the research data" },
                   category: { type: "string" },
                   subcategory: { type: "string" },
                   price_cents: { type: "integer", description: "Estimated retail price in cents" },
@@ -242,6 +243,7 @@ Also suggest:
           category: analysis.category || null,
           subcategory: analysis.subcategory || null,
           source_url: productUrl || null,
+          image_url: analysis.image_url || null,
           price_cents: analysis.price_cents || null,
           supplier_price_cents: analysis.supplier_price_cents || null,
           estimated_margin_pct: analysis.estimated_margin_pct || null,
@@ -261,6 +263,7 @@ Also suggest:
       await supabase.from("products").update({
         category: analysis.category || undefined,
         subcategory: analysis.subcategory || undefined,
+        image_url: analysis.image_url || undefined,
         price_cents: analysis.price_cents || undefined,
         supplier_price_cents: analysis.supplier_price_cents || undefined,
         estimated_margin_pct: analysis.estimated_margin_pct || undefined,
