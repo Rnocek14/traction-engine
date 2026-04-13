@@ -91,7 +91,39 @@ export function useAssembledVideos() {
         }
       }
 
-      
+      // Fetch prompt scores for confidence calculation
+      if (expIds.length > 0) {
+        const { data: scoreData } = await supabase
+          .from("prompt_scores")
+          .select("experiment_id, overall_score, score_layer")
+          .in("experiment_id", expIds)
+          .eq("score_layer", "output");
+
+        const scoreMap = new Map<string, number>();
+        if (scoreData) {
+          for (const s of scoreData) {
+            if (s.overall_score != null) scoreMap.set(s.experiment_id, Number(s.overall_score));
+          }
+        }
+
+        rows = rows.map(row => {
+          const continuityVal = row.continuity_score != null ? Math.min(row.continuity_score / 10, 10) : 5;
+          const enrichmentVal = row.enrichment?.used ? 8 : 4;
+          const qualityVal = row.script_experiment_id && scoreMap.has(row.script_experiment_id)
+            ? Math.min(scoreMap.get(row.script_experiment_id)! / 10, 10)
+            : 5;
+          const total = row.total_clips || 1;
+          const completed = row.completed_clips || (row.assembled_status === "succeeded" ? total : 0);
+          const completionVal = Math.round((completed / total) * 10);
+
+          const overall = Math.round(((continuityVal * 3 + enrichmentVal * 1.5 + qualityVal * 3.5 + completionVal * 2) / 10) * 10) / 10;
+          const level: "high" | "medium" | "low" = overall >= 7 ? "high" : overall >= 5 ? "medium" : "low";
+
+          return { ...row, confidence: { overall, continuity: continuityVal, enrichment: enrichmentVal, quality: qualityVal, completion: completionVal, level } };
+        });
+      }
+
+
       const activeRows = rows.filter(
         (row) => row.assembled_status === "queued" || row.assembled_status === "rendering"
       );
