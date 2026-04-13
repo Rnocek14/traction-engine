@@ -177,16 +177,32 @@ export function ScraperHealthDashboard() {
                         </div>
                       )}
                     </div>
-                    {story.source_url && (
-                      <a
-                        href={story.source_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-muted-foreground hover:text-foreground shrink-0"
+                    <div className="flex flex-col items-end gap-2 shrink-0">
+                      {story.source_url && (
+                        <a
+                          href={story.source_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-muted-foreground hover:text-foreground"
+                        >
+                          <ExternalLink className="w-4 h-4" />
+                        </a>
+                      )}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="text-xs gap-1 h-7"
+                        disabled={addingId === story.id}
+                        onClick={() => handleAddToQueue(story)}
                       >
-                        <ExternalLink className="w-4 h-4" />
-                      </a>
-                    )}
+                        {addingId === story.id ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <Sparkles className="w-3 h-3" />
+                        )}
+                        Add to Ideas
+                      </Button>
+                    </div>
                   </div>
                 </div>
               ))}
