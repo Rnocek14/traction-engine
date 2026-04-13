@@ -7,6 +7,7 @@ const corsHeaders = {
 
 interface AssembledMeta {
   ffmpeg_job_id?: string;
+  ffmpeg_instance_id?: string;
   ffmpeg_status?: string;
   eta_seconds?: number;
   started_at?: string;
@@ -85,11 +86,16 @@ Deno.serve(async (req) => {
     if (!jobId) throw new Error("No FFmpeg job ID found");
     if (!ffmpegServiceUrl) throw new Error("FFmpeg service not configured");
 
+    const ffmpegHeaders: Record<string, string> = { "Content-Type": "application/json" };
+    if (meta?.ffmpeg_instance_id) {
+      ffmpegHeaders["fly-force-instance-id"] = meta.ffmpeg_instance_id;
+    }
+
     console.log(`Polling FFmpeg job: ${jobId}`);
     
     const pollResponse = await fetch(`${ffmpegServiceUrl}/jobs/${jobId}`, {
       method: "GET",
-      headers: { "Content-Type": "application/json" },
+      headers: ffmpegHeaders,
     });
 
     if (!pollResponse.ok) {
@@ -108,6 +114,7 @@ Deno.serve(async (req) => {
     }
 
     const pollResult = await pollResponse.json();
+    const ffmpegInstanceId = pollResult?.instance_id || pollResponse.headers.get("x-ffmpeg-instance-id") || meta?.ffmpeg_instance_id;
     console.log("FFmpeg poll result:", pollResult);
 
     if (pollResult.status === "succeeded") {
@@ -116,7 +123,7 @@ Deno.serve(async (req) => {
         assembled_video_url: pollResult.output_url || publicUrl,
         assembled_status: "succeeded",
         assembled_at: new Date().toISOString(),
-        assembled_meta: { ...meta, completed_at: new Date().toISOString(), duration: pollResult.duration || meta?.expected_duration, ffmpeg_status: "succeeded" },
+        assembled_meta: { ...meta, completed_at: new Date().toISOString(), duration: pollResult.duration || meta?.expected_duration, ffmpeg_status: "succeeded", ffmpeg_instance_id: ffmpegInstanceId },
       });
       return new Response(
         JSON.stringify({ success: true, status: "succeeded", output_url: pollResult.output_url || publicUrl, duration: pollResult.duration }),
@@ -127,7 +134,7 @@ Deno.serve(async (req) => {
     if (pollResult.status === "failed") {
       await updateTable(supabase, table, primaryId, {
         assembled_status: "failed",
-        assembled_meta: { ...meta, error: pollResult.error || "FFmpeg render failed", failed_at: new Date().toISOString(), ffmpeg_status: "failed" },
+        assembled_meta: { ...meta, error: pollResult.error || "FFmpeg render failed", failed_at: new Date().toISOString(), ffmpeg_status: "failed", ffmpeg_instance_id: ffmpegInstanceId },
       });
       return new Response(
         JSON.stringify({ success: false, status: "failed", error: pollResult.error || "FFmpeg render failed" }),
@@ -137,7 +144,7 @@ Deno.serve(async (req) => {
 
     // Still processing
     await updateTable(supabase, table, primaryId, {
-      assembled_meta: { ...meta, ffmpeg_status: pollResult.status || "rendering", progress: pollResult.progress, eta_seconds: pollResult.eta_seconds },
+      assembled_meta: { ...meta, ffmpeg_status: pollResult.status || "rendering", progress: pollResult.progress, eta_seconds: pollResult.eta_seconds, ffmpeg_instance_id: ffmpegInstanceId },
     });
 
     return new Response(
