@@ -848,6 +848,7 @@ Deno.serve(async (req) => {
     if (wholesaleSearch.content) {
       researchParts.push(`WHOLESALE/SUPPLIER SOURCES:\n${wholesaleSearch.content}`);
       allCitations.push(...wholesaleSearch.citations);
+      console.log(`[product-research] Wholesale citations (${wholesaleSearch.citations.length}): ${wholesaleSearch.citations.slice(0, 5).join(", ")}`);
       for (const c of wholesaleSearch.citations) {
         if (c.match(/aliexpress\.|alibaba\.|1688\.|dhgate\.|temu\./i)) {
           candidateLinks.push({ url: c, platform: detectPlatform(c), linkType: "wholesale" });
@@ -860,6 +861,34 @@ Deno.serve(async (req) => {
           candidateLinks.push({ url: u, platform: detectPlatform(u), linkType: "wholesale" });
         }
       }
+    }
+
+    // ─── FALLBACK: If no candidates yet, do a URL-focused search ───
+    if (candidateLinks.length === 0) {
+      console.log("[product-research] No candidates from citations — running URL-focused fallback search");
+      const fallbackSearch = await perplexitySearch(
+        `Find exact product listing URLs for "${searchName}" on Amazon.com, AliExpress.com, or Temu.com. I need the actual product page links, not review articles. Give me amazon.com/dp/ links or aliexpress.com/item/ links.`,
+        `Return ONLY direct product page URLs from major retailers. No blog posts, no review sites. Only amazon.com, aliexpress.com, walmart.com, temu.com, ebay.com product pages.`,
+        perplexityKey
+      );
+      if (fallbackSearch.citations.length > 0) {
+        console.log(`[product-research] Fallback citations (${fallbackSearch.citations.length}): ${fallbackSearch.citations.slice(0, 5).join(", ")}`);
+        for (const c of fallbackSearch.citations) {
+          if (isRetailDomain(c)) {
+            const lt = c.match(/aliexpress\.|alibaba\.|1688\.|dhgate\.|temu\./i) ? "wholesale" : "retail";
+            candidateLinks.push({ url: c, platform: detectPlatform(c), linkType: lt });
+          }
+        }
+      }
+      // Extract URLs from text
+      const fbUrls = (fallbackSearch.content || "").match(/https?:\/\/[^\s"'<>)\]]+/gi) || [];
+      for (const u of fbUrls) {
+        if (isRetailDomain(u) && !candidateLinks.some(cl => cl.url === u)) {
+          const lt = u.match(/aliexpress\.|alibaba\.|1688\.|dhgate\.|temu\./i) ? "wholesale" : "retail";
+          candidateLinks.push({ url: u, platform: detectPlatform(u), linkType: lt });
+        }
+      }
+      console.log(`[product-research] After fallback: ${candidateLinks.length} candidates`);
     }
     await new Promise(r => setTimeout(r, 1200));
 
