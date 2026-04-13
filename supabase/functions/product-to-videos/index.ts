@@ -246,6 +246,9 @@ ${marketingPlan ? `MARKETING INSIGHTS:
 - Key Angles: ${JSON.stringify((marketingPlan as any).content_angles || [])}
 - Emotional Triggers: ${JSON.stringify((marketingPlan as any).emotional_triggers || [])}` : "No marketing plan available — use your best judgment."}
 
+${product.purchase_url ? `PURCHASE URL: ${product.purchase_url}
+IMPORTANT: Use this exact URL in all CTAs. Example: "Shop now → ${product.purchase_url}" or "Link in bio"` : "No purchase URL set — use generic CTA like 'Link in bio | Shop now'"}
+
 AVAILABLE PRODUCT IMAGES (use their URLs as referenceImageUrl):
 ${imageList.map(img => `  ${img.index}. [${img.label}${img.is_primary ? " PRIMARY" : ""}] ${img.url}`).join("\n")}
 
