@@ -109,7 +109,7 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
         {/* Image gallery */}
-        {images.length > 1 && (
+        {images.length > 0 && (
           <div className="relative rounded-md overflow-hidden bg-muted/30">
             <img
               src={images[imgIdx]?.url}
@@ -117,27 +117,56 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
               className="w-full h-32 object-contain"
               onError={(e) => { (e.target as HTMLImageElement).src = "/placeholder.svg"; }}
             />
-            <div className="absolute bottom-1 left-1/2 -translate-x-1/2 flex items-center gap-1">
+            {/* Top-left: verify/delete controls */}
+            <div className="absolute top-1 left-1 flex items-center gap-0.5">
+              {!images[imgIdx]?.verified && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="h-5 w-5 p-0 rounded-full opacity-80 hover:opacity-100 hover:bg-green-500/20"
+                  onClick={() => handleVerifyImage(images[imgIdx].id)}
+                  title="Verify — this is the correct product"
+                >
+                  <CheckCircle2 className="w-3 h-3 text-green-500" />
+                </Button>
+              )}
+              {images[imgIdx]?.verified && (
+                <Badge className="text-[9px] bg-green-500/20 text-green-500 border-green-500/30">✓ verified</Badge>
+              )}
               <Button
                 variant="secondary"
                 size="sm"
-                className="h-5 w-5 p-0 rounded-full opacity-80"
-                onClick={() => setImgIdx((imgIdx - 1 + images.length) % images.length)}
+                className="h-5 w-5 p-0 rounded-full opacity-80 hover:opacity-100 hover:bg-destructive/20"
+                onClick={() => handleDeleteImage(images[imgIdx].id)}
+                title="Remove — wrong image"
               >
-                <ChevronLeft className="w-3 h-3" />
-              </Button>
-              <span className="text-[10px] bg-background/80 px-1.5 rounded-full">
-                {imgIdx + 1}/{images.length}
-              </span>
-              <Button
-                variant="secondary"
-                size="sm"
-                className="h-5 w-5 p-0 rounded-full opacity-80"
-                onClick={() => setImgIdx((imgIdx + 1) % images.length)}
-              >
-                <ChevronRight className="w-3 h-3" />
+                <Trash2 className="w-3 h-3 text-destructive" />
               </Button>
             </div>
+            {/* Bottom nav */}
+            {images.length > 1 && (
+              <div className="absolute bottom-1 left-1/2 -translate-x-1/2 flex items-center gap-1">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="h-5 w-5 p-0 rounded-full opacity-80"
+                  onClick={() => setImgIdx((imgIdx - 1 + images.length) % images.length)}
+                >
+                  <ChevronLeft className="w-3 h-3" />
+                </Button>
+                <span className="text-[10px] bg-background/80 px-1.5 rounded-full">
+                  {imgIdx + 1}/{images.length}
+                </span>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="h-5 w-5 p-0 rounded-full opacity-80"
+                  onClick={() => setImgIdx((imgIdx + 1) % images.length)}
+                >
+                  <ChevronRight className="w-3 h-3" />
+                </Button>
+              </div>
+            )}
             <Badge variant="outline" className="absolute top-1 right-1 text-[9px] bg-background/80">
               {images[imgIdx]?.source} · {images[imgIdx]?.label}
             </Badge>
