@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
-import { FlaskConical, Trophy, TrendingUp, AlertTriangle, CheckCircle, XCircle, Database } from "lucide-react";
+import { FlaskConical, Trophy, TrendingUp, AlertTriangle, CheckCircle, XCircle, Database, Flame } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { PROMPT_TEMPLATE_SEEDS } from "@/data/prompt-template-seeds";
 import { toast } from "sonner";
@@ -16,9 +16,14 @@ const STAGES = ["hook", "script", "visual", "topic"] as const;
 
 export function PromptLeaderboard() {
   const [stageFilter, setStageFilter] = useState<string>("hook");
+  const [enrichedOnly, setEnrichedOnly] = useState(false);
   const { data: templates = [], isLoading: templatesLoading } = usePromptTemplates(stageFilter);
   const { data: familyStats = [], isLoading: statsLoading } = usePromptFamilyStats();
-  const { data: experiments = [], isLoading: experimentsLoading } = usePromptExperiments({ stage: stageFilter, limit: 20 });
+  const { data: allExperiments = [], isLoading: experimentsLoading } = usePromptExperiments({ stage: stageFilter, limit: 20 });
+
+  const experiments = enrichedOnly
+    ? allExperiments.filter(e => (e.input_context as any)?.used_scraped_insights === true)
+    : allExperiments;
 
   const queryClient = useQueryClient();
   const [seeding, setSeeding] = useState(false);
@@ -226,10 +231,21 @@ export function PromptLeaderboard() {
       {/* Recent experiments */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base flex items-center gap-2">
-            <TrendingUp className="h-4 w-4 text-primary" />
-            Recent Experiments — {stageFilter}
-          </CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base flex items-center gap-2">
+              <TrendingUp className="h-4 w-4 text-primary" />
+              Recent Experiments — {stageFilter}
+            </CardTitle>
+            <Button
+              variant={enrichedOnly ? "default" : "outline"}
+              size="sm"
+              className="gap-1.5 text-xs"
+              onClick={() => setEnrichedOnly(!enrichedOnly)}
+            >
+              <Flame className="h-3.5 w-3.5" />
+              {enrichedOnly ? "Enriched Only" : "All"}
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           {experimentsLoading ? (
@@ -246,6 +262,7 @@ export function PromptLeaderboard() {
                 <TableRow>
                   <TableHead>Family</TableHead>
                   <TableHead>Provider</TableHead>
+                  <TableHead>Enriched</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Prompt</TableHead>
                   <TableHead>Created</TableHead>
@@ -258,6 +275,15 @@ export function PromptLeaderboard() {
                       <Badge variant="outline">{exp.family}</Badge>
                     </TableCell>
                     <TableCell>{exp.provider || "—"}</TableCell>
+                    <TableCell>
+                      {(exp.input_context as any)?.used_scraped_insights ? (
+                        <Badge variant="outline" className="gap-1 text-xs border-primary/30 text-primary">
+                          <Flame className="w-3 h-3" /> Yes
+                        </Badge>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
                     <TableCell>
                       <StatusBadge status={exp.status} />
                     </TableCell>

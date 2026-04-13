@@ -26,6 +26,7 @@ export interface PromptExperimentRow {
   prompt_text: string;
   created_at: string;
   story_job_id: string | null;
+  input_context: Record<string, unknown>;
 }
 
 export interface PromptFamilyStat {
