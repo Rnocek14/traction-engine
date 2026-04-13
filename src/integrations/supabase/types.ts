@@ -3108,10 +3108,15 @@ export type Database = {
           caption: string | null
           comments_count: number | null
           created_at: string
+          creative_strength_score: number | null
           creator_handle: string | null
+          demand_score: number | null
           demand_signals: Json | null
+          engagement_rate: number | null
           extracted_product_description: string | null
           extracted_product_name: string | null
+          extraction_confidence: number | null
+          hook_type: string | null
           id: string
           likes: number | null
           linked_product_id: string | null
@@ -3128,10 +3133,15 @@ export type Database = {
           caption?: string | null
           comments_count?: number | null
           created_at?: string
+          creative_strength_score?: number | null
           creator_handle?: string | null
+          demand_score?: number | null
           demand_signals?: Json | null
+          engagement_rate?: number | null
           extracted_product_description?: string | null
           extracted_product_name?: string | null
+          extraction_confidence?: number | null
+          hook_type?: string | null
           id?: string
           likes?: number | null
           linked_product_id?: string | null
@@ -3148,10 +3158,15 @@ export type Database = {
           caption?: string | null
           comments_count?: number | null
           created_at?: string
+          creative_strength_score?: number | null
           creator_handle?: string | null
+          demand_score?: number | null
           demand_signals?: Json | null
+          engagement_rate?: number | null
           extracted_product_description?: string | null
           extracted_product_name?: string | null
+          extraction_confidence?: number | null
+          hook_type?: string | null
           id?: string
           likes?: number | null
           linked_product_id?: string | null
