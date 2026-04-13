@@ -1206,8 +1206,10 @@ Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, s
         competitionInv * 0.10) / 5 * 100
     );
 
-    const finalSourceUrl = bestRetailLink?.url || analysis.source_url || allCitations[0] || productUrl || null;
-    const finalSupplierUrl = bestWholesaleLink?.url || analysis.supplier_url || null;
+    const evidenceRetailPrice = bestRetailLink?.structuredPriceCents || bestRetailLink?.priceCents || null;
+    const evidenceSupplierPrice = bestWholesaleLink?.structuredPriceCents || bestWholesaleLink?.priceCents || null;
+    const finalSourceUrl = bestRetailLink?.url || null;
+    const finalSupplierUrl = bestWholesaleLink?.url || null;
 
     // ==========================================
     // SAVE TO DATABASE
@@ -1223,9 +1225,9 @@ Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, s
           source_url: finalSourceUrl,
           supplier_url: finalSupplierUrl,
           image_url: foundImageUrls[0]?.url || null,
-          price_cents: analysis.price_cents || null,
-          supplier_price_cents: analysis.supplier_price_cents || null,
-          estimated_margin_pct: analysis.estimated_margin_pct || null,
+          price_cents: evidenceRetailPrice,
+          supplier_price_cents: evidenceSupplierPrice,
+          estimated_margin_pct: null,
           status: "researching",
           discovered_via: "manual",
           notes: analysis.summary || null,
@@ -1241,10 +1243,10 @@ Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, s
         subcategory: analysis.subcategory || undefined,
         source_url: finalSourceUrl,
         supplier_url: finalSupplierUrl,
-        image_url: foundImageUrls[0]?.url || undefined,
-        price_cents: analysis.price_cents || undefined,
-        supplier_price_cents: analysis.supplier_price_cents || undefined,
-        estimated_margin_pct: analysis.estimated_margin_pct || undefined,
+        image_url: foundImageUrls[0]?.url || null,
+        price_cents: evidenceRetailPrice,
+        supplier_price_cents: evidenceSupplierPrice,
+        estimated_margin_pct: null,
         status: "researching",
         notes: analysis.summary || undefined,
         updated_at: new Date().toISOString(),
@@ -1462,7 +1464,7 @@ Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, s
     // PHASE 8: AUTO-CALCULATE UNIT ECONOMICS
     // ==========================================
     console.log("[product-research] Phase 8: Auto-calculating unit economics");
-    if (productId) {
+    if (productId && acceptedLinks.length > 0) {
       try {
         const econResp = await fetch(`${supabaseUrl}/functions/v1/calculate-unit-economics`, {
           method: "POST",
@@ -1479,6 +1481,8 @@ Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, s
           console.warn(`[product-research] Economics calculation returned ${econResp.status}`);
         }
       } catch (e) { console.warn("[product-research] Economics calculation error:", e); }
+    } else {
+      console.log("[product-research] Skipping economics — no accepted evidence yet");
     }
 
     console.log(`[product-research] ===== COMPLETE v3: "${analysis.product_name}" score=${overallScore}/100, ${acceptedLinks.length} accepted / ${rejectedLinks.length} rejected links, ${foundImageUrls.length} images =====`);
