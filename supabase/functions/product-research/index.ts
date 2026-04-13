@@ -738,6 +738,43 @@ function detectPlatform(url: string): string {
   try { return new URL(url).hostname.replace("www.", ""); } catch { return "unknown"; }
 }
 
+function isLikelyProductPageUrl(url: string): boolean {
+  try {
+    const lower = url.toLowerCase();
+    if (!isRetailDomain(url)) return false;
+
+    // Reject obvious non-product pages
+    if (
+      lower.includes("/blog/") ||
+      lower.includes("/blogs/") ||
+      lower.includes("/article/") ||
+      lower.includes("/articles/") ||
+      lower.includes("/category/") ||
+      lower.includes("/collections/") ||
+      lower.includes("/search") ||
+      lower.includes("trueprofit.io")
+    ) {
+      return false;
+    }
+
+    return (
+      /amazon\.[^/]+\/(?:[^/]+\/)?dp\//.test(lower) ||
+      /walmart\.[^/]+\/ip\//.test(lower) ||
+      /tiktok\.com\/.*\/product\//.test(lower) ||
+      /aliexpress\.[^/]+\/item\//.test(lower) ||
+      /alibaba\.[^/]+\/product-detail\//.test(lower) ||
+      /1688\.com\/offer\//.test(lower) ||
+      /dhgate\.[^/]+\/product\//.test(lower) ||
+      /temu\.[^/]+\/.*-g-\d+/.test(lower) ||
+      /ebay\.[^/]+\/itm\//.test(lower) ||
+      /etsy\.[^/]+\/listing\//.test(lower) ||
+      /\/products\//.test(lower)
+    );
+  } catch {
+    return false;
+  }
+}
+
 function parsePriceFromText(text: string): number | undefined {
   const match = text.match(/\$\s*([\d,]+\.?\d{0,2})/);
   if (!match) return undefined;
@@ -819,16 +856,8 @@ Deno.serve(async (req) => {
       allCitations.push(...retailSearch.citations);
       console.log(`[product-research] Retail citations (${retailSearch.citations.length}): ${retailSearch.citations.slice(0, 5).join(", ")}`);
       for (const c of retailSearch.citations) {
-        // Accept any retail domain OR any URL from a retail search (let verification decide)
-        if (isRetailDomain(c) || c.match(/amazon\.|walmart\.|ebay\.|etsy\.|tiktok\.com.*shop|shopify|myshopify|target\./i)) {
+        if (isLikelyProductPageUrl(c) && !candidateLinks.some(cl => cl.url === c)) {
           candidateLinks.push({ url: c, platform: detectPlatform(c), linkType: "retail" });
-        }
-      }
-      // Also extract URLs from the response text itself
-      const urlsInText = retailSearch.content.match(/https?:\/\/[^\s"'<>)\]]+/gi) || [];
-      for (const u of urlsInText) {
-        if (isRetailDomain(u) && !candidateLinks.some(cl => cl.url === u)) {
-          candidateLinks.push({ url: u, platform: detectPlatform(u), linkType: "retail" });
         }
       }
     } else {
@@ -850,45 +879,57 @@ Deno.serve(async (req) => {
       allCitations.push(...wholesaleSearch.citations);
       console.log(`[product-research] Wholesale citations (${wholesaleSearch.citations.length}): ${wholesaleSearch.citations.slice(0, 5).join(", ")}`);
       for (const c of wholesaleSearch.citations) {
-        if (c.match(/aliexpress\.|alibaba\.|1688\.|dhgate\.|temu\./i)) {
+        if (isLikelyProductPageUrl(c) && c.match(/aliexpress\.|alibaba\.|1688\.|dhgate\.|temu\./i) && !candidateLinks.some(cl => cl.url === c)) {
           candidateLinks.push({ url: c, platform: detectPlatform(c), linkType: "wholesale" });
-        }
-      }
-      // Also extract URLs from wholesale text
-      const wUrls = wholesaleSearch.content.match(/https?:\/\/[^\s"'<>)\]]+/gi) || [];
-      for (const u of wUrls) {
-        if (u.match(/aliexpress\.|alibaba\.|1688\.|dhgate\.|temu\./i) && !candidateLinks.some(cl => cl.url === u)) {
-          candidateLinks.push({ url: u, platform: detectPlatform(u), linkType: "wholesale" });
         }
       }
     }
 
-    // ─── FALLBACK: If no candidates yet, do a URL-focused search ───
+    // ─── FALLBACK: if broad searches fail, run retailer-specific searches using citations only ───
     if (candidateLinks.length === 0) {
-      console.log("[product-research] No candidates from citations — running URL-focused fallback search");
-      const fallbackSearch = await perplexitySearch(
-        `Find exact product listing URLs for "${searchName}" on Amazon.com, AliExpress.com, or Temu.com. I need the actual product page links, not review articles. Give me amazon.com/dp/ links or aliexpress.com/item/ links.`,
-        `Return ONLY direct product page URLs from major retailers. No blog posts, no review sites. Only amazon.com, aliexpress.com, walmart.com, temu.com, ebay.com product pages.`,
-        perplexityKey
-      );
-      if (fallbackSearch.citations.length > 0) {
-        console.log(`[product-research] Fallback citations (${fallbackSearch.citations.length}): ${fallbackSearch.citations.slice(0, 5).join(", ")}`);
+      console.log("[product-research] No direct product-page citations yet — running retailer-specific fallback searches");
+      const targetedSearches = [
+        {
+          label: "Amazon retail",
+          query: `site:amazon.com \"${searchName}\" direct product page`,
+          domain: /amazon\./i,
+          linkType: "retail" as const,
+        },
+        {
+          label: "Walmart retail",
+          query: `site:walmart.com \"${searchName}\" direct product page`,
+          domain: /walmart\./i,
+          linkType: "retail" as const,
+        },
+        {
+          label: "AliExpress wholesale",
+          query: `site:aliexpress.com \"${searchName}\" direct product page`,
+          domain: /aliexpress\./i,
+          linkType: "wholesale" as const,
+        },
+        {
+          label: "Temu wholesale",
+          query: `site:temu.com \"${searchName}\" direct product page`,
+          domain: /temu\./i,
+          linkType: "wholesale" as const,
+        },
+      ];
+
+      for (const search of targetedSearches) {
+        const fallbackSearch = await perplexitySearch(
+          `Find exact product listing URLs for ${search.query}. I need live product pages only.`,
+          `Return direct product page citations only. No blogs, no review sites, no category pages, no homepages.`,
+          perplexityKey
+        );
+        console.log(`[product-research] ${search.label} citations (${fallbackSearch.citations.length}): ${fallbackSearch.citations.slice(0, 5).join(", ")}`);
         for (const c of fallbackSearch.citations) {
-          if (isRetailDomain(c)) {
-            const lt = c.match(/aliexpress\.|alibaba\.|1688\.|dhgate\.|temu\./i) ? "wholesale" : "retail";
-            candidateLinks.push({ url: c, platform: detectPlatform(c), linkType: lt });
+          if (search.domain.test(c) && isLikelyProductPageUrl(c) && !candidateLinks.some(cl => cl.url === c)) {
+            candidateLinks.push({ url: c, platform: detectPlatform(c), linkType: search.linkType });
           }
         }
+        await new Promise(r => setTimeout(r, 600));
       }
-      // Extract URLs from text
-      const fbUrls = (fallbackSearch.content || "").match(/https?:\/\/[^\s"'<>)\]]+/gi) || [];
-      for (const u of fbUrls) {
-        if (isRetailDomain(u) && !candidateLinks.some(cl => cl.url === u)) {
-          const lt = u.match(/aliexpress\.|alibaba\.|1688\.|dhgate\.|temu\./i) ? "wholesale" : "retail";
-          candidateLinks.push({ url: u, platform: detectPlatform(u), linkType: lt });
-        }
-      }
-      console.log(`[product-research] After fallback: ${candidateLinks.length} candidates`);
+      console.log(`[product-research] After targeted fallback: ${candidateLinks.length} candidates`);
     }
     await new Promise(r => setTimeout(r, 1200));
 
@@ -920,7 +961,7 @@ Deno.serve(async (req) => {
 
     const candidateImgs: { url: string; source: string; label: string }[] = [];
     const allRetailerCitations = [...new Set([...allCitations, ...imgSearch.citations])].filter(c =>
-      c.match(/amazon\.|aliexpress\.|walmart\.|temu\.|etsy\.|ebay\.|shopify|myshopify/i)
+      isLikelyProductPageUrl(c)
     );
 
     for (const citation of allRetailerCitations.slice(0, 6)) {
@@ -1165,8 +1206,10 @@ Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, s
         competitionInv * 0.10) / 5 * 100
     );
 
-    const finalSourceUrl = bestRetailLink?.url || analysis.source_url || allCitations[0] || productUrl || null;
-    const finalSupplierUrl = bestWholesaleLink?.url || analysis.supplier_url || null;
+    const evidenceRetailPrice = bestRetailLink?.structuredPriceCents || bestRetailLink?.priceCents || null;
+    const evidenceSupplierPrice = bestWholesaleLink?.structuredPriceCents || bestWholesaleLink?.priceCents || null;
+    const finalSourceUrl = bestRetailLink?.url || null;
+    const finalSupplierUrl = bestWholesaleLink?.url || null;
 
     // ==========================================
     // SAVE TO DATABASE
@@ -1182,9 +1225,9 @@ Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, s
           source_url: finalSourceUrl,
           supplier_url: finalSupplierUrl,
           image_url: foundImageUrls[0]?.url || null,
-          price_cents: analysis.price_cents || null,
-          supplier_price_cents: analysis.supplier_price_cents || null,
-          estimated_margin_pct: analysis.estimated_margin_pct || null,
+          price_cents: evidenceRetailPrice,
+          supplier_price_cents: evidenceSupplierPrice,
+          estimated_margin_pct: null,
           status: "researching",
           discovered_via: "manual",
           notes: analysis.summary || null,
@@ -1200,10 +1243,10 @@ Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, s
         subcategory: analysis.subcategory || undefined,
         source_url: finalSourceUrl,
         supplier_url: finalSupplierUrl,
-        image_url: foundImageUrls[0]?.url || undefined,
-        price_cents: analysis.price_cents || undefined,
-        supplier_price_cents: analysis.supplier_price_cents || undefined,
-        estimated_margin_pct: analysis.estimated_margin_pct || undefined,
+        image_url: foundImageUrls[0]?.url || null,
+        price_cents: evidenceRetailPrice,
+        supplier_price_cents: evidenceSupplierPrice,
+        estimated_margin_pct: null,
         status: "researching",
         notes: analysis.summary || undefined,
         updated_at: new Date().toISOString(),
@@ -1239,10 +1282,12 @@ Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, s
       await supabase.from("product_analysis").insert(analysisRow);
     }
 
-    // Save ALL verified links with full evidence (including rejected ones for audit)
-    if (allVerifiedLinks.length > 0 && productId) {
+    // Replace prior link evidence every run so stale candidates do not linger
+    if (productId) {
       await supabase.from("product_links").delete().eq("product_id", productId);
+    }
 
+    if (allVerifiedLinks.length > 0 && productId) {
       const linkRows = allVerifiedLinks.map(l => ({
         product_id: productId,
         url: l.url,
@@ -1271,9 +1316,12 @@ Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, s
       else console.log(`[product-research] Saved ${linkRows.length} links (${acceptedLinks.length} accepted, ${rejectedLinks.length} rejected)`);
     }
 
-    // Save images
-    if (foundImageUrls.length > 0 && productId) {
+    // Replace prior unverified image evidence every run
+    if (productId) {
       await supabase.from("product_images").delete().eq("product_id", productId).eq("verified", false);
+    }
+
+    if (foundImageUrls.length > 0 && productId) {
       const imageRows = foundImageUrls.map((img, i) => ({
         product_id: productId,
         url: img.url,
@@ -1288,6 +1336,8 @@ Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, s
         await supabase.from("products").update({ image_url: foundImageUrls[0].url }).eq("id", productId);
         console.log(`[product-research] Saved ${imageRows.length} images`);
       }
+    } else if (productId) {
+      await supabase.from("products").update({ image_url: null }).eq("id", productId);
     }
 
     // ==========================================
@@ -1295,6 +1345,11 @@ Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, s
     // ==========================================
     console.log("[product-research] Phase 7: Extracting supplier data");
     const wholesaleVerified = acceptedLinks.filter(l => l.linkType === "wholesale");
+
+    if (productId) {
+      await supabase.from("product_suppliers").delete().eq("product_id", productId).neq("verification_status", "verified");
+    }
+
     if (productId && wholesaleVerified.length > 0) {
       try {
         const supplierResp = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -1421,7 +1476,7 @@ Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, s
     // PHASE 8: AUTO-CALCULATE UNIT ECONOMICS
     // ==========================================
     console.log("[product-research] Phase 8: Auto-calculating unit economics");
-    if (productId) {
+    if (productId && acceptedLinks.length > 0) {
       try {
         const econResp = await fetch(`${supabaseUrl}/functions/v1/calculate-unit-economics`, {
           method: "POST",
@@ -1438,6 +1493,10 @@ Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, s
           console.warn(`[product-research] Economics calculation returned ${econResp.status}`);
         }
       } catch (e) { console.warn("[product-research] Economics calculation error:", e); }
+    } else if (productId) {
+      await supabase.from("product_unit_economics").delete().eq("product_id", productId);
+      await supabase.from("product_market_snapshots").delete().eq("product_id", productId);
+      console.log("[product-research] Skipping economics — no accepted evidence yet; cleared stale economics");
     }
 
     console.log(`[product-research] ===== COMPLETE v3: "${analysis.product_name}" score=${overallScore}/100, ${acceptedLinks.length} accepted / ${rejectedLinks.length} rejected links, ${foundImageUrls.length} images =====`);
