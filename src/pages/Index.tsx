@@ -34,6 +34,8 @@ const ACTION_ICONS: Record<string, typeof Package> = {
   video_review: Film,
   plan_generate: Sparkles,
   product_hot: Flame,
+  winner_scale: TrendingUp,
+  loser_cut: Eye,
 };
 
 const ACTION_COLORS: Record<string, string> = {
@@ -43,6 +45,8 @@ const ACTION_COLORS: Record<string, string> = {
   video_review: "border-l-purple-500",
   plan_generate: "border-l-orange-500",
   product_hot: "border-l-red-500",
+  winner_scale: "border-l-emerald-500",
+  loser_cut: "border-l-gray-500",
 };
 
 const ACTION_ROUTES: Record<string, string> = {
@@ -52,6 +56,8 @@ const ACTION_ROUTES: Record<string, string> = {
   video_review: "/review",
   plan_generate: "/products",
   product_hot: "/products",
+  winner_scale: "/review",
+  loser_cut: "/review",
 };
 
 const TREND_COLORS: Record<string, string> = {
