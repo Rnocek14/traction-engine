@@ -10,6 +10,8 @@ interface MarketingPlan {
     recommended_accounts?: string[];
     key_selling_points?: string[];
     objection_handling?: Array<{ objection: string; response: string }>;
+    best_hook_type?: string;
+    best_first_3_seconds?: string;
   };
   content_ideas?: Array<{ title: string; hook: string; angle: string; emotional_trigger: string; suggested_format: string }>;
   page_draft?: {
