@@ -30,6 +30,7 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
   const updateStatus = useUpdateProductStatus();
   const researchProduct = useResearchProduct();
   const generatePlan = useGenerateProductPlan();
+  const assignAccounts = useAssignProductAccounts();
   const { data: linkedIdeas } = useProductLinkedIdeas(product.id);
 
   const priceDollars = product.price_cents ? (product.price_cents / 100).toFixed(2) : null;
