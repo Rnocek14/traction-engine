@@ -2,12 +2,13 @@ import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ExternalLink, TrendingUp, Package, Search, Loader2, Sparkles, ChevronDown, ChevronUp, Lightbulb, Film, Users, ImageIcon, ChevronLeft, ChevronRight } from "lucide-react";
+import { ExternalLink, TrendingUp, Package, Search, Loader2, Sparkles, ChevronDown, ChevronUp, Lightbulb, Film, Users, ImageIcon, ChevronLeft, ChevronRight, Trash2, CheckCircle2 } from "lucide-react";
 import { type ProductWithAnalysis, type ProductStatus, useUpdateProductStatus, useResearchProduct, useGenerateProductPlan, useProductLinkedIdeas, useAssignProductAccounts } from "@/hooks/use-products";
 import { ProductScoringForm } from "./ProductScoringForm";
 import { ProductMarketingPlan } from "./ProductMarketingPlan";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
 
 const STATUS_COLORS: Record<ProductStatus, string> = {
   discovered: "bg-blue-500/10 text-blue-500",
@@ -34,6 +35,22 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
   const generatePlan = useGenerateProductPlan();
   const assignAccounts = useAssignProductAccounts();
   const { data: linkedIdeas } = useProductLinkedIdeas(product.id);
+  const qc = useQueryClient();
+
+  const handleDeleteImage = async (imageId: string) => {
+    const { error } = await supabase.from("product_images").delete().eq("id", imageId);
+    if (error) { toast.error("Failed to delete image"); return; }
+    toast.success("Image removed");
+    qc.invalidateQueries({ queryKey: ["products"] });
+    setImgIdx(0);
+  };
+
+  const handleVerifyImage = async (imageId: string) => {
+    const { error } = await supabase.from("product_images").update({ verified: true }).eq("id", imageId);
+    if (error) { toast.error("Failed to verify"); return; }
+    toast.success("Image verified ✓");
+    qc.invalidateQueries({ queryKey: ["products"] });
+  };
 
   const priceDollars = product.price_cents ? (product.price_cents / 100).toFixed(2) : null;
   const costDollars = product.supplier_price_cents ? (product.supplier_price_cents / 100).toFixed(2) : null;
@@ -92,7 +109,7 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
         {/* Image gallery */}
-        {images.length > 1 && (
+        {images.length > 0 && (
           <div className="relative rounded-md overflow-hidden bg-muted/30">
             <img
               src={images[imgIdx]?.url}
@@ -100,27 +117,56 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
               className="w-full h-32 object-contain"
               onError={(e) => { (e.target as HTMLImageElement).src = "/placeholder.svg"; }}
             />
-            <div className="absolute bottom-1 left-1/2 -translate-x-1/2 flex items-center gap-1">
+            {/* Top-left: verify/delete controls */}
+            <div className="absolute top-1 left-1 flex items-center gap-0.5">
+              {!images[imgIdx]?.verified && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="h-5 w-5 p-0 rounded-full opacity-80 hover:opacity-100 hover:bg-green-500/20"
+                  onClick={() => handleVerifyImage(images[imgIdx].id)}
+                  title="Verify — this is the correct product"
+                >
+                  <CheckCircle2 className="w-3 h-3 text-green-500" />
+                </Button>
+              )}
+              {images[imgIdx]?.verified && (
+                <Badge className="text-[9px] bg-green-500/20 text-green-500 border-green-500/30">✓ verified</Badge>
+              )}
               <Button
                 variant="secondary"
                 size="sm"
-                className="h-5 w-5 p-0 rounded-full opacity-80"
-                onClick={() => setImgIdx((imgIdx - 1 + images.length) % images.length)}
+                className="h-5 w-5 p-0 rounded-full opacity-80 hover:opacity-100 hover:bg-destructive/20"
+                onClick={() => handleDeleteImage(images[imgIdx].id)}
+                title="Remove — wrong image"
               >
-                <ChevronLeft className="w-3 h-3" />
-              </Button>
-              <span className="text-[10px] bg-background/80 px-1.5 rounded-full">
-                {imgIdx + 1}/{images.length}
-              </span>
-              <Button
-                variant="secondary"
-                size="sm"
-                className="h-5 w-5 p-0 rounded-full opacity-80"
-                onClick={() => setImgIdx((imgIdx + 1) % images.length)}
-              >
-                <ChevronRight className="w-3 h-3" />
+                <Trash2 className="w-3 h-3 text-destructive" />
               </Button>
             </div>
+            {/* Bottom nav */}
+            {images.length > 1 && (
+              <div className="absolute bottom-1 left-1/2 -translate-x-1/2 flex items-center gap-1">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="h-5 w-5 p-0 rounded-full opacity-80"
+                  onClick={() => setImgIdx((imgIdx - 1 + images.length) % images.length)}
+                >
+                  <ChevronLeft className="w-3 h-3" />
+                </Button>
+                <span className="text-[10px] bg-background/80 px-1.5 rounded-full">
+                  {imgIdx + 1}/{images.length}
+                </span>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="h-5 w-5 p-0 rounded-full opacity-80"
+                  onClick={() => setImgIdx((imgIdx + 1) % images.length)}
+                >
+                  <ChevronRight className="w-3 h-3" />
+                </Button>
+              </div>
+            )}
             <Badge variant="outline" className="absolute top-1 right-1 text-[9px] bg-background/80">
               {images[imgIdx]?.source} · {images[imgIdx]?.label}
             </Badge>
