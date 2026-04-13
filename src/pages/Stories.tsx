@@ -349,6 +349,7 @@ export function StoryEditor({
 }: StoryEditorProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { assemble, isAssembling, assemblyStatus } = useReelAssembly({ storyJobId: storyId });
 
   // Load story
   const { data: story, isLoading: storyLoading } = useQuery({
