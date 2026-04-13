@@ -240,6 +240,10 @@ export function AssembledVideoCard({ video, onApprove, onReject, onReassemble, o
                   </a>
                 )}
               </div>
+              {/* Performance Ingest */}
+              {!video.performance && (
+                <PerformanceIngestForm storyJobId={video.id} onSuccess={onRefresh} />
+              )}
             )}
 
             {(video.assembled_status === "rendering" || video.assembled_status === "queued") && (
