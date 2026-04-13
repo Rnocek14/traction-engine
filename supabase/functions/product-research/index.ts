@@ -135,65 +135,141 @@ Deno.serve(async (req) => {
       }
     }
 
-    // 2b. Perplexity image search - find real product images
+    // 2b. Multi-query image search with AI validation
     let foundImageUrls: { url: string; source: string; label: string }[] = [];
     if (perplexityKey && productName) {
       try {
-        const imgSearch = await perplexityResearch(
-          `"${productName}" product photo image high quality. Find direct image URLs for this exact product. Include Amazon, AliExpress, or official product page images.`,
-          perplexityKey
-        );
-        // Extract image URLs from citations and content
-        const allText = imgSearch.content + " " + imgSearch.citations.join(" ");
-        const imgRegex = /https?:\/\/[^\s"'<>]+\.(?:jpg|jpeg|png|webp|gif)(?:\?[^\s"'<>]*)?/gi;
-        const imgMatches = allText.match(imgRegex) || [];
-        // Also check citations for product page URLs (Amazon, AliExpress etc)
-        for (const citation of imgSearch.citations) {
-          if (citation.match(/amazon\.|aliexpress\.|walmart\.|temu\.|etsy\./i)) {
-            // Try to extract og:image from product pages
-            try {
-              const pageResp = await fetch(citation, {
-                headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
-                redirect: "follow",
-              });
-              if (pageResp.ok) {
-                const html = await pageResp.text();
-                const ogMatch = html.match(/property="og:image"\s+content="([^"]+)"/i) || 
-                                html.match(/content="([^"]+)"\s+property="og:image"/i);
-                if (ogMatch?.[1]) {
+        // Run TWO targeted image searches for better coverage
+        const imgQueries = [
+          `"${productName}" buy online product listing photo. Show me where to buy this exact product with product photos.`,
+          `"${productName}" product review unboxing photo image. Real photos of this specific product.`,
+        ];
+        
+        const candidateUrls: { url: string; source: string; label: string; pageUrl?: string }[] = [];
+        
+        for (const q of imgQueries) {
+          const imgSearch = await perplexityResearch(q, perplexityKey);
+          
+          // Extract direct image URLs from content
+          const allText = imgSearch.content + " " + imgSearch.citations.join(" ");
+          const imgRegex = /https?:\/\/[^\s"'<>]+\.(?:jpg|jpeg|png|webp|gif)(?:\?[^\s"'<>]*)?/gi;
+          const imgMatches = allText.match(imgRegex) || [];
+          for (const imgUrl of imgMatches.slice(0, 5)) {
+            candidateUrls.push({ url: imgUrl, source: "perplexity", label: "reference" });
+          }
+          
+          // Scrape og:image from retailer citations
+          for (const citation of imgSearch.citations) {
+            if (citation.match(/amazon\.|aliexpress\.|walmart\.|temu\.|etsy\.|ebay\.|shopify|myshopify/i)) {
+              try {
+                const pageResp = await fetch(citation, {
+                  headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+                  redirect: "follow",
+                });
+                if (pageResp.ok) {
+                  const html = await pageResp.text();
+                  // Check page title contains product keywords before using images
+                  const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+                  const pageTitle = (titleMatch?.[1] || "").toLowerCase();
+                  const productWords = productName.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+                  const titleRelevant = productWords.some(w => pageTitle.includes(w));
+                  
+                  if (!titleRelevant) {
+                    console.log(`[product-research] Skipping irrelevant page: "${titleMatch?.[1]}" for "${productName}"`);
+                    continue;
+                  }
+                  
                   const domain = new URL(citation).hostname.replace("www.", "");
-                  foundImageUrls.push({ url: ogMatch[1], source: domain, label: "hero" });
-                }
-                // Also grab additional product images
-                const imgTags = html.match(/data-a-dynamic-image="([^"]+)"/i) || // Amazon
-                                html.match(/"imageUrl":"([^"]+)"/g); // AliExpress
-                if (imgTags) {
-                  for (const tag of imgTags.slice(0, 3)) {
-                    const urlMatch = tag.match(/https?:\/\/[^"\\]+/);
-                    if (urlMatch) {
-                      const domain2 = new URL(citation).hostname.replace("www.", "");
-                      foundImageUrls.push({ url: urlMatch[0], source: domain2, label: "detail" });
+                  
+                  const ogMatch = html.match(/property="og:image"\s+content="([^"]+)"/i) || 
+                                  html.match(/content="([^"]+)"\s+property="og:image"/i);
+                  if (ogMatch?.[1]) {
+                    candidateUrls.push({ url: ogMatch[1], source: domain, label: "hero", pageUrl: citation });
+                  }
+                  
+                  // Amazon-specific image extraction
+                  const dynamicImg = html.match(/data-a-dynamic-image="\{([^}]+)\}"/i);
+                  if (dynamicImg) {
+                    const amazonUrls = dynamicImg[1].match(/https?:\/\/[^"]+/g) || [];
+                    for (const au of amazonUrls.slice(0, 3)) {
+                      candidateUrls.push({ url: au.replace(/\._[^.]+_\./, "."), source: domain, label: "detail" });
                     }
                   }
                 }
-              }
-            } catch { /* page fetch failed, skip */ }
+              } catch { /* skip */ }
+            }
           }
+          
+          await new Promise(r => setTimeout(r, 1000)); // Rate limit between queries
         }
-        // Add direct image URLs from Perplexity content
-        for (const imgUrl of imgMatches.slice(0, 5)) {
-          if (!foundImageUrls.some(f => f.url === imgUrl)) {
-            foundImageUrls.push({ url: imgUrl, source: "perplexity", label: "reference" });
-          }
-        }
-        // Deduplicate
+        
+        // Deduplicate candidates
         const seen = new Set<string>();
-        foundImageUrls = foundImageUrls.filter(img => {
+        const uniqueCandidates = candidateUrls.filter(img => {
           if (seen.has(img.url)) return false;
+          // Filter out obviously wrong images (gift cards, logos, icons, banners)
+          const lower = img.url.toLowerCase();
+          if (lower.includes("gift-card") || lower.includes("giftcard") || lower.includes("logo") || 
+              lower.includes("banner") || lower.includes("icon") || lower.includes("badge") ||
+              lower.includes("placeholder") || lower.includes("sprite")) return false;
           seen.add(img.url);
           return true;
-        }).slice(0, 8); // Max 8 images
-        console.log(`[product-research] Found ${foundImageUrls.length} product images`);
+        });
+        
+        // AI validation: ask OpenAI to pick which URLs are actually this product
+        if (uniqueCandidates.length > 0) {
+          const validationResp = await fetch("https://api.openai.com/v1/chat/completions", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${openaiKey}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              model: "gpt-4o-mini",
+              messages: [{
+                role: "system",
+                content: `You validate product image URLs. Given a product name and a list of image URLs, return ONLY the indices of URLs that are likely to be actual photos of that specific product. Reject URLs that are: gift cards, unrelated products, category banners, logos, or generic placeholder images. Judge by the URL path, filename, and domain.`,
+              }, {
+                role: "user",
+                content: `Product: "${productName}"\n\nCandidate image URLs:\n${uniqueCandidates.map((c, i) => `[${i}] ${c.url} (source: ${c.source})`).join("\n")}`,
+              }],
+              tools: [{
+                type: "function",
+                function: {
+                  name: "validate_images",
+                  description: "Return indices of valid product images",
+                  parameters: {
+                    type: "object",
+                    properties: {
+                      valid_indices: { type: "array", items: { type: "integer" }, description: "Indices of URLs that show this specific product" },
+                    },
+                    required: ["valid_indices"],
+                  },
+                },
+              }],
+              tool_choice: { type: "function", function: { name: "validate_images" } },
+              temperature: 0.1,
+            }),
+          });
+          
+          if (validationResp.ok) {
+            const valData = await validationResp.json();
+            const valCall = valData.choices?.[0]?.message?.tool_calls?.[0];
+            if (valCall) {
+              const { valid_indices } = JSON.parse(valCall.function.arguments);
+              foundImageUrls = (valid_indices as number[])
+                .filter(i => i >= 0 && i < uniqueCandidates.length)
+                .map(i => ({ url: uniqueCandidates[i].url, source: uniqueCandidates[i].source, label: uniqueCandidates[i].label }))
+                .slice(0, 8);
+            }
+          }
+          
+          // Fallback: if validation returned nothing, use retailer images only
+          if (foundImageUrls.length === 0) {
+            foundImageUrls = uniqueCandidates
+              .filter(c => c.source !== "perplexity")
+              .slice(0, 4);
+          }
+        }
+        
+        console.log(`[product-research] Found ${foundImageUrls.length} validated product images from ${uniqueCandidates.length} candidates`);
       } catch (err) {
         console.warn("[product-research] Image search failed:", err);
       }
