@@ -2,7 +2,9 @@ import { GlobalNav } from "@/components/GlobalNav";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ProductGrid } from "@/components/products/ProductGrid";
 import { ProductEntryForm } from "@/components/products/ProductEntryForm";
-import type { ProductStatus } from "@/hooks/use-products";
+import { Button } from "@/components/ui/button";
+import { Loader2, Radar } from "lucide-react";
+import { useDiscoverProducts, type ProductStatus } from "@/hooks/use-products";
 
 const TABS: { value: ProductStatus | "all"; label: string }[] = [
   { value: "all", label: "All" },
@@ -14,6 +16,8 @@ const TABS: { value: ProductStatus | "all"; label: string }[] = [
 ];
 
 export default function Products() {
+  const discoverProducts = useDiscoverProducts();
+
   return (
     <div className="min-h-screen bg-background">
       <GlobalNav />
@@ -23,7 +27,17 @@ export default function Products() {
             <h1 className="text-2xl font-bold">Products</h1>
             <p className="text-sm text-muted-foreground">Research, score, and track products for content marketing</p>
           </div>
-          <ProductEntryForm />
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={() => discoverProducts.mutate()}
+              disabled={discoverProducts.isPending}
+            >
+              {discoverProducts.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Radar className="w-4 h-4 mr-2" />}
+              Discover Products
+            </Button>
+            <ProductEntryForm />
+          </div>
         </div>
 
         <Tabs defaultValue="all">
