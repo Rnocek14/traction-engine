@@ -245,13 +245,12 @@ async function serpSearch(
 
   console.log(`[research] After Shopping: ${results.length} passed, ${gatedOut} gated out`);
 
-  // 2. Site-specific searches with tight core phrase
+  // 2. Retail site-specific searches (use branded queries)
   const retailSites = ["amazon.com", "walmart.com", "ebay.com", "temu.com"];
-  const wholesaleSites = ["aliexpress.com", "alibaba.com", "dhgate.com"];
-
-  for (const site of [...retailSites, ...wholesaleSites]) {
+  for (const site of retailSites) {
     try {
-      const q = encodeURIComponent(`"${identity.corePhrase}" ${identity.modifiers.slice(0, 2).join(" ")} site:${site}`);
+      const brandPrefix = identity.brandName ? `"${identity.brandName}" ` : "";
+      const q = encodeURIComponent(`${brandPrefix}"${identity.corePhrase}" ${identity.modifiers.slice(0, 2).join(" ")} site:${site}`);
       const resp = await fetch(`https://serpapi.com/search.json?engine=google&q=${q}&api_key=${serpApiKey}&num=5`);
       if (!resp.ok) continue;
       const data = await resp.json();
@@ -262,6 +261,37 @@ async function serpSearch(
       }
     } catch { /* skip */ }
     await new Promise(r => setTimeout(r, 250));
+  }
+
+  console.log(`[research] After retail sites: ${results.length} passed, ${gatedOut} gated out`);
+
+  // 3. Wholesale site-specific searches (use UNBRANDED physical description queries)
+  const wholesaleSites = ["aliexpress.com", "alibaba.com", "dhgate.com"];
+  for (const site of wholesaleSites) {
+    for (const wq of identity.wholesaleQueries.slice(0, 2)) {
+      try {
+        const q = encodeURIComponent(`${wq} site:${site}`);
+        const resp = await fetch(`https://serpapi.com/search.json?engine=google&q=${q}&api_key=${serpApiKey}&num=5`);
+        if (!resp.ok) continue;
+        const data = await resp.json();
+        for (const r of (data.organic_results || [])) {
+          if (r.link?.startsWith("http")) {
+            // Wholesale links skip anchor gate — they won't have brand terms
+            if (seen.has(r.link) || !isUsefulUrl(r.link)) continue;
+            seen.add(r.link);
+            results.push({
+              url: r.link,
+              title: r.title || "",
+              price: null,
+              thumbnail: r.thumbnail || null,
+              source: `wholesale:${site}`,
+              gateResult: "wholesale_bypass",
+            });
+          }
+        }
+      } catch { /* skip */ }
+      await new Promise(r => setTimeout(r, 250));
+    }
   }
 
   console.log(`[research] Total: ${results.length} candidates passed anchor gate, ${gatedOut} rejected`);
