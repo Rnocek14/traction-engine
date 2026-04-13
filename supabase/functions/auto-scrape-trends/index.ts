@@ -21,33 +21,39 @@ const corsHeaders = {
 // Vertical-specific search queries for trend discovery
 const VERTICAL_QUERIES: Record<string, string[]> = {
   health: [
-    "trending health topics on social media this week",
-    "viral health myths debunked 2025",
-    "most shared health facts on TikTok this week",
+    "trending health topics on TikTok and Instagram Reels this week",
+    "viral health myths debunked on social media this week",
+    "most shared health and wellness short-form videos this week",
+    "controversial health claims going viral right now",
   ],
   privacy: [
-    "trending privacy and security news this week",
-    "viral data privacy stories social media",
-    "biggest surveillance and tracking stories this week",
+    "trending privacy and cybersecurity stories on social media this week",
+    "viral data privacy and surveillance news this week",
+    "most discussed online privacy topics on Reddit this week",
+    "shocking privacy revelations trending on TikTok this week",
   ],
   education: [
-    "trending education topics on social media this week",
-    "viral learning facts and study tips TikTok",
+    "trending education and learning topics on TikTok this week",
+    "viral study tips and learning hacks on social media this week",
+    "most shared educational short-form content this week",
   ],
   finance: [
-    "trending personal finance topics social media this week",
-    "viral money saving tips TikTok this week",
+    "trending personal finance topics on TikTok and YouTube Shorts this week",
+    "viral money saving and investing stories on social media this week",
+    "most controversial financial advice going viral right now",
   ],
   tech: [
-    "trending tech news social media this week",
-    "viral AI and technology stories this week",
+    "trending AI and technology stories on social media this week",
+    "viral tech demos and product reveals on TikTok this week",
+    "most discussed tech controversies on Reddit this week",
   ],
 };
 
 // Fallback for unknown verticals
 const DEFAULT_QUERIES = [
-  "most viral short-form video topics this week",
+  "most viral short-form video topics on TikTok and YouTube Shorts this week",
   "trending content ideas for social media creators this week",
+  "what topics are going viral on social media right now",
 ];
 
 interface PerplexityResult {
@@ -60,8 +66,8 @@ async function discoverTrendingUrls(
   perplexityKey: string
 ): Promise<PerplexityResult> {
   const queries = VERTICAL_QUERIES[vertical] || DEFAULT_QUERIES;
-  // Pick 1-2 random queries per vertical to avoid rate limits
-  const selected = queries.sort(() => Math.random() - 0.5).slice(0, 2);
+  // Pick 2-3 queries per vertical for better coverage
+  const selected = queries.sort(() => Math.random() - 0.5).slice(0, 3);
 
   const allUrls: string[] = [];
   const allTopics: string[] = [];
@@ -124,7 +130,7 @@ async function discoverTrendingUrls(
         return !skip.some(s => url.href.includes(s));
       } catch { return false; }
     })
-    .slice(0, 8); // Cap at 8 URLs per vertical
+    .slice(0, 15); // Cap at 15 URLs per vertical (up from 8)
 
   return { urls: uniqueUrls, topics: [...new Set(allTopics)].slice(0, 10) };
 }

@@ -171,13 +171,25 @@ async function perplexityFallback(url: string): Promise<{ text: string; method: 
 // ─── OpenAI structured extraction ───
 async function extractWithAI(text: string, sourceType: string, url: string): Promise<Record<string, unknown>> {
   const systemPrompt = `You are a content intelligence extractor for a short-form video content engine.
+
 Extract structured data from the provided content. Focus on:
 - Topics and themes that could become viral short-form videos
-- Hook patterns (attention-grabbing first lines or concepts)
+- Hook patterns: extract BOTH a typed category AND a specific example
 - Emotional triggers that drive engagement
-- Content format patterns (listicle, myth-busting, story, tutorial, etc.)
+- Content format patterns
 - Visual style suggestions for video production
 - Key facts or talking points
+
+CRITICAL SCORING RULES FOR viral_score:
+You MUST distribute scores across the full 20-95 range. Do NOT cluster scores.
+Use this rubric strictly:
+- 90-95: Genuinely explosive. Topic is breaking NOW, has massive emotional pull, AND high shareability. Very rare.
+- 75-89: Strong viral potential. Timely topic with clear emotional hook and broad appeal.
+- 55-74: Moderate potential. Interesting topic but either not timely, narrow audience, or weak emotional pull.
+- 35-54: Low potential. Evergreen or niche content. Useful but unlikely to go viral.
+- 20-34: Minimal potential. Too generic, too old, or too narrow to drive engagement.
+
+Score based on: (1) timeliness — is this happening NOW? (2) emotional intensity — does it provoke a strong reaction? (3) shareability — would someone send this to a friend? (4) novelty — has this been covered to death already? (5) controversy — does it spark debate?
 
 Source type: ${sourceType}
 Source URL: ${url}`;
@@ -207,25 +219,41 @@ Source URL: ${url}`;
                 topics: {
                   type: "array",
                   items: { type: "string" },
-                  description: "Main topics/themes (3-8)",
+                  description: "Main topics/themes (3-8). Use normalized lowercase terms.",
                 },
                 hook_patterns: {
                   type: "array",
-                  items: { type: "string" },
-                  description: "Attention-grabbing hook ideas derived from this content (2-5)",
+                  items: {
+                    type: "object",
+                    properties: {
+                      type: {
+                        type: "string",
+                        enum: ["statistic_shock", "question_challenge", "myth_bust", "fear_warning", "curiosity_gap", "contrarian_claim", "social_proof", "urgency", "story_tease", "authority_reveal"],
+                        description: "Hook pattern category",
+                      },
+                      example: { type: "string", description: "Specific hook text example (under 80 chars)" },
+                    },
+                    required: ["type", "example"],
+                  },
+                  description: "2-5 hook patterns with typed categories and specific examples",
                 },
                 emotional_triggers: {
                   type: "array",
-                  items: { type: "string" },
-                  description: "Emotional triggers: curiosity, fear, surprise, outrage, etc.",
+                  items: {
+                    type: "string",
+                    enum: ["curiosity", "fear", "surprise", "outrage", "hope", "nostalgia", "amusement", "awe", "anxiety", "empathy", "pride", "disgust", "relief", "urgency", "belonging"],
+                  },
+                  description: "2-4 emotional triggers. Be specific — don't default to curiosity+fear for everything.",
                 },
                 content_format: {
                   type: "string",
-                  description: "Best format: listicle, myth_busting, story, tutorial, comparison, hot_take, explainer",
+                  enum: ["listicle", "myth_busting", "story", "tutorial", "comparison", "hot_take", "explainer", "warning", "behind_the_scenes", "reaction", "challenge"],
+                  description: "Best content format for a short-form video",
                 },
                 visual_style: {
                   type: "string",
-                  description: "Suggested visual style for video: cinematic, documentary, fast_cuts, text_overlay, animation",
+                  enum: ["cinematic", "documentary", "fast_cuts", "text_overlay", "animation", "screencast", "talking_head", "b_roll_montage"],
+                  description: "Suggested visual style for video",
                 },
                 key_points: {
                   type: "array",
@@ -234,15 +262,25 @@ Source URL: ${url}`;
                 },
                 viral_score: {
                   type: "integer",
-                  description: "Viral potential 0-100 based on topic timeliness, emotional pull, and shareability",
+                  description: "Viral potential 20-95. MUST follow the scoring rubric. Do NOT default to 80-85.",
+                },
+                novelty_level: {
+                  type: "string",
+                  enum: ["breaking", "emerging", "established", "evergreen", "saturated"],
+                  description: "How new/fresh is this topic? breaking=hours old, saturated=overdone",
+                },
+                controversy_level: {
+                  type: "string",
+                  enum: ["none", "mild", "moderate", "high", "extreme"],
+                  description: "Does this topic spark debate?",
                 },
                 relevance_tags: {
                   type: "array",
                   items: { type: "string" },
-                  description: "Tags for matching to verticals: privacy, education, health, tech, finance, etc.",
+                  description: "Tags for matching to verticals: privacy, education, health, tech, finance, lifestyle, etc.",
                 },
               },
-              required: ["title", "topics", "hook_patterns", "content_format", "key_points", "viral_score"],
+              required: ["title", "topics", "hook_patterns", "content_format", "key_points", "viral_score", "novelty_level", "controversy_level", "relevance_tags", "emotional_triggers"],
             },
           },
         },
@@ -394,19 +432,28 @@ Deno.serve(async (req) => {
 
         // Store insight
         if (jobId) {
+          // hook_patterns now come as objects {type, example} — store the typed array as JSON
+          const hookPatterns = Array.isArray(extracted.hook_patterns)
+            ? (extracted.hook_patterns as Array<{type?: string; example?: string} | string>).map(h =>
+                typeof h === "object" && h !== null ? `${h.type || "unknown"}: ${h.example || ""}` : String(h)
+              )
+            : [];
+
           await supabase.from("scraped_insights").insert({
             scrape_job_id: jobId,
             source_url: targetUrl,
             source_type: sourceType,
             title: extracted.title as string || null,
             topics: (extracted.topics as string[]) || [],
-            hook_patterns: (extracted.hook_patterns as string[]) || [],
+            hook_patterns: hookPatterns,
             emotional_triggers: (extracted.emotional_triggers as string[]) || [],
             content_format: (extracted.content_format as string) || null,
             visual_style: (extracted.visual_style as string) || null,
             key_points: (extracted.key_points as string[]) || [],
             viral_score: (extracted.viral_score as number) || null,
             relevance_tags: (extracted.relevance_tags as string[]) || [],
+            novelty_level: (extracted.novelty_level as string) || null,
+            controversy_level: (extracted.controversy_level as string) || null,
             raw_extraction: extracted,
           });
 
