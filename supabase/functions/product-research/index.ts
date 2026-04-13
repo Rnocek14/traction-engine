@@ -404,15 +404,22 @@ async function verifyLink(
     const isJsHeavy = marketplace && jsHeavyMarketplaces.includes(marketplace);
     
     // STAGE 5: Thin content / anti-bot / JS-heavy detection
-    const needsFirecrawl = html.length < 500 || 
-      (isJsHeavy && !html.includes('"@type":"Product"') && !html.match(/<h1[^>]*>[^<]{5,}/i));
+    const hasProductSchema = html.includes('"@type":"Product"') || html.includes('"@type": "Product"');
+    const hasH1 = !!html.match(/<h1[^>]*>[^<]{5,}/i);
+    const needsFirecrawl = html.length < 500 || (isJsHeavy && !hasProductSchema && !hasH1);
+    
+    console.log(`[product-research] Fetch: ${candidateUrl.slice(0, 80)} html=${html.length} marketplace=${marketplace} jsHeavy=${isJsHeavy} schema=${hasProductSchema} h1=${hasH1} needsFC=${needsFirecrawl}`);
     
     if (needsFirecrawl && firecrawlKey) {
+      console.log(`[product-research] Using Firecrawl for JS-heavy page: ${candidateUrl.slice(0, 80)}`);
       const fcData = await firecrawlFetch(candidateUrl, firecrawlKey);
       if (fcData) {
+        console.log(`[product-research] Firecrawl returned ${fcData.length} chars`);
         pageData = extractStructuredData(fcData, candidateUrl);
         fetchMethod = "firecrawl";
         reasons.push("fetch:firecrawl_js_heavy");
+      } else {
+        console.log(`[product-research] Firecrawl returned null`);
       }
     }
     
