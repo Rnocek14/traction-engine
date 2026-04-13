@@ -258,6 +258,9 @@ export function ProductVideosSection({ productId }: { productId: string }) {
                 <div className="flex items-center gap-2 min-w-0">
                   <Badge variant="outline" className="text-xs shrink-0">{job.status}</Badge>
                   <span className="truncate">{job.title || "Untitled"}</span>
+                  {hasPreferredSupplier && !hasSupplierImages && (
+                    <Badge variant="outline" className="text-[10px] text-yellow-600 border-yellow-500/30 shrink-0">pre-pin</Badge>
+                  )}
                 </div>
                 <div className="flex items-center gap-2 text-xs text-muted-foreground shrink-0">
                   {job.completed_clips}/{job.total_clips} clips
