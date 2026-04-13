@@ -81,8 +81,22 @@ export async function fetchTrendEnrichment(
 
     const insights = data as ScrapedInsight[];
 
-    // Filter by topic relevance if we have a topic
+    // Filter by relevance_tags first (structured vertical matching)
     let relevant = insights;
+    if (opts.vertical) {
+      const verticalLower = opts.vertical.toLowerCase();
+      // deno-lint-ignore no-explicit-any
+      const tagFiltered = insights.filter((i: any) => {
+        const tags: string[] = i.relevance_tags || [];
+        return tags.some((t: string) => t.toLowerCase() === verticalLower);
+      });
+      if (tagFiltered.length >= 2) {
+        relevant = tagFiltered as ScrapedInsight[];
+      }
+      // Fall back to keyword matching only if tag matching found <2
+    }
+
+    // Secondary: keyword relevance scoring
     if (opts.topic_prompt || opts.pillar) {
       const keywords = [
         ...(opts.topic_prompt?.toLowerCase().split(/\s+/) || []),
@@ -90,7 +104,7 @@ export async function fetchTrendEnrichment(
       ].filter(w => w.length > 3);
 
       if (keywords.length > 0) {
-        const scored = insights.map(insight => {
+        const scored = relevant.map(insight => {
           const text = [
             insight.title || "",
             ...insight.topics,
