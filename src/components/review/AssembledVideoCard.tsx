@@ -200,6 +200,7 @@ export function AssembledVideoCard({ video, onApprove, onReject, onReassemble, o
 
             {/* Actions */}
             {video.assembled_status === "succeeded" && (
+              <>
               <div className="flex items-center gap-2 mt-4 pt-4 border-t border-border/50">
                 <Button
                   size="sm"
@@ -240,10 +241,10 @@ export function AssembledVideoCard({ video, onApprove, onReject, onReassemble, o
                   </a>
                 )}
               </div>
-              {/* Performance Ingest */}
               {!video.performance && (
                 <PerformanceIngestForm storyJobId={video.id} onSuccess={onRefresh} />
               )}
+              </>
             )}
 
             {(video.assembled_status === "rendering" || video.assembled_status === "queued") && (
