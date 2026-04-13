@@ -925,31 +925,31 @@ Deno.serve(async (req) => {
     }
     console.log(`[product-research] After Phase 2: ${candidateLinks.length} candidates`);
 
-    // ─── FALLBACK: if broad searches fail, run retailer-specific searches using citations only ───
+    // ─── FALLBACK: if broad searches fail, run retailer-specific searches ───
     if (candidateLinks.length === 0) {
-      console.log("[product-research] No direct product-page citations yet — running retailer-specific fallback searches");
+      console.log("[product-research] No candidates yet — running retailer-specific fallback searches");
       const targetedSearches = [
         {
           label: "Amazon retail",
-          query: `site:amazon.com \"${searchName}\" direct product page`,
+          query: `"${searchName}" amazon.com/dp/ buy now price`,
           domain: /amazon\./i,
           linkType: "retail" as const,
         },
         {
           label: "Walmart retail",
-          query: `site:walmart.com \"${searchName}\" direct product page`,
+          query: `"${searchName}" walmart.com/ip/ buy now price`,
           domain: /walmart\./i,
           linkType: "retail" as const,
         },
         {
           label: "AliExpress wholesale",
-          query: `site:aliexpress.com \"${searchName}\" direct product page`,
+          query: `"${searchName}" aliexpress.com/item/ wholesale price`,
           domain: /aliexpress\./i,
           linkType: "wholesale" as const,
         },
         {
           label: "Temu wholesale",
-          query: `site:temu.com \"${searchName}\" direct product page`,
+          query: `"${searchName}" temu.com buy price`,
           domain: /temu\./i,
           linkType: "wholesale" as const,
         },
@@ -957,16 +957,12 @@ Deno.serve(async (req) => {
 
       for (const search of targetedSearches) {
         const fallbackSearch = await perplexitySearch(
-          `Find exact product listing URLs for ${search.query}. I need live product pages only.`,
-          `Return direct product page citations only. No blogs, no review sites, no category pages, no homepages.`,
+          search.query,
+          `Return ONLY direct product listing page URLs. Never return blog posts, wiki pages, showroom pages, category pages, or search results pages. I need the exact URL where I can add this product to cart.`,
           perplexityKey
         );
         console.log(`[product-research] ${search.label} citations (${fallbackSearch.citations.length}): ${fallbackSearch.citations.slice(0, 5).join(", ")}`);
-        for (const c of fallbackSearch.citations) {
-          if (search.domain.test(c) && isLikelyProductPageUrl(c) && !candidateLinks.some(cl => cl.url === c)) {
-            candidateLinks.push({ url: c, platform: detectPlatform(c), linkType: search.linkType });
-          }
-        }
+        collectCandidates(fallbackSearch.citations, fallbackSearch.content, search.linkType);
         await new Promise(r => setTimeout(r, 600));
       }
       console.log(`[product-research] After targeted fallback: ${candidateLinks.length} candidates`);
