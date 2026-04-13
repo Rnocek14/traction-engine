@@ -398,27 +398,41 @@ async function verifyLink(
     
     const html = await resp.text();
     
-    // STAGE 5: Thin content / anti-bot / redirect detection
-    if (html.length < 500) {
-      // Try Firecrawl for JS-heavy pages
-      if (firecrawlKey) {
-        const fcData = await firecrawlFetch(candidateUrl, firecrawlKey);
-        if (fcData) {
-          pageData = extractStructuredData(fcData, candidateUrl);
-          fetchMethod = "firecrawl";
-          reasons.push("fetch:firecrawl_fallback");
-        }
+    // Known JS-heavy marketplaces that need Firecrawl
+    const jsHeavyMarketplaces = ["aliexpress", "dhgate", "temu", "1688"];
+    const marketplace = getMarketplace(candidateUrl);
+    const isJsHeavy = marketplace && jsHeavyMarketplaces.includes(marketplace);
+    
+    // STAGE 5: Thin content / anti-bot / JS-heavy detection
+    const hasProductSchema = html.includes('"@type":"Product"') || html.includes('"@type": "Product"');
+    const hasH1 = !!html.match(/<h1[^>]*>[^<]{5,}/i);
+    const needsFirecrawl = html.length < 500 || (isJsHeavy && !hasProductSchema && !hasH1);
+    
+    console.log(`[product-research] Fetch: ${candidateUrl.slice(0, 80)} html=${html.length} marketplace=${marketplace} jsHeavy=${isJsHeavy} schema=${hasProductSchema} h1=${hasH1} needsFC=${needsFirecrawl}`);
+    
+    if (needsFirecrawl && firecrawlKey) {
+      console.log(`[product-research] Using Firecrawl for JS-heavy page: ${candidateUrl.slice(0, 80)}`);
+      const fcData = await firecrawlFetch(candidateUrl, firecrawlKey);
+      if (fcData) {
+        console.log(`[product-research] Firecrawl returned ${fcData.length} chars`);
+        pageData = extractStructuredData(fcData, candidateUrl);
+        fetchMethod = "firecrawl";
+        reasons.push("fetch:firecrawl_js_heavy");
+      } else {
+        console.log(`[product-research] Firecrawl returned null`);
       }
-      if (!pageData) {
-        reasons.push("fetch:thin_content");
-        return null;
-      }
-    } else {
+    }
+    
+    if (!pageData && html.length < 500) {
+      reasons.push("fetch:thin_content");
+      return null;
+    }
+    
+    if (!pageData) {
       pageData = extractStructuredData(html, candidateUrl);
     }
     
     // Marketplace-specific dead page detection
-    const marketplace = getMarketplace(candidateUrl);
     if (marketplace && MARKETPLACE_HEURISTICS[marketplace]) {
       const heuristic = MARKETPLACE_HEURISTICS[marketplace];
       const bodyLower = html.slice(0, 8000).toLowerCase();
@@ -658,10 +672,18 @@ async function firecrawlFetch(url: string, apiKey: string): Promise<string | nul
       },
       body: JSON.stringify({ url, formats: ["html"], onlyMainContent: true }),
     });
-    if (!resp.ok) return null;
+    if (!resp.ok) {
+      console.warn(`[product-research] Firecrawl HTTP ${resp.status} for ${url.slice(0, 60)}`);
+      return null;
+    }
     const data = await resp.json();
-    return data.data?.html || data.html || null;
-  } catch {
+    const html = data.data?.html || data.data?.rawHtml || data.html || null;
+    if (!html) {
+      console.warn(`[product-research] Firecrawl empty response keys: ${Object.keys(data).join(",")}, data keys: ${data.data ? Object.keys(data.data).join(",") : "none"}`);
+    }
+    return html;
+  } catch (e) {
+    console.warn(`[product-research] Firecrawl error: ${e}`);
     return null;
   }
 }
@@ -738,41 +760,64 @@ function detectPlatform(url: string): string {
   try { return new URL(url).hostname.replace("www.", ""); } catch { return "unknown"; }
 }
 
+// Non-product page patterns to reject
+const NON_PRODUCT_PATTERNS = [
+  /\/blog[s]?\//i, /\/article[s]?\//i, /\/wiki\//i, /\/p\/wiki\//i, /\/s\/wiki/i,
+  /\/category\//i, /\/collections\//i, /\/search/i,
+  /\/help\//i, /\/support\//i, /\/about/i, /\/contact/i,
+  /\/faq/i, /\/terms/i, /\/privacy/i, /\/press/i,
+  /\/careers/i, /\/podcast/i, /\/music\./i,
+  /\/w\/wholesale/i, /\/wholesale-/i,  // AliExpress search/category pages
+  /aws\.amazon\.com/i, /music\.amazon\.com/i, /advertising\.amazon/i,
+  /trueprofit\.io/i, /\/showroom\//i,
+];
+
 function isLikelyProductPageUrl(url: string): boolean {
   try {
-    const lower = url.toLowerCase();
     if (!isRetailDomain(url)) return false;
-
-    // Reject obvious non-product pages
-    if (
-      lower.includes("/blog/") ||
-      lower.includes("/blogs/") ||
-      lower.includes("/article/") ||
-      lower.includes("/articles/") ||
-      lower.includes("/category/") ||
-      lower.includes("/collections/") ||
-      lower.includes("/search") ||
-      lower.includes("trueprofit.io")
-    ) {
-      return false;
+    for (const p of NON_PRODUCT_PATTERNS) {
+      if (p.test(url)) return false;
     }
-
+    // Known product page patterns (high confidence)
     return (
-      /amazon\.[^/]+\/(?:[^/]+\/)?dp\//.test(lower) ||
-      /walmart\.[^/]+\/ip\//.test(lower) ||
-      /tiktok\.com\/.*\/product\//.test(lower) ||
-      /aliexpress\.[^/]+\/item\//.test(lower) ||
-      /alibaba\.[^/]+\/product-detail\//.test(lower) ||
-      /1688\.com\/offer\//.test(lower) ||
-      /dhgate\.[^/]+\/product\//.test(lower) ||
-      /temu\.[^/]+\/.*-g-\d+/.test(lower) ||
-      /ebay\.[^/]+\/itm\//.test(lower) ||
-      /etsy\.[^/]+\/listing\//.test(lower) ||
-      /\/products\//.test(lower)
+      /amazon\.[^/]+\/(?:[^/]+\/)?dp\//.test(url) ||
+      /walmart\.[^/]+\/ip\//.test(url) ||
+      /tiktok\.com\/.*\/product\//.test(url) ||
+      /aliexpress\.[^/]+\/item\//.test(url) ||
+      /alibaba\.[^/]+\/product-detail\//.test(url) ||
+      /1688\.com\/offer\//.test(url) ||
+      /dhgate\.[^/]+\/product\//.test(url) ||
+      /temu\.[^/]+\/.*-g-\d+/.test(url) ||
+      /ebay\.[^/]+\/itm\//.test(url) ||
+      /etsy\.[^/]+\/listing\//.test(url) ||
+      /\/products\//.test(url)
     );
   } catch {
     return false;
   }
+}
+
+// Looser filter: any retail domain URL that isn't obviously non-product
+function isRetailCandidate(url: string): boolean {
+  try {
+    if (!isRetailDomain(url)) return false;
+    for (const p of NON_PRODUCT_PATTERNS) {
+      if (p.test(url)) return false;
+    }
+    // Reject homepages and very short paths
+    const path = new URL(url).pathname;
+    if (path === "/" || path.length < 5) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Extract URLs from Perplexity response text content
+function extractUrlsFromText(text: string): string[] {
+  const urlRegex = /https?:\/\/[^\s"'<>\])\},]+/g;
+  const matches = text.match(urlRegex) || [];
+  return [...new Set(matches.map(u => u.replace(/[.)]+$/, "")))];
 }
 
 function parsePriceFromText(text: string): number | undefined {
@@ -841,28 +886,49 @@ Deno.serve(async (req) => {
     
     // Candidate URLs from Perplexity (discovery only — NOT verified)
     const candidateLinks: { url: string; platform: string; linkType: string }[] = [];
+    
+    function addCandidate(url: string, linkType: string) {
+      if (!candidateLinks.some(cl => cl.url === url)) {
+        candidateLinks.push({ url, platform: detectPlatform(url), linkType });
+      }
+    }
+    
+    // Collect candidates from both citations AND URLs mentioned in response text
+    function collectCandidates(citations: string[], content: string, linkType: string) {
+      // From citations: accept strict product pages
+      for (const c of citations) {
+        if (isLikelyProductPageUrl(c)) addCandidate(c, linkType);
+      }
+      // From citations: also accept any retail domain page (looser filter, let verification handle quality)
+      for (const c of citations) {
+        if (!isLikelyProductPageUrl(c) && isRetailCandidate(c)) addCandidate(c, linkType);
+      }
+      // Extract URLs mentioned in the response body text
+      const textUrls = extractUrlsFromText(content);
+      for (const u of textUrls) {
+        if (isLikelyProductPageUrl(u)) addCandidate(u, linkType);
+        else if (isRetailCandidate(u)) addCandidate(u, linkType);
+      }
+    }
 
     // ==========================================
     // PHASE 1: RETAIL — Where is it being sold?
     // ==========================================
     console.log("[product-research] Phase 1: Retail search");
     const retailSearch = await perplexitySearch(
-      `Where can I buy "${searchName}" online right now? Find specific product listings on Amazon, Walmart, TikTok Shop, eBay, Etsy, or Shopify stores. Include exact prices and product page URLs. I need real, working links to buy this specific product.`,
-      `You are a shopping assistant. Find REAL product listings where someone can BUY this exact product online. Include specific prices, store names, and direct product page URLs. Only include listings for this exact product, not similar or related items.`,
+      `Find the exact product page URL to buy "${searchName}" on Amazon, Walmart, eBay, Etsy, Target, or TikTok Shop. I need the direct product listing page with the price. Give me the amazon.com/dp/ or walmart.com/ip/ link.`,
+      `You are a product search engine. Return ONLY direct product listing URLs (e.g. amazon.com/dp/BXXXXXXX, walmart.com/ip/NNNNN). Do NOT return blog posts, articles, category pages, or search results. Include the exact price if found.`,
       perplexityKey
     );
     if (retailSearch.content) {
       researchParts.push(`RETAIL LISTINGS:\n${retailSearch.content}`);
       allCitations.push(...retailSearch.citations);
       console.log(`[product-research] Retail citations (${retailSearch.citations.length}): ${retailSearch.citations.slice(0, 5).join(", ")}`);
-      for (const c of retailSearch.citations) {
-        if (isLikelyProductPageUrl(c) && !candidateLinks.some(cl => cl.url === c)) {
-          candidateLinks.push({ url: c, platform: detectPlatform(c), linkType: "retail" });
-        }
-      }
+      collectCandidates(retailSearch.citations, retailSearch.content, "retail");
     } else {
       console.warn("[product-research] Retail search returned no content");
     }
+    console.log(`[product-research] After Phase 1: ${candidateLinks.length} candidates`);
     await new Promise(r => setTimeout(r, 1200));
 
     // ==========================================
@@ -870,46 +936,43 @@ Deno.serve(async (req) => {
     // ==========================================
     console.log("[product-research] Phase 2: Wholesale/supplier search");
     const wholesaleSearch = await perplexitySearch(
-      `"${searchName}" wholesale supplier price. Find this product on AliExpress, Alibaba, 1688, DHgate, or Temu. What is the wholesale or bulk price? What is the cheapest supplier price available? Include direct product listing URLs.`,
-      `You are a dropshipping supplier researcher. Find the CHEAPEST wholesale/supplier sources for this exact product. Include: supplier platform, wholesale price, MOQ if available, shipping estimates, and direct URLs. Focus on AliExpress, Alibaba, 1688.com, DHgate, and Temu.`,
+      `Find the exact product listing URL for "${searchName}" on AliExpress, Alibaba, DHgate, or Temu. I need the direct aliexpress.com/item/ or alibaba.com/product-detail/ link with the wholesale/supplier price.`,
+      `You are a wholesale product sourcer. Return ONLY direct product listing URLs from AliExpress (aliexpress.com/item/), Alibaba (alibaba.com/product-detail/), DHgate, 1688, or Temu. Do NOT return wiki pages, showroom pages, category pages, or search results. Include the unit price.`,
       perplexityKey
     );
     if (wholesaleSearch.content) {
       researchParts.push(`WHOLESALE/SUPPLIER SOURCES:\n${wholesaleSearch.content}`);
       allCitations.push(...wholesaleSearch.citations);
       console.log(`[product-research] Wholesale citations (${wholesaleSearch.citations.length}): ${wholesaleSearch.citations.slice(0, 5).join(", ")}`);
-      for (const c of wholesaleSearch.citations) {
-        if (isLikelyProductPageUrl(c) && c.match(/aliexpress\.|alibaba\.|1688\.|dhgate\.|temu\./i) && !candidateLinks.some(cl => cl.url === c)) {
-          candidateLinks.push({ url: c, platform: detectPlatform(c), linkType: "wholesale" });
-        }
-      }
+      collectCandidates(wholesaleSearch.citations, wholesaleSearch.content, "wholesale");
     }
+    console.log(`[product-research] After Phase 2: ${candidateLinks.length} candidates`);
 
-    // ─── FALLBACK: if broad searches fail, run retailer-specific searches using citations only ───
+    // ─── FALLBACK: if broad searches fail, run retailer-specific searches ───
     if (candidateLinks.length === 0) {
-      console.log("[product-research] No direct product-page citations yet — running retailer-specific fallback searches");
+      console.log("[product-research] No candidates yet — running retailer-specific fallback searches");
       const targetedSearches = [
         {
           label: "Amazon retail",
-          query: `site:amazon.com \"${searchName}\" direct product page`,
+          query: `"${searchName}" amazon.com/dp/ buy now price`,
           domain: /amazon\./i,
           linkType: "retail" as const,
         },
         {
           label: "Walmart retail",
-          query: `site:walmart.com \"${searchName}\" direct product page`,
+          query: `"${searchName}" walmart.com/ip/ buy now price`,
           domain: /walmart\./i,
           linkType: "retail" as const,
         },
         {
           label: "AliExpress wholesale",
-          query: `site:aliexpress.com \"${searchName}\" direct product page`,
+          query: `"${searchName}" aliexpress.com/item/ wholesale price`,
           domain: /aliexpress\./i,
           linkType: "wholesale" as const,
         },
         {
           label: "Temu wholesale",
-          query: `site:temu.com \"${searchName}\" direct product page`,
+          query: `"${searchName}" temu.com buy price`,
           domain: /temu\./i,
           linkType: "wholesale" as const,
         },
@@ -917,16 +980,12 @@ Deno.serve(async (req) => {
 
       for (const search of targetedSearches) {
         const fallbackSearch = await perplexitySearch(
-          `Find exact product listing URLs for ${search.query}. I need live product pages only.`,
-          `Return direct product page citations only. No blogs, no review sites, no category pages, no homepages.`,
+          search.query,
+          `Return ONLY direct product listing page URLs. Never return blog posts, wiki pages, showroom pages, category pages, or search results pages. I need the exact URL where I can add this product to cart.`,
           perplexityKey
         );
         console.log(`[product-research] ${search.label} citations (${fallbackSearch.citations.length}): ${fallbackSearch.citations.slice(0, 5).join(", ")}`);
-        for (const c of fallbackSearch.citations) {
-          if (search.domain.test(c) && isLikelyProductPageUrl(c) && !candidateLinks.some(cl => cl.url === c)) {
-            candidateLinks.push({ url: c, platform: detectPlatform(c), linkType: search.linkType });
-          }
-        }
+        collectCandidates(fallbackSearch.citations, fallbackSearch.content, search.linkType);
         await new Promise(r => setTimeout(r, 600));
       }
       console.log(`[product-research] After targeted fallback: ${candidateLinks.length} candidates`);
