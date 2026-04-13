@@ -743,6 +743,63 @@ async function perplexitySearch(query: string, systemPrompt: string, perplexityK
   }
 }
 
+// ─── SERPAPI-BASED PRODUCT SEARCH ───
+// Uses Google Shopping + organic search with site: filters for real product URLs
+async function serpApiProductSearch(
+  productName: string,
+  sites: string[],
+  serpApiKey: string,
+): Promise<string[]> {
+  const urls: string[] = [];
+
+  // Strategy 1: Google Shopping results (best for retail)
+  try {
+    const shoppingQuery = encodeURIComponent(productName);
+    const shoppingResp = await fetch(
+      `https://serpapi.com/search.json?engine=google_shopping&q=${shoppingQuery}&api_key=${serpApiKey}&num=10`
+    );
+    if (shoppingResp.ok) {
+      const data = await shoppingResp.json();
+      const results = data.shopping_results || [];
+      for (const r of results) {
+        if (r.link && r.link.startsWith("http")) urls.push(r.link);
+        if (r.product_link && r.product_link.startsWith("http")) urls.push(r.product_link);
+      }
+      console.log(`[product-research] SerpAPI Shopping: ${results.length} results, ${urls.length} URLs`);
+    } else {
+      console.warn(`[product-research] SerpAPI Shopping failed: ${shoppingResp.status}`);
+    }
+  } catch (e) {
+    console.warn(`[product-research] SerpAPI Shopping error:`, e);
+  }
+
+  // Strategy 2: Site-specific organic searches
+  for (const site of sites) {
+    try {
+      const siteQuery = encodeURIComponent(`"${productName}" site:${site}`);
+      const resp = await fetch(
+        `https://serpapi.com/search.json?engine=google&q=${siteQuery}&api_key=${serpApiKey}&num=5`
+      );
+      if (!resp.ok) {
+        console.warn(`[product-research] SerpAPI site:${site} failed: ${resp.status}`);
+        continue;
+      }
+      const data = await resp.json();
+      const organic = data.organic_results || [];
+      for (const r of organic) {
+        if (r.link && r.link.startsWith("http")) urls.push(r.link);
+      }
+      console.log(`[product-research] SerpAPI site:${site}: ${organic.length} results`);
+    } catch (e) {
+      console.warn(`[product-research] SerpAPI site:${site} error:`, e);
+    }
+    await new Promise(r => setTimeout(r, 300));
+  }
+
+  // Deduplicate
+  return [...new Set(urls)];
+}
+
 function detectPlatform(url: string): string {
   const u = url.toLowerCase();
   if (u.includes("amazon.")) return "Amazon";
@@ -838,9 +895,10 @@ Deno.serve(async (req) => {
     const openaiKey = Deno.env.get("OPENAI_API_KEY")!;
     const perplexityKey = Deno.env.get("PERPLEXITY_API_KEY");
     const firecrawlKey = Deno.env.get("FIRECRAWL_API_KEY") || null;
+    const serpApiKey = Deno.env.get("SERPAPI_API_KEY") || null;
 
-    if (!perplexityKey) {
-      return new Response(JSON.stringify({ error: "PERPLEXITY_API_KEY not configured" }), {
+    if (!perplexityKey && !serpApiKey) {
+      return new Response(JSON.stringify({ error: "PERPLEXITY_API_KEY or SERPAPI_API_KEY required" }), {
         status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -912,95 +970,131 @@ Deno.serve(async (req) => {
     }
 
     // ==========================================
-    // PHASE 1: RETAIL — Where is it being sold?
+    // PHASE 1: RETAIL — SERP-based product URL discovery (PRIMARY)
     // ==========================================
-    console.log("[product-research] Phase 1: Retail search");
-    const retailSearch = await perplexitySearch(
-      `Find the exact product page URL to buy "${searchName}" on Amazon, Walmart, eBay, Etsy, Target, or TikTok Shop. I need the direct product listing page with the price. Give me the amazon.com/dp/ or walmart.com/ip/ link.`,
-      `You are a product search engine. Return ONLY direct product listing URLs (e.g. amazon.com/dp/BXXXXXXX, walmart.com/ip/NNNNN). Do NOT return blog posts, articles, category pages, or search results. Include the exact price if found.`,
-      perplexityKey
-    );
-    if (retailSearch.content) {
-      researchParts.push(`RETAIL LISTINGS:\n${retailSearch.content}`);
-      allCitations.push(...retailSearch.citations);
-      console.log(`[product-research] Retail citations (${retailSearch.citations.length}): ${retailSearch.citations.slice(0, 5).join(", ")}`);
-      collectCandidates(retailSearch.citations, retailSearch.content, "retail");
-    } else {
-      console.warn("[product-research] Retail search returned no content");
+    console.log("[product-research] Phase 1: Retail search (SerpAPI → Perplexity fallback)");
+    
+    let retailSearchContent = "";
+    
+    if (serpApiKey) {
+      // PRIMARY: SerpAPI — Google Shopping + site-specific organic
+      const retailSites = ["amazon.com", "walmart.com", "ebay.com", "etsy.com", "target.com"];
+      const retailUrls = await serpApiProductSearch(searchName, retailSites, serpApiKey);
+      console.log(`[product-research] SerpAPI retail: ${retailUrls.length} URLs found`);
+      
+      for (const u of retailUrls) {
+        if (isLikelyProductPageUrl(u)) addCandidate(u, "retail");
+        else if (isRetailCandidate(u)) addCandidate(u, "retail");
+      }
     }
+    
+    // SECONDARY: Perplexity for context + any extra citations
+    if (perplexityKey) {
+      const retailSearch = await perplexitySearch(
+        `What is "${searchName}"? Where can I buy it? What is the retail price? Which retailers sell it?`,
+        `You are a product research analyst. Provide: product description, retail price range, where it's sold (Amazon, Walmart, etc.), and any direct product listing URLs. Focus on factual commerce data.`,
+        perplexityKey
+      );
+      if (retailSearch.content) {
+        retailSearchContent = retailSearch.content;
+        researchParts.push(`RETAIL INTELLIGENCE:\n${retailSearch.content}`);
+        allCitations.push(...retailSearch.citations);
+        collectCandidates(retailSearch.citations, retailSearch.content, "retail");
+      }
+    }
+    
     console.log(`[product-research] After Phase 1: ${candidateLinks.length} candidates`);
-    await new Promise(r => setTimeout(r, 1200));
+    await new Promise(r => setTimeout(r, 800));
 
     // ==========================================
-    // PHASE 2: WHOLESALE — Where to source it?
+    // PHASE 2: WHOLESALE — SERP-based supplier discovery (PRIMARY)
     // ==========================================
-    console.log("[product-research] Phase 2: Wholesale/supplier search");
-    const wholesaleSearch = await perplexitySearch(
-      `Find the exact product listing URL for "${searchName}" on AliExpress, Alibaba, DHgate, or Temu. I need the direct aliexpress.com/item/ or alibaba.com/product-detail/ link with the wholesale/supplier price.`,
-      `You are a wholesale product sourcer. Return ONLY direct product listing URLs from AliExpress (aliexpress.com/item/), Alibaba (alibaba.com/product-detail/), DHgate, 1688, or Temu. Do NOT return wiki pages, showroom pages, category pages, or search results. Include the unit price.`,
-      perplexityKey
-    );
-    if (wholesaleSearch.content) {
-      researchParts.push(`WHOLESALE/SUPPLIER SOURCES:\n${wholesaleSearch.content}`);
-      allCitations.push(...wholesaleSearch.citations);
-      console.log(`[product-research] Wholesale citations (${wholesaleSearch.citations.length}): ${wholesaleSearch.citations.slice(0, 5).join(", ")}`);
-      collectCandidates(wholesaleSearch.citations, wholesaleSearch.content, "wholesale");
+    console.log("[product-research] Phase 2: Wholesale/supplier search (SerpAPI → Perplexity fallback)");
+    
+    let wholesaleSearchContent = "";
+    
+    if (serpApiKey) {
+      // PRIMARY: SerpAPI — site-specific wholesale searches
+      const wholesaleSites = ["aliexpress.com", "alibaba.com", "dhgate.com", "temu.com"];
+      const wholesaleUrls = await serpApiProductSearch(searchName, wholesaleSites, serpApiKey);
+      console.log(`[product-research] SerpAPI wholesale: ${wholesaleUrls.length} URLs found`);
+      
+      for (const u of wholesaleUrls) {
+        if (isLikelyProductPageUrl(u)) addCandidate(u, "wholesale");
+        else if (isRetailCandidate(u)) addCandidate(u, "wholesale");
+      }
     }
+    
+    // SECONDARY: Perplexity for supplier context
+    if (perplexityKey) {
+      const wholesaleSearch = await perplexitySearch(
+        `"${searchName}" wholesale supplier price AliExpress Alibaba DHgate. What is the wholesale/supplier cost?`,
+        `You are a wholesale sourcing analyst. Provide: supplier pricing, MOQ, shipping estimates, and which wholesale platforms carry this product. Include any direct listing URLs.`,
+        perplexityKey
+      );
+      if (wholesaleSearch.content) {
+        wholesaleSearchContent = wholesaleSearch.content;
+        researchParts.push(`WHOLESALE/SUPPLIER INTELLIGENCE:\n${wholesaleSearch.content}`);
+        allCitations.push(...wholesaleSearch.citations);
+        collectCandidates(wholesaleSearch.citations, wholesaleSearch.content, "wholesale");
+      }
+    }
+    
     console.log(`[product-research] After Phase 2: ${candidateLinks.length} candidates`);
 
-    // ─── FALLBACK: if broad searches fail, run retailer-specific searches ───
-    if (candidateLinks.length === 0) {
-      console.log("[product-research] No candidates yet — running retailer-specific fallback searches");
-      const targetedSearches = [
-        {
-          label: "Amazon retail",
-          query: `"${searchName}" amazon.com/dp/ buy now price`,
-          domain: /amazon\./i,
-          linkType: "retail" as const,
-        },
-        {
-          label: "Walmart retail",
-          query: `"${searchName}" walmart.com/ip/ buy now price`,
-          domain: /walmart\./i,
-          linkType: "retail" as const,
-        },
-        {
-          label: "AliExpress wholesale",
-          query: `"${searchName}" aliexpress.com/item/ wholesale price`,
-          domain: /aliexpress\./i,
-          linkType: "wholesale" as const,
-        },
-        {
-          label: "Temu wholesale",
-          query: `"${searchName}" temu.com buy price`,
-          domain: /temu\./i,
-          linkType: "wholesale" as const,
-        },
-      ];
+    // ─── FALLBACK: if still no candidates, try broader SerpAPI without site: filter ───
+    if (candidateLinks.length === 0 && serpApiKey) {
+      console.log("[product-research] No candidates yet — running broad SerpAPI search");
+      try {
+        const broadQuery = encodeURIComponent(`buy "${searchName}" price`);
+        const resp = await fetch(
+          `https://serpapi.com/search.json?engine=google&q=${broadQuery}&api_key=${serpApiKey}&num=10`
+        );
+        if (resp.ok) {
+          const data = await resp.json();
+          const organic = data.organic_results || [];
+          for (const r of organic) {
+            if (r.link) {
+              if (isLikelyProductPageUrl(r.link)) addCandidate(r.link, "retail");
+              else if (isRetailCandidate(r.link)) addCandidate(r.link, "retail");
+            }
+          }
+          console.log(`[product-research] Broad SerpAPI: ${organic.length} results, now ${candidateLinks.length} candidates`);
+        }
+      } catch (e) {
+        console.warn("[product-research] Broad SerpAPI error:", e);
+      }
+    }
 
+    // LAST RESORT: Perplexity targeted searches (if SerpAPI unavailable or empty)
+    if (candidateLinks.length === 0 && perplexityKey) {
+      console.log("[product-research] No candidates — Perplexity targeted fallback");
+      const targetedSearches = [
+        { query: `"${searchName}" amazon.com/dp/ buy now price`, linkType: "retail" as const },
+        { query: `"${searchName}" aliexpress.com/item/ wholesale price`, linkType: "wholesale" as const },
+      ];
       for (const search of targetedSearches) {
-        const fallbackSearch = await perplexitySearch(
+        const fallback = await perplexitySearch(
           search.query,
-          `Return ONLY direct product listing page URLs. Never return blog posts, wiki pages, showroom pages, category pages, or search results pages. I need the exact URL where I can add this product to cart.`,
+          `Return ONLY direct product listing page URLs. Never return blog posts or search results.`,
           perplexityKey
         );
-        console.log(`[product-research] ${search.label} citations (${fallbackSearch.citations.length}): ${fallbackSearch.citations.slice(0, 5).join(", ")}`);
-        collectCandidates(fallbackSearch.citations, fallbackSearch.content, search.linkType);
+        collectCandidates(fallback.citations, fallback.content, search.linkType);
         await new Promise(r => setTimeout(r, 600));
       }
-      console.log(`[product-research] After targeted fallback: ${candidateLinks.length} candidates`);
+      console.log(`[product-research] After Perplexity fallback: ${candidateLinks.length} candidates`);
     }
-    await new Promise(r => setTimeout(r, 1200));
+    await new Promise(r => setTimeout(r, 800));
 
     // ==========================================
     // PHASE 3: SOCIAL PROOF
     // ==========================================
     console.log("[product-research] Phase 3: Social proof & competition");
-    const socialSearch = await perplexitySearch(
+    const socialSearch = perplexityKey ? await perplexitySearch(
       `"${searchName}" TikTok viral review. How many views does this product have? Who are the top creators promoting it? How many sellers are already selling it? Is this product saturated or still emerging?`,
       `You are a social media trend analyst for e-commerce. Analyze this product's social media presence: view counts, number of creators promoting it, engagement rates, competition level, and whether it's still trending or past its peak. Be specific with numbers.`,
       perplexityKey
-    );
+    ) : { content: "", citations: [] as string[] };
     if (socialSearch.content) {
       researchParts.push(`SOCIAL PROOF & COMPETITION:\n${socialSearch.content}`);
       allCitations.push(...socialSearch.citations);
@@ -1012,11 +1106,11 @@ Deno.serve(async (req) => {
     // ==========================================
     console.log("[product-research] Phase 4: Image search");
     let foundImageUrls: { url: string; source: string; label: string }[] = [];
-    const imgSearch = await perplexitySearch(
+    const imgSearch = perplexityKey ? await perplexitySearch(
       `"${searchName}" product photo. Show me where to buy this exact product with product photos. Amazon listing, AliExpress listing.`,
       `Find real product listing pages for this exact product. I need pages with product photos. Focus on Amazon, AliExpress, Walmart, or official product sites.`,
       perplexityKey
-    );
+    ) : { content: "", citations: [] as string[] };
 
     const candidateImgs: { url: string; source: string; label: string }[] = [];
     const allRetailerCitations = [...new Set([...allCitations, ...imgSearch.citations])].filter(c =>
@@ -1057,7 +1151,7 @@ Deno.serve(async (req) => {
       } catch { /* skip */ }
     }
 
-    const allSearchText = [retailSearch.content, wholesaleSearch.content, imgSearch.content].join(" ");
+    const allSearchText = [retailSearchContent, wholesaleSearchContent, imgSearch.content].join(" ");
     const imgRegex = /https?:\/\/[^\s"'<>]+\.(?:jpg|jpeg|png|webp)(?:\?[^\s"'<>]*)?/gi;
     const directImgs = allSearchText.match(imgRegex) || [];
     for (const imgUrl of directImgs.slice(0, 5)) {
@@ -1421,7 +1515,7 @@ Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, s
               content: `You are a dropshipping supplier analyst. Extract structured supplier data from wholesale research. Be conservative — mark anything uncertain.`,
             }, {
               role: "user",
-              content: `Product: "${productName}"\n\nWholesale research:\n${wholesaleSearch.content}\n\nVerified wholesale links:\n${wholesaleVerified.map(l => `${l.platform}: ${l.url} (confidence=${l.matchConfidence}) ${l.priceCents ? `($${(l.priceCents / 100).toFixed(2)})` : ""}`).join("\n")}`,
+              content: `Product: "${productName}"\n\nWholesale research:\n${wholesaleSearchContent}\n\nVerified wholesale links:\n${wholesaleVerified.map(l => `${l.platform}: ${l.url} (confidence=${l.matchConfidence}) ${l.priceCents ? `($${(l.priceCents / 100).toFixed(2)})` : ""}`).join("\n")}`,
             }],
             tools: [{ type: "function", function: {
               name: "store_suppliers",
