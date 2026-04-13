@@ -284,6 +284,7 @@ export function PromptLeaderboard() {
                         <span className="text-xs text-muted-foreground">—</span>
                       )}
                     </TableCell>
+                    <TableCell>
                       <StatusBadge status={exp.status} />
                     </TableCell>
                     <TableCell className="max-w-[300px] truncate text-xs text-muted-foreground">
