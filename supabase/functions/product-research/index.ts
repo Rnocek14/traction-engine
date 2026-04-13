@@ -77,15 +77,45 @@ async function perplexitySearch(query: string, systemPrompt: string, perplexityK
   }
 }
 
+/** Known-fake URL patterns that AI hallucinates */
+const FAKE_URL_PATTERNS = [
+  /aliexpress\.com\/item\/100500678912345/,  // common hallucinated ID
+  /amazon\.com\/dp\/B0[A-Z0-9]{8}FAKE/,
+  /example\.com/,
+  /placeholder/i,
+];
+
 /** Validate a URL actually loads and optionally check title relevance */
 async function validateUrl(url: string, productName: string): Promise<{ valid: boolean; title: string; price?: string }> {
   try {
+    // Reject known hallucinated patterns
+    if (FAKE_URL_PATTERNS.some(p => p.test(url))) {
+      console.log(`[product-research] Rejected hallucinated URL pattern: ${url}`);
+      return { valid: false, title: "hallucinated" };
+    }
+
     const resp = await fetch(url, {
       headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
       redirect: "follow",
     });
-    if (!resp.ok) return { valid: false, title: "" };
+    if (!resp.ok) return { valid: false, title: `HTTP ${resp.status}` };
+    
+    const finalUrl = resp.url;
+    // Detect redirect to error/home pages
+    if (finalUrl.match(/\/errors?\/|\/404|\/not-found|\/page-not-found/i)) {
+      return { valid: false, title: "redirected to error page" };
+    }
+    
     const html = await resp.text();
+    
+    // Check for "page not found" / "item not available" in body
+    const bodyLower = html.slice(0, 5000).toLowerCase();
+    if (bodyLower.includes("page not found") || bodyLower.includes("item is no longer available") ||
+        bodyLower.includes("this item cannot be found") || bodyLower.includes("sorry, this video is removed") ||
+        bodyLower.includes("this listing has ended") || bodyLower.includes("no longer exists")) {
+      return { valid: false, title: "dead page" };
+    }
+    
     const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
     const title = (titleMatch?.[1] || "").trim();
     
@@ -99,7 +129,7 @@ async function validateUrl(url: string, productName: string): Promise<{ valid: b
     
     return { valid: relevant, title, price: priceMatch?.[0] };
   } catch {
-    return { valid: false, title: "" };
+    return { valid: false, title: "fetch failed" };
   }
 }
 
@@ -611,6 +641,7 @@ Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, s
     // PHASE 7: EXTRACT SUPPLIER DATA
     // ==========================================
     console.log("[product-research] Phase 7: Extracting supplier data");
+    const wholesaleLinks = validatedLinks.filter(l => l.linkType === "wholesale");
     if (productId && wholesaleLinks.length > 0) {
       // Use AI to extract structured supplier info from wholesale search results
       try {
@@ -709,17 +740,28 @@ Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, s
                 is_preferred: false,
               });
             }
-            // Mark cheapest as preferred
+            // Mark BEST OVERALL supplier as preferred (not cheapest!)
             const { data: allSuppliers } = await supabase
               .from("product_suppliers")
-              .select("id, unit_cost_cents")
-              .eq("product_id", productId)
-              .order("unit_cost_cents", { ascending: true })
-              .limit(1);
-            if (allSuppliers?.[0]) {
-              await supabase.from("product_suppliers")
-                .update({ is_preferred: true })
-                .eq("id", allSuppliers[0].id);
+              .select("id, unit_cost_cents, reliability_score, defect_risk, delivery_days, processing_days, overall_supplier_score")
+              .eq("product_id", productId);
+            if (allSuppliers && allSuppliers.length > 0) {
+              // Weighted score: cost 30%, reliability 30%, delivery speed 20%, defect inverse 20%
+              const maxCost = Math.max(...allSuppliers.map(s => s.unit_cost_cents || 9999));
+              const scored = allSuppliers.map(s => {
+                const costScore = maxCost > 0 ? (1 - ((s.unit_cost_cents || maxCost) / maxCost)) * 5 : 2.5;
+                const reliabilityScore = s.reliability_score || 2;
+                const totalDays = (s.processing_days || 7) + (s.delivery_days || 14);
+                const deliveryScore = totalDays <= 7 ? 5 : totalDays <= 12 ? 4 : totalDays <= 20 ? 2.5 : 1;
+                const defectInverse = 6 - (s.defect_risk || 3);
+                const weighted = costScore * 0.3 + reliabilityScore * 0.3 + deliveryScore * 0.2 + defectInverse * 0.2;
+                return { id: s.id, weighted };
+              });
+              scored.sort((a, b) => b.weighted - a.weighted);
+              // Reset all, then set best
+              await supabase.from("product_suppliers").update({ is_preferred: false }).eq("product_id", productId);
+              await supabase.from("product_suppliers").update({ is_preferred: true }).eq("id", scored[0].id);
+              console.log(`[product-research] Preferred supplier selected by weighted score (not cheapest)`);
             }
             console.log(`[product-research] Saved ${suppliers?.length || 0} suppliers`);
           }
