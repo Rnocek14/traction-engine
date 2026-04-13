@@ -1,0 +1,1 @@
+UPDATE products SET source_url = 'https://' || source_url WHERE source_url IS NOT NULL AND source_url != '' AND source_url NOT LIKE 'http%';
