@@ -27,10 +27,15 @@ const NEXT_STATUS: Partial<Record<ProductStatus, ProductStatus>> = {
 
 export function ProductDetailCard({ product }: { product: ProductWithAnalysis }) {
   const [showPlan, setShowPlan] = useState(false);
+  const [showSuppliers, setShowSuppliers] = useState(false);
+  const [showEconomics, setShowEconomics] = useState(false);
   const [imgIdx, setImgIdx] = useState(0);
+  const [calcPending, setCalcPending] = useState(false);
   const analysis = product.product_analysis?.[0];
   const images = product.product_images || [];
   const links = product.product_links || [];
+  const suppliers = product.product_suppliers || [];
+  const economics = product.product_unit_economics?.[0] || null;
   const retailLinks = links.filter(l => l.link_type === "retail");
   const wholesaleLinks = links.filter(l => l.link_type === "wholesale");
   const updateStatus = useUpdateProductStatus();
@@ -39,6 +44,22 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
   const assignAccounts = useAssignProductAccounts();
   const { data: linkedIdeas } = useProductLinkedIdeas(product.id);
   const qc = useQueryClient();
+
+  const handleRecalcEconomics = async () => {
+    setCalcPending(true);
+    try {
+      const { error } = await supabase.functions.invoke("calculate-unit-economics", {
+        body: { product_id: product.id },
+      });
+      if (error) throw error;
+      toast.success("Economics recalculated");
+      qc.invalidateQueries({ queryKey: ["products"] });
+    } catch (e: any) {
+      toast.error(`Calc failed: ${e.message}`);
+    } finally {
+      setCalcPending(false);
+    }
+  };
 
   const handleDeleteImage = async (imageId: string) => {
     const { error } = await supabase.from("product_images").delete().eq("id", imageId);
