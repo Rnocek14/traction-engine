@@ -197,7 +197,7 @@ Source URL: ${url}`;
   const resp = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
-      Authorization: \`Bearer \${OPENAI_API_KEY}\`,
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
