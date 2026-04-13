@@ -25,10 +25,13 @@ interface ResearchRequest {
 
 interface SearchIdentity {
   corePhrase: string;        // e.g. "diffuser necklace"
+  brandName: string;          // e.g. "RORRY" — extracted brand, empty if generic
   modifiers: string[];        // e.g. ["rechargeable", "aroma", "portable"]
   anchorTerms: string[];      // MUST appear in candidate title/URL — e.g. ["necklace"]
   excludedConcepts: string[]; // e.g. ["car", "room", "vent", "shoe"]
-  queries: string[];          // Pre-built search queries
+  queries: string[];          // Pre-built search queries (retail, brand-aware)
+  wholesaleDescription: string; // Physical description for sourcing: "5000mAh mini power bank keychain USB-C built-in cable"
+  wholesaleQueries: string[]; // Unbranded queries for AliExpress/Alibaba/DHgate
 }
 
 // ─── HELPERS ───
@@ -92,19 +95,22 @@ async function extractSearchIdentity(productName: string, openaiKey: string): Pr
           content: `You extract a precise search identity for a product to find it on marketplaces.
 
 Rules:
-- corePhrase: The shortest phrase that uniquely identifies the product CLASS (2-4 words). Example: "diffuser necklace", "pet water fountain", "magnetic phone mount"
+- brandName: The brand/manufacturer name if present. Empty string if the product is generic/unbranded.
+- corePhrase: The shortest phrase that uniquely identifies the product CLASS (2-4 words). Example: "diffuser necklace", "pet water fountain", "magnetic phone mount". Do NOT include the brand name here.
 - modifiers: Additional qualifying words that narrow the product but aren't essential for category identification
 - anchorTerms: 1-3 words that MUST appear in any valid search result. These define the product class. A result missing ALL anchor terms is definitely wrong.
 - excludedConcepts: Common related products that should be EXCLUDED. These are products that share some keywords but are fundamentally different.
-- queries: Generate 3-4 tight search queries using quotes for exact phrases. Mix the core phrase with modifiers.
+- queries: Generate 3-4 tight search queries for RETAIL sites (Amazon, Walmart). Include brand name if known.
+- wholesaleDescription: Describe the product's PHYSICAL characteristics for sourcing on Chinese wholesale sites. Focus on: capacity/size specs, form factor, materials, connectors, key features. NO brand names. Example: "5000mAh mini power bank keychain USB-C built-in cable lightning connector"
+- wholesaleQueries: Generate 2-3 search queries for AliExpress/Alibaba/DHgate. These must be UNBRANDED and use generic factory terms. Use physical specs and Chinese wholesale terminology. Example: ["5000mah keychain power bank USB-C", "mini portable charger built-in cable OEM"]
 
-Think carefully: what makes THIS product different from similar but wrong products?`
+Think carefully: wholesale sites sell the UNBRANDED factory version. The brand name will NOT appear there.`
         },
         {
           role: "user",
           content: `Product: "${productName}"
 
-Extract the canonical search identity.`
+Extract the canonical search identity with both retail and wholesale search strategies.`
         }
       ],
       tools: [{
@@ -114,13 +120,16 @@ Extract the canonical search identity.`
           parameters: {
             type: "object",
             properties: {
-              corePhrase: { type: "string", description: "Shortest unique product class phrase, 2-4 words" },
+              brandName: { type: "string", description: "Brand name if present, empty string if generic" },
+              corePhrase: { type: "string", description: "Shortest unique product class phrase, 2-4 words, NO brand" },
               modifiers: { type: "array", items: { type: "string" }, description: "Additional qualifying terms" },
               anchorTerms: { type: "array", items: { type: "string" }, description: "1-3 terms that MUST appear in valid results" },
               excludedConcepts: { type: "array", items: { type: "string" }, description: "Related but wrong product concepts to reject" },
-              queries: { type: "array", items: { type: "string" }, description: "3-4 tight search queries with quotes" },
+              queries: { type: "array", items: { type: "string" }, description: "3-4 tight retail search queries (with brand)" },
+              wholesaleDescription: { type: "string", description: "Physical product description for factory sourcing, no brand" },
+              wholesaleQueries: { type: "array", items: { type: "string" }, description: "2-3 unbranded queries for AliExpress/Alibaba" },
             },
-            required: ["corePhrase", "modifiers", "anchorTerms", "excludedConcepts", "queries"],
+            required: ["brandName", "corePhrase", "modifiers", "anchorTerms", "excludedConcepts", "queries", "wholesaleDescription", "wholesaleQueries"],
           },
         },
       }],
@@ -139,7 +148,7 @@ Extract the canonical search identity.`
   if (!call) return fallbackIdentity(productName);
 
   const identity: SearchIdentity = JSON.parse(call.function.arguments);
-  console.log(`[research] Identity: core="${identity.corePhrase}" anchors=[${identity.anchorTerms}] exclude=[${identity.excludedConcepts}]`);
+  console.log(`[research] Identity: brand="${identity.brandName}" core="${identity.corePhrase}" anchors=[${identity.anchorTerms}] exclude=[${identity.excludedConcepts}] wholesale="${identity.wholesaleDescription}"`);
   return identity;
 }
 
@@ -147,10 +156,13 @@ function fallbackIdentity(productName: string): SearchIdentity {
   const words = productName.toLowerCase().split(/\s+/).filter(w => w.length > 2);
   return {
     corePhrase: productName,
+    brandName: "",
     modifiers: [],
     anchorTerms: words.slice(0, 2),
     excludedConcepts: [],
     queries: [`"${productName}"`],
+    wholesaleDescription: productName,
+    wholesaleQueries: [`"${productName}"`],
   };
 }
 
@@ -233,13 +245,12 @@ async function serpSearch(
 
   console.log(`[research] After Shopping: ${results.length} passed, ${gatedOut} gated out`);
 
-  // 2. Site-specific searches with tight core phrase
+  // 2. Retail site-specific searches (use branded queries)
   const retailSites = ["amazon.com", "walmart.com", "ebay.com", "temu.com"];
-  const wholesaleSites = ["aliexpress.com", "alibaba.com", "dhgate.com"];
-
-  for (const site of [...retailSites, ...wholesaleSites]) {
+  for (const site of retailSites) {
     try {
-      const q = encodeURIComponent(`"${identity.corePhrase}" ${identity.modifiers.slice(0, 2).join(" ")} site:${site}`);
+      const brandPrefix = identity.brandName ? `"${identity.brandName}" ` : "";
+      const q = encodeURIComponent(`${brandPrefix}"${identity.corePhrase}" ${identity.modifiers.slice(0, 2).join(" ")} site:${site}`);
       const resp = await fetch(`https://serpapi.com/search.json?engine=google&q=${q}&api_key=${serpApiKey}&num=5`);
       if (!resp.ok) continue;
       const data = await resp.json();
@@ -250,6 +261,37 @@ async function serpSearch(
       }
     } catch { /* skip */ }
     await new Promise(r => setTimeout(r, 250));
+  }
+
+  console.log(`[research] After retail sites: ${results.length} passed, ${gatedOut} gated out`);
+
+  // 3. Wholesale site-specific searches (use UNBRANDED physical description queries)
+  const wholesaleSites = ["aliexpress.com", "alibaba.com", "dhgate.com"];
+  for (const site of wholesaleSites) {
+    for (const wq of identity.wholesaleQueries.slice(0, 2)) {
+      try {
+        const q = encodeURIComponent(`${wq} site:${site}`);
+        const resp = await fetch(`https://serpapi.com/search.json?engine=google&q=${q}&api_key=${serpApiKey}&num=5`);
+        if (!resp.ok) continue;
+        const data = await resp.json();
+        for (const r of (data.organic_results || [])) {
+          if (r.link?.startsWith("http")) {
+            // Wholesale links skip anchor gate — they won't have brand terms
+            if (seen.has(r.link) || !isUsefulUrl(r.link)) continue;
+            seen.add(r.link);
+            results.push({
+              url: r.link,
+              title: r.title || "",
+              price: null,
+              thumbnail: r.thumbnail || null,
+              source: `wholesale:${site}`,
+              gateResult: "wholesale_bypass",
+            });
+          }
+        }
+      } catch { /* skip */ }
+      await new Promise(r => setTimeout(r, 250));
+    }
   }
 
   console.log(`[research] Total: ${results.length} candidates passed anchor gate, ${gatedOut} rejected`);
