@@ -6,6 +6,7 @@ import { ExternalLink, TrendingUp, Package, Search, Loader2, Sparkles, ChevronDo
 import { type ProductWithAnalysis, type ProductStatus, useUpdateProductStatus, useResearchProduct, useGenerateProductPlan, useProductLinkedIdeas, useAssignProductAccounts } from "@/hooks/use-products";
 import { ProductScoringForm } from "./ProductScoringForm";
 import { ProductMarketingPlan } from "./ProductMarketingPlan";
+import { ConversionTracker } from "./ConversionTracker";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
@@ -431,6 +432,9 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
             Calculate Unit Economics
           </Button>
         ) : null}
+
+        {/* Conversion Tracking */}
+        <ConversionTracker productId={product.id} productName={product.name} />
 
         {/* Plan version indicator */}
         {hasPlan && (
