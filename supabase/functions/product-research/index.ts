@@ -743,6 +743,63 @@ async function perplexitySearch(query: string, systemPrompt: string, perplexityK
   }
 }
 
+// ─── SERPAPI-BASED PRODUCT SEARCH ───
+// Uses Google Shopping + organic search with site: filters for real product URLs
+async function serpApiProductSearch(
+  productName: string,
+  sites: string[],
+  serpApiKey: string,
+): Promise<string[]> {
+  const urls: string[] = [];
+
+  // Strategy 1: Google Shopping results (best for retail)
+  try {
+    const shoppingQuery = encodeURIComponent(productName);
+    const shoppingResp = await fetch(
+      `https://serpapi.com/search.json?engine=google_shopping&q=${shoppingQuery}&api_key=${serpApiKey}&num=10`
+    );
+    if (shoppingResp.ok) {
+      const data = await shoppingResp.json();
+      const results = data.shopping_results || [];
+      for (const r of results) {
+        if (r.link && r.link.startsWith("http")) urls.push(r.link);
+        if (r.product_link && r.product_link.startsWith("http")) urls.push(r.product_link);
+      }
+      console.log(`[product-research] SerpAPI Shopping: ${results.length} results, ${urls.length} URLs`);
+    } else {
+      console.warn(`[product-research] SerpAPI Shopping failed: ${shoppingResp.status}`);
+    }
+  } catch (e) {
+    console.warn(`[product-research] SerpAPI Shopping error:`, e);
+  }
+
+  // Strategy 2: Site-specific organic searches
+  for (const site of sites) {
+    try {
+      const siteQuery = encodeURIComponent(`"${productName}" site:${site}`);
+      const resp = await fetch(
+        `https://serpapi.com/search.json?engine=google&q=${siteQuery}&api_key=${serpApiKey}&num=5`
+      );
+      if (!resp.ok) {
+        console.warn(`[product-research] SerpAPI site:${site} failed: ${resp.status}`);
+        continue;
+      }
+      const data = await resp.json();
+      const organic = data.organic_results || [];
+      for (const r of organic) {
+        if (r.link && r.link.startsWith("http")) urls.push(r.link);
+      }
+      console.log(`[product-research] SerpAPI site:${site}: ${organic.length} results`);
+    } catch (e) {
+      console.warn(`[product-research] SerpAPI site:${site} error:`, e);
+    }
+    await new Promise(r => setTimeout(r, 300));
+  }
+
+  // Deduplicate
+  return [...new Set(urls)];
+}
+
 function detectPlatform(url: string): string {
   const u = url.toLowerCase();
   if (u.includes("amazon.")) return "Amazon";
