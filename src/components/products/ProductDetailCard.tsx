@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ExternalLink, TrendingUp, Package, Search, Loader2, Sparkles, ChevronDown, ChevronUp, Lightbulb, Film, Users, ImageIcon, ChevronLeft, ChevronRight, Trash2, CheckCircle2 } from "lucide-react";
+import { ExternalLink, TrendingUp, Package, Search, Loader2, Sparkles, ChevronDown, ChevronUp, Lightbulb, Film, Users, ImageIcon, ChevronLeft, ChevronRight, Trash2, CheckCircle2, ShoppingCart, Warehouse } from "lucide-react";
 import { type ProductWithAnalysis, type ProductStatus, useUpdateProductStatus, useResearchProduct, useGenerateProductPlan, useProductLinkedIdeas, useAssignProductAccounts } from "@/hooks/use-products";
 import { ProductScoringForm } from "./ProductScoringForm";
 import { ProductMarketingPlan } from "./ProductMarketingPlan";
