@@ -50,18 +50,22 @@ function classifyLinkType(url: string): string {
 // Reject obvious non-product pages
 const NON_PRODUCT_PATTERNS = [
   /\/blog[s]?\//i, /\/article[s]?\//i, /\/wiki\//i,
-  /\/category\//i, /\/search/i, /\/help\//i, /\/about/i,
+  /\/help\//i, /\/about\b/i,
   /\/faq/i, /\/terms/i, /\/privacy/i,
   /aws\.amazon\.com/i, /music\.amazon\.com/i, /advertising\.amazon/i,
+  /smart\.dhgate\.com/i, // DHgate blog/articles
+  /\/showroom\//i, // Alibaba showroom (category pages, not products)
 ];
 
 function isUsefulUrl(url: string): boolean {
   try {
-    const path = new URL(url).pathname;
-    if (path === "/" || path.length < 4) return false;
+    const u = new URL(url);
+    if (u.pathname === "/") return false;
     for (const p of NON_PRODUCT_PATTERNS) {
       if (p.test(url)) return false;
     }
+    // Reject search/category pages (but allow Amazon /s? with k= param which are search results we want titles from)
+    if (u.pathname.includes("/search") && !u.searchParams.has("k")) return false;
     return true;
   } catch {
     return false;
