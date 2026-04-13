@@ -748,11 +748,12 @@ function detectPlatform(url: string): string {
 
 // Non-product page patterns to reject
 const NON_PRODUCT_PATTERNS = [
-  /\/blog[s]?\//i, /\/article[s]?\//i, /\/wiki\//i, /\/p\/wiki\//i,
+  /\/blog[s]?\//i, /\/article[s]?\//i, /\/wiki\//i, /\/p\/wiki\//i, /\/s\/wiki/i,
   /\/category\//i, /\/collections\//i, /\/search/i,
   /\/help\//i, /\/support\//i, /\/about/i, /\/contact/i,
   /\/faq/i, /\/terms/i, /\/privacy/i, /\/press/i,
   /\/careers/i, /\/podcast/i, /\/music\./i,
+  /\/w\/wholesale/i, /\/wholesale-/i,  // AliExpress search/category pages
   /aws\.amazon\.com/i, /music\.amazon\.com/i, /advertising\.amazon/i,
   /trueprofit\.io/i, /\/showroom\//i,
 ];
