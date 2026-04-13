@@ -103,8 +103,34 @@ export function AssembledVideoCard({ video, onApprove, onReject, onReassemble }:
                 <Badge variant="secondary" className="text-xs">
                   {video.story_type}
                 </Badge>
-              </div>
-            </div>
+                </div>
+
+                {/* Enrichment metadata */}
+                {video.enrichment?.used && (
+                  <div className="rounded-md border border-primary/20 bg-primary/5 p-3 space-y-1.5">
+                    <div className="flex items-center gap-1.5 text-xs font-medium text-primary">
+                      <Flame className="w-3.5 h-3.5" />
+                      Trend Enriched
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {video.enrichment.hooks.map((h, i) => (
+                        <Badge key={`h-${i}`} variant="secondary" className="text-xs">
+                          🪝 {h}
+                        </Badge>
+                      ))}
+                      {video.enrichment.emotions.map((e, i) => (
+                        <Badge key={`e-${i}`} variant="secondary" className="text-xs">
+                          💡 {e}
+                        </Badge>
+                      ))}
+                      {video.enrichment.format && (
+                        <Badge variant="outline" className="text-xs">
+                          📐 {video.enrichment.format}
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+                )}
 
             {/* Actions */}
             {video.assembled_status === "succeeded" && (
