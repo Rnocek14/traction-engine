@@ -817,6 +817,7 @@ Deno.serve(async (req) => {
     if (retailSearch.content) {
       researchParts.push(`RETAIL LISTINGS:\n${retailSearch.content}`);
       allCitations.push(...retailSearch.citations);
+      console.log(`[product-research] Retail citations (${retailSearch.citations.length}): ${retailSearch.citations.slice(0, 5).join(", ")}`);
       for (const c of retailSearch.citations) {
         // Accept any retail domain OR any URL from a retail search (let verification decide)
         if (isRetailDomain(c) || c.match(/amazon\.|walmart\.|ebay\.|etsy\.|tiktok\.com.*shop|shopify|myshopify|target\./i)) {
@@ -830,6 +831,8 @@ Deno.serve(async (req) => {
           candidateLinks.push({ url: u, platform: detectPlatform(u), linkType: "retail" });
         }
       }
+    } else {
+      console.warn("[product-research] Retail search returned no content");
     }
     await new Promise(r => setTimeout(r, 1200));
 
