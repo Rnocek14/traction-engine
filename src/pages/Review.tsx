@@ -46,11 +46,37 @@ export default function Review() {
       const { data, error } = await supabase.functions.invoke("assemble-reel", {
         body: { story_job_id: id },
       });
-      if (error) throw error;
+
+      // supabase-js treats non-2xx as an error, but 409 means render is already running
+      if (error) {
+        const parsed = typeof error === "object" && "context" in error
+          ? error
+          : null;
+        const statusCode = (parsed as any)?.context?.status ?? 0;
+        const bodyText = typeof data === "object" && data?.status === "rendering"
+          ? "rendering"
+          : typeof data === "string" && data.includes("already in progress")
+            ? "rendering"
+            : null;
+
+        if (statusCode === 409 || bodyText === "rendering") {
+          toast.info("Assembly is already in progress — check back shortly.");
+          queryClient.invalidateQueries({ queryKey: ["assembled-videos"] });
+          return;
+        }
+        throw error;
+      }
+
       toast.success("Reassembly triggered!");
       queryClient.invalidateQueries({ queryKey: ["assembled-videos"] });
     } catch (err: any) {
-      toast.error(`Reassembly failed: ${err.message}`);
+      const msg = err?.message || String(err);
+      if (msg.includes("already in progress")) {
+        toast.info("Assembly is already in progress — check back shortly.");
+        queryClient.invalidateQueries({ queryKey: ["assembled-videos"] });
+        return;
+      }
+      toast.error(`Reassembly failed: ${msg}`);
     }
   };
 
