@@ -818,8 +818,16 @@ Deno.serve(async (req) => {
       researchParts.push(`RETAIL LISTINGS:\n${retailSearch.content}`);
       allCitations.push(...retailSearch.citations);
       for (const c of retailSearch.citations) {
-        if (c.match(/amazon\.|walmart\.|ebay\.|etsy\.|tiktok\.com.*shop|shopify|myshopify/i)) {
+        // Accept any retail domain OR any URL from a retail search (let verification decide)
+        if (isRetailDomain(c) || c.match(/amazon\.|walmart\.|ebay\.|etsy\.|tiktok\.com.*shop|shopify|myshopify|target\./i)) {
           candidateLinks.push({ url: c, platform: detectPlatform(c), linkType: "retail" });
+        }
+      }
+      // Also extract URLs from the response text itself
+      const urlsInText = retailSearch.content.match(/https?:\/\/[^\s"'<>)\]]+/gi) || [];
+      for (const u of urlsInText) {
+        if (isRetailDomain(u) && !candidateLinks.some(cl => cl.url === u)) {
+          candidateLinks.push({ url: u, platform: detectPlatform(u), linkType: "retail" });
         }
       }
     }
@@ -840,6 +848,13 @@ Deno.serve(async (req) => {
       for (const c of wholesaleSearch.citations) {
         if (c.match(/aliexpress\.|alibaba\.|1688\.|dhgate\.|temu\./i)) {
           candidateLinks.push({ url: c, platform: detectPlatform(c), linkType: "wholesale" });
+        }
+      }
+      // Also extract URLs from wholesale text
+      const wUrls = wholesaleSearch.content.match(/https?:\/\/[^\s"'<>)\]]+/gi) || [];
+      for (const u of wUrls) {
+        if (u.match(/aliexpress\.|alibaba\.|1688\.|dhgate\.|temu\./i) && !candidateLinks.some(cl => cl.url === u)) {
+          candidateLinks.push({ url: u, platform: detectPlatform(u), linkType: "wholesale" });
         }
       }
     }
