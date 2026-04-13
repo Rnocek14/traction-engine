@@ -80,7 +80,7 @@ export function useAssembledVideos() {
         }
       }
 
-      const rows = (data ?? []) as AssembledVideoRow[];
+      
       const activeRows = rows.filter(
         (row) => row.assembled_status === "queued" || row.assembled_status === "rendering"
       );
