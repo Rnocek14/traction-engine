@@ -706,6 +706,50 @@ export type Database = {
           },
         ]
       }
+      product_links: {
+        Row: {
+          created_at: string
+          id: string
+          link_type: string
+          platform: string
+          price_cents: number | null
+          product_id: string
+          title: string | null
+          url: string
+          verified: boolean
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          link_type?: string
+          platform?: string
+          price_cents?: number | null
+          product_id: string
+          title?: string | null
+          url: string
+          verified?: boolean
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          link_type?: string
+          platform?: string
+          price_cents?: number | null
+          product_id?: string
+          title?: string | null
+          url?: string
+          verified?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_links_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       products: {
         Row: {
           category: string | null
