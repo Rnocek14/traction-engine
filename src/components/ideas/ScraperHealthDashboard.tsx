@@ -16,6 +16,8 @@ import {
   Heart,
   Film,
   Hash,
+  ExternalLink,
+  Flame,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
@@ -85,6 +87,78 @@ export function ScraperHealthDashboard() {
           status={health.avgAgeHours < 48 ? "good" : health.avgAgeHours < 168 ? "warn" : "bad"}
         />
       </div>
+
+      {/* Trending Stories — actual content */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Flame className="w-4 h-4 text-primary" />
+            Trending Now — Top Scraped Stories
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {health.trendingStories.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4 text-center">
+              No trend data yet. Run the scraper to discover trending topics.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {health.trendingStories.map((story) => (
+                <div
+                  key={story.id}
+                  className="p-3 rounded-lg border bg-card hover:bg-muted/30 transition-colors"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Badge
+                          variant={story.viral_score >= 80 ? "default" : "secondary"}
+                          className="text-xs tabular-nums"
+                        >
+                          🔥 {story.viral_score}
+                        </Badge>
+                        <Badge variant="outline" className="text-[10px]">
+                          {story.source_type}
+                        </Badge>
+                        {story.content_format && (
+                          <Badge variant="outline" className="text-[10px]">
+                            📐 {story.content_format}
+                          </Badge>
+                        )}
+                      </div>
+                      <h4 className="text-sm font-semibold">{story.title || "Untitled"}</h4>
+                      <div className="flex flex-wrap gap-1 mt-1.5">
+                        {story.topics.slice(0, 4).map((t) => (
+                          <Badge key={t} variant="secondary" className="text-[10px] px-1.5 py-0">
+                            {t}
+                          </Badge>
+                        ))}
+                      </div>
+                      {story.emotional_triggers.length > 0 && (
+                        <div className="flex flex-wrap gap-2 mt-1 text-[10px] text-muted-foreground">
+                          {story.emotional_triggers.slice(0, 3).map((e) => (
+                            <span key={e}>❤️ {e}</span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    {story.source_url && (
+                      <a
+                        href={story.source_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-muted-foreground hover:text-foreground shrink-0"
+                      >
+                        <ExternalLink className="w-4 h-4" />
+                      </a>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Detail panels */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
