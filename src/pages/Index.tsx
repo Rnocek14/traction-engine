@@ -25,6 +25,7 @@ import {
   Eye,
   Clock,
   Zap,
+  Users,
 } from "lucide-react";
 
 const ACTION_ICONS: Record<string, typeof Package> = {
