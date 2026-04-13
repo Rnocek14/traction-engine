@@ -963,6 +963,7 @@ export type Database = {
           continuity_score: number | null
           created_at: string
           id: string
+          review_status: string
           status: string
           story_type: string
           storyboard_json: Json | null
@@ -983,6 +984,7 @@ export type Database = {
           continuity_score?: number | null
           created_at?: string
           id?: string
+          review_status?: string
           status?: string
           story_type?: string
           storyboard_json?: Json | null
@@ -1003,6 +1005,7 @@ export type Database = {
           continuity_score?: number | null
           created_at?: string
           id?: string
+          review_status?: string
           status?: string
           story_type?: string
           storyboard_json?: Json | null
