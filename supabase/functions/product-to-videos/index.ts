@@ -81,8 +81,8 @@ Deno.serve(async (req) => {
       throw new Error("Product not found");
     }
 
-    // Fetch verified images
-    const { data: images } = await supabase
+    // Fetch images — prefer verified, fall back to any
+    let { data: images } = await supabase
       .from("product_images")
       .select("*")
       .eq("product_id", product_id)
@@ -90,12 +90,28 @@ Deno.serve(async (req) => {
       .order("is_primary", { ascending: false })
       .limit(8);
 
-    if (!images || images.length < 2) {
+    // If no verified images, try all images
+    if (!images || images.length === 0) {
+      const { data: allImages } = await supabase
+        .from("product_images")
+        .select("*")
+        .eq("product_id", product_id)
+        .order("is_primary", { ascending: false })
+        .limit(8);
+      images = allImages || [];
+    }
+
+    // Fall back to product.image_url if no images in table
+    if (images.length === 0 && product.image_url) {
+      images = [{ url: product.image_url, label: "hero", is_primary: true }] as any;
+    }
+
+    if (images.length === 0) {
       return new Response(
         JSON.stringify({ 
           success: false, 
-          error: "Need at least 2 verified product images. Verify images in the dossier first.",
-          image_count: images?.length || 0,
+          error: "No product images found. Run AI Research first to scrape product images, or add images manually.",
+          image_count: 0,
         }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
