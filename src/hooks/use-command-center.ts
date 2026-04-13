@@ -9,7 +9,7 @@ import { supabase } from "@/integrations/supabase/client";
 
 export interface ActionItem {
   id: string;
-  type: "product_approve" | "product_research" | "idea_approve" | "video_review" | "plan_generate" | "product_hot";
+  type: "product_approve" | "product_research" | "idea_approve" | "video_review" | "plan_generate" | "product_hot" | "winner_scale" | "loser_cut";
   priority: number; // 0-100, higher = more urgent
   title: string;
   subtitle: string;
@@ -45,17 +45,19 @@ export function useCommandCenter() {
   return useQuery({
     queryKey: ["command-center"],
     queryFn: async (): Promise<CommandCenterData> => {
-      const [productsRes, ideasRes, storiesRes, analysisRes] = await Promise.all([
+      const [productsRes, ideasRes, storiesRes, analysisRes, outcomesRes] = await Promise.all([
         supabase.from("products").select("id, name, status, image_url, estimated_margin_pct, plan_status, plan_version, marketing_plan, price_cents").order("created_at", { ascending: false }),
         supabase.from("content_ideas").select("id, title, status, product_id, opportunity_score, angle, suggested_format").order("created_at", { ascending: false }).limit(200),
         supabase.from("story_jobs").select("id, title, status, review_status, assembled_status, assembled_video_url, product_id").order("created_at", { ascending: false }).limit(100),
         supabase.from("product_analysis").select("product_id, overall_score, trending_status, wow_factor, social_media_potential, impulse_buy_appeal, demonstrability_score, competition_level"),
+        supabase.from("prompt_outcomes").select("id, story_job_id, outcome_score, views, likes, shares, saves, platform").order("created_at", { ascending: false }).limit(100),
       ]);
 
       const products = productsRes.data || [];
       const ideas = ideasRes.data || [];
       const stories = storiesRes.data || [];
       const analyses = analysisRes.data || [];
+      const outcomes = outcomesRes.data || [];
 
       // Build analysis lookup
       const analysisMap = new Map(analyses.map(a => [a.product_id, a]));
@@ -167,9 +169,34 @@ export function useCommandCenter() {
               title: `🔥 "${p.name}" is ${a.trending_status}`,
               subtitle: `Score ${a.overall_score} — create more content`,
               metadata: { product_id: p.id, score: a.overall_score },
-            });
-          }
         });
+
+      // 7. Winner signals from performance data
+      outcomes.forEach(o => {
+        const score = o.outcome_score != null ? Number(o.outcome_score) : null;
+        const views = o.views != null ? Number(o.views) : null;
+        if (score != null && score >= 70 && (views ?? 0) >= 1000) {
+          const job = stories.find(s => s.id === o.story_job_id);
+          actions.push({
+            id: `winner-${o.id}`,
+            type: "winner_scale",
+            priority: 90,
+            title: `🏆 Winner! "${job?.title || "Video"}" — Score ${score}`,
+            subtitle: `${(views ?? 0).toLocaleString()} views · Scale this content`,
+            metadata: { story_job_id: o.story_job_id, outcome_score: score, views },
+          });
+        } else if (score != null && score < 10 && (views ?? 0) > 0) {
+          const job = stories.find(s => s.id === o.story_job_id);
+          actions.push({
+            id: `loser-${o.id}`,
+            type: "loser_cut",
+            priority: 40,
+            title: `❌ Cut "${job?.title || "Video"}" — Score ${score}`,
+            subtitle: `Underperforming · Consider new angle`,
+            metadata: { story_job_id: o.story_job_id, outcome_score: score },
+          });
+        }
+      });
 
       // Sort by priority descending
       actions.sort((a, b) => b.priority - a.priority);
