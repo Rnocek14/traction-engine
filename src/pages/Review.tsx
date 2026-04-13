@@ -16,7 +16,8 @@ import { GlobalNav } from "@/components/GlobalNav";
 import { AuthHeader } from "@/components/auth/AuthHeader";
 import { AssembledVideoCard } from "@/components/review/AssembledVideoCard";
 import { useAssembledVideos } from "@/hooks/use-assembled-videos";
-import { Film, ShieldCheck, RefreshCw, CheckCircle } from "lucide-react";
+import { Film, ShieldCheck, RefreshCw, CheckCircle, BarChart3 } from "lucide-react";
+import { PerformanceDashboard } from "@/components/review/PerformanceDashboard";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
@@ -147,10 +148,14 @@ export default function Review() {
 
       <main className="container mx-auto px-6 py-6">
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full max-w-md grid-cols-2 mb-6">
+          <TabsList className="grid w-full max-w-lg grid-cols-3 mb-6">
             <TabsTrigger value="videos" className="gap-2">
               <Film className="w-4 h-4" />
               Videos ({succeededCount})
+            </TabsTrigger>
+            <TabsTrigger value="performance" className="gap-2">
+              <BarChart3 className="w-4 h-4" />
+              Performance
             </TabsTrigger>
             <TabsTrigger value="scripts" className="gap-2">
               <ShieldCheck className="w-4 h-4" />
@@ -191,6 +196,10 @@ export default function Review() {
                 />
               ))
             )}
+          </TabsContent>
+
+          <TabsContent value="performance">
+            <PerformanceDashboard />
           </TabsContent>
 
           <TabsContent value="scripts">
