@@ -30,6 +30,34 @@ import { useState } from "react";
 
 export function ScraperHealthDashboard() {
   const { data: health, isLoading } = useScraperHealth();
+  const queryClient = useQueryClient();
+  const [addingId, setAddingId] = useState<string | null>(null);
+
+  const handleAddToQueue = async (story: NonNullable<typeof health>["trendingStories"][number]) => {
+    setAddingId(story.id);
+    try {
+      const { error } = await supabase.from("content_ideas").insert({
+        account_id: "default",
+        title: story.title || "Untitled trend",
+        subject: story.topics?.[0] || story.title || "Trending topic",
+        angle: story.content_format ? `${story.content_format} format` : null,
+        vertical: null,
+        suggested_format: story.content_format,
+        emotional_triggers: story.emotional_triggers || [],
+        trend_source_ids: [story.id],
+        opportunity_score: story.viral_score,
+        status: "proposed",
+        generated_by: "operator",
+      });
+      if (error) throw error;
+      toast.success(`"${story.title || "Trend"}" added to idea queue`);
+      queryClient.invalidateQueries({ queryKey: ["content-ideas"] });
+    } catch (err) {
+      toast.error(`Failed to add idea: ${(err as Error).message}`);
+    } finally {
+      setAddingId(null);
+    }
+  };
 
   if (isLoading) {
     return (
