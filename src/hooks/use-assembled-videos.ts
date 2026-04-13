@@ -41,11 +41,44 @@ export function useAssembledVideos() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("story_jobs")
-        .select("id, title, story_type, assembled_status, assembled_video_url, assembled_at, assembled_meta, total_clips, continuity_score, account_id, status")
+        .select("id, title, story_type, assembled_status, assembled_video_url, assembled_at, assembled_meta, total_clips, continuity_score, account_id, status, script_experiment_id")
         .in("assembled_status", ["succeeded", "rendering", "queued", "failed"])
         .order("updated_at", { ascending: false });
 
       if (error) throw error;
+
+      let rows = (data ?? []) as AssembledVideoRow[];
+
+      // Fetch enrichment metadata from linked experiments
+      const expIds = rows.map(r => r.script_experiment_id).filter(Boolean) as string[];
+      if (expIds.length > 0) {
+        const { data: expData } = await supabase
+          .from("prompt_experiments")
+          .select("id, input_context")
+          .in("id", expIds);
+
+        if (expData) {
+          const expMap = new Map<string, Record<string, unknown>>();
+          for (const e of expData) {
+            expMap.set(e.id, (e.input_context ?? {}) as Record<string, unknown>);
+          }
+          rows = rows.map(row => {
+            if (!row.script_experiment_id) return row;
+            const ctx = expMap.get(row.script_experiment_id);
+            if (!ctx) return row;
+            return {
+              ...row,
+              enrichment: {
+                used: ctx.used_scraped_insights === true,
+                hooks: (ctx.enrichment_hooks as string[]) || [],
+                emotions: (ctx.enrichment_emotions as string[]) || [],
+                format: (ctx.enrichment_format as string) || null,
+                insight_ids: (ctx.scraped_insight_ids as string[]) || [],
+              },
+            };
+          });
+        }
+      }
 
       const rows = (data ?? []) as AssembledVideoRow[];
       const activeRows = rows.filter(
