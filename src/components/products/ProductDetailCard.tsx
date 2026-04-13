@@ -34,7 +34,22 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
   const researchProduct = useResearchProduct();
   const generatePlan = useGenerateProductPlan();
   const assignAccounts = useAssignProductAccounts();
-  const { data: linkedIdeas } = useProductLinkedIdeas(product.id);
+  const qc = useQueryClient();
+
+  const handleDeleteImage = async (imageId: string) => {
+    const { error } = await supabase.from("product_images").delete().eq("id", imageId);
+    if (error) { toast.error("Failed to delete image"); return; }
+    toast.success("Image removed");
+    qc.invalidateQueries({ queryKey: ["products"] });
+    setImgIdx(0);
+  };
+
+  const handleVerifyImage = async (imageId: string) => {
+    const { error } = await supabase.from("product_images").update({ verified: true }).eq("id", imageId);
+    if (error) { toast.error("Failed to verify"); return; }
+    toast.success("Image verified ✓");
+    qc.invalidateQueries({ queryKey: ["products"] });
+  };
 
   const priceDollars = product.price_cents ? (product.price_cents / 100).toFixed(2) : null;
   const costDollars = product.supplier_price_cents ? (product.supplier_price_cents / 100).toFixed(2) : null;
