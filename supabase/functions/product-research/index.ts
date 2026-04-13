@@ -863,28 +863,49 @@ Deno.serve(async (req) => {
     
     // Candidate URLs from Perplexity (discovery only — NOT verified)
     const candidateLinks: { url: string; platform: string; linkType: string }[] = [];
+    
+    function addCandidate(url: string, linkType: string) {
+      if (!candidateLinks.some(cl => cl.url === url)) {
+        candidateLinks.push({ url, platform: detectPlatform(url), linkType });
+      }
+    }
+    
+    // Collect candidates from both citations AND URLs mentioned in response text
+    function collectCandidates(citations: string[], content: string, linkType: string) {
+      // From citations: accept strict product pages
+      for (const c of citations) {
+        if (isLikelyProductPageUrl(c)) addCandidate(c, linkType);
+      }
+      // From citations: also accept any retail domain page (looser filter, let verification handle quality)
+      for (const c of citations) {
+        if (!isLikelyProductPageUrl(c) && isRetailCandidate(c)) addCandidate(c, linkType);
+      }
+      // Extract URLs mentioned in the response body text
+      const textUrls = extractUrlsFromText(content);
+      for (const u of textUrls) {
+        if (isLikelyProductPageUrl(u)) addCandidate(u, linkType);
+        else if (isRetailCandidate(u)) addCandidate(u, linkType);
+      }
+    }
 
     // ==========================================
     // PHASE 1: RETAIL — Where is it being sold?
     // ==========================================
     console.log("[product-research] Phase 1: Retail search");
     const retailSearch = await perplexitySearch(
-      `Where can I buy "${searchName}" online right now? Find specific product listings on Amazon, Walmart, TikTok Shop, eBay, Etsy, or Shopify stores. Include exact prices and product page URLs. I need real, working links to buy this specific product.`,
-      `You are a shopping assistant. Find REAL product listings where someone can BUY this exact product online. Include specific prices, store names, and direct product page URLs. Only include listings for this exact product, not similar or related items.`,
+      `Find the exact product page URL to buy "${searchName}" on Amazon, Walmart, eBay, Etsy, Target, or TikTok Shop. I need the direct product listing page with the price. Give me the amazon.com/dp/ or walmart.com/ip/ link.`,
+      `You are a product search engine. Return ONLY direct product listing URLs (e.g. amazon.com/dp/BXXXXXXX, walmart.com/ip/NNNNN). Do NOT return blog posts, articles, category pages, or search results. Include the exact price if found.`,
       perplexityKey
     );
     if (retailSearch.content) {
       researchParts.push(`RETAIL LISTINGS:\n${retailSearch.content}`);
       allCitations.push(...retailSearch.citations);
       console.log(`[product-research] Retail citations (${retailSearch.citations.length}): ${retailSearch.citations.slice(0, 5).join(", ")}`);
-      for (const c of retailSearch.citations) {
-        if (isLikelyProductPageUrl(c) && !candidateLinks.some(cl => cl.url === c)) {
-          candidateLinks.push({ url: c, platform: detectPlatform(c), linkType: "retail" });
-        }
-      }
+      collectCandidates(retailSearch.citations, retailSearch.content, "retail");
     } else {
       console.warn("[product-research] Retail search returned no content");
     }
+    console.log(`[product-research] After Phase 1: ${candidateLinks.length} candidates`);
     await new Promise(r => setTimeout(r, 1200));
 
     // ==========================================
@@ -892,20 +913,17 @@ Deno.serve(async (req) => {
     // ==========================================
     console.log("[product-research] Phase 2: Wholesale/supplier search");
     const wholesaleSearch = await perplexitySearch(
-      `"${searchName}" wholesale supplier price. Find this product on AliExpress, Alibaba, 1688, DHgate, or Temu. What is the wholesale or bulk price? What is the cheapest supplier price available? Include direct product listing URLs.`,
-      `You are a dropshipping supplier researcher. Find the CHEAPEST wholesale/supplier sources for this exact product. Include: supplier platform, wholesale price, MOQ if available, shipping estimates, and direct URLs. Focus on AliExpress, Alibaba, 1688.com, DHgate, and Temu.`,
+      `Find the exact product listing URL for "${searchName}" on AliExpress, Alibaba, DHgate, or Temu. I need the direct aliexpress.com/item/ or alibaba.com/product-detail/ link with the wholesale/supplier price.`,
+      `You are a wholesale product sourcer. Return ONLY direct product listing URLs from AliExpress (aliexpress.com/item/), Alibaba (alibaba.com/product-detail/), DHgate, 1688, or Temu. Do NOT return wiki pages, showroom pages, category pages, or search results. Include the unit price.`,
       perplexityKey
     );
     if (wholesaleSearch.content) {
       researchParts.push(`WHOLESALE/SUPPLIER SOURCES:\n${wholesaleSearch.content}`);
       allCitations.push(...wholesaleSearch.citations);
       console.log(`[product-research] Wholesale citations (${wholesaleSearch.citations.length}): ${wholesaleSearch.citations.slice(0, 5).join(", ")}`);
-      for (const c of wholesaleSearch.citations) {
-        if (isLikelyProductPageUrl(c) && c.match(/aliexpress\.|alibaba\.|1688\.|dhgate\.|temu\./i) && !candidateLinks.some(cl => cl.url === c)) {
-          candidateLinks.push({ url: c, platform: detectPlatform(c), linkType: "wholesale" });
-        }
-      }
+      collectCandidates(wholesaleSearch.citations, wholesaleSearch.content, "wholesale");
     }
+    console.log(`[product-research] After Phase 2: ${candidateLinks.length} candidates`);
 
     // ─── FALLBACK: if broad searches fail, run retailer-specific searches using citations only ───
     if (candidateLinks.length === 0) {
