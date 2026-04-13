@@ -17,6 +17,8 @@ const STATUS_COLORS: Record<ProductStatus, string> = {
   researching: "bg-yellow-500/10 text-yellow-500",
   approved: "bg-green-500/10 text-green-500",
   active: "bg-primary/10 text-primary",
+  test_listing: "bg-orange-500/10 text-orange-500",
+  scaled_listing: "bg-emerald-500/10 text-emerald-500",
   paused: "bg-muted text-muted-foreground",
   dead: "bg-destructive/10 text-destructive",
 };
@@ -24,7 +26,8 @@ const STATUS_COLORS: Record<ProductStatus, string> = {
 const NEXT_STATUS: Partial<Record<ProductStatus, ProductStatus>> = {
   discovered: "researching",
   researching: "approved",
-  approved: "active",
+  approved: "test_listing",
+  test_listing: "scaled_listing",
 };
 
 export function ProductDetailCard({ product }: { product: ProductWithAnalysis }) {
