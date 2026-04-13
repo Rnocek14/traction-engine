@@ -33,12 +33,29 @@ export default function Review() {
   const renderingCount = videos.filter(v => v.assembled_status === "rendering" || v.assembled_status === "queued").length;
 
   const handleApprove = async (id: string) => {
-    // For now, just mark as noted - future: move to publishing queue
+    const { error } = await supabase
+      .from("story_jobs")
+      .update({ review_status: "approved" } as any)
+      .eq("id", id);
+    if (error) {
+      toast.error(`Approve failed: ${error.message}`);
+      return;
+    }
     toast.success("Video approved! Ready for posting.");
+    queryClient.invalidateQueries({ queryKey: ["assembled-videos"] });
   };
 
   const handleReject = async (id: string) => {
+    const { error } = await supabase
+      .from("story_jobs")
+      .update({ review_status: "rejected" } as any)
+      .eq("id", id);
+    if (error) {
+      toast.error(`Reject failed: ${error.message}`);
+      return;
+    }
     toast.info("Video rejected. Consider regenerating clips.");
+    queryClient.invalidateQueries({ queryKey: ["assembled-videos"] });
   };
 
   const handleReassemble = async (id: string) => {
