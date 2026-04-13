@@ -460,21 +460,20 @@ Deno.serve(async (req) => {
 
     await supabase.from("viral_videos").update(updatePayload).eq("id", video.id);
 
-    // Trigger research pipeline if linked
+    // Fire-and-forget research pipeline (don't await — it's slow)
     if (linkedProductId) {
-      try {
-        await fetch(`${supabaseUrl}/functions/v1/product-research`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${supabaseServiceKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ product_id: linkedProductId }),
-        });
+      fetch(`${supabaseUrl}/functions/v1/product-research`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${supabaseServiceKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ product_id: linkedProductId }),
+      }).then(() => {
         console.log(`[ingest-viral] Triggered research for product ${linkedProductId}`);
-      } catch (err) {
+      }).catch((err) => {
         console.warn(`[ingest-viral] Research trigger failed:`, err);
-      }
+      });
     }
 
     return new Response(
