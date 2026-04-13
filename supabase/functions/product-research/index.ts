@@ -866,7 +866,7 @@ Deno.serve(async (req) => {
     console.log("[product-research] Phase 4: Image search");
     let foundImageUrls: { url: string; source: string; label: string }[] = [];
     const imgSearch = await perplexitySearch(
-      `"${productName}" product photo. Show me where to buy this exact product with product photos. Amazon listing, AliExpress listing.`,
+      `"${searchName}" product photo. Show me where to buy this exact product with product photos. Amazon listing, AliExpress listing.`,
       `Find real product listing pages for this exact product. I need pages with product photos. Focus on Amazon, AliExpress, Walmart, or official product sites.`,
       perplexityKey
     );
