@@ -810,7 +810,7 @@ Deno.serve(async (req) => {
     // ==========================================
     console.log("[product-research] Phase 1: Retail search");
     const retailSearch = await perplexitySearch(
-      `Where can I buy "${productName}" online right now? Find specific product listings on Amazon, Walmart, TikTok Shop, eBay, Etsy, or Shopify stores. Include exact prices and product page URLs. I need real, working links to buy this specific product.`,
+      `Where can I buy "${searchName}" online right now? Find specific product listings on Amazon, Walmart, TikTok Shop, eBay, Etsy, or Shopify stores. Include exact prices and product page URLs. I need real, working links to buy this specific product.`,
       `You are a shopping assistant. Find REAL product listings where someone can BUY this exact product online. Include specific prices, store names, and direct product page URLs. Only include listings for this exact product, not similar or related items.`,
       perplexityKey
     );
@@ -830,7 +830,7 @@ Deno.serve(async (req) => {
     // ==========================================
     console.log("[product-research] Phase 2: Wholesale/supplier search");
     const wholesaleSearch = await perplexitySearch(
-      `"${productName}" wholesale supplier price. Find this product on AliExpress, Alibaba, 1688, DHgate, or Temu. What is the wholesale or bulk price? What is the cheapest supplier price available? Include direct product listing URLs.`,
+      `"${searchName}" wholesale supplier price. Find this product on AliExpress, Alibaba, 1688, DHgate, or Temu. What is the wholesale or bulk price? What is the cheapest supplier price available? Include direct product listing URLs.`,
       `You are a dropshipping supplier researcher. Find the CHEAPEST wholesale/supplier sources for this exact product. Include: supplier platform, wholesale price, MOQ if available, shipping estimates, and direct URLs. Focus on AliExpress, Alibaba, 1688.com, DHgate, and Temu.`,
       perplexityKey
     );
@@ -850,7 +850,7 @@ Deno.serve(async (req) => {
     // ==========================================
     console.log("[product-research] Phase 3: Social proof & competition");
     const socialSearch = await perplexitySearch(
-      `"${productName}" TikTok viral review. How many views does this product have? Who are the top creators promoting it? How many sellers are already selling it? Is this product saturated or still emerging?`,
+      `"${searchName}" TikTok viral review. How many views does this product have? Who are the top creators promoting it? How many sellers are already selling it? Is this product saturated or still emerging?`,
       `You are a social media trend analyst for e-commerce. Analyze this product's social media presence: view counts, number of creators promoting it, engagement rates, competition level, and whether it's still trending or past its peak. Be specific with numbers.`,
       perplexityKey
     );
