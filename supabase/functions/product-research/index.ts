@@ -856,16 +856,8 @@ Deno.serve(async (req) => {
       allCitations.push(...retailSearch.citations);
       console.log(`[product-research] Retail citations (${retailSearch.citations.length}): ${retailSearch.citations.slice(0, 5).join(", ")}`);
       for (const c of retailSearch.citations) {
-        // Accept any retail domain OR any URL from a retail search (let verification decide)
-        if (isRetailDomain(c) || c.match(/amazon\.|walmart\.|ebay\.|etsy\.|tiktok\.com.*shop|shopify|myshopify|target\./i)) {
+        if (isLikelyProductPageUrl(c) && !candidateLinks.some(cl => cl.url === c)) {
           candidateLinks.push({ url: c, platform: detectPlatform(c), linkType: "retail" });
-        }
-      }
-      // Also extract URLs from the response text itself
-      const urlsInText = retailSearch.content.match(/https?:\/\/[^\s"'<>)\]]+/gi) || [];
-      for (const u of urlsInText) {
-        if (isRetailDomain(u) && !candidateLinks.some(cl => cl.url === u)) {
-          candidateLinks.push({ url: u, platform: detectPlatform(u), linkType: "retail" });
         }
       }
     } else {
@@ -887,45 +879,57 @@ Deno.serve(async (req) => {
       allCitations.push(...wholesaleSearch.citations);
       console.log(`[product-research] Wholesale citations (${wholesaleSearch.citations.length}): ${wholesaleSearch.citations.slice(0, 5).join(", ")}`);
       for (const c of wholesaleSearch.citations) {
-        if (c.match(/aliexpress\.|alibaba\.|1688\.|dhgate\.|temu\./i)) {
+        if (isLikelyProductPageUrl(c) && c.match(/aliexpress\.|alibaba\.|1688\.|dhgate\.|temu\./i) && !candidateLinks.some(cl => cl.url === c)) {
           candidateLinks.push({ url: c, platform: detectPlatform(c), linkType: "wholesale" });
-        }
-      }
-      // Also extract URLs from wholesale text
-      const wUrls = wholesaleSearch.content.match(/https?:\/\/[^\s"'<>)\]]+/gi) || [];
-      for (const u of wUrls) {
-        if (u.match(/aliexpress\.|alibaba\.|1688\.|dhgate\.|temu\./i) && !candidateLinks.some(cl => cl.url === u)) {
-          candidateLinks.push({ url: u, platform: detectPlatform(u), linkType: "wholesale" });
         }
       }
     }
 
-    // ─── FALLBACK: If no candidates yet, do a URL-focused search ───
+    // ─── FALLBACK: if broad searches fail, run retailer-specific searches using citations only ───
     if (candidateLinks.length === 0) {
-      console.log("[product-research] No candidates from citations — running URL-focused fallback search");
-      const fallbackSearch = await perplexitySearch(
-        `Find exact product listing URLs for "${searchName}" on Amazon.com, AliExpress.com, or Temu.com. I need the actual product page links, not review articles. Give me amazon.com/dp/ links or aliexpress.com/item/ links.`,
-        `Return ONLY direct product page URLs from major retailers. No blog posts, no review sites. Only amazon.com, aliexpress.com, walmart.com, temu.com, ebay.com product pages.`,
-        perplexityKey
-      );
-      if (fallbackSearch.citations.length > 0) {
-        console.log(`[product-research] Fallback citations (${fallbackSearch.citations.length}): ${fallbackSearch.citations.slice(0, 5).join(", ")}`);
+      console.log("[product-research] No direct product-page citations yet — running retailer-specific fallback searches");
+      const targetedSearches = [
+        {
+          label: "Amazon retail",
+          query: `site:amazon.com \"${searchName}\" direct product page`,
+          domain: /amazon\./i,
+          linkType: "retail" as const,
+        },
+        {
+          label: "Walmart retail",
+          query: `site:walmart.com \"${searchName}\" direct product page`,
+          domain: /walmart\./i,
+          linkType: "retail" as const,
+        },
+        {
+          label: "AliExpress wholesale",
+          query: `site:aliexpress.com \"${searchName}\" direct product page`,
+          domain: /aliexpress\./i,
+          linkType: "wholesale" as const,
+        },
+        {
+          label: "Temu wholesale",
+          query: `site:temu.com \"${searchName}\" direct product page`,
+          domain: /temu\./i,
+          linkType: "wholesale" as const,
+        },
+      ];
+
+      for (const search of targetedSearches) {
+        const fallbackSearch = await perplexitySearch(
+          `Find exact product listing URLs for ${search.query}. I need live product pages only.`,
+          `Return direct product page citations only. No blogs, no review sites, no category pages, no homepages.`,
+          perplexityKey
+        );
+        console.log(`[product-research] ${search.label} citations (${fallbackSearch.citations.length}): ${fallbackSearch.citations.slice(0, 5).join(", ")}`);
         for (const c of fallbackSearch.citations) {
-          if (isRetailDomain(c)) {
-            const lt = c.match(/aliexpress\.|alibaba\.|1688\.|dhgate\.|temu\./i) ? "wholesale" : "retail";
-            candidateLinks.push({ url: c, platform: detectPlatform(c), linkType: lt });
+          if (search.domain.test(c) && isLikelyProductPageUrl(c) && !candidateLinks.some(cl => cl.url === c)) {
+            candidateLinks.push({ url: c, platform: detectPlatform(c), linkType: search.linkType });
           }
         }
+        await new Promise(r => setTimeout(r, 600));
       }
-      // Extract URLs from text
-      const fbUrls = (fallbackSearch.content || "").match(/https?:\/\/[^\s"'<>)\]]+/gi) || [];
-      for (const u of fbUrls) {
-        if (isRetailDomain(u) && !candidateLinks.some(cl => cl.url === u)) {
-          const lt = u.match(/aliexpress\.|alibaba\.|1688\.|dhgate\.|temu\./i) ? "wholesale" : "retail";
-          candidateLinks.push({ url: u, platform: detectPlatform(u), linkType: lt });
-        }
-      }
-      console.log(`[product-research] After fallback: ${candidateLinks.length} candidates`);
+      console.log(`[product-research] After targeted fallback: ${candidateLinks.length} candidates`);
     }
     await new Promise(r => setTimeout(r, 1200));
 
@@ -957,7 +961,7 @@ Deno.serve(async (req) => {
 
     const candidateImgs: { url: string; source: string; label: string }[] = [];
     const allRetailerCitations = [...new Set([...allCitations, ...imgSearch.citations])].filter(c =>
-      c.match(/amazon\.|aliexpress\.|walmart\.|temu\.|etsy\.|ebay\.|shopify|myshopify/i)
+      isLikelyProductPageUrl(c)
     );
 
     for (const citation of allRetailerCitations.slice(0, 6)) {
