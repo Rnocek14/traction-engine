@@ -9,13 +9,14 @@
 
 import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Settings as SettingsIcon, Activity, Users, Beaker } from "lucide-react";
+import { Settings as SettingsIcon, Activity, Users, Beaker, FlaskConical } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { GlobalNav } from "@/components/GlobalNav";
 import RoutingAnalytics from "./RoutingAnalytics";
 import AccountDetail from "./AccountDetail";
 import { ComparePanel } from "@/components/lab/ComparePanel";
 import { LearningInspector } from "@/components/lab/LearningInspector";
+import { PromptLeaderboard } from "@/components/settings/PromptLeaderboard";
 
 export default function Settings() {
   const { accountId, tab } = useParams<{ accountId?: string; tab?: string }>();
@@ -47,6 +48,10 @@ export default function Settings() {
               <Users className="h-4 w-4" />
               Accounts
             </TabsTrigger>
+            <TabsTrigger value="prompts" className="gap-2">
+              <FlaskConical className="h-4 w-4" />
+              Prompt R&D
+            </TabsTrigger>
             <TabsTrigger value="advanced" className="gap-2">
               <Beaker className="h-4 w-4" />
               Advanced
@@ -65,6 +70,10 @@ export default function Settings() {
                 Select an account from the dashboard to view details
               </div>
             )}
+          </TabsContent>
+
+          <TabsContent value="prompts" className="mt-0">
+            <PromptLeaderboard />
           </TabsContent>
 
           <TabsContent value="advanced" className="mt-0">
