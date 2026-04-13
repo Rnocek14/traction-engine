@@ -657,5 +657,3 @@ function LinkRow({ link, productId, qc, rejected }: {
   );
 }
 
-// Re-export types for LinkRow
-import type { ProductLink } from "@/hooks/use-products";
