@@ -95,3 +95,6 @@ verify_jwt = false
 
 [functions.generate-ideas]
 verify_jwt = false
+
+[functions.auto-scrape-trends]
+verify_jwt = false

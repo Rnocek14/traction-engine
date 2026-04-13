@@ -2,9 +2,11 @@
  * create-story
  * 
  * Creates a new story_job entry and optionally triggers generation.
+ * Now injects trend enrichment into scene prompts before creation.
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { fetchTrendEnrichment } from "../_shared/trend-enrichment.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -30,13 +32,14 @@ interface CreateStoryRequest {
     size?: string;
     provider?: string;
   };
-  // Prompt R&D lineage
   experiment_ids?: {
     topic?: string;
     script?: string;
     hook?: string;
     visual?: string;
   };
+  // Optional: caller can pass content_idea_id to link back
+  content_idea_id?: string;
 }
 
 Deno.serve(async (req) => {
@@ -59,6 +62,7 @@ Deno.serve(async (req) => {
       auto_generate = false,
       settings,
       experiment_ids,
+      content_idea_id,
     } = body;
 
     if (!title || !continuity_anchors || !storyboard_json?.scenes?.length) {
@@ -66,6 +70,30 @@ Deno.serve(async (req) => {
         JSON.stringify({ success: false, error: "title, continuity_anchors, and storyboard_json.scenes required" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
+    }
+
+    // ── Trend enrichment injection ──
+    // Fetch trend context and enrich scene prompts with trending signals
+    const enrichment = await fetchTrendEnrichment(supabase, {
+      vertical: undefined, // will use whatever insights are available
+      topic_prompt: title,
+      mode: "light",
+    });
+
+    let enrichedStoryboard = storyboard_json;
+    if (enrichment.enabled && enrichment.prompt_block) {
+      // Inject trend context into the first scene's prompt as grounding
+      const enrichedScenes = storyboard_json.scenes.map((scene, idx) => {
+        if (idx === 0) {
+          return {
+            ...scene,
+            prompt: `${scene.prompt}\n\n${enrichment.prompt_block}`,
+          };
+        }
+        return scene;
+      });
+      enrichedStoryboard = { scenes: enrichedScenes };
+      console.log(`[create-story] Enriched with ${enrichment.insight_ids.length} trend insights`);
     }
 
     // Create the story job
@@ -76,11 +104,20 @@ Deno.serve(async (req) => {
         story_type,
         title,
         status: auto_generate ? "generating" : "draft",
-        total_clips: storyboard_json.scenes.length,
+        total_clips: enrichedStoryboard.scenes.length,
         completed_clips: 0,
-        continuity_anchors,
-        storyboard_json,
-        // Prompt R&D lineage
+        continuity_anchors: {
+          ...continuity_anchors,
+          // Store trend enrichment metadata for traceability
+          ...(enrichment.enabled ? {
+            _trend_enrichment: {
+              insight_ids: enrichment.insight_ids,
+              hook_patterns: enrichment.hook_patterns,
+              mode: enrichment.mode,
+            },
+          } : {}),
+        },
+        storyboard_json: enrichedStoryboard,
         ...(experiment_ids?.topic ? { topic_experiment_id: experiment_ids.topic } : {}),
         ...(experiment_ids?.script ? { script_experiment_id: experiment_ids.script } : {}),
         ...(experiment_ids?.hook ? { hook_experiment_id: experiment_ids.hook } : {}),
@@ -97,18 +134,25 @@ Deno.serve(async (req) => {
       );
     }
 
-    console.log(`[create-story] Created story ${storyJob.id}: "${title}" with ${storyboard_json.scenes.length} scenes`);
+    // Link content idea to this story if provided
+    if (content_idea_id) {
+      await supabase
+        .from("content_ideas")
+        .update({ story_job_id: storyJob.id, status: "produced" })
+        .eq("id", content_idea_id);
+    }
+
+    console.log(`[create-story] Created story ${storyJob.id}: "${title}" with ${enrichedStoryboard.scenes.length} scenes (trend_enriched=${enrichment.enabled})`);
 
     // If auto_generate, trigger the chained generation
     if (auto_generate) {
       const chainedPayload = {
         story_job_id: storyJob.id,
-        scenes: storyboard_json.scenes,
+        scenes: enrichedStoryboard.scenes,
         anchors: continuity_anchors,
         settings: settings || { size: "720x1280", provider: "runway" },
       };
 
-      // Fire and forget - don't wait for completion
       fetch(`${supabaseUrl}/functions/v1/generate-story-chained`, {
         method: "POST",
         headers: {
@@ -128,9 +172,11 @@ Deno.serve(async (req) => {
         success: true,
         story_job_id: storyJob.id,
         title: storyJob.title,
-        scene_count: storyboard_json.scenes.length,
+        scene_count: enrichedStoryboard.scenes.length,
         status: storyJob.status,
         auto_generate_triggered: auto_generate,
+        trend_enriched: enrichment.enabled,
+        trend_insight_count: enrichment.insight_ids.length,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

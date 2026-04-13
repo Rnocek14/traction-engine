@@ -422,6 +422,45 @@ export type Database = {
           },
         ]
       }
+      insight_performance: {
+        Row: {
+          created_at: string
+          id: string
+          outcome_score: number | null
+          scraped_insight_id: string
+          story_job_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          outcome_score?: number | null
+          scraped_insight_id: string
+          story_job_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          outcome_score?: number | null
+          scraped_insight_id?: string
+          story_job_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "insight_performance_scraped_insight_id_fkey"
+            columns: ["scraped_insight_id"]
+            isOneToOne: false
+            referencedRelation: "scraped_insights"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "insight_performance_story_job_id_fkey"
+            columns: ["story_job_id"]
+            isOneToOne: false
+            referencedRelation: "story_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       instructor_profiles: {
         Row: {
           bio: string | null
