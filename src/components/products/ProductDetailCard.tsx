@@ -224,7 +224,7 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
             </Button>
           )}
           {product.source_url && (
-            <a href={product.source_url} target="_blank" rel="noopener noreferrer">
+            <a href={product.source_url.startsWith("http") ? product.source_url : `https://${product.source_url}`} target="_blank" rel="noopener noreferrer">
               <Button variant="ghost" size="sm"><ExternalLink className="w-3 h-3" /></Button>
             </a>
           )}

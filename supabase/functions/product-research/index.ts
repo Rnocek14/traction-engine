@@ -41,7 +41,7 @@ async function fetchPageContent(url: string): Promise<string> {
   }
 }
 
-async function perplexityResearch(query: string, perplexityKey: string): Promise<string> {
+async function perplexityResearch(query: string, perplexityKey: string): Promise<{ content: string; citations: string[] }> {
   try {
     const resp = await fetch("https://api.perplexity.ai/chat/completions", {
       method: "POST",
@@ -54,7 +54,7 @@ async function perplexityResearch(query: string, perplexityKey: string): Promise
         messages: [
           {
             role: "system",
-            content: "You are a product analyst for e-commerce and dropshipping. Research this product thoroughly: pricing, competition, social media presence, viral potential, suppliers, and market saturation.",
+            content: "You are a product analyst for e-commerce and dropshipping. Research this product thoroughly: pricing, competition, social media presence, viral potential, suppliers, and market saturation. Include any product image URLs you find.",
           },
           { role: "user", content: query },
         ],
@@ -62,11 +62,14 @@ async function perplexityResearch(query: string, perplexityKey: string): Promise
         search_recency_filter: "month",
       }),
     });
-    if (!resp.ok) return "";
+    if (!resp.ok) return { content: "", citations: [] };
     const data = await resp.json();
-    return data.choices?.[0]?.message?.content || "";
+    return {
+      content: data.choices?.[0]?.message?.content || "",
+      citations: data.citations || [],
+    };
   } catch {
-    return "";
+    return { content: "", citations: [] };
   }
 }
 
@@ -119,12 +122,17 @@ Deno.serve(async (req) => {
     }
 
     // 2. Perplexity deep research
+    let perplexityCitations: string[] = [];
     if (perplexityKey) {
       const searchQuery = productName
         ? `"${productName}" product review TikTok viral dropshipping price competition`
         : `product at ${productUrl} - reviews, pricing, competition, viral potential, TikTok`;
       const research = await perplexityResearch(searchQuery, perplexityKey);
-      if (research) researchParts.push(`Market research:\n${research}`);
+      if (research.content) researchParts.push(`Market research:\n${research.content}`);
+      perplexityCitations = research.citations;
+      if (perplexityCitations.length > 0) {
+        researchParts.push(`\nReal Source URLs from research (USE THESE):\n${perplexityCitations.map((c, i) => `[${i+1}] ${c}`).join("\n")}`);
+      }
     }
 
     const combined = researchParts.join("\n\n---\n\n").slice(0, 15000);
@@ -147,6 +155,10 @@ Deno.serve(async (req) => {
           {
             role: "system",
             content: `You are an expert dropshipping product analyst. Score this product for viral short-form video marketing potential.
+
+CRITICAL - URLs:
+- image_url: If you find a direct product image URL (ending in .jpg, .png, .webp) in the research data, include it. Do NOT make up image URLs.
+- source_url: Use a REAL URL from the "Real Source URLs" section. Pick the most relevant product page. Do NOT hallucinate URLs.
 
 SCORING (1-5):
 - wow_factor: Visual impact and surprise value. 5=jaw-dropping demo, 1=boring/generic
@@ -183,7 +195,8 @@ Also suggest:
                 type: "object",
                 properties: {
                   product_name: { type: "string" },
-                  image_url: { type: "string", description: "Direct URL to a product image if found in the research data" },
+                   image_url: { type: "string", description: "Direct URL to a product image if found in the research data. Must be a real URL ending in .jpg/.png/.webp. Empty string if none found." },
+                   source_url: { type: "string", description: "A real product page URL from the Source URLs section. Do NOT make up URLs. Empty string if none relevant." },
                   category: { type: "string" },
                   subcategory: { type: "string" },
                   price_cents: { type: "integer", description: "Estimated retail price in cents" },
@@ -242,7 +255,7 @@ Also suggest:
           name: analysis.product_name || productName,
           category: analysis.category || null,
           subcategory: analysis.subcategory || null,
-          source_url: productUrl || null,
+          source_url: analysis.source_url || productUrl || perplexityCitations[0] || null,
           image_url: analysis.image_url || null,
           price_cents: analysis.price_cents || null,
           supplier_price_cents: analysis.supplier_price_cents || null,
@@ -260,7 +273,7 @@ Also suggest:
       productId = newProduct.id;
     } else {
       // Update existing product with new data
-      await supabase.from("products").update({
+      const updatePayload: Record<string, unknown> = {
         category: analysis.category || undefined,
         subcategory: analysis.subcategory || undefined,
         image_url: analysis.image_url || undefined,
@@ -270,7 +283,12 @@ Also suggest:
         status: "researching",
         notes: analysis.summary || undefined,
         updated_at: new Date().toISOString(),
-      }).eq("id", productId);
+      };
+      // Backfill source_url if missing
+      if (analysis.source_url || perplexityCitations.length > 0) {
+        updatePayload.source_url = analysis.source_url || perplexityCitations[0];
+      }
+      await supabase.from("products").update(updatePayload).eq("id", productId);
     }
 
     // Upsert analysis
