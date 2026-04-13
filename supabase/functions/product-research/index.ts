@@ -895,9 +895,10 @@ Deno.serve(async (req) => {
     const openaiKey = Deno.env.get("OPENAI_API_KEY")!;
     const perplexityKey = Deno.env.get("PERPLEXITY_API_KEY");
     const firecrawlKey = Deno.env.get("FIRECRAWL_API_KEY") || null;
+    const serpApiKey = Deno.env.get("SERPAPI_API_KEY") || null;
 
-    if (!perplexityKey) {
-      return new Response(JSON.stringify({ error: "PERPLEXITY_API_KEY not configured" }), {
+    if (!perplexityKey && !serpApiKey) {
+      return new Response(JSON.stringify({ error: "PERPLEXITY_API_KEY or SERPAPI_API_KEY required" }), {
         status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
