@@ -148,7 +148,7 @@ Extract the canonical search identity with both retail and wholesale search stra
   if (!call) return fallbackIdentity(productName);
 
   const identity: SearchIdentity = JSON.parse(call.function.arguments);
-  console.log(`[research] Identity: core="${identity.corePhrase}" anchors=[${identity.anchorTerms}] exclude=[${identity.excludedConcepts}]`);
+  console.log(`[research] Identity: brand="${identity.brandName}" core="${identity.corePhrase}" anchors=[${identity.anchorTerms}] exclude=[${identity.excludedConcepts}] wholesale="${identity.wholesaleDescription}"`);
   return identity;
 }
 
@@ -156,10 +156,13 @@ function fallbackIdentity(productName: string): SearchIdentity {
   const words = productName.toLowerCase().split(/\s+/).filter(w => w.length > 2);
   return {
     corePhrase: productName,
+    brandName: "",
     modifiers: [],
     anchorTerms: words.slice(0, 2),
     excludedConcepts: [],
     queries: [`"${productName}"`],
+    wholesaleDescription: productName,
+    wholesaleQueries: [`"${productName}"`],
   };
 }
 
