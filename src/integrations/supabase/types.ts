@@ -3103,6 +3103,77 @@ export type Database = {
           },
         ]
       }
+      viral_videos: {
+        Row: {
+          caption: string | null
+          comments_count: number | null
+          created_at: string
+          creator_handle: string | null
+          demand_signals: Json | null
+          extracted_product_description: string | null
+          extracted_product_name: string | null
+          id: string
+          likes: number | null
+          linked_product_id: string | null
+          platform: string
+          processed_at: string | null
+          processing_status: string
+          shares: number | null
+          source_hook: string | null
+          updated_at: string
+          url: string
+          views: number | null
+        }
+        Insert: {
+          caption?: string | null
+          comments_count?: number | null
+          created_at?: string
+          creator_handle?: string | null
+          demand_signals?: Json | null
+          extracted_product_description?: string | null
+          extracted_product_name?: string | null
+          id?: string
+          likes?: number | null
+          linked_product_id?: string | null
+          platform?: string
+          processed_at?: string | null
+          processing_status?: string
+          shares?: number | null
+          source_hook?: string | null
+          updated_at?: string
+          url: string
+          views?: number | null
+        }
+        Update: {
+          caption?: string | null
+          comments_count?: number | null
+          created_at?: string
+          creator_handle?: string | null
+          demand_signals?: Json | null
+          extracted_product_description?: string | null
+          extracted_product_name?: string | null
+          id?: string
+          likes?: number | null
+          linked_product_id?: string | null
+          platform?: string
+          processed_at?: string | null
+          processing_status?: string
+          shares?: number | null
+          source_hook?: string | null
+          updated_at?: string
+          url?: string
+          views?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "viral_videos_linked_product_id_fkey"
+            columns: ["linked_product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never

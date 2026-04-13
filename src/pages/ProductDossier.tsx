@@ -8,6 +8,7 @@ import { ProductIdentitySection } from "@/components/products/dossier/ProductIde
 import { RetailEvidenceSection } from "@/components/products/dossier/RetailEvidenceSection";
 import { WholesaleEvidenceSection } from "@/components/products/dossier/WholesaleEvidenceSection";
 import { DossierHeader } from "@/components/products/dossier/DossierHeader";
+import { ViralVideoList } from "@/components/products/ViralVideoList";
 
 export default function ProductDossier() {
   const { productId } = useParams();
@@ -50,6 +51,7 @@ export default function ProductDossier() {
         </Button>
 
         <DossierHeader product={product} />
+        <ViralVideoList productId={productId} />
         <ProductIdentitySection product={product} />
         <RetailEvidenceSection product={product} />
         <WholesaleEvidenceSection product={product} />

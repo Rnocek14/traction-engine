@@ -2,6 +2,8 @@ import { GlobalNav } from "@/components/GlobalNav";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ProductGrid } from "@/components/products/ProductGrid";
 import { ProductEntryForm } from "@/components/products/ProductEntryForm";
+import { ViralIntakeForm } from "@/components/products/ViralIntakeForm";
+import { ViralVideoList } from "@/components/products/ViralVideoList";
 import { Button } from "@/components/ui/button";
 import { Loader2, Radar } from "lucide-react";
 import { useDiscoverProducts, type ProductStatus } from "@/hooks/use-products";
@@ -37,6 +39,15 @@ export default function Products() {
               Discover Products
             </Button>
             <ProductEntryForm />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+          <div className="lg:col-span-2">
+            <ViralIntakeForm />
+          </div>
+          <div>
+            <ViralVideoList />
           </div>
         </div>
 
