@@ -156,6 +156,10 @@ Deno.serve(async (req) => {
             role: "system",
             content: `You are an expert dropshipping product analyst. Score this product for viral short-form video marketing potential.
 
+CRITICAL - URLs:
+- image_url: If you find a direct product image URL (ending in .jpg, .png, .webp) in the research data, include it. Do NOT make up image URLs.
+- source_url: Use a REAL URL from the "Real Source URLs" section. Pick the most relevant product page. Do NOT hallucinate URLs.
+
 SCORING (1-5):
 - wow_factor: Visual impact and surprise value. 5=jaw-dropping demo, 1=boring/generic
 - social_media_potential: Likelihood of generating engagement. 5=guaranteed viral, 1=no social appeal
