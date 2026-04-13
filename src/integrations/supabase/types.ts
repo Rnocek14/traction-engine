@@ -17,60 +17,99 @@ export type Database = {
       account_configs: {
         Row: {
           account_id: string
+          account_name: string | null
+          allowed_offer_types: string[]
+          allowed_product_categories: string[]
           audience: Json
           banned_topics: string[]
           claim_policy: Database["public"]["Enums"]["claim_policy_level"]
           content_pillars: string[]
+          content_style: string | null
           created_at: string
           cta_destination: string | null
           cta_phrases: string[]
           cta_style: Database["public"]["Enums"]["cta_style"]
           disclaimer_rules: Json
+          handle: string | null
           id: string
+          max_daily_posts: number
+          monetization_mode: Database["public"]["Enums"]["monetization_mode"]
           persona: Json
+          platform: Database["public"]["Enums"]["account_platform"]
+          posting_frequency_target: number
+          priority_score: number
           promise: string
+          status: Database["public"]["Enums"]["account_status"]
           style_rules: Json
           uniqueness_salt: string | null
           updated_at: string
           vertical: Database["public"]["Enums"]["content_vertical"]
+          voice_id: string | null
+          voice_provider: string | null
         }
         Insert: {
           account_id: string
+          account_name?: string | null
+          allowed_offer_types?: string[]
+          allowed_product_categories?: string[]
           audience?: Json
           banned_topics?: string[]
           claim_policy?: Database["public"]["Enums"]["claim_policy_level"]
           content_pillars?: string[]
+          content_style?: string | null
           created_at?: string
           cta_destination?: string | null
           cta_phrases?: string[]
           cta_style?: Database["public"]["Enums"]["cta_style"]
           disclaimer_rules?: Json
+          handle?: string | null
           id?: string
+          max_daily_posts?: number
+          monetization_mode?: Database["public"]["Enums"]["monetization_mode"]
           persona?: Json
+          platform?: Database["public"]["Enums"]["account_platform"]
+          posting_frequency_target?: number
+          priority_score?: number
           promise: string
+          status?: Database["public"]["Enums"]["account_status"]
           style_rules?: Json
           uniqueness_salt?: string | null
           updated_at?: string
           vertical: Database["public"]["Enums"]["content_vertical"]
+          voice_id?: string | null
+          voice_provider?: string | null
         }
         Update: {
           account_id?: string
+          account_name?: string | null
+          allowed_offer_types?: string[]
+          allowed_product_categories?: string[]
           audience?: Json
           banned_topics?: string[]
           claim_policy?: Database["public"]["Enums"]["claim_policy_level"]
           content_pillars?: string[]
+          content_style?: string | null
           created_at?: string
           cta_destination?: string | null
           cta_phrases?: string[]
           cta_style?: Database["public"]["Enums"]["cta_style"]
           disclaimer_rules?: Json
+          handle?: string | null
           id?: string
+          max_daily_posts?: number
+          monetization_mode?: Database["public"]["Enums"]["monetization_mode"]
           persona?: Json
+          platform?: Database["public"]["Enums"]["account_platform"]
+          posting_frequency_target?: number
+          priority_score?: number
           promise?: string
+          status?: Database["public"]["Enums"]["account_status"]
           style_rules?: Json
           uniqueness_salt?: string | null
           updated_at?: string
           vertical?: Database["public"]["Enums"]["content_vertical"]
+          voice_id?: string | null
+          voice_provider?: string | null
         }
         Relationships: []
       }
@@ -2568,6 +2607,8 @@ export type Database = {
       }
     }
     Enums: {
+      account_platform: "tiktok" | "instagram" | "youtube_shorts"
+      account_status: "active" | "paused" | "warmup" | "flagged"
       app_role: "admin" | "qa" | "viewer"
       claim_policy_level: "standard" | "moderate" | "strict" | "medical"
       content_vertical:
@@ -2576,10 +2617,14 @@ export type Database = {
         | "health"
         | "hyperlocal"
         | "ecommerce"
+        | "gadgets"
+        | "home"
+        | "toys"
       cta_style: "soft" | "direct" | "hard_offer"
       delivery_format: "online" | "in_person" | "hybrid" | "self_paced"
       export_format: "pdf" | "json" | "docx"
       learning_style: "video" | "project" | "reading"
+      monetization_mode: "app_first" | "product_first" | "hybrid"
       progress_status: "not_started" | "in_progress" | "completed"
       script_status:
         | "draft"
@@ -2728,6 +2773,8 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      account_platform: ["tiktok", "instagram", "youtube_shorts"],
+      account_status: ["active", "paused", "warmup", "flagged"],
       app_role: ["admin", "qa", "viewer"],
       claim_policy_level: ["standard", "moderate", "strict", "medical"],
       content_vertical: [
@@ -2736,11 +2783,15 @@ export const Constants = {
         "health",
         "hyperlocal",
         "ecommerce",
+        "gadgets",
+        "home",
+        "toys",
       ],
       cta_style: ["soft", "direct", "hard_offer"],
       delivery_format: ["online", "in_person", "hybrid", "self_paced"],
       export_format: ["pdf", "json", "docx"],
       learning_style: ["video", "project", "reading"],
+      monetization_mode: ["app_first", "product_first", "hybrid"],
       progress_status: ["not_started", "in_progress", "completed"],
       script_status: [
         "draft",
