@@ -37,6 +37,19 @@ export interface ScraperHealth {
   topEmotions: { name: string; count: number }[];
   topFormats: { name: string; count: number }[];
   topTopics: { name: string; count: number }[];
+
+  // Actual trending stories
+  trendingStories: {
+    id: string;
+    title: string | null;
+    viral_score: number;
+    source_type: string;
+    content_format: string | null;
+    topics: string[];
+    emotional_triggers: string[];
+    created_at: string;
+    source_url?: string;
+  }[];
 }
 
 export function useScraperHealth() {
