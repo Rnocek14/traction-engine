@@ -359,10 +359,11 @@ async function generateWithOpenAI(
   config: AccountConfig,
   topic: Topic,
   apiKey: string,
-  constraint?: string
+  constraint?: string,
+  trendBlock?: string
 ): Promise<ScriptContent> {
   const systemPrompt = buildSystemPrompt(config);
-  const userPrompt = buildUserPrompt(topic, config, constraint);
+  const userPrompt = buildUserPrompt(topic, config, constraint, trendBlock);
 
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
