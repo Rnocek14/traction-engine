@@ -773,12 +773,21 @@ Deno.serve(async (req) => {
 
     // ── Prompt R&D: log hook + script experiments ──
     const hookFamily = content.hook.length < 20 ? "curiosity" : "value_first"; // heuristic family
+    const enrichmentMeta = trendEnrichment.enabled ? {
+      used_scraped_insights: true,
+      scraped_insight_ids: trendEnrichment.insight_ids,
+      enrichment_mode: trendEnrichment.mode,
+      used_hooks: trendEnrichment.hook_patterns,
+      used_emotions: trendEnrichment.emotional_triggers,
+      used_format: trendEnrichment.format_suggestion,
+    } : { used_scraped_insights: false };
+
     const hookExpId = await logExperiment({
       stage: "hook",
       family: hookFamily,
       promptText: content.hook,
       promptVariables: { topic: topic.topic_prompt, pillar: topic.pillar },
-      inputContext: { account_id, vertical: config.vertical, topic_id: topic.id },
+      inputContext: { account_id, vertical: config.vertical, topic_id: topic.id, ...enrichmentMeta },
       outputSummary: { hook: content.hook, char_count: content.hook.length },
       vertical: config.vertical,
       model: mode === "ai" ? "gpt-4o" : "template",
@@ -792,7 +801,7 @@ Deno.serve(async (req) => {
       family: mode === "ai" ? "fast_explainer" : "template",
       promptText: content.voiceover,
       promptVariables: { topic: topic.topic_prompt, pillar: topic.pillar, hook: content.hook },
-      inputContext: { account_id, vertical: config.vertical, topic_id: topic.id, mode },
+      inputContext: { account_id, vertical: config.vertical, topic_id: topic.id, mode, ...enrichmentMeta },
       outputSummary: {
         scene_count: content.scene_prompts.length,
         word_count: content.voiceover.split(/\s+/).length,
