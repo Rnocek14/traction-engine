@@ -91,6 +91,42 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
         </div>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
+        {/* Image gallery */}
+        {images.length > 1 && (
+          <div className="relative rounded-md overflow-hidden bg-muted/30">
+            <img
+              src={images[imgIdx]?.url}
+              alt={`${product.name} - ${images[imgIdx]?.label}`}
+              className="w-full h-32 object-contain"
+              onError={(e) => { (e.target as HTMLImageElement).src = "/placeholder.svg"; }}
+            />
+            <div className="absolute bottom-1 left-1/2 -translate-x-1/2 flex items-center gap-1">
+              <Button
+                variant="secondary"
+                size="sm"
+                className="h-5 w-5 p-0 rounded-full opacity-80"
+                onClick={() => setImgIdx((imgIdx - 1 + images.length) % images.length)}
+              >
+                <ChevronLeft className="w-3 h-3" />
+              </Button>
+              <span className="text-[10px] bg-background/80 px-1.5 rounded-full">
+                {imgIdx + 1}/{images.length}
+              </span>
+              <Button
+                variant="secondary"
+                size="sm"
+                className="h-5 w-5 p-0 rounded-full opacity-80"
+                onClick={() => setImgIdx((imgIdx + 1) % images.length)}
+              >
+                <ChevronRight className="w-3 h-3" />
+              </Button>
+            </div>
+            <Badge variant="outline" className="absolute top-1 right-1 text-[9px] bg-background/80">
+              {images[imgIdx]?.source} · {images[imgIdx]?.label}
+            </Badge>
+          </div>
+        )}
+
         {/* Price row */}
         <div className="flex items-center gap-3 text-xs">
           {priceDollars && <span className="font-medium">${priceDollars}</span>}
