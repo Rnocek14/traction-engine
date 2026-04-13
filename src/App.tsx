@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import Index from "./pages/Index";
+import Ideas from "./pages/Ideas";
 import AccountDetail from "./pages/AccountDetail";
 import ScriptGenerator from "./pages/ScriptGenerator";
 import Produce from "./pages/Produce";
@@ -27,6 +28,7 @@ const App = () => (
           <Routes>
             {/* Core Workspaces */}
             <Route path="/" element={<Index />} />
+            <Route path="/ideas" element={<Ideas />} />
             <Route path="/produce" element={<Produce />} />
             <Route path="/produce/:storyId" element={<Produce />} />
             <Route path="/review" element={<Review />} />

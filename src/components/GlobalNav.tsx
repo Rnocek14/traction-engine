@@ -6,12 +6,13 @@
  */
 
 import { Link, useLocation } from "react-router-dom";
-import { Zap, LayoutDashboard, Clapperboard, ShieldCheck, Settings } from "lucide-react";
+import { Zap, LayoutDashboard, Lightbulb, Clapperboard, ShieldCheck, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AuthHeader } from "@/components/auth/AuthHeader";
 
 const NAV_ITEMS = [
   { label: "Dashboard", path: "/", icon: LayoutDashboard },
+  { label: "Ideas", path: "/ideas", icon: Lightbulb },
   { label: "Produce", path: "/produce", icon: Clapperboard },
   { label: "Review", path: "/review", icon: ShieldCheck },
   { label: "Settings", path: "/settings", icon: Settings },
