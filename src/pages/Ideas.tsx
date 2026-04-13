@@ -51,16 +51,16 @@ const Ideas = () => {
           </Button>
         </div>
 
+        {/* AI-Proposed Ideas (primary focus) */}
+        <section>
+          <h2 className="text-lg font-semibold mb-3">Content Ideas</h2>
+          <ContentIdeasPanel />
+        </section>
+
         {/* Trend Intelligence */}
         <section>
           <h2 className="text-lg font-semibold mb-3">Trend Intelligence</h2>
           <TrendIntelligencePanel />
-        </section>
-
-        {/* AI-Proposed Ideas */}
-        <section>
-          <h2 className="text-lg font-semibold mb-3">Content Ideas</h2>
-          <ContentIdeasPanel />
         </section>
 
         {/* Production Pipeline */}
