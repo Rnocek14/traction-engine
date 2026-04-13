@@ -151,8 +151,11 @@ Deno.serve(async (req) => {
       ? Math.round((retailPriceCents / netMarginCents) * 100) / 100
       : 999.99;
 
-    // Viability grade
-    const viabilityGrade = computeViabilityGrade(netMarginPct, bestSupplier?.overall_supplier_score || null);
+    // Viability grade (now includes delivery penalty)
+    const viabilityGrade = computeViabilityGrade(netMarginPct, bestSupplier?.overall_supplier_score || null, totalDeliveryDays);
+
+    // Kill condition check
+    const killReason = checkKillConditions(netMarginPct, totalDeliveryDays, bestSupplier?.overall_supplier_score || null);
 
     const economicsRow = {
       product_id,
@@ -172,7 +175,7 @@ Deno.serve(async (req) => {
       break_even_cpa_cents: breakEvenCpaCents,
       break_even_roas: breakEvenRoas,
       viability_grade: viabilityGrade,
-      calculator_version: "v1",
+      calculator_version: "v2",
       calculated_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -184,7 +187,17 @@ Deno.serve(async (req) => {
 
     if (upsertErr) throw new Error(`Failed to save economics: ${upsertErr.message}`);
 
-    console.log(`[unit-economics] ${product.name}: grade=${viabilityGrade}, net_margin=${netMarginPct}%, breakeven=${breakEvenUnits} units`);
+    // AUTO-BLOCK: If kill conditions are met, set product status to "dead"
+    if (killReason) {
+      console.warn(`[unit-economics] KILL: ${product.name} — ${killReason}`);
+      await supabase.from("products").update({ 
+        status: "dead",
+        notes: `Auto-blocked: ${killReason}`,
+        updated_at: new Date().toISOString(),
+      }).eq("id", product_id);
+    }
+
+    console.log(`[unit-economics] ${product.name}: grade=${viabilityGrade}, net_margin=${netMarginPct}%, delivery=${totalDeliveryDays || "?"}d, kill=${killReason || "none"}`);
 
     return new Response(JSON.stringify({
       success: true,
@@ -195,6 +208,10 @@ Deno.serve(async (req) => {
       break_even_units: breakEvenUnits,
       break_even_cpa_cents: breakEvenCpaCents,
       break_even_roas: breakEvenRoas,
+      delivery_grade: deliveryGrade,
+      total_delivery_days: totalDeliveryDays,
+      kill_reason: killReason,
+      blocked: !!killReason,
       inputs: {
         retail_price_cents: retailPriceCents,
         supplier_cost_cents: supplierCostCents,
