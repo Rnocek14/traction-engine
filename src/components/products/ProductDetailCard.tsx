@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,6 +28,7 @@ const NEXT_STATUS: Partial<Record<ProductStatus, ProductStatus>> = {
 };
 
 export function ProductDetailCard({ product }: { product: ProductWithAnalysis }) {
+  const navigate = useNavigate();
   const [showPlan, setShowPlan] = useState(false);
   const [showSuppliers, setShowSuppliers] = useState(false);
   const [showEconomics, setShowEconomics] = useState(false);
@@ -114,7 +116,7 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
               </div>
             )}
             <div className="min-w-0">
-              <CardTitle className="text-sm truncate">{product.name}</CardTitle>
+              <CardTitle className="text-sm truncate cursor-pointer hover:text-primary transition-colors" onClick={() => navigate(`/products/${product.id}`)}>{product.name}</CardTitle>
               {images.length > 0 && (
                 <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
                   <ImageIcon className="w-2.5 h-2.5" /> {images.length} photos

@@ -14,6 +14,7 @@ import Studio from "./pages/Studio";
 import Settings from "./pages/Settings";
 import RoutingAnalytics from "./pages/RoutingAnalytics";
 import Products from "./pages/Products";
+import ProductDossier from "./pages/ProductDossier";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
 
@@ -37,6 +38,7 @@ const App = () => (
             <Route path="/settings/:tab" element={<Settings />} />
             <Route path="/account/:accountId" element={<AccountDetail />} />
             <Route path="/products" element={<Products />} />
+            <Route path="/products/:productId" element={<ProductDossier />} />
 
             {/* Scripts generator (accessible from Produce "New Script") */}
             <Route path="/scripts" element={<ScriptGenerator />} />
