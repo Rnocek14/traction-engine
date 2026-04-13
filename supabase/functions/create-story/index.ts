@@ -25,10 +25,17 @@ interface CreateStoryRequest {
       camera_direction?: string;
     }>;
   };
-  auto_generate?: boolean; // If true, immediately trigger chained generation
+  auto_generate?: boolean;
   settings?: {
     size?: string;
     provider?: string;
+  };
+  // Prompt R&D lineage
+  experiment_ids?: {
+    topic?: string;
+    script?: string;
+    hook?: string;
+    visual?: string;
   };
 }
 
@@ -51,6 +58,7 @@ Deno.serve(async (req) => {
       storyboard_json,
       auto_generate = false,
       settings,
+      experiment_ids,
     } = body;
 
     if (!title || !continuity_anchors || !storyboard_json?.scenes?.length) {
@@ -72,6 +80,11 @@ Deno.serve(async (req) => {
         completed_clips: 0,
         continuity_anchors,
         storyboard_json,
+        // Prompt R&D lineage
+        ...(experiment_ids?.topic ? { topic_experiment_id: experiment_ids.topic } : {}),
+        ...(experiment_ids?.script ? { script_experiment_id: experiment_ids.script } : {}),
+        ...(experiment_ids?.hook ? { hook_experiment_id: experiment_ids.hook } : {}),
+        ...(experiment_ids?.visual ? { visual_experiment_id: experiment_ids.visual } : {}),
       })
       .select()
       .single();
