@@ -2,8 +2,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ExternalLink, TrendingUp, Package } from "lucide-react";
-import { type ProductWithAnalysis, type ProductStatus, useUpdateProductStatus } from "@/hooks/use-products";
+import { type ProductWithAnalysis, type ProductStatus, useUpdateProductStatus, useResearchProduct } from "@/hooks/use-products";
 import { ProductScoringForm } from "./ProductScoringForm";
+import { Search, Loader2 } from "lucide-react";
 
 const STATUS_COLORS: Record<ProductStatus, string> = {
   discovered: "bg-blue-500/10 text-blue-500",
@@ -23,6 +24,7 @@ const NEXT_STATUS: Partial<Record<ProductStatus, ProductStatus>> = {
 export function ProductDetailCard({ product }: { product: ProductWithAnalysis }) {
   const analysis = product.product_analysis?.[0];
   const updateStatus = useUpdateProductStatus();
+  const researchProduct = useResearchProduct();
 
   const priceDollars = product.price_cents ? (product.price_cents / 100).toFixed(2) : null;
   const costDollars = product.supplier_price_cents ? (product.supplier_price_cents / 100).toFixed(2) : null;
@@ -85,7 +87,16 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
         {product.notes && <p className="text-xs text-muted-foreground line-clamp-2">{product.notes}</p>}
 
         {/* Actions */}
-        <div className="flex items-center gap-2 pt-1">
+        <div className="flex items-center gap-2 pt-1 flex-wrap">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => researchProduct.mutate({ product_id: product.id })}
+            disabled={researchProduct.isPending}
+          >
+            {researchProduct.isPending ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Search className="w-3 h-3 mr-1" />}
+            AI Research
+          </Button>
           <ProductScoringForm product={product} />
           {next && (
             <Button

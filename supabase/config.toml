@@ -98,3 +98,9 @@ verify_jwt = false
 
 [functions.auto-scrape-trends]
 verify_jwt = false
+
+[functions.auto-scrape-products]
+verify_jwt = false
+
+[functions.product-research]
+verify_jwt = false

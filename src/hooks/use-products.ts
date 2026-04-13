@@ -115,6 +115,42 @@ export function useUpdateProductStatus() {
   });
 }
 
+export function useResearchProduct() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (params: { product_id?: string; url?: string; name?: string }) => {
+      const { data, error } = await supabase.functions.invoke("product-research", {
+        body: params,
+      });
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["products"] });
+      toast.success(`Research complete — Score: ${data.overall_score}/100`);
+    },
+    onError: (e) => toast.error(`Research failed: ${e.message}`),
+  });
+}
+
+export function useDiscoverProducts() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (categories?: string[] | void) => {
+      const { data, error } = await supabase.functions.invoke("auto-scrape-products", {
+        body: categories ? { categories } : {},
+      });
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["products"] });
+      toast.success(`Discovered ${data.products_added} new products`);
+    },
+    onError: (e) => toast.error(`Discovery failed: ${e.message}`),
+  });
+}
+
 export function useSaveProductAnalysis() {
   const qc = useQueryClient();
   return useMutation({
