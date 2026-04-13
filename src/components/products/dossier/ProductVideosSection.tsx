@@ -34,32 +34,27 @@ export function ProductVideosSection({ productId }: { productId: string }) {
   const queueMutation = useQueueVideoConcepts();
   const existingJobs = useProductStoryJobs(productId);
 
-  // Check if product has any images
-  const { data: imageCount = 0 } = useQuery({
-    queryKey: ["product-image-count", productId],
+  // Check if product has any images and supplier pin info
+  const { data: imageInfo } = useQuery({
+    queryKey: ["product-image-info", productId],
     queryFn: async () => {
-      const { count } = await supabase
-        .from("product_images")
-        .select("id", { count: "exact", head: true })
-        .eq("product_id", productId);
-      return count || 0;
+      const [{ count }, { data: product }, { data: supplierImages }] = await Promise.all([
+        supabase.from("product_images").select("id", { count: "exact", head: true }).eq("product_id", productId),
+        supabase.from("products").select("image_url, preferred_supplier_id").eq("id", productId).single(),
+        supabase.from("product_images").select("id", { count: "exact", head: true }).eq("product_id", productId).eq("source", "pinned_supplier"),
+      ]);
+      return {
+        totalImages: count || 0,
+        imageUrl: product?.image_url || null,
+        hasPreferredSupplier: !!product?.preferred_supplier_id,
+        hasSupplierImages: (supplierImages as any)?.count > 0 || false,
+      };
     },
   });
 
-  // Also check if product has image_url fallback
-  const { data: productImageUrl } = useQuery({
-    queryKey: ["product-image-url", productId],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("products")
-        .select("image_url")
-        .eq("id", productId)
-        .single();
-      return data?.image_url || null;
-    },
-  });
-
-  const hasImages = imageCount > 0 || !!productImageUrl;
+  const hasImages = (imageInfo?.totalImages || 0) > 0 || !!imageInfo?.imageUrl;
+  const hasSupplierImages = imageInfo?.hasSupplierImages || false;
+  const hasPreferredSupplier = imageInfo?.hasPreferredSupplier || false;
 
   const { data: accounts } = useQuery({
     queryKey: ["accounts-for-video"],
@@ -130,6 +125,18 @@ export function ProductVideosSection({ productId }: { productId: string }) {
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
+        {/* Supplier image status */}
+        {hasPreferredSupplier && !hasSupplierImages && (
+          <div className="text-xs bg-yellow-500/10 text-yellow-700 border border-yellow-500/20 rounded p-2">
+            ⚠️ Supplier pinned but no supplier images scraped yet. Concepts will use other available images.
+          </div>
+        )}
+        {hasSupplierImages && (
+          <div className="text-xs bg-green-500/10 text-green-700 border border-green-500/20 rounded p-2">
+            📌 Using pinned supplier images — ads will match the exact product you ship.
+          </div>
+        )}
+
         {/* Concept preview cards */}
         {concepts.length > 0 && (
           <>
@@ -251,6 +258,9 @@ export function ProductVideosSection({ productId }: { productId: string }) {
                 <div className="flex items-center gap-2 min-w-0">
                   <Badge variant="outline" className="text-xs shrink-0">{job.status}</Badge>
                   <span className="truncate">{job.title || "Untitled"}</span>
+                  {hasPreferredSupplier && !hasSupplierImages && (
+                    <Badge variant="outline" className="text-[10px] text-yellow-600 border-yellow-500/30 shrink-0">pre-pin</Badge>
+                  )}
                 </div>
                 <div className="flex items-center gap-2 text-xs text-muted-foreground shrink-0">
                   {job.completed_clips}/{job.total_clips} clips

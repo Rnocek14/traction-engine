@@ -81,17 +81,29 @@ Deno.serve(async (req) => {
       throw new Error("Product not found");
     }
 
-    // Fetch images — prefer verified, fall back to any
+    // Fetch images — priority: pinned_supplier > verified > any
     let { data: images } = await supabase
       .from("product_images")
       .select("*")
       .eq("product_id", product_id)
-      .or("verified.eq.true,manually_approved.eq.true")
+      .eq("source", "pinned_supplier")
       .order("is_primary", { ascending: false })
       .limit(8);
 
-    // If no verified images, try all images
+    // If no pinned supplier images, try verified/approved
     if (!images || images.length === 0) {
+      const { data: verifiedImages } = await supabase
+        .from("product_images")
+        .select("*")
+        .eq("product_id", product_id)
+        .or("verified.eq.true,manually_approved.eq.true")
+        .order("is_primary", { ascending: false })
+        .limit(8);
+      images = verifiedImages || [];
+    }
+
+    // If no verified images, try all images
+    if (images.length === 0) {
       const { data: allImages } = await supabase
         .from("product_images")
         .select("*")

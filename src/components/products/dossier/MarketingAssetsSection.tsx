@@ -19,14 +19,24 @@ export interface NormalizedAsset {
   origin: "product_images" | "product_hero";
 }
 
+const SOURCE_PRIORITY: Record<string, number> = {
+  pinned_supplier: 0,
+  manual: 1,
+  ai_search: 2,
+  product_url: 3,
+};
+
 /** Build a normalized asset list from all available sources */
 export function buildAssetList(product: ProductWithAnalysis): NormalizedAsset[] {
   const assets: NormalizedAsset[] = [];
   const seenUrls = new Set<string>();
 
-  // 1. All product_images (verified first, then unverified)
+  // 1. All product_images sorted by: pinned_supplier first, then verified, then primary
   const images = [...(product.product_images || [])];
   images.sort((a, b) => {
+    const aPri = SOURCE_PRIORITY[a.source] ?? 99;
+    const bPri = SOURCE_PRIORITY[b.source] ?? 99;
+    if (aPri !== bPri) return aPri - bPri;
     if (a.verified !== b.verified) return a.verified ? -1 : 1;
     if (a.is_primary !== b.is_primary) return a.is_primary ? -1 : 1;
     return 0;
@@ -123,7 +133,9 @@ export function MarketingAssetsSection({ product }: { product: ProductWithAnalys
               />
               {/* Status badges */}
               <div className="absolute top-2 left-2 flex items-center gap-1">
-                {current?.verified ? (
+                {current?.source === "pinned_supplier" ? (
+                  <Badge className="text-[10px] bg-green-500/20 text-green-500 border-green-500/30">📌 supplier</Badge>
+                ) : current?.verified ? (
                   <Badge className="text-[10px] bg-green-500/20 text-green-500 border-green-500/30">✓ verified</Badge>
                 ) : current?.manually_approved ? (
                   <Badge className="text-[10px] bg-blue-500/20 text-blue-500 border-blue-500/30">✓ approved</Badge>
@@ -132,7 +144,7 @@ export function MarketingAssetsSection({ product }: { product: ProductWithAnalys
                 )}
               </div>
               <Badge variant="outline" className="absolute top-2 right-2 text-[10px] bg-background/80">
-                {current?.source} · {current?.label}
+                {current?.source === "pinned_supplier" ? "Pinned Supplier" : current?.source} · {current?.label}
               </Badge>
               {/* Actions */}
               {current?.origin === "product_images" && (
