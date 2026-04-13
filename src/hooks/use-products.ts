@@ -136,7 +136,7 @@ export function useResearchProduct() {
 export function useDiscoverProducts() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (categories?: string[]) => {
+    mutationFn: async (categories?: string[] | void) => {
       const { data, error } = await supabase.functions.invoke("auto-scrape-products", {
         body: categories ? { categories } : {},
       });
