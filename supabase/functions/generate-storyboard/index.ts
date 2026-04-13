@@ -13,6 +13,7 @@ import {
   MIN_CLIP_DURATION, MAX_CLIP_DURATION, TIMING_LIGHT_ROLES,
   snapToProvider, estimateNarrationDuration, bucketAwareRebalance, formatProviderBuckets,
 } from "../_shared/timing-helpers.ts";
+import { logExperiment, logScore } from "../_shared/prompt-experiment-logger.ts";
 import type { SceneRole, CutZone, CutType, ChangeType, GeneratedStoryboard } from "../_shared/storyboard-prompts.ts";
 import { SYSTEM_PROMPT, STORY_TYPE_GUIDANCE } from "../_shared/storyboard-prompts.ts";
 
