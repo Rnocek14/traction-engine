@@ -95,19 +95,22 @@ async function extractSearchIdentity(productName: string, openaiKey: string): Pr
           content: `You extract a precise search identity for a product to find it on marketplaces.
 
 Rules:
-- corePhrase: The shortest phrase that uniquely identifies the product CLASS (2-4 words). Example: "diffuser necklace", "pet water fountain", "magnetic phone mount"
+- brandName: The brand/manufacturer name if present. Empty string if the product is generic/unbranded.
+- corePhrase: The shortest phrase that uniquely identifies the product CLASS (2-4 words). Example: "diffuser necklace", "pet water fountain", "magnetic phone mount". Do NOT include the brand name here.
 - modifiers: Additional qualifying words that narrow the product but aren't essential for category identification
 - anchorTerms: 1-3 words that MUST appear in any valid search result. These define the product class. A result missing ALL anchor terms is definitely wrong.
 - excludedConcepts: Common related products that should be EXCLUDED. These are products that share some keywords but are fundamentally different.
-- queries: Generate 3-4 tight search queries using quotes for exact phrases. Mix the core phrase with modifiers.
+- queries: Generate 3-4 tight search queries for RETAIL sites (Amazon, Walmart). Include brand name if known.
+- wholesaleDescription: Describe the product's PHYSICAL characteristics for sourcing on Chinese wholesale sites. Focus on: capacity/size specs, form factor, materials, connectors, key features. NO brand names. Example: "5000mAh mini power bank keychain USB-C built-in cable lightning connector"
+- wholesaleQueries: Generate 2-3 search queries for AliExpress/Alibaba/DHgate. These must be UNBRANDED and use generic factory terms. Use physical specs and Chinese wholesale terminology. Example: ["5000mah keychain power bank USB-C", "mini portable charger built-in cable OEM"]
 
-Think carefully: what makes THIS product different from similar but wrong products?`
+Think carefully: wholesale sites sell the UNBRANDED factory version. The brand name will NOT appear there.`
         },
         {
           role: "user",
           content: `Product: "${productName}"
 
-Extract the canonical search identity.`
+Extract the canonical search identity with both retail and wholesale search strategies.`
         }
       ],
       tools: [{
@@ -117,13 +120,16 @@ Extract the canonical search identity.`
           parameters: {
             type: "object",
             properties: {
-              corePhrase: { type: "string", description: "Shortest unique product class phrase, 2-4 words" },
+              brandName: { type: "string", description: "Brand name if present, empty string if generic" },
+              corePhrase: { type: "string", description: "Shortest unique product class phrase, 2-4 words, NO brand" },
               modifiers: { type: "array", items: { type: "string" }, description: "Additional qualifying terms" },
               anchorTerms: { type: "array", items: { type: "string" }, description: "1-3 terms that MUST appear in valid results" },
               excludedConcepts: { type: "array", items: { type: "string" }, description: "Related but wrong product concepts to reject" },
-              queries: { type: "array", items: { type: "string" }, description: "3-4 tight search queries with quotes" },
+              queries: { type: "array", items: { type: "string" }, description: "3-4 tight retail search queries (with brand)" },
+              wholesaleDescription: { type: "string", description: "Physical product description for factory sourcing, no brand" },
+              wholesaleQueries: { type: "array", items: { type: "string" }, description: "2-3 unbranded queries for AliExpress/Alibaba" },
             },
-            required: ["corePhrase", "modifiers", "anchorTerms", "excludedConcepts", "queries"],
+            required: ["brandName", "corePhrase", "modifiers", "anchorTerms", "excludedConcepts", "queries", "wholesaleDescription", "wholesaleQueries"],
           },
         },
       }],
