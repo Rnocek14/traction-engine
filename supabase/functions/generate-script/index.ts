@@ -323,7 +323,7 @@ OUTPUT RULES:
 7. Return ONLY valid JSON, no markdown`;
 }
 
-function buildUserPrompt(topic: Topic, config: AccountConfig, constraint?: string): string {
+function buildUserPrompt(topic: Topic, config: AccountConfig, constraint?: string, trendBlock?: string): string {
   const hookOptions = topic.hook_variants.length > 0
     ? `\n\nHook inspiration:\n${topic.hook_variants.map((h, i) => `${i + 1}. ${h}`).join("\n")}`
     : "";
@@ -332,12 +332,14 @@ function buildUserPrompt(topic: Topic, config: AccountConfig, constraint?: strin
     ? `\n\nCRITICAL CONSTRAINTS (must follow):\n${constraint}`
     : "";
 
+  const trendSection = trendBlock ? `\n\n${trendBlock}` : "";
+
   return `Generate a script for this topic:
 
 TOPIC: ${topic.topic_prompt}
 PILLAR: ${topic.pillar}
 VISUAL HINTS: ${topic.motif_hints.join(", ") || "none specified"}
-${hookOptions}${constraintSection}
+${hookOptions}${constraintSection}${trendSection}
 
 Return JSON in this exact schema:
 {
