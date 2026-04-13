@@ -50,6 +50,7 @@ export default function ProductDossier() {
         </Button>
 
         <DossierHeader product={product} />
+        <ViralVideoList productId={productId} />
         <ProductIdentitySection product={product} />
         <RetailEvidenceSection product={product} />
         <WholesaleEvidenceSection product={product} />
