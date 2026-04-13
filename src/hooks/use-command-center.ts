@@ -9,7 +9,7 @@ import { supabase } from "@/integrations/supabase/client";
 
 export interface ActionItem {
   id: string;
-  type: "product_approve" | "product_research" | "idea_approve" | "video_review" | "plan_generate" | "product_hot" | "winner_scale" | "loser_cut";
+  type: "product_approve" | "product_research" | "idea_approve" | "video_review" | "plan_generate" | "product_hot" | "winner_scale" | "loser_cut" | "assign_accounts";
   priority: number; // 0-100, higher = more urgent
   title: string;
   subtitle: string;
@@ -127,8 +127,25 @@ export function useCommandCenter() {
             title: `Generate plan for "${p.name}"`,
             subtitle: "Approved but no marketing plan yet",
             metadata: { product_id: p.id },
-          });
         });
+      });
+
+      // 3b. Approved/active products WITH plan but few account-assigned ideas
+      products
+        .filter(p => (p.status === "approved" || p.status === "active") && p.plan_status === "ready")
+        .forEach(p => {
+          const ideaCount = productIdeaCount.get(p.id) || 0;
+          // Only suggest assignment if there are very few ideas (likely only generic ones)
+          if (ideaCount < 3) {
+            actions.push({
+              id: `assign-${p.id}`,
+              type: "assign_accounts",
+              priority: 72,
+              title: `Assign accounts for "${p.name}"`,
+              subtitle: `Has plan but only ${ideaCount} ideas — route to accounts`,
+              metadata: { product_id: p.id },
+            });
+          }
 
       // 4. Ideas waiting for approval
       const proposedIdeas = ideas.filter(i => i.status === "proposed").slice(0, 5);
