@@ -11,6 +11,8 @@ import { WholesaleEvidenceSection } from "@/components/products/dossier/Wholesal
 import { DossierHeader } from "@/components/products/dossier/DossierHeader";
 import { ViralVideoList } from "@/components/products/ViralVideoList";
 import { ProductVideosSection } from "@/components/products/dossier/ProductVideosSection";
+import { TestScoreboard } from "@/components/products/dossier/TestScoreboard";
+import { ConversionTracker } from "@/components/products/ConversionTracker";
 
 export default function ProductDossier() {
   const { productId } = useParams();
@@ -53,6 +55,8 @@ export default function ProductDossier() {
         </Button>
 
         <DossierHeader product={product} />
+        <TestScoreboard productId={productId!} />
+        <ConversionTracker productId={productId!} productName={product.name} />
         <MarketingAssetsSection product={product} />
         <ProductVideosSection productId={productId!} />
         <ViralVideoList productId={productId} />
