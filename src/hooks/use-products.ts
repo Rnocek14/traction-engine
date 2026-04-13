@@ -152,7 +152,10 @@ export function useResearchProduct() {
     },
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["products"] });
-      toast.success(`Research complete — Score: ${data.overall_score}/100, ${data.images_found || 0} images found`);
+      const parts = [`Score: ${data.overall_score}/100`];
+      if (data.images_found) parts.push(`${data.images_found} images`);
+      if (data.links_found) parts.push(`${data.links_found} verified links`);
+      toast.success(`Research complete — ${parts.join(", ")}`);
     },
     onError: (e) => toast.error(`Research failed: ${e.message}`),
   });
