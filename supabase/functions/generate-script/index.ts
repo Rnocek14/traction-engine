@@ -1,5 +1,6 @@
 /// <reference types="https://esm.sh/@supabase/functions-js/src/edge-runtime.d.ts" />
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { logExperiment, logScore } from "../_shared/prompt-experiment-logger.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -752,6 +753,68 @@ Deno.serve(async (req) => {
     }
 
     console.log(`[pipeline] Script saved with id: ${scriptRun.id}, status: ${finalStatus}`);
+
+    // ── Prompt R&D: log hook + script experiments ──
+    const hookFamily = content.hook.length < 20 ? "curiosity" : "value_first"; // heuristic family
+    const hookExpId = await logExperiment({
+      stage: "hook",
+      family: hookFamily,
+      promptText: content.hook,
+      promptVariables: { topic: topic.topic_prompt, pillar: topic.pillar },
+      inputContext: { account_id, vertical: config.vertical, topic_id: topic.id },
+      outputSummary: { hook: content.hook, char_count: content.hook.length },
+      vertical: config.vertical,
+      model: mode === "ai" ? "gpt-4o" : "template",
+      accountId: account_id,
+      scriptRunId: scriptRun.id,
+      status: finalStatus === "qa_passed" ? "scored" : "rejected",
+    }, supabaseAdmin);
+
+    const scriptExpId = await logExperiment({
+      stage: "script",
+      family: mode === "ai" ? "fast_explainer" : "template",
+      promptText: content.voiceover,
+      promptVariables: { topic: topic.topic_prompt, pillar: topic.pillar, hook: content.hook },
+      inputContext: { account_id, vertical: config.vertical, topic_id: topic.id, mode },
+      outputSummary: {
+        scene_count: content.scene_prompts.length,
+        word_count: content.voiceover.split(/\s+/).length,
+        has_disclaimer: !!content.disclaimer,
+      },
+      vertical: config.vertical,
+      model: mode === "ai" ? "gpt-4o" : "template",
+      accountId: account_id,
+      scriptRunId: scriptRun.id,
+      status: finalStatus === "qa_passed" ? "scored" : "rejected",
+    }, supabaseAdmin);
+
+    // Log output scores from QA results
+    if (hookExpId) {
+      await logScore({
+        experimentId: hookExpId,
+        overallScore: qaResult.passed ? 7 : 3,
+        hookStrength: qaResult.passed ? 7 : 3,
+        hardFail: qaResult.hardBlockFlags.length > 0,
+        riskScore: qaResult.safetyFlags.length,
+        notes: qaResult.errors.length > 0 ? qaResult.errors.join("; ") : undefined,
+        scorePayload: { qa_passed: qaResult.passed, safety_flags: qaResult.safetyFlags },
+      }, "output", supabaseAdmin);
+    }
+
+    if (scriptExpId) {
+      await logScore({
+        experimentId: scriptExpId,
+        overallScore: qaResult.passed ? 7 : 3,
+        clarity: qaResult.passed ? 7 : 4,
+        coherence: qaResult.passed ? 7 : 4,
+        hardFail: qaResult.hardBlockFlags.length > 0,
+        riskScore: qaResult.safetyFlags.length,
+        notes: qaResult.errors.length > 0 ? qaResult.errors.join("; ") : undefined,
+        scorePayload: { qa_passed: qaResult.passed, word_count: content.voiceover.split(/\s+/).length },
+      }, "output", supabaseAdmin);
+    }
+
+    console.log(`[pipeline] Prompt R&D logged: hook=${hookExpId} script=${scriptExpId}`);
 
     // 8. If QA passed, insert fingerprint and update topic
     if (qaResult.passed && scriptRun) {
