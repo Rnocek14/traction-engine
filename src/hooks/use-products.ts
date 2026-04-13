@@ -217,12 +217,32 @@ export function useProductLinkedIdeas(productId: string) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("content_ideas")
-        .select("id, title, status, angle, suggested_format")
+        .select("id, title, status, angle, suggested_format, account_id")
         .eq("product_id", productId)
         .order("created_at", { ascending: false });
       if (error) throw error;
       return data || [];
     },
     enabled: !!productId,
+  });
+}
+
+export function useAssignProductAccounts() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (productId: string) => {
+      const { data, error } = await supabase.functions.invoke("assign-product-accounts", {
+        body: { product_id: productId },
+      });
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["products"] });
+      qc.invalidateQueries({ queryKey: ["product-ideas", data.product_id] });
+      qc.invalidateQueries({ queryKey: ["content-ideas"] });
+      toast.success(`Assigned to ${data.assignments?.length || 0} accounts, ${data.ideas_created || 0} ideas created`);
+    },
+    onError: (e) => toast.error(`Assignment failed: ${e.message}`),
   });
 }

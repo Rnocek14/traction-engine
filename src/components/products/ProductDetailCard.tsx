@@ -2,8 +2,8 @@ import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ExternalLink, TrendingUp, Package, Search, Loader2, Sparkles, ChevronDown, ChevronUp, Lightbulb, Film } from "lucide-react";
-import { type ProductWithAnalysis, type ProductStatus, useUpdateProductStatus, useResearchProduct, useGenerateProductPlan, useProductLinkedIdeas } from "@/hooks/use-products";
+import { ExternalLink, TrendingUp, Package, Search, Loader2, Sparkles, ChevronDown, ChevronUp, Lightbulb, Film, Users } from "lucide-react";
+import { type ProductWithAnalysis, type ProductStatus, useUpdateProductStatus, useResearchProduct, useGenerateProductPlan, useProductLinkedIdeas, useAssignProductAccounts } from "@/hooks/use-products";
 import { ProductScoringForm } from "./ProductScoringForm";
 import { ProductMarketingPlan } from "./ProductMarketingPlan";
 import { supabase } from "@/integrations/supabase/client";
@@ -30,6 +30,7 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
   const updateStatus = useUpdateProductStatus();
   const researchProduct = useResearchProduct();
   const generatePlan = useGenerateProductPlan();
+  const assignAccounts = useAssignProductAccounts();
   const { data: linkedIdeas } = useProductLinkedIdeas(product.id);
 
   const priceDollars = product.price_cents ? (product.price_cents / 100).toFixed(2) : null;
@@ -129,6 +130,7 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
             {linkedIdeas.map((idea) => (
               <div key={idea.id} className="flex items-center justify-between text-xs bg-muted/30 rounded px-2 py-1">
                 <div className="flex items-center gap-1.5 min-w-0">
+                  <Badge variant="outline" className="text-[10px] shrink-0">{idea.account_id || "unassigned"}</Badge>
                   <Badge variant="outline" className="text-[10px] shrink-0">{idea.status}</Badge>
                   <span className="truncate">{idea.title}</span>
                 </div>
@@ -156,7 +158,7 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
                         const { error } = await supabase.functions.invoke("create-story", {
                           body: {
                             title: idea.title,
-                            account_id: "ecommerce_default",
+                            account_id: idea.account_id || "ecommerce_default",
                             story_type: "product_demo",
                             continuity_anchors: { product_name: product.name, product_category: product.category },
                             storyboard_json: { scenes },
@@ -197,8 +199,19 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
             disabled={isGenerating}
           >
             {isGenerating ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Sparkles className="w-3 h-3 mr-1" />}
-            {hasPlan ? "Regen Plan" : "Gen Plan"}
+          {hasPlan ? "Regen Plan" : "Gen Plan"}
           </Button>
+          {hasPlan && (product.status === "approved" || product.status === "active") && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => assignAccounts.mutate(product.id)}
+              disabled={assignAccounts.isPending}
+            >
+              {assignAccounts.isPending ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Users className="w-3 h-3 mr-1" />}
+              Assign Accounts
+            </Button>
+          )}
           <ProductScoringForm product={product} />
           {next && (
             <Button
