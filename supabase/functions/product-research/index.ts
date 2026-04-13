@@ -1282,10 +1282,12 @@ Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, s
       await supabase.from("product_analysis").insert(analysisRow);
     }
 
-    // Save ALL verified links with full evidence (including rejected ones for audit)
-    if (allVerifiedLinks.length > 0 && productId) {
+    // Replace prior link evidence every run so stale candidates do not linger
+    if (productId) {
       await supabase.from("product_links").delete().eq("product_id", productId);
+    }
 
+    if (allVerifiedLinks.length > 0 && productId) {
       const linkRows = allVerifiedLinks.map(l => ({
         product_id: productId,
         url: l.url,
@@ -1314,9 +1316,12 @@ Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, s
       else console.log(`[product-research] Saved ${linkRows.length} links (${acceptedLinks.length} accepted, ${rejectedLinks.length} rejected)`);
     }
 
-    // Save images
-    if (foundImageUrls.length > 0 && productId) {
+    // Replace prior unverified image evidence every run
+    if (productId) {
       await supabase.from("product_images").delete().eq("product_id", productId).eq("verified", false);
+    }
+
+    if (foundImageUrls.length > 0 && productId) {
       const imageRows = foundImageUrls.map((img, i) => ({
         product_id: productId,
         url: img.url,
@@ -1331,6 +1336,8 @@ Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, s
         await supabase.from("products").update({ image_url: foundImageUrls[0].url }).eq("id", productId);
         console.log(`[product-research] Saved ${imageRows.length} images`);
       }
+    } else if (productId) {
+      await supabase.from("products").update({ image_url: null }).eq("id", productId);
     }
 
     // ==========================================
@@ -1338,6 +1345,11 @@ Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, s
     // ==========================================
     console.log("[product-research] Phase 7: Extracting supplier data");
     const wholesaleVerified = acceptedLinks.filter(l => l.linkType === "wholesale");
+
+    if (productId) {
+      await supabase.from("product_suppliers").delete().eq("product_id", productId).neq("verification_status", "verified");
+    }
+
     if (productId && wholesaleVerified.length > 0) {
       try {
         const supplierResp = await fetch("https://api.openai.com/v1/chat/completions", {
