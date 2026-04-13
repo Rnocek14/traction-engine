@@ -34,6 +34,7 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
   const researchProduct = useResearchProduct();
   const generatePlan = useGenerateProductPlan();
   const assignAccounts = useAssignProductAccounts();
+  const { data: linkedIdeas } = useProductLinkedIdeas(product.id);
   const qc = useQueryClient();
 
   const handleDeleteImage = async (imageId: string) => {
