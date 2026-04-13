@@ -742,36 +742,89 @@ export type Database = {
           },
         ]
       }
+      product_decisions: {
+        Row: {
+          created_at: string | null
+          decision_type: string
+          decision_value: string | null
+          id: string
+          made_by: string | null
+          product_id: string
+          reason: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          decision_type: string
+          decision_value?: string | null
+          id?: string
+          made_by?: string | null
+          product_id: string
+          reason?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          decision_type?: string
+          decision_value?: string | null
+          id?: string
+          made_by?: string | null
+          product_id?: string
+          reason?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_decisions_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       product_images: {
         Row: {
+          ad_readiness_score: number | null
           created_at: string
           id: string
           is_primary: boolean
           label: string | null
+          low_resolution: boolean | null
+          manually_approved: boolean | null
           product_id: string
           source: string
+          source_domain: string | null
           url: string
           verified: boolean
+          watermarked: boolean | null
         }
         Insert: {
+          ad_readiness_score?: number | null
           created_at?: string
           id?: string
           is_primary?: boolean
           label?: string | null
+          low_resolution?: boolean | null
+          manually_approved?: boolean | null
           product_id: string
           source?: string
+          source_domain?: string | null
           url: string
           verified?: boolean
+          watermarked?: boolean | null
         }
         Update: {
+          ad_readiness_score?: number | null
           created_at?: string
           id?: string
           is_primary?: boolean
           label?: string | null
+          low_resolution?: boolean | null
+          manually_approved?: boolean | null
           product_id?: string
           source?: string
+          source_domain?: string | null
           url?: string
           verified?: boolean
+          watermarked?: boolean | null
         }
         Relationships: [
           {
@@ -792,12 +845,18 @@ export type Database = {
           created_at: string
           distinctive_tokens_matched: string[] | null
           evidence_summary: Json | null
+          extracted_brand: string | null
+          extracted_currency: string | null
           extracted_product_name: string | null
           fetch_method: string | null
+          first_seen_at: string | null
           id: string
+          last_checked_at: string | null
           link_type: string
+          manually_overridden: boolean | null
           match_confidence: number | null
           matched_tokens: string[] | null
+          override_action: string | null
           platform: string
           price_cents: number | null
           product_id: string
@@ -817,12 +876,18 @@ export type Database = {
           created_at?: string
           distinctive_tokens_matched?: string[] | null
           evidence_summary?: Json | null
+          extracted_brand?: string | null
+          extracted_currency?: string | null
           extracted_product_name?: string | null
           fetch_method?: string | null
+          first_seen_at?: string | null
           id?: string
+          last_checked_at?: string | null
           link_type?: string
+          manually_overridden?: boolean | null
           match_confidence?: number | null
           matched_tokens?: string[] | null
+          override_action?: string | null
           platform?: string
           price_cents?: number | null
           product_id: string
@@ -842,12 +907,18 @@ export type Database = {
           created_at?: string
           distinctive_tokens_matched?: string[] | null
           evidence_summary?: Json | null
+          extracted_brand?: string | null
+          extracted_currency?: string | null
           extracted_product_name?: string | null
           fetch_method?: string | null
+          first_seen_at?: string | null
           id?: string
+          last_checked_at?: string | null
           link_type?: string
+          manually_overridden?: boolean | null
           match_confidence?: number | null
           matched_tokens?: string[] | null
+          override_action?: string | null
           platform?: string
           price_cents?: number | null
           product_id?: string
@@ -864,6 +935,68 @@ export type Database = {
             foreignKeyName: "product_links_product_id_fkey"
             columns: ["product_id"]
             isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      product_market_snapshots: {
+        Row: {
+          created_at: string | null
+          highest_verified_retail_cents: number | null
+          id: string
+          lowest_verified_retail_cents: number | null
+          median_verified_retail_cents: number | null
+          preferred_supplier_cost_cents: number | null
+          preferred_supplier_delivered_cents: number | null
+          product_id: string
+          snapshot_at: string | null
+          source_diversity_count: number | null
+          spread_cents: number | null
+          spread_pct: number | null
+          updated_at: string | null
+          verified_retail_count: number | null
+          verified_wholesale_count: number | null
+        }
+        Insert: {
+          created_at?: string | null
+          highest_verified_retail_cents?: number | null
+          id?: string
+          lowest_verified_retail_cents?: number | null
+          median_verified_retail_cents?: number | null
+          preferred_supplier_cost_cents?: number | null
+          preferred_supplier_delivered_cents?: number | null
+          product_id: string
+          snapshot_at?: string | null
+          source_diversity_count?: number | null
+          spread_cents?: number | null
+          spread_pct?: number | null
+          updated_at?: string | null
+          verified_retail_count?: number | null
+          verified_wholesale_count?: number | null
+        }
+        Update: {
+          created_at?: string | null
+          highest_verified_retail_cents?: number | null
+          id?: string
+          lowest_verified_retail_cents?: number | null
+          median_verified_retail_cents?: number | null
+          preferred_supplier_cost_cents?: number | null
+          preferred_supplier_delivered_cents?: number | null
+          product_id?: string
+          snapshot_at?: string | null
+          source_diversity_count?: number | null
+          spread_cents?: number | null
+          spread_pct?: number | null
+          updated_at?: string | null
+          verified_retail_count?: number | null
+          verified_wholesale_count?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_market_snapshots_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: true
             referencedRelation: "products"
             referencedColumns: ["id"]
           },
@@ -1046,11 +1179,15 @@ export type Database = {
       }
       products: {
         Row: {
+          canonical_name: string | null
           category: string | null
           created_at: string
           discovered_via: string
+          distinctive_attributes: string[] | null
           estimated_margin_pct: number | null
+          excluded_variants: string[] | null
           id: string
+          identity_confidence: number | null
           image_url: string | null
           marketing_plan: Json | null
           name: string
@@ -1058,21 +1195,31 @@ export type Database = {
           plan_generated_at: string | null
           plan_status: string
           plan_version: number
+          preferred_supplier_id: string | null
           price_cents: number | null
+          readiness_score: number | null
+          readiness_state: string | null
+          retail_anchor_price_cents: number | null
           shipping_days: number | null
+          short_description: string | null
           source_url: string | null
           status: string
           subcategory: string | null
           supplier_price_cents: number | null
           supplier_url: string | null
+          synonyms: string[] | null
           updated_at: string
         }
         Insert: {
+          canonical_name?: string | null
           category?: string | null
           created_at?: string
           discovered_via?: string
+          distinctive_attributes?: string[] | null
           estimated_margin_pct?: number | null
+          excluded_variants?: string[] | null
           id?: string
+          identity_confidence?: number | null
           image_url?: string | null
           marketing_plan?: Json | null
           name: string
@@ -1080,21 +1227,31 @@ export type Database = {
           plan_generated_at?: string | null
           plan_status?: string
           plan_version?: number
+          preferred_supplier_id?: string | null
           price_cents?: number | null
+          readiness_score?: number | null
+          readiness_state?: string | null
+          retail_anchor_price_cents?: number | null
           shipping_days?: number | null
+          short_description?: string | null
           source_url?: string | null
           status?: string
           subcategory?: string | null
           supplier_price_cents?: number | null
           supplier_url?: string | null
+          synonyms?: string[] | null
           updated_at?: string
         }
         Update: {
+          canonical_name?: string | null
           category?: string | null
           created_at?: string
           discovered_via?: string
+          distinctive_attributes?: string[] | null
           estimated_margin_pct?: number | null
+          excluded_variants?: string[] | null
           id?: string
+          identity_confidence?: number | null
           image_url?: string | null
           marketing_plan?: Json | null
           name?: string
@@ -1102,16 +1259,30 @@ export type Database = {
           plan_generated_at?: string | null
           plan_status?: string
           plan_version?: number
+          preferred_supplier_id?: string | null
           price_cents?: number | null
+          readiness_score?: number | null
+          readiness_state?: string | null
+          retail_anchor_price_cents?: number | null
           shipping_days?: number | null
+          short_description?: string | null
           source_url?: string | null
           status?: string
           subcategory?: string | null
           supplier_price_cents?: number | null
           supplier_url?: string | null
+          synonyms?: string[] | null
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "fk_products_preferred_supplier"
+            columns: ["preferred_supplier_id"]
+            isOneToOne: false
+            referencedRelation: "product_suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       profiles: {
         Row: {
