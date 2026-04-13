@@ -1,64 +1,62 @@
 
-
-# Phase 1: Product Intelligence Layer — Foundation
+# Phase 1: Product Intelligence Layer — Foundation ✅
 
 Build the product data model, scoring table, FK links, ecommerce vertical, and a manual product entry UI. No automation, no scraper expansion, no auto-scaling yet.
 
----
-
-## Database Migration (single migration)
-
-1. **Add `ecommerce` to `content_vertical` enum**
-
-2. **Create `products` table** — id, name, category, subcategory, source_url, image_url, price_cents, supplier_price_cents, estimated_margin_pct, supplier_url, shipping_days, status (`discovered|researching|approved|active|paused|dead`), discovered_via (`manual|scraper|tiktok_shop`), notes, created_at, updated_at. RLS: public read, service_role write.
-
-3. **Create `product_analysis` table** — product_id (unique FK → products), wow_factor/social_media_potential/impulse_buy_appeal/demonstrability_score/competition_level (all integer 1-5), price_sweet_spot (boolean), emotional_triggers (text[]), trending_status (`emerging|rising|peak|declining|saturated`), overall_score (0-100 composite), analyzed_by (`manual|ai`), analyzed_at. RLS: public read, service_role write.
-
-4. **Add FK columns to existing tables**
-   - `content_ideas`: add `product_id` (uuid FK → products), `cta_url` (text), `cta_type` (text)
-   - `story_jobs`: add `product_id` (uuid FK → products)
+## Completed
+- Products table, product_analysis, product_images, product_links, product_suppliers, product_unit_economics
+- Products page with grid, entry form, scoring form, detail card
+- AI research pipeline (8-phase deep research)
+- Supplier intelligence with weighted scoring
+- Unit economics calculator with kill conditions
+- Conversion tracking (product_conversions, video_conversions)
+- Marketing plan generation + account assignment
 
 ---
 
-## Products Page (`/products`)
+# Link Verification Pipeline v3 ✅
 
-- **Status pipeline tabs**: Discovered → Researching → Approved → Active → Dead
-- **Product grid** with status badges, price, margin %, and analysis scores
-- **Manual product entry dialog**: name, category, source URL, image URL, price, supplier price, notes
-- **Product detail card**: info, margin calc, analysis scores as visual badges, linked ideas/videos count
-- **Manual scoring form** (dialog): 5 dimension sliders (1-5), price sweet spot toggle, trending status dropdown, emotional triggers multi-select. Auto-computes overall_score as weighted average. Saves to `product_analysis`.
+Evidence-based verification system replacing brittle single-word URL matching.
 
----
+## Architecture
+- **Weighted Token Matching**: Distinctive tokens (brand names, unique words) carry 3x weight vs generic words (phone, stand, holder)
+- **Structured Data Extraction**: JSON-LD Product schema, Open Graph, H1, canonical URL, breadcrumbs extracted BEFORE AI verification
+- **Staged Verification**: Domain check → URL slug → Fetch → Dead page detection → Structured signals → Lexical relevance → AI verification (only for ambiguous cases)
+- **Marketplace Heuristics**: Amazon, AliExpress, DHgate, Temu, Walmart, eBay each have custom dead-page signals
+- **Firecrawl Fallback**: JS-heavy pages (DHgate, AliExpress) fall back to Firecrawl when native fetch returns thin content
+- **Composed Confidence Score**: domain_trust(15) + structured_data(20) + weighted_relevance(20) + url_slug(10) + content_relevance(10) + ai_verdict(20) + price_extracted(5) = 0-100
+- **Validation Statuses**: verified (80+), probable (60-79), candidate (50-59), rejected (<50)
+- **Full Explainability**: Every link stores validation_reasons[], matched_tokens[], distinctive_tokens_matched[], ai_verdict, ai_confidence, fetch_method, extracted_product_name, evidence_summary
+- **Manual Override**: Operators can approve/reject any link from the UI
+- **Rejected links preserved**: Stored with evidence for audit trail
 
-## Navigation & Routing
-
-- Add `/products` route to `App.tsx`
-- Add "Products" link to `GlobalNav.tsx`
-
----
-
-## Files
-
-| File | Action |
-|------|--------|
-| Migration SQL | Create tables, enum, FKs |
-| `src/pages/Products.tsx` | New page |
-| `src/components/products/ProductGrid.tsx` | Grid with filters |
-| `src/components/products/ProductEntryForm.tsx` | Manual intake |
-| `src/components/products/ProductScoringForm.tsx` | 5-dimension scoring |
-| `src/components/products/ProductDetailCard.tsx` | Detail view |
-| `src/hooks/use-products.ts` | Data hook |
-| `src/App.tsx` | Add route |
-| `src/components/GlobalNav.tsx` | Add nav link |
+## DB Changes
+- product_links: added match_confidence, validation_status, validation_reasons, matched_tokens, distinctive_tokens_matched, ai_verdict, ai_confidence, fetch_method, extracted_product_name, structured_price_cents, schema_type, canonical_url, content_quality_score, evidence_summary
 
 ---
 
-## Explicitly Deferred (Phase 2+)
+# Phase 2: Conversion Tracking ✅
 
-- AI product scoring edge function
+- product_conversions table (daily funnel: impressions → clicks → carts → purchases → revenue)
+- video_conversions table (per-video attribution)
+- ingest-conversions edge function (auto-pulls COGS from unit economics)
+- ConversionTracker UI with summary dashboard + manual ingestion form
+- Winner badge logic (5+ sales with positive net profit)
+
+---
+
+# Phase 3: Shopify PDP Publishing (Next)
+
+- Shopify integration for product page creation
+- Automated order sync
+- Revenue data flowing back into conversion tracking
+
+---
+
+# Explicitly Deferred
+
+- AI product scoring edge function improvements
 - Product discovery via scraper expansion
 - Product-aware idea generation angles
-- Supplier reliability tracking
-- Product ROI dashboard
 - Winner detection / auto-scaling
-
+- Evaluation test fixtures for link verification
