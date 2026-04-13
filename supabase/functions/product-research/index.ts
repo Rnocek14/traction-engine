@@ -738,41 +738,63 @@ function detectPlatform(url: string): string {
   try { return new URL(url).hostname.replace("www.", ""); } catch { return "unknown"; }
 }
 
+// Non-product page patterns to reject
+const NON_PRODUCT_PATTERNS = [
+  /\/blog[s]?\//i, /\/article[s]?\//i, /\/wiki\//i, /\/p\/wiki\//i,
+  /\/category\//i, /\/collections\//i, /\/search/i,
+  /\/help\//i, /\/support\//i, /\/about/i, /\/contact/i,
+  /\/faq/i, /\/terms/i, /\/privacy/i, /\/press/i,
+  /\/careers/i, /\/podcast/i, /\/music\./i,
+  /aws\.amazon\.com/i, /music\.amazon\.com/i, /advertising\.amazon/i,
+  /trueprofit\.io/i, /\/showroom\//i,
+];
+
 function isLikelyProductPageUrl(url: string): boolean {
   try {
-    const lower = url.toLowerCase();
     if (!isRetailDomain(url)) return false;
-
-    // Reject obvious non-product pages
-    if (
-      lower.includes("/blog/") ||
-      lower.includes("/blogs/") ||
-      lower.includes("/article/") ||
-      lower.includes("/articles/") ||
-      lower.includes("/category/") ||
-      lower.includes("/collections/") ||
-      lower.includes("/search") ||
-      lower.includes("trueprofit.io")
-    ) {
-      return false;
+    for (const p of NON_PRODUCT_PATTERNS) {
+      if (p.test(url)) return false;
     }
-
+    // Known product page patterns (high confidence)
     return (
-      /amazon\.[^/]+\/(?:[^/]+\/)?dp\//.test(lower) ||
-      /walmart\.[^/]+\/ip\//.test(lower) ||
-      /tiktok\.com\/.*\/product\//.test(lower) ||
-      /aliexpress\.[^/]+\/item\//.test(lower) ||
-      /alibaba\.[^/]+\/product-detail\//.test(lower) ||
-      /1688\.com\/offer\//.test(lower) ||
-      /dhgate\.[^/]+\/product\//.test(lower) ||
-      /temu\.[^/]+\/.*-g-\d+/.test(lower) ||
-      /ebay\.[^/]+\/itm\//.test(lower) ||
-      /etsy\.[^/]+\/listing\//.test(lower) ||
-      /\/products\//.test(lower)
+      /amazon\.[^/]+\/(?:[^/]+\/)?dp\//.test(url) ||
+      /walmart\.[^/]+\/ip\//.test(url) ||
+      /tiktok\.com\/.*\/product\//.test(url) ||
+      /aliexpress\.[^/]+\/item\//.test(url) ||
+      /alibaba\.[^/]+\/product-detail\//.test(url) ||
+      /1688\.com\/offer\//.test(url) ||
+      /dhgate\.[^/]+\/product\//.test(url) ||
+      /temu\.[^/]+\/.*-g-\d+/.test(url) ||
+      /ebay\.[^/]+\/itm\//.test(url) ||
+      /etsy\.[^/]+\/listing\//.test(url) ||
+      /\/products\//.test(url)
     );
   } catch {
     return false;
   }
+}
+
+// Looser filter: any retail domain URL that isn't obviously non-product
+function isRetailCandidate(url: string): boolean {
+  try {
+    if (!isRetailDomain(url)) return false;
+    for (const p of NON_PRODUCT_PATTERNS) {
+      if (p.test(url)) return false;
+    }
+    // Reject homepages and very short paths
+    const path = new URL(url).pathname;
+    if (path === "/" || path.length < 5) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Extract URLs from Perplexity response text content
+function extractUrlsFromText(text: string): string[] {
+  const urlRegex = /https?:\/\/[^\s"'<>\])\},]+/g;
+  const matches = text.match(urlRegex) || [];
+  return [...new Set(matches.map(u => u.replace(/[.)]+$/, "")))];
 }
 
 function parsePriceFromText(text: string): number | undefined {
