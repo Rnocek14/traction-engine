@@ -219,10 +219,13 @@ export type Database = {
           account_id: string
           angle: string | null
           created_at: string
+          cta_type: string | null
+          cta_url: string | null
           emotional_triggers: string[]
           generated_by: string
           id: string
           opportunity_score: number | null
+          product_id: string | null
           reasoning: string | null
           status: string
           story_job_id: string | null
@@ -238,10 +241,13 @@ export type Database = {
           account_id: string
           angle?: string | null
           created_at?: string
+          cta_type?: string | null
+          cta_url?: string | null
           emotional_triggers?: string[]
           generated_by?: string
           id?: string
           opportunity_score?: number | null
+          product_id?: string | null
           reasoning?: string | null
           status?: string
           story_job_id?: string | null
@@ -257,10 +263,13 @@ export type Database = {
           account_id?: string
           angle?: string | null
           created_at?: string
+          cta_type?: string | null
+          cta_url?: string | null
           emotional_triggers?: string[]
           generated_by?: string
           id?: string
           opportunity_score?: number | null
+          product_id?: string | null
           reasoning?: string | null
           status?: string
           story_job_id?: string | null
@@ -273,6 +282,13 @@ export type Database = {
           vertical?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "content_ideas_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "content_ideas_story_job_id_fkey"
             columns: ["story_job_id"]
@@ -547,6 +563,125 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      product_analysis: {
+        Row: {
+          analyzed_at: string | null
+          analyzed_by: string | null
+          competition_level: number | null
+          created_at: string
+          demonstrability_score: number | null
+          emotional_triggers: string[] | null
+          id: string
+          impulse_buy_appeal: number | null
+          overall_score: number | null
+          price_sweet_spot: boolean | null
+          product_id: string
+          social_media_potential: number | null
+          trending_status: string | null
+          updated_at: string
+          wow_factor: number | null
+        }
+        Insert: {
+          analyzed_at?: string | null
+          analyzed_by?: string | null
+          competition_level?: number | null
+          created_at?: string
+          demonstrability_score?: number | null
+          emotional_triggers?: string[] | null
+          id?: string
+          impulse_buy_appeal?: number | null
+          overall_score?: number | null
+          price_sweet_spot?: boolean | null
+          product_id: string
+          social_media_potential?: number | null
+          trending_status?: string | null
+          updated_at?: string
+          wow_factor?: number | null
+        }
+        Update: {
+          analyzed_at?: string | null
+          analyzed_by?: string | null
+          competition_level?: number | null
+          created_at?: string
+          demonstrability_score?: number | null
+          emotional_triggers?: string[] | null
+          id?: string
+          impulse_buy_appeal?: number | null
+          overall_score?: number | null
+          price_sweet_spot?: boolean | null
+          product_id?: string
+          social_media_potential?: number | null
+          trending_status?: string | null
+          updated_at?: string
+          wow_factor?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_analysis_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: true
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      products: {
+        Row: {
+          category: string | null
+          created_at: string
+          discovered_via: string
+          estimated_margin_pct: number | null
+          id: string
+          image_url: string | null
+          name: string
+          notes: string | null
+          price_cents: number | null
+          shipping_days: number | null
+          source_url: string | null
+          status: string
+          subcategory: string | null
+          supplier_price_cents: number | null
+          supplier_url: string | null
+          updated_at: string
+        }
+        Insert: {
+          category?: string | null
+          created_at?: string
+          discovered_via?: string
+          estimated_margin_pct?: number | null
+          id?: string
+          image_url?: string | null
+          name: string
+          notes?: string | null
+          price_cents?: number | null
+          shipping_days?: number | null
+          source_url?: string | null
+          status?: string
+          subcategory?: string | null
+          supplier_price_cents?: number | null
+          supplier_url?: string | null
+          updated_at?: string
+        }
+        Update: {
+          category?: string | null
+          created_at?: string
+          discovered_via?: string
+          estimated_margin_pct?: number | null
+          id?: string
+          image_url?: string | null
+          name?: string
+          notes?: string | null
+          price_cents?: number | null
+          shipping_days?: number | null
+          source_url?: string | null
+          status?: string
+          subcategory?: string | null
+          supplier_price_cents?: number | null
+          supplier_url?: string | null
+          updated_at?: string
+        }
+        Relationships: []
       }
       profiles: {
         Row: {
@@ -1563,6 +1698,7 @@ export type Database = {
           created_at: string
           hook_experiment_id: string | null
           id: string
+          product_id: string | null
           review_status: string
           script_experiment_id: string | null
           status: string
@@ -1588,6 +1724,7 @@ export type Database = {
           created_at?: string
           hook_experiment_id?: string | null
           id?: string
+          product_id?: string | null
           review_status?: string
           script_experiment_id?: string | null
           status?: string
@@ -1613,6 +1750,7 @@ export type Database = {
           created_at?: string
           hook_experiment_id?: string | null
           id?: string
+          product_id?: string | null
           review_status?: string
           script_experiment_id?: string | null
           status?: string
@@ -1638,6 +1776,13 @@ export type Database = {
             columns: ["hook_experiment_id"]
             isOneToOne: false
             referencedRelation: "prompt_experiments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "story_jobs_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
             referencedColumns: ["id"]
           },
           {
@@ -2413,7 +2558,12 @@ export type Database = {
     Enums: {
       app_role: "admin" | "qa" | "viewer"
       claim_policy_level: "standard" | "moderate" | "strict" | "medical"
-      content_vertical: "privacy" | "education" | "health" | "hyperlocal"
+      content_vertical:
+        | "privacy"
+        | "education"
+        | "health"
+        | "hyperlocal"
+        | "ecommerce"
       cta_style: "soft" | "direct" | "hard_offer"
       delivery_format: "online" | "in_person" | "hybrid" | "self_paced"
       export_format: "pdf" | "json" | "docx"
@@ -2568,7 +2718,13 @@ export const Constants = {
     Enums: {
       app_role: ["admin", "qa", "viewer"],
       claim_policy_level: ["standard", "moderate", "strict", "medical"],
-      content_vertical: ["privacy", "education", "health", "hyperlocal"],
+      content_vertical: [
+        "privacy",
+        "education",
+        "health",
+        "hyperlocal",
+        "ecommerce",
+      ],
       cta_style: ["soft", "direct", "hard_offer"],
       delivery_format: ["online", "in_person", "hybrid", "self_paced"],
       export_format: ["pdf", "json", "docx"],

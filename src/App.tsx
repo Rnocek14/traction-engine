@@ -13,6 +13,7 @@ import Review from "./pages/Review";
 import Studio from "./pages/Studio";
 import Settings from "./pages/Settings";
 import RoutingAnalytics from "./pages/RoutingAnalytics";
+import Products from "./pages/Products";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
 
@@ -35,6 +36,7 @@ const App = () => (
             <Route path="/settings" element={<Settings />} />
             <Route path="/settings/:tab" element={<Settings />} />
             <Route path="/account/:accountId" element={<AccountDetail />} />
+            <Route path="/products" element={<Products />} />
 
             {/* Scripts generator (accessible from Produce "New Script") */}
             <Route path="/scripts" element={<ScriptGenerator />} />
