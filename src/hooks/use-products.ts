@@ -53,9 +53,20 @@ export interface ProductImage {
   verified: boolean;
 }
 
+export interface ProductLink {
+  id: string;
+  url: string;
+  link_type: string;
+  platform: string;
+  price_cents: number | null;
+  title: string | null;
+  verified: boolean;
+}
+
 export interface ProductWithAnalysis extends Product {
   product_analysis: ProductAnalysis[] | null;
   product_images: ProductImage[] | null;
+  product_links: ProductLink[] | null;
 }
 
 export function useProducts(statusFilter?: ProductStatus) {
