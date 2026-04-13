@@ -11,7 +11,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Film, Plus, Loader2, Sparkles, Settings2 } from "lucide-react";
+import { Film, Plus, Loader2, Sparkles, Settings2, PackageCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -36,6 +36,7 @@ import { StoryCreationWizard } from "@/components/lab/StoryCreationWizard";
 // Types
 import type { StoryScene, ContinuityAnchors, Storyboard } from "@/lib/continuity-scoring";
 import { useStoryVoiceover } from "@/hooks/use-story-voiceover";
+import { useReelAssembly } from "@/hooks/use-reel-assembly";
 
 type StoryJob = Tables<"story_jobs">;
 type VideoJob = Tables<"video_jobs">;
@@ -348,6 +349,7 @@ export function StoryEditor({
 }: StoryEditorProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { assemble, isAssembling, status: assemblyStatus, canAssemble, hasAssembledVideo, videoUrl } = useReelAssembly(storyId, "story");
 
   // Load story
   const { data: story, isLoading: storyLoading } = useQuery({
@@ -669,6 +671,28 @@ export function StoryEditor({
           <Badge variant="outline" className="text-[10px]">
             {stats.done}/{stats.total} scenes
           </Badge>
+          {stats.done === stats.total && stats.total > 0 && (
+            <Button
+              size="sm"
+              className="h-8 gap-1.5 text-xs"
+              onClick={() => assemble()}
+              disabled={!canAssemble}
+            >
+              {isAssembling ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <PackageCheck className="h-3.5 w-3.5" />
+              )}
+              {isAssembling ? "Assembling…" : hasAssembledVideo ? "Re-assemble" : "Assemble Reel"}
+            </Button>
+          )}
+          {hasAssembledVideo && videoUrl && (
+            <a href={videoUrl} target="_blank" rel="noopener noreferrer">
+              <Button size="sm" variant="outline" className="h-8 text-xs">
+                View MP4
+              </Button>
+            </a>
+          )}
           <Button
             variant="ghost"
             size="sm"

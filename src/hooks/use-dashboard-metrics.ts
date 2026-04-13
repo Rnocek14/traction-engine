@@ -79,7 +79,7 @@ export function useDashboardMetrics() {
         voice: scriptsWithVoiceover,
         video: videosCompleted,
         assembly: assembledSuccess,
-        published: stories.filter(s => storiesByStatus["published"]).length, // placeholder
+        published: storiesByStatus["published"] || 0,
       };
 
       return {
