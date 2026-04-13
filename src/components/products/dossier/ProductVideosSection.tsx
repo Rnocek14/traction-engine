@@ -125,6 +125,18 @@ export function ProductVideosSection({ productId }: { productId: string }) {
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
+        {/* Supplier image status */}
+        {hasPreferredSupplier && !hasSupplierImages && (
+          <div className="text-xs bg-yellow-500/10 text-yellow-700 border border-yellow-500/20 rounded p-2">
+            ⚠️ Supplier pinned but no supplier images scraped yet. Concepts will use other available images.
+          </div>
+        )}
+        {hasSupplierImages && (
+          <div className="text-xs bg-green-500/10 text-green-700 border border-green-500/20 rounded p-2">
+            📌 Using pinned supplier images — ads will match the exact product you ship.
+          </div>
+        )}
+
         {/* Concept preview cards */}
         {concepts.length > 0 && (
           <>
