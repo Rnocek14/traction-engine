@@ -80,6 +80,7 @@ interface AssembledMeta {
   transition: { type: string; duration: number };
   output: { width: number; height: number; fps: number };
   ffmpeg_job_id?: string;
+  ffmpeg_instance_id?: string;
   ffmpeg_status?: string;
   eta_seconds?: number;
   duration?: number;
@@ -185,14 +186,20 @@ async function updateAssemblyStatus(
 async function getRemoteJobState(
   ffmpegServiceUrl: string | undefined,
   jobId?: string,
+  instanceId?: string,
 ): Promise<"active" | "done" | "missing" | "unknown"> {
   if (!jobId) return "missing";
   if (!ffmpegServiceUrl) return "unknown";
 
   try {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (instanceId) {
+      headers["fly-force-instance-id"] = instanceId;
+    }
+
     const response = await fetch(`${ffmpegServiceUrl}/jobs/${jobId}`, {
       method: "GET",
-      headers: { "Content-Type": "application/json" },
+      headers,
     });
 
     if (response.status === 404) return "missing";
@@ -284,7 +291,11 @@ Deno.serve(async (req) => {
 
       if (existingStory?.assembled_status === "rendering") {
         const currentMeta = existingStory.assembled_meta as AssembledMeta | null;
-        const remoteJobState = await getRemoteJobState(ffmpegServiceUrl, currentMeta?.ffmpeg_job_id);
+        const remoteJobState = await getRemoteJobState(
+          ffmpegServiceUrl,
+          currentMeta?.ffmpeg_job_id,
+          currentMeta?.ffmpeg_instance_id,
+        );
 
         if (remoteJobState !== "missing") {
           return new Response(
@@ -372,7 +383,11 @@ Deno.serve(async (req) => {
 
       if (existingRun?.assembled_status === "rendering") {
         const currentMeta = existingRun.assembled_meta as AssembledMeta | null;
-        const remoteJobState = await getRemoteJobState(ffmpegServiceUrl, currentMeta?.ffmpeg_job_id);
+        const remoteJobState = await getRemoteJobState(
+          ffmpegServiceUrl,
+          currentMeta?.ffmpeg_job_id,
+          currentMeta?.ffmpeg_instance_id,
+        );
 
         if (remoteJobState !== "missing") {
           return new Response(
@@ -666,6 +681,7 @@ Deno.serve(async (req) => {
     }
 
     const ffmpegResult = await ffmpegResponse.json();
+    const ffmpegInstanceId = ffmpegResult.instance_id || ffmpegResponse.headers.get("x-ffmpeg-instance-id") || undefined;
 
     console.log(
       JSON.stringify({
@@ -675,6 +691,7 @@ Deno.serve(async (req) => {
         status: ffmpegResult.status,
         duration: ffmpegResult.duration,
         eta_seconds: ffmpegResult.eta_seconds,
+        instance_id: ffmpegInstanceId,
       })
     );
 
@@ -691,6 +708,7 @@ Deno.serve(async (req) => {
           completed_at: new Date().toISOString(),
           duration: ffmpegResult.duration || expectedDuration,
           ffmpeg_job_id: jobId,
+          ffmpeg_instance_id: ffmpegInstanceId,
         },
       });
 
@@ -711,6 +729,7 @@ Deno.serve(async (req) => {
       assembled_meta: {
         ...sanitizedMeta,
         ffmpeg_job_id: jobId,
+        ffmpeg_instance_id: ffmpegInstanceId,
         ffmpeg_status: ffmpegResult.status || "queued",
         eta_seconds: ffmpegResult.eta_seconds,
       },

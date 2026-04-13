@@ -8,6 +8,13 @@ import { resizeImage, type ResizeRequest } from "./resize.js";
 const app = express();
 app.use(express.json({ limit: "50mb" }));
 
+const instanceId = process.env.FLY_MACHINE_ID || process.env.FLY_ALLOC_ID || "local";
+
+app.use((_req, res, next) => {
+  res.setHeader("x-ffmpeg-instance-id", instanceId);
+  next();
+});
+
 // Cleanup old jobs every hour
 setInterval(() => cleanupOldJobs(3600000), 3600000);
 
@@ -30,6 +37,7 @@ app.post("/render/reel", async (req, res) => {
           error: existingJob.error,
           started_at: existingJob.started_at,
           completed_at: existingJob.completed_at,
+          instance_id: instanceId,
         });
       }
     }
@@ -55,6 +63,7 @@ app.post("/render/reel", async (req, res) => {
       job_id: body.job_id,
       status: "queued",
       eta_seconds: Math.ceil(body.clips.length * 10 + 15),
+      instance_id: instanceId,
     });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "error";
@@ -69,13 +78,13 @@ app.post("/render/reel", async (req, res) => {
 app.get("/jobs/:job_id", (req, res) => {
   const job = getJob(req.params.job_id);
   if (!job) {
-    return res.status(404).json({ status: "failed", error: "Job not found" });
+    return res.status(404).json({ status: "failed", error: "Job not found", instance_id: instanceId });
   }
-  return res.json(job);
+  return res.json({ ...job, instance_id: instanceId });
 });
 
 app.get("/health", (_req, res) => {
-  res.json({ status: "ok" });
+  res.json({ status: "ok", instance_id: instanceId });
 });
 
 // Thumbnail extraction endpoint
