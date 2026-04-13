@@ -138,6 +138,37 @@ export function useAssembledVideos() {
         });
       }
 
+      // Fetch performance outcomes
+      if (expIds.length > 0) {
+        const { data: outcomeData } = await supabase
+          .from("prompt_outcomes")
+          .select("experiment_id, views, impressions, likes, shares, saves, comments, avg_watch_time, watch_3s_rate, watch_15s_rate, outcome_score, platform")
+          .in("experiment_id", expIds);
+
+        if (outcomeData && outcomeData.length > 0) {
+          const outcomeMap = new Map<string, PerformanceData>();
+          for (const o of outcomeData) {
+            outcomeMap.set(o.experiment_id, {
+              views: o.views != null ? Number(o.views) : null,
+              impressions: o.impressions != null ? Number(o.impressions) : null,
+              likes: o.likes != null ? Number(o.likes) : null,
+              shares: o.shares != null ? Number(o.shares) : null,
+              saves: o.saves != null ? Number(o.saves) : null,
+              comments: o.comments != null ? Number(o.comments) : null,
+              avg_watch_time: o.avg_watch_time != null ? Number(o.avg_watch_time) : null,
+              watch_3s_rate: o.watch_3s_rate != null ? Number(o.watch_3s_rate) : null,
+              watch_15s_rate: o.watch_15s_rate != null ? Number(o.watch_15s_rate) : null,
+              outcome_score: o.outcome_score != null ? Number(o.outcome_score) : null,
+              platform: o.platform,
+            });
+          }
+          rows = rows.map(row => {
+            if (!row.script_experiment_id) return row;
+            const perf = outcomeMap.get(row.script_experiment_id);
+            return perf ? { ...row, performance: perf } : row;
+          });
+        }
+      }
 
       const activeRows = rows.filter(
         (row) => row.assembled_status === "queued" || row.assembled_status === "rendering"
