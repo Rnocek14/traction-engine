@@ -32,6 +32,12 @@ const STOPWORDS = new Set([
   "new", "best", "top", "pro", "mini", "max", "ultra", "plus", "super", "great",
   "buy", "shop", "store", "sale", "deal", "price", "cheap", "free", "online",
   "product", "item", "set", "kit", "pack", "piece", "unit", "size", "color", "style",
+  // Platform/channel names — these describe WHERE it was found, not WHAT the product is
+  "tiktok", "youtube", "instagram", "facebook", "pinterest", "snapchat", "twitter",
+  "amazon", "walmart", "aliexpress", "alibaba", "temu", "shopify", "etsy", "ebay",
+  // Filler/grouping words common in product names
+  "assorted", "models", "various", "mixed", "random", "bundle", "collection",
+  "version", "edition", "type", "types", "model", "variant", "variants",
 ]);
 
 // ─── RETAIL DOMAIN ALLOWLIST ───
@@ -764,10 +770,12 @@ Deno.serve(async (req) => {
     let productUrl = body.url || "";
     let productId = body.product_id;
 
+    let canonicalName = "";
     if (productId) {
       const { data: product } = await supabase.from("products").select("*").eq("id", productId).single();
       if (product) {
         productName = product.name;
+        canonicalName = product.canonical_name || "";
         productUrl = product.source_url || "";
       }
     }
@@ -778,8 +786,17 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Use canonical_name for search if available; otherwise clean the raw name
+    // by stripping parentheticals and platform references
+    const searchName = canonicalName || productName
+      .replace(/\([^)]*\)/g, "")  // Remove parentheticals like "(Assorted Models)"
+      .replace(/\b(tiktok|youtube|instagram|facebook|viral)\b/gi, "")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+
     console.log(`[product-research] ===== DEEP RESEARCH v3: "${productName}" =====`);
-    const productTokens = analyzeProductTokens(productName);
+    console.log(`[product-research] Search name: "${searchName}"`);
+    const productTokens = analyzeProductTokens(searchName);
     console.log(`[product-research] Tokens: distinctive=[${productTokens.distinctiveTokens}] generic=[${productTokens.genericTokens}]`);
 
     const researchParts: string[] = [];
