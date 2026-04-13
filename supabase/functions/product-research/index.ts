@@ -135,6 +135,69 @@ Deno.serve(async (req) => {
       }
     }
 
+    // 2b. Perplexity image search - find real product images
+    let foundImageUrls: { url: string; source: string; label: string }[] = [];
+    if (perplexityKey && productName) {
+      try {
+        const imgSearch = await perplexityResearch(
+          `"${productName}" product photo image high quality. Find direct image URLs for this exact product. Include Amazon, AliExpress, or official product page images.`,
+          perplexityKey
+        );
+        // Extract image URLs from citations and content
+        const allText = imgSearch.content + " " + imgSearch.citations.join(" ");
+        const imgRegex = /https?:\/\/[^\s"'<>]+\.(?:jpg|jpeg|png|webp|gif)(?:\?[^\s"'<>]*)?/gi;
+        const imgMatches = allText.match(imgRegex) || [];
+        // Also check citations for product page URLs (Amazon, AliExpress etc)
+        for (const citation of imgSearch.citations) {
+          if (citation.match(/amazon\.|aliexpress\.|walmart\.|temu\.|etsy\./i)) {
+            // Try to extract og:image from product pages
+            try {
+              const pageResp = await fetch(citation, {
+                headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+                redirect: "follow",
+              });
+              if (pageResp.ok) {
+                const html = await pageResp.text();
+                const ogMatch = html.match(/property="og:image"\s+content="([^"]+)"/i) || 
+                                html.match(/content="([^"]+)"\s+property="og:image"/i);
+                if (ogMatch?.[1]) {
+                  const domain = new URL(citation).hostname.replace("www.", "");
+                  foundImageUrls.push({ url: ogMatch[1], source: domain, label: "hero" });
+                }
+                // Also grab additional product images
+                const imgTags = html.match(/data-a-dynamic-image="([^"]+)"/i) || // Amazon
+                                html.match(/"imageUrl":"([^"]+)"/g); // AliExpress
+                if (imgTags) {
+                  for (const tag of imgTags.slice(0, 3)) {
+                    const urlMatch = tag.match(/https?:\/\/[^"\\]+/);
+                    if (urlMatch) {
+                      const domain2 = new URL(citation).hostname.replace("www.", "");
+                      foundImageUrls.push({ url: urlMatch[0], source: domain2, label: "detail" });
+                    }
+                  }
+                }
+              }
+            } catch { /* page fetch failed, skip */ }
+          }
+        }
+        // Add direct image URLs from Perplexity content
+        for (const imgUrl of imgMatches.slice(0, 5)) {
+          if (!foundImageUrls.some(f => f.url === imgUrl)) {
+            foundImageUrls.push({ url: imgUrl, source: "perplexity", label: "reference" });
+          }
+        }
+        // Deduplicate
+        const seen = new Set<string>();
+        foundImageUrls = foundImageUrls.filter(img => {
+          if (seen.has(img.url)) return false;
+          seen.add(img.url);
+          return true;
+        }).slice(0, 8); // Max 8 images
+        console.log(`[product-research] Found ${foundImageUrls.length} product images`);
+      } catch (err) {
+        console.warn("[product-research] Image search failed:", err);
+      }
+
     const combined = researchParts.join("\n\n---\n\n").slice(0, 15000);
     if (combined.length < 50) {
       return new Response(JSON.stringify({ error: "Could not gather enough product data" }), {
