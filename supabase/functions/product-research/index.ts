@@ -421,6 +421,7 @@ Also suggest:
         success: true,
         product_id: productId,
         overall_score: overallScore,
+        images_found: foundImageUrls.length,
         analysis,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
