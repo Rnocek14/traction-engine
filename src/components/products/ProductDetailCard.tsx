@@ -30,6 +30,7 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
   const [showPlan, setShowPlan] = useState(false);
   const [showSuppliers, setShowSuppliers] = useState(false);
   const [showEconomics, setShowEconomics] = useState(false);
+  const [showRejected, setShowRejected] = useState(false);
   const [imgIdx, setImgIdx] = useState(0);
   const [calcPending, setCalcPending] = useState(false);
   const analysis = product.product_analysis?.[0];
@@ -37,8 +38,10 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
   const links = product.product_links || [];
   const suppliers = product.product_suppliers || [];
   const economics = product.product_unit_economics?.[0] || null;
-  const retailLinks = links.filter(l => l.link_type === "retail");
-  const wholesaleLinks = links.filter(l => l.link_type === "wholesale");
+  const acceptedLinks = links.filter(l => l.validation_status !== "rejected");
+  const rejectedLinks = links.filter(l => l.validation_status === "rejected");
+  const retailLinks = acceptedLinks.filter(l => l.link_type === "retail");
+  const wholesaleLinks = acceptedLinks.filter(l => l.link_type === "wholesale");
   const updateStatus = useUpdateProductStatus();
   const researchProduct = useResearchProduct();
   const generatePlan = useGenerateProductPlan();
