@@ -199,8 +199,19 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
             disabled={isGenerating}
           >
             {isGenerating ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Sparkles className="w-3 h-3 mr-1" />}
-            {hasPlan ? "Regen Plan" : "Gen Plan"}
+          {hasPlan ? "Regen Plan" : "Gen Plan"}
           </Button>
+          {hasPlan && (product.status === "approved" || product.status === "active") && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => assignAccounts.mutate(product.id)}
+              disabled={assignAccounts.isPending}
+            >
+              {assignAccounts.isPending ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Users className="w-3 h-3 mr-1" />}
+              Assign Accounts
+            </Button>
+          )}
           <ProductScoringForm product={product} />
           {next && (
             <Button
