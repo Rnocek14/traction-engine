@@ -5,6 +5,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ArrowLeft } from "lucide-react";
 import { useProductDetail } from "@/hooks/use-product-detail";
 import { ProductIdentitySection } from "@/components/products/dossier/ProductIdentitySection";
+import { MarketingAssetsSection } from "@/components/products/dossier/MarketingAssetsSection";
 import { RetailEvidenceSection } from "@/components/products/dossier/RetailEvidenceSection";
 import { WholesaleEvidenceSection } from "@/components/products/dossier/WholesaleEvidenceSection";
 import { DossierHeader } from "@/components/products/dossier/DossierHeader";
@@ -52,6 +53,7 @@ export default function ProductDossier() {
         </Button>
 
         <DossierHeader product={product} />
+        <MarketingAssetsSection product={product} />
         <ProductVideosSection productId={productId!} />
         <ViralVideoList productId={productId} />
         <ProductIdentitySection product={product} />
