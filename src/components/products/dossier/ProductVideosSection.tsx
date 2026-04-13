@@ -34,32 +34,27 @@ export function ProductVideosSection({ productId }: { productId: string }) {
   const queueMutation = useQueueVideoConcepts();
   const existingJobs = useProductStoryJobs(productId);
 
-  // Check if product has any images
-  const { data: imageCount = 0 } = useQuery({
-    queryKey: ["product-image-count", productId],
+  // Check if product has any images and supplier pin info
+  const { data: imageInfo } = useQuery({
+    queryKey: ["product-image-info", productId],
     queryFn: async () => {
-      const { count } = await supabase
-        .from("product_images")
-        .select("id", { count: "exact", head: true })
-        .eq("product_id", productId);
-      return count || 0;
+      const [{ count }, { data: product }, { data: supplierImages }] = await Promise.all([
+        supabase.from("product_images").select("id", { count: "exact", head: true }).eq("product_id", productId),
+        supabase.from("products").select("image_url, preferred_supplier_id").eq("id", productId).single(),
+        supabase.from("product_images").select("id", { count: "exact", head: true }).eq("product_id", productId).eq("source", "pinned_supplier"),
+      ]);
+      return {
+        totalImages: count || 0,
+        imageUrl: product?.image_url || null,
+        hasPreferredSupplier: !!product?.preferred_supplier_id,
+        hasSupplierImages: (supplierImages as any)?.count > 0 || false,
+      };
     },
   });
 
-  // Also check if product has image_url fallback
-  const { data: productImageUrl } = useQuery({
-    queryKey: ["product-image-url", productId],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("products")
-        .select("image_url")
-        .eq("id", productId)
-        .single();
-      return data?.image_url || null;
-    },
-  });
-
-  const hasImages = imageCount > 0 || !!productImageUrl;
+  const hasImages = (imageInfo?.totalImages || 0) > 0 || !!imageInfo?.imageUrl;
+  const hasSupplierImages = imageInfo?.hasSupplierImages || false;
+  const hasPreferredSupplier = imageInfo?.hasPreferredSupplier || false;
 
   const { data: accounts } = useQuery({
     queryKey: ["accounts-for-video"],
