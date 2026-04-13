@@ -88,8 +88,8 @@ export function WholesaleEvidenceSection({ product }: { product: ProductWithAnal
 
       // Scrape images from pinned supplier listing
       try {
-        await supabase.functions.invoke("product-research", {
-          body: { product_id: product.id, scrape_supplier_images: true, supplier_url: url },
+        await supabase.functions.invoke("scrape-supplier-images", {
+          body: { product_id: product.id, supplier_url: url },
         });
       } catch { /* non-blocking */ }
 
@@ -143,8 +143,8 @@ export function WholesaleEvidenceSection({ product }: { product: ProductWithAnal
 
       // Scrape images from pinned supplier listing
       try {
-        await supabase.functions.invoke("product-research", {
-          body: { product_id: product.id, scrape_supplier_images: true, supplier_url: link.url },
+        await supabase.functions.invoke("scrape-supplier-images", {
+          body: { product_id: product.id, supplier_url: link.url },
         });
       } catch { /* non-blocking */ }
 

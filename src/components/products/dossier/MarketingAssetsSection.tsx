@@ -19,14 +19,24 @@ export interface NormalizedAsset {
   origin: "product_images" | "product_hero";
 }
 
+const SOURCE_PRIORITY: Record<string, number> = {
+  pinned_supplier: 0,
+  manual: 1,
+  ai_search: 2,
+  product_url: 3,
+};
+
 /** Build a normalized asset list from all available sources */
 export function buildAssetList(product: ProductWithAnalysis): NormalizedAsset[] {
   const assets: NormalizedAsset[] = [];
   const seenUrls = new Set<string>();
 
-  // 1. All product_images (verified first, then unverified)
+  // 1. All product_images sorted by: pinned_supplier first, then verified, then primary
   const images = [...(product.product_images || [])];
   images.sort((a, b) => {
+    const aPri = SOURCE_PRIORITY[a.source] ?? 99;
+    const bPri = SOURCE_PRIORITY[b.source] ?? 99;
+    if (aPri !== bPri) return aPri - bPri;
     if (a.verified !== b.verified) return a.verified ? -1 : 1;
     if (a.is_primary !== b.is_primary) return a.is_primary ? -1 : 1;
     return 0;
