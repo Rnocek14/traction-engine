@@ -158,7 +158,7 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
                         const { error } = await supabase.functions.invoke("create-story", {
                           body: {
                             title: idea.title,
-                            account_id: "ecommerce_default",
+                            account_id: idea.account_id || "ecommerce_default",
                             story_type: "product_demo",
                             continuity_anchors: { product_name: product.name, product_category: product.category },
                             storyboard_json: { scenes },
