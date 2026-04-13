@@ -8,6 +8,9 @@ interface AuthContextType {
   isLoading: boolean;
   hasRole: (roles: string[]) => Promise<boolean>;
   signInWithMagicLink: (email: string) => Promise<{ error: Error | null }>;
+  signInWithPassword: (email: string, password: string) => Promise<{ error: Error | null }>;
+  signUp: (email: string, password: string) => Promise<{ error: Error | null }>;
+  signInWithGoogle: () => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
 }
 
@@ -19,7 +22,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // Set up auth state listener BEFORE getting session
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (_event, session) => {
         setSession(session);
@@ -28,7 +30,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     );
 
-    // Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
@@ -41,9 +42,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signInWithMagicLink = async (email: string) => {
     const { error } = await supabase.auth.signInWithOtp({
       email,
-      options: {
-        emailRedirectTo: window.location.origin,
-      },
+      options: { emailRedirectTo: window.location.origin },
+    });
+    return { error: error ? new Error(error.message) : null };
+  };
+
+  const signInWithPassword = async (email: string, password: string) => {
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    return { error: error ? new Error(error.message) : null };
+  };
+
+  const signUp = async (email: string, password: string) => {
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { emailRedirectTo: window.location.origin },
+    });
+    return { error: error ? new Error(error.message) : null };
+  };
+
+  const signInWithGoogle = async () => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: window.location.origin },
     });
     return { error: error ? new Error(error.message) : null };
   };
@@ -56,25 +77,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const hasRole = async (roles: ('admin' | 'qa' | 'viewer')[]): Promise<boolean> => {
     if (!user) return false;
-    
-    // Check roles via user_roles table (RLS allows reading own roles)
     const { data, error } = await supabase
       .from('user_roles')
       .select('role')
       .eq('user_id', user.id);
-    
     if (error) {
       console.error('Error checking roles:', error);
       return false;
     }
-    
-    // Check if any of the user's roles match the requested roles
     const userRoles = data?.map(r => r.role) ?? [];
     return roles.some(role => userRoles.includes(role));
   };
 
   return (
-    <AuthContext.Provider value={{ user, session, isLoading, hasRole, signInWithMagicLink, signOut }}>
+    <AuthContext.Provider value={{ user, session, isLoading, hasRole, signInWithMagicLink, signInWithPassword, signUp, signInWithGoogle, signOut }}>
       {children}
     </AuthContext.Provider>
   );
