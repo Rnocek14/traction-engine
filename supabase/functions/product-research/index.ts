@@ -50,18 +50,22 @@ function classifyLinkType(url: string): string {
 // Reject obvious non-product pages
 const NON_PRODUCT_PATTERNS = [
   /\/blog[s]?\//i, /\/article[s]?\//i, /\/wiki\//i,
-  /\/category\//i, /\/search/i, /\/help\//i, /\/about/i,
+  /\/help\//i, /\/about\b/i,
   /\/faq/i, /\/terms/i, /\/privacy/i,
   /aws\.amazon\.com/i, /music\.amazon\.com/i, /advertising\.amazon/i,
+  /smart\.dhgate\.com/i, // DHgate blog/articles
+  /\/showroom\//i, // Alibaba showroom (category pages, not products)
 ];
 
 function isUsefulUrl(url: string): boolean {
   try {
-    const path = new URL(url).pathname;
-    if (path === "/" || path.length < 4) return false;
+    const u = new URL(url);
+    if (u.pathname === "/") return false;
     for (const p of NON_PRODUCT_PATTERNS) {
       if (p.test(url)) return false;
     }
+    // Reject search/category pages (but allow Amazon /s? with k= param which are search results we want titles from)
+    if (u.pathname.includes("/search") && !u.searchParams.has("k")) return false;
     return true;
   } catch {
     return false;
@@ -79,19 +83,20 @@ async function serpSearch(productName: string, serpApiKey: string): Promise<Arra
     results.push({ url, title, price, thumbnail, source });
   }
 
-  // 1. Google Shopping
+  // 1. Google Shopping — these give real product pages with prices
   try {
     const q = encodeURIComponent(productName);
-    const resp = await fetch(`https://serpapi.com/search.json?engine=google_shopping&q=${q}&api_key=${serpApiKey}&num=10`);
+    const resp = await fetch(`https://serpapi.com/search.json?engine=google_shopping&q=${q}&api_key=${serpApiKey}&num=20`);
     if (resp.ok) {
       const data = await resp.json();
       for (const r of (data.shopping_results || [])) {
-        const link = r.link || r.product_link;
+        // Google Shopping may have link, product_link, or source
+        const link = r.product_link || r.link || r.source;
         if (link?.startsWith("http")) {
           add(link, r.title || "", r.extracted_price || r.price || null, r.thumbnail || null, "google_shopping");
         }
       }
-      console.log(`[research] Google Shopping: ${data.shopping_results?.length || 0} results`);
+      console.log(`[research] Google Shopping: ${data.shopping_results?.length || 0} results, ${results.length} accepted`);
     }
   } catch (e) { console.warn("[research] Shopping error:", e); }
 
