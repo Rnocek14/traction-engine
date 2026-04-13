@@ -1,13 +1,13 @@
 /**
- * product-research v4 — AI-Assisted, Human-in-the-Loop
+ * product-research v5 — Canonical Identity + Anchor Gating
  * 
- * Simplified pipeline:
- * 1. Search for candidate URLs via SerpAPI (Google Shopping + site-specific)
- * 2. Get market intelligence from Perplexity (context, not links)
- * 3. AI scores the product
- * 4. Store ALL candidates as "pending" — user picks the right ones in the UI
- * 
- * No auto-verification. No 8-phase pipeline. Human confirms.
+ * Pipeline:
+ * 1. AI extracts canonical search identity (core noun, modifiers, anchor terms, excluded concepts)
+ * 2. Build tight search queries from identity
+ * 3. Pre-filter candidates via anchor term gate (title/URL must contain anchor)
+ * 4. Get market intelligence from Perplexity
+ * 5. AI scores the product
+ * 6. Store surviving candidates as "pending" for user selection
  */
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -21,6 +21,14 @@ interface ResearchRequest {
   product_id?: string;
   url?: string;
   name?: string;
+}
+
+interface SearchIdentity {
+  corePhrase: string;        // e.g. "diffuser necklace"
+  modifiers: string[];        // e.g. ["rechargeable", "aroma", "portable"]
+  anchorTerms: string[];      // MUST appear in candidate title/URL — e.g. ["necklace"]
+  excludedConcepts: string[]; // e.g. ["car", "room", "vent", "shoe"]
+  queries: string[];          // Pre-built search queries
 }
 
 // ─── HELPERS ───
@@ -47,14 +55,13 @@ function classifyLinkType(url: string): string {
   return "retail";
 }
 
-// Reject obvious non-product pages
 const NON_PRODUCT_PATTERNS = [
   /\/blog[s]?\//i, /\/article[s]?\//i, /\/wiki\//i,
   /\/help\//i, /\/about\b/i,
   /\/faq/i, /\/terms/i, /\/privacy/i,
   /aws\.amazon\.com/i, /music\.amazon\.com/i, /advertising\.amazon/i,
-  /smart\.dhgate\.com/i, // DHgate blog/articles
-  /\/showroom\//i, // Alibaba showroom (category pages, not products)
+  /smart\.dhgate\.com/i,
+  /\/showroom\//i,
 ];
 
 function isUsefulUrl(url: string): boolean {
@@ -64,7 +71,6 @@ function isUsefulUrl(url: string): boolean {
     for (const p of NON_PRODUCT_PATTERNS) {
       if (p.test(url)) return false;
     }
-    // Reject search/category pages (but allow Amazon /s? with k= param which are search results we want titles from)
     if (u.pathname.includes("/search") && !u.searchParams.has("k")) return false;
     return true;
   } catch {
@@ -72,52 +78,181 @@ function isUsefulUrl(url: string): boolean {
   }
 }
 
-// ─── SERPAPI SEARCH ───
-async function serpSearch(productName: string, serpApiKey: string): Promise<Array<{ url: string; title: string; price: string | null; thumbnail: string | null; source: string }>> {
-  const results: Array<{ url: string; title: string; price: string | null; thumbnail: string | null; source: string }> = [];
+// ─── STEP 1: EXTRACT CANONICAL SEARCH IDENTITY ───
+
+async function extractSearchIdentity(productName: string, openaiKey: string): Promise<SearchIdentity> {
+  const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${openaiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: `You extract a precise search identity for a product to find it on marketplaces.
+
+Rules:
+- corePhrase: The shortest phrase that uniquely identifies the product CLASS (2-4 words). Example: "diffuser necklace", "pet water fountain", "magnetic phone mount"
+- modifiers: Additional qualifying words that narrow the product but aren't essential for category identification
+- anchorTerms: 1-3 words that MUST appear in any valid search result. These define the product class. A result missing ALL anchor terms is definitely wrong.
+- excludedConcepts: Common related products that should be EXCLUDED. These are products that share some keywords but are fundamentally different.
+- queries: Generate 3-4 tight search queries using quotes for exact phrases. Mix the core phrase with modifiers.
+
+Think carefully: what makes THIS product different from similar but wrong products?`
+        },
+        {
+          role: "user",
+          content: `Product: "${productName}"
+
+Extract the canonical search identity.`
+        }
+      ],
+      tools: [{
+        type: "function",
+        function: {
+          name: "set_search_identity",
+          parameters: {
+            type: "object",
+            properties: {
+              corePhrase: { type: "string", description: "Shortest unique product class phrase, 2-4 words" },
+              modifiers: { type: "array", items: { type: "string" }, description: "Additional qualifying terms" },
+              anchorTerms: { type: "array", items: { type: "string" }, description: "1-3 terms that MUST appear in valid results" },
+              excludedConcepts: { type: "array", items: { type: "string" }, description: "Related but wrong product concepts to reject" },
+              queries: { type: "array", items: { type: "string" }, description: "3-4 tight search queries with quotes" },
+            },
+            required: ["corePhrase", "modifiers", "anchorTerms", "excludedConcepts", "queries"],
+          },
+        },
+      }],
+      tool_choice: { type: "function", function: { name: "set_search_identity" } },
+      temperature: 0.1,
+    }),
+  });
+
+  if (!resp.ok) {
+    console.warn(`[research] Identity extraction failed (${resp.status}), using fallback`);
+    return fallbackIdentity(productName);
+  }
+
+  const data = await resp.json();
+  const call = data.choices?.[0]?.message?.tool_calls?.[0];
+  if (!call) return fallbackIdentity(productName);
+
+  const identity: SearchIdentity = JSON.parse(call.function.arguments);
+  console.log(`[research] Identity: core="${identity.corePhrase}" anchors=[${identity.anchorTerms}] exclude=[${identity.excludedConcepts}]`);
+  return identity;
+}
+
+function fallbackIdentity(productName: string): SearchIdentity {
+  const words = productName.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+  return {
+    corePhrase: productName,
+    modifiers: [],
+    anchorTerms: words.slice(0, 2),
+    excludedConcepts: [],
+    queries: [`"${productName}"`],
+  };
+}
+
+// ─── STEP 2: ANCHOR GATE ───
+
+function passesAnchorGate(
+  title: string,
+  url: string,
+  identity: SearchIdentity,
+): { passes: boolean; reason: string } {
+  const titleLower = (title || "").toLowerCase();
+  const urlLower = url.toLowerCase();
+  const combined = `${titleLower} ${urlLower}`;
+
+  // Check excluded concepts — if title contains an excluded concept but NOT an anchor, reject
+  for (const ex of identity.excludedConcepts) {
+    const exLower = ex.toLowerCase();
+    if (combined.includes(exLower)) {
+      // Only reject if no anchor term is present (sometimes excluded concepts co-occur with valid products)
+      const hasAnchor = identity.anchorTerms.some(a => combined.includes(a.toLowerCase()));
+      if (!hasAnchor) {
+        return { passes: false, reason: `excluded_concept:${ex}` };
+      }
+    }
+  }
+
+  // At least ONE anchor term must appear in title or URL
+  if (identity.anchorTerms.length > 0) {
+    const hasAnchor = identity.anchorTerms.some(a => combined.includes(a.toLowerCase()));
+    if (!hasAnchor) {
+      return { passes: false, reason: `missing_anchor:[${identity.anchorTerms.join(",")}]` };
+    }
+  }
+
+  return { passes: true, reason: "anchor_matched" };
+}
+
+// ─── STEP 3: SERPAPI SEARCH (with identity-driven queries) ───
+
+async function serpSearch(
+  identity: SearchIdentity,
+  serpApiKey: string,
+): Promise<Array<{ url: string; title: string; price: string | null; thumbnail: string | null; source: string; gateResult: string }>> {
+  const results: Array<{ url: string; title: string; price: string | null; thumbnail: string | null; source: string; gateResult: string }> = [];
   const seen = new Set<string>();
+  let gatedOut = 0;
 
   function add(url: string, title: string, price: string | null, thumbnail: string | null, source: string) {
     if (seen.has(url) || !isUsefulUrl(url)) return;
     seen.add(url);
-    results.push({ url, title, price, thumbnail, source });
+
+    // Anchor gate check
+    const gate = passesAnchorGate(title, url, identity);
+    if (!gate.passes) {
+      gatedOut++;
+      console.log(`[research] GATED OUT: "${title?.slice(0, 60)}" → ${gate.reason}`);
+      return;
+    }
+
+    results.push({ url, title, price, thumbnail, source, gateResult: gate.reason });
   }
 
-  // 1. Google Shopping — these give real product pages with prices
-  try {
-    const q = encodeURIComponent(productName);
-    const resp = await fetch(`https://serpapi.com/search.json?engine=google_shopping&q=${q}&api_key=${serpApiKey}&num=20`);
-    if (resp.ok) {
-      const data = await resp.json();
-      for (const r of (data.shopping_results || [])) {
-        // Google Shopping may have link, product_link, or source
-        const link = r.product_link || r.link || r.source;
-        if (link?.startsWith("http")) {
-          add(link, r.title || "", r.extracted_price || r.price || null, r.thumbnail || null, "google_shopping");
+  // 1. Google Shopping with identity-driven queries
+  for (const query of identity.queries.slice(0, 3)) {
+    try {
+      const q = encodeURIComponent(query);
+      const resp = await fetch(`https://serpapi.com/search.json?engine=google_shopping&q=${q}&api_key=${serpApiKey}&num=15`);
+      if (resp.ok) {
+        const data = await resp.json();
+        for (const r of (data.shopping_results || [])) {
+          const link = r.product_link || r.link || r.source;
+          if (link?.startsWith("http")) {
+            add(link, r.title || "", r.extracted_price || r.price || null, r.thumbnail || null, `shopping:${query.slice(0, 40)}`);
+          }
         }
       }
-      console.log(`[research] Google Shopping: ${data.shopping_results?.length || 0} results, ${results.length} accepted`);
-    }
-  } catch (e) { console.warn("[research] Shopping error:", e); }
+    } catch (e) { console.warn("[research] Shopping error:", e); }
+    await new Promise(r => setTimeout(r, 200));
+  }
 
-  // 2. Site-specific searches
-  const sites = ["amazon.com", "walmart.com", "aliexpress.com", "alibaba.com", "dhgate.com", "temu.com", "ebay.com"];
-  for (const site of sites) {
+  console.log(`[research] After Shopping: ${results.length} passed, ${gatedOut} gated out`);
+
+  // 2. Site-specific searches with tight core phrase
+  const retailSites = ["amazon.com", "walmart.com", "ebay.com", "temu.com"];
+  const wholesaleSites = ["aliexpress.com", "alibaba.com", "dhgate.com"];
+
+  for (const site of [...retailSites, ...wholesaleSites]) {
     try {
-      const q = encodeURIComponent(`${productName} site:${site}`);
+      const q = encodeURIComponent(`"${identity.corePhrase}" ${identity.modifiers.slice(0, 2).join(" ")} site:${site}`);
       const resp = await fetch(`https://serpapi.com/search.json?engine=google&q=${q}&api_key=${serpApiKey}&num=5`);
       if (!resp.ok) continue;
       const data = await resp.json();
       for (const r of (data.organic_results || [])) {
         if (r.link?.startsWith("http")) {
-          add(r.link, r.title || "", null, r.thumbnail || null, `serp:${site}`);
+          add(r.link, r.title || "", null, r.thumbnail || null, `site:${site}`);
         }
       }
     } catch { /* skip */ }
     await new Promise(r => setTimeout(r, 250));
   }
 
-  console.log(`[research] Total candidates: ${results.length}`);
+  console.log(`[research] Total: ${results.length} candidates passed anchor gate, ${gatedOut} rejected`);
   return results;
 }
 
@@ -211,9 +346,9 @@ EMOTIONAL TRIGGERS (pick 2-4): wow, satisfaction, transformation, curiosity, gif
               trending_status: { type: "string", enum: ["emerging", "rising", "peak", "declining", "saturated"] },
               emotional_triggers: { type: "array", items: { type: "string" } },
               price_sweet_spot: { type: "boolean" },
-              estimated_retail_price_cents: { type: "integer", description: "Best guess retail price from research" },
-              estimated_supplier_price_cents: { type: "integer", description: "Best guess supplier price from research" },
-              summary: { type: "string", description: "2-3 sentence honest assessment" },
+              estimated_retail_price_cents: { type: "integer" },
+              estimated_supplier_price_cents: { type: "integer" },
+              summary: { type: "string" },
             },
             required: ["category", "wow_factor", "social_media_potential", "impulse_buy_appeal", "demonstrability_score", "competition_level", "trending_status", "emotional_triggers", "summary"],
           },
@@ -244,8 +379,8 @@ Deno.serve(async (req) => {
     const perplexityKey = Deno.env.get("PERPLEXITY_API_KEY") || null;
     const serpApiKey = Deno.env.get("SERPAPI_API_KEY") || null;
 
-    if (!serpApiKey && !perplexityKey) {
-      return new Response(JSON.stringify({ error: "SERPAPI_API_KEY or PERPLEXITY_API_KEY required" }), {
+    if (!serpApiKey) {
+      return new Response(JSON.stringify({ error: "SERPAPI_API_KEY required" }), {
         status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -276,22 +411,30 @@ Deno.serve(async (req) => {
       .replace(/\s{2,}/g, " ")
       .trim();
 
-    console.log(`[research] ===== v4 RESEARCH: "${searchName}" =====`);
+    console.log(`[research] ===== v5 RESEARCH: "${searchName}" =====`);
 
-    // ─── STEP 1: Find candidate URLs ───
-    let candidates: Array<{ url: string; title: string; price: string | null; thumbnail: string | null; source: string }> = [];
+    // ─── STEP 1: Extract canonical search identity ───
+    const identity = await extractSearchIdentity(searchName, openaiKey);
     
-    if (serpApiKey) {
-      candidates = await serpSearch(searchName, serpApiKey);
+    // Also save identity to product for debugging
+    if (productId) {
+      await supabase.from("products").update({
+        distinctive_attributes: identity.anchorTerms,
+        excluded_variants: identity.excludedConcepts,
+        canonical_name: identity.corePhrase,
+      }).eq("id", productId);
     }
 
-    // ─── STEP 2: Get market intelligence ───
+    // ─── STEP 2: Find candidates with anchor gating ───
+    const candidates = await serpSearch(identity, serpApiKey);
+
+    // ─── STEP 3: Get market intelligence ───
     let intelligence = { summary: "", socialProof: "" };
     if (perplexityKey) {
       intelligence = await getMarketIntelligence(searchName, perplexityKey);
     }
 
-    // ─── STEP 3: AI scoring ───
+    // ─── STEP 4: AI scoring ───
     const scoring = await scoreProduct(searchName, intelligence, candidates.length, openaiKey);
     
     const competitionInv = 6 - (scoring.competition_level || 3);
@@ -303,14 +446,15 @@ Deno.serve(async (req) => {
         competitionInv * 0.10) / 5 * 100
     );
 
-    // ─── STEP 4: Save everything ───
-
-    // Create or update product
+    // ─── STEP 5: Save everything ───
     if (!productId) {
       const { data: newProduct, error: insertErr } = await supabase
         .from("products")
         .insert({
           name: productName,
+          canonical_name: identity.corePhrase,
+          distinctive_attributes: identity.anchorTerms,
+          excluded_variants: identity.excludedConcepts,
           category: scoring.category || null,
           subcategory: scoring.subcategory || null,
           price_cents: scoring.estimated_retail_price_cents || null,
@@ -353,7 +497,7 @@ Deno.serve(async (req) => {
       emotional_triggers: scoring.emotional_triggers || [],
       price_sweet_spot: scoring.price_sweet_spot ?? false,
       overall_score: overallScore,
-      analyzed_by: "ai_v4",
+      analyzed_by: "ai_v5",
       analyzed_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -364,13 +508,13 @@ Deno.serve(async (req) => {
       await supabase.from("product_analysis").insert(analysisRow);
     }
 
-    // Clear old unconfirmed links, keep user-confirmed ones
+    // Clear old unconfirmed links
     await supabase.from("product_links")
       .delete()
       .eq("product_id", productId)
       .or("validation_status.eq.pending,validation_status.eq.rejected,validation_status.is.null");
 
-    // Save ALL candidates as "pending" — user picks the right ones
+    // Save candidates with entry source logged
     if (candidates.length > 0) {
       const linkRows = candidates.slice(0, 30).map(c => {
         const priceCents = c.price ? parsePriceToCents(c.price) : null;
@@ -384,16 +528,16 @@ Deno.serve(async (req) => {
           verified: false,
           match_confidence: 0,
           validation_status: "pending",
-          validation_reasons: [`source:${c.source}`],
-          fetch_method: "serp_candidate",
+          validation_reasons: [`source:${c.source}`, `gate:${c.gateResult}`],
+          fetch_method: "serp_v5_identity",
         };
       });
       const { error: linkErr } = await supabase.from("product_links").insert(linkRows);
       if (linkErr) console.warn("[research] Failed to save candidate links:", linkErr);
-      else console.log(`[research] Saved ${linkRows.length} candidate links for user review`);
+      else console.log(`[research] Saved ${linkRows.length} candidates for user review`);
     }
 
-    console.log(`[research] ===== COMPLETE: score=${overallScore}, ${candidates.length} candidates for review =====`);
+    console.log(`[research] ===== COMPLETE: score=${overallScore}, ${candidates.length} candidates passed gate =====`);
 
     return new Response(
       JSON.stringify({
@@ -401,6 +545,11 @@ Deno.serve(async (req) => {
         product_id: productId,
         overall_score: overallScore,
         candidates_found: candidates.length,
+        identity: {
+          corePhrase: identity.corePhrase,
+          anchorTerms: identity.anchorTerms,
+          excludedConcepts: identity.excludedConcepts,
+        },
         analysis: scoring,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
