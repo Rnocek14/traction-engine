@@ -665,6 +665,83 @@ export type Database = {
           },
         ]
       }
+      product_conversions: {
+        Row: {
+          ad_spend_cents: number | null
+          add_to_carts: number | null
+          clicks: number | null
+          cogs_cents: number | null
+          conversion_rate: number | null
+          cost_per_acquisition_cents: number | null
+          created_at: string
+          date: string
+          gross_profit_cents: number | null
+          id: string
+          impressions: number | null
+          net_profit_cents: number | null
+          product_id: string
+          purchases: number | null
+          refund_amount_cents: number | null
+          refunds: number | null
+          revenue_cents: number | null
+          roas: number | null
+          source: string
+          updated_at: string
+        }
+        Insert: {
+          ad_spend_cents?: number | null
+          add_to_carts?: number | null
+          clicks?: number | null
+          cogs_cents?: number | null
+          conversion_rate?: number | null
+          cost_per_acquisition_cents?: number | null
+          created_at?: string
+          date: string
+          gross_profit_cents?: number | null
+          id?: string
+          impressions?: number | null
+          net_profit_cents?: number | null
+          product_id: string
+          purchases?: number | null
+          refund_amount_cents?: number | null
+          refunds?: number | null
+          revenue_cents?: number | null
+          roas?: number | null
+          source?: string
+          updated_at?: string
+        }
+        Update: {
+          ad_spend_cents?: number | null
+          add_to_carts?: number | null
+          clicks?: number | null
+          cogs_cents?: number | null
+          conversion_rate?: number | null
+          cost_per_acquisition_cents?: number | null
+          created_at?: string
+          date?: string
+          gross_profit_cents?: number | null
+          id?: string
+          impressions?: number | null
+          net_profit_cents?: number | null
+          product_id?: string
+          purchases?: number | null
+          refund_amount_cents?: number | null
+          refunds?: number | null
+          revenue_cents?: number | null
+          roas?: number | null
+          source?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_conversions_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       product_images: {
         Row: {
           created_at: string
@@ -2535,6 +2612,81 @@ export type Database = {
             columns: ["job_b"]
             isOneToOne: false
             referencedRelation: "video_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      video_conversions: {
+        Row: {
+          ad_spend_cents: number | null
+          add_to_carts: number | null
+          clicks: number | null
+          conversion_rate: number | null
+          created_at: string
+          ctr: number | null
+          date: string
+          external_post_id: string | null
+          id: string
+          impressions: number | null
+          platform: string
+          product_id: string | null
+          purchases: number | null
+          revenue_cents: number | null
+          roas: number | null
+          story_job_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          ad_spend_cents?: number | null
+          add_to_carts?: number | null
+          clicks?: number | null
+          conversion_rate?: number | null
+          created_at?: string
+          ctr?: number | null
+          date: string
+          external_post_id?: string | null
+          id?: string
+          impressions?: number | null
+          platform?: string
+          product_id?: string | null
+          purchases?: number | null
+          revenue_cents?: number | null
+          roas?: number | null
+          story_job_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          ad_spend_cents?: number | null
+          add_to_carts?: number | null
+          clicks?: number | null
+          conversion_rate?: number | null
+          created_at?: string
+          ctr?: number | null
+          date?: string
+          external_post_id?: string | null
+          id?: string
+          impressions?: number | null
+          platform?: string
+          product_id?: string | null
+          purchases?: number | null
+          revenue_cents?: number | null
+          roas?: number | null
+          story_job_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "video_conversions_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "video_conversions_story_job_id_fkey"
+            columns: ["story_job_id"]
+            isOneToOne: false
+            referencedRelation: "story_jobs"
             referencedColumns: ["id"]
           },
         ]
