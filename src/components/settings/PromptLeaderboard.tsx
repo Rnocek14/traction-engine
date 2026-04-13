@@ -276,6 +276,14 @@ export function PromptLeaderboard() {
                     </TableCell>
                     <TableCell>{exp.provider || "—"}</TableCell>
                     <TableCell>
+                      {(exp.input_context as any)?.used_scraped_insights ? (
+                        <Badge variant="outline" className="gap-1 text-xs border-primary/30 text-primary">
+                          <Flame className="w-3 h-3" /> Yes
+                        </Badge>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
                       <StatusBadge status={exp.status} />
                     </TableCell>
                     <TableCell className="max-w-[300px] truncate text-xs text-muted-foreground">
