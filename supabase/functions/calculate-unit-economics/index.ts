@@ -26,16 +26,32 @@ interface EconomicsInput {
   content_cost_per_sale_cents?: number;
 }
 
-function computeViabilityGrade(netMarginPct: number, supplierScore: number | null): string {
-  // Grade based on net margin + supplier quality
+function computeDeliveryGrade(totalDays: number): string {
+  if (totalDays <= 7) return "excellent";
+  if (totalDays <= 12) return "good";
+  if (totalDays <= 20) return "risky";
+  return "bad";
+}
+
+function computeViabilityGrade(netMarginPct: number, supplierScore: number | null, totalDeliveryDays: number | null): string {
   const supplierFactor = supplierScore ? supplierScore / 5 : 0.5;
-  const adjustedMargin = netMarginPct * supplierFactor;
+  const deliveryPenalty = totalDeliveryDays && totalDeliveryDays > 20 ? 0.7 : totalDeliveryDays && totalDeliveryDays > 15 ? 0.85 : 1;
+  const adjustedMargin = netMarginPct * supplierFactor * deliveryPenalty;
 
   if (adjustedMargin >= 30) return "A";
   if (adjustedMargin >= 20) return "B";
   if (adjustedMargin >= 10) return "C";
   if (adjustedMargin >= 0) return "D";
   return "F";
+}
+
+/** Kill conditions: returns reason string or null if viable */
+function checkKillConditions(netMarginPct: number, totalDeliveryDays: number | null, supplierScore: number | null): string | null {
+  const reasons: string[] = [];
+  if (netMarginPct < 10) reasons.push(`net margin ${netMarginPct.toFixed(1)}% < 10%`);
+  if (totalDeliveryDays && totalDeliveryDays > 15) reasons.push(`delivery ${totalDeliveryDays}d > 15d`);
+  if (supplierScore !== null && supplierScore < 50) reasons.push(`supplier score ${supplierScore} < 50`);
+  return reasons.length > 0 ? reasons.join("; ") : null;
 }
 
 Deno.serve(async (req) => {
@@ -80,6 +96,10 @@ Deno.serve(async (req) => {
       .limit(1);
 
     const bestSupplier = suppliers?.[0] || null;
+    const totalDeliveryDays = bestSupplier 
+      ? (bestSupplier.processing_days || 0) + (bestSupplier.delivery_days || 0) 
+      : null;
+    const deliveryGrade = totalDeliveryDays ? computeDeliveryGrade(totalDeliveryDays) : null;
 
     // Resolve values: overrides > supplier data > product data > defaults
     const retailPriceCents = body.retail_price_cents || product.price_cents;
