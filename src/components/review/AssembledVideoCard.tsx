@@ -3,8 +3,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { CheckCircle, XCircle, RotateCcw, Play, Clock, Film, Flame } from "lucide-react";
-import type { EnrichmentMeta } from "@/hooks/use-assembled-videos";
+import { CheckCircle, XCircle, RotateCcw, Play, Clock, Film, Flame, Shield } from "lucide-react";
+import type { EnrichmentMeta, ConfidenceScore } from "@/hooks/use-assembled-videos";
 
 interface AssembledVideo {
   id: string;
@@ -18,6 +18,7 @@ interface AssembledVideo {
   continuity_score: number | null;
   account_id: string;
   enrichment?: EnrichmentMeta;
+  confidence?: ConfidenceScore;
 }
 
 interface AssembledVideoCardProps {
@@ -128,6 +129,29 @@ export function AssembledVideoCard({ video, onApprove, onReject, onReassemble }:
                           📐 {video.enrichment.format}
                         </Badge>
                       )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Confidence Score */}
+                {video.confidence && (
+                  <div className="flex items-center gap-3 rounded-md border border-border/50 bg-secondary/30 px-3 py-2">
+                    <div className="flex items-center gap-1.5">
+                      <Shield className={`w-4 h-4 ${
+                        video.confidence.level === "high" ? "text-success" :
+                        video.confidence.level === "medium" ? "text-warning" : "text-destructive"
+                      }`} />
+                      <span className="font-semibold text-sm">
+                        {video.confidence.overall.toFixed(1)}
+                      </span>
+                      <span className="text-xs text-muted-foreground">/ 10</span>
+                    </div>
+                    <div className="flex gap-2 text-xs text-muted-foreground">
+                      <span>Quality {video.confidence.quality.toFixed(0)}</span>
+                      <span>·</span>
+                      <span>Continuity {video.confidence.continuity.toFixed(0)}</span>
+                      <span>·</span>
+                      <span>Completion {video.confidence.completion.toFixed(0)}</span>
                     </div>
                   </div>
                 )}
