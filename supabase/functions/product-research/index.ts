@@ -426,7 +426,6 @@ async function verifyLink(
     }
     
     // Marketplace-specific dead page detection
-    const marketplace = getMarketplace(candidateUrl);
     if (marketplace && MARKETPLACE_HEURISTICS[marketplace]) {
       const heuristic = MARKETPLACE_HEURISTICS[marketplace];
       const bodyLower = html.slice(0, 8000).toLowerCase();
