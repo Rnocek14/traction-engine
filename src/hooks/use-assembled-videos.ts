@@ -9,6 +9,15 @@ export type EnrichmentMeta = {
   insight_ids: string[];
 };
 
+export type ConfidenceScore = {
+  overall: number; // 0-10
+  continuity: number; // 0-10
+  enrichment: number; // 0-10
+  quality: number; // 0-10
+  completion: number; // 0-10
+  level: "high" | "medium" | "low";
+};
+
 type AssembledVideoRow = {
   id: string;
   title: string | null;
@@ -18,11 +27,13 @@ type AssembledVideoRow = {
   assembled_at: string | null;
   assembled_meta: Record<string, unknown> | null;
   total_clips: number | null;
+  completed_clips: number | null;
   continuity_score: number | null;
   account_id: string;
   status: string;
   script_experiment_id: string | null;
   enrichment?: EnrichmentMeta;
+  confidence?: ConfidenceScore;
 };
 
 type AssemblyPollResponse = {
