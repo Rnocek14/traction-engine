@@ -463,8 +463,39 @@ Return ONLY valid JSON: {"beats":[{...}]}`;
           debugPersistId = await writeDebugPersist(debugConfig, debugPayload);
         }
 
-        // 11. Response
-        console.log(`[generate-storyboard] ✓ Template mode complete: ${compiledScenes.length} scenes, type=${selection.type}`);
+        // 11. Prompt R&D: log visual experiments (fire-and-forget)
+        const visualPrompts = compiledScenes.map((s: { prompt: string }) => s.prompt).join("\n---\n");
+        const visualExpId = await logExperiment({
+          stage: "visual",
+          family: constraints.compiler === "cinematic" ? "cinematic_mood" : "literal_match",
+          promptText: visualPrompts,
+          promptVariables: { concept, story_type: selection.type, scene_count: compiledScenes.length },
+          inputContext: { vertical, goal, tier, hook_category: hookCategory },
+          outputSummary: {
+            scene_count: compiledScenes.length,
+            has_research: researchBrief.activated,
+            preflight_errors: preflight.errors.length,
+            preflight_warnings: preflight.warnings.length,
+          },
+          vertical,
+          model: "gpt-4o-mini",
+          status: preflight.errors.length > 0 ? "rejected" : "scored",
+        });
+
+        if (visualExpId) {
+          await logScore({
+            experimentId: visualExpId,
+            overallScore: preflight.errors.length === 0 ? 7 : 3,
+            visuality: 7,
+            coherence: preflight.errors.length === 0 ? 7 : 4,
+            hardFail: storyCompliance.has_hard_blocks,
+            notes: preflight.warnings.length > 0 ? preflight.warnings.slice(0, 3).join("; ") : undefined,
+            scorePayload: { compliance: { replacements: storyCompliance.total_replacements, hard_blocks: storyCompliance.has_hard_blocks } },
+          }, "output");
+        }
+
+        // 12. Response
+        console.log(`[generate-storyboard] ✓ Template mode complete: ${compiledScenes.length} scenes, type=${selection.type} visualExp=${visualExpId}`);
 
         return new Response(
           JSON.stringify({
