@@ -1197,6 +1197,7 @@ export type Database = {
           plan_version: number
           preferred_supplier_id: string | null
           price_cents: number | null
+          purchase_url: string | null
           readiness_score: number | null
           readiness_state: string | null
           retail_anchor_price_cents: number | null
@@ -1229,6 +1230,7 @@ export type Database = {
           plan_version?: number
           preferred_supplier_id?: string | null
           price_cents?: number | null
+          purchase_url?: string | null
           readiness_score?: number | null
           readiness_state?: string | null
           retail_anchor_price_cents?: number | null
@@ -1261,6 +1263,7 @@ export type Database = {
           plan_version?: number
           preferred_supplier_id?: string | null
           price_cents?: number | null
+          purchase_url?: string | null
           readiness_score?: number | null
           readiness_state?: string | null
           retail_anchor_price_cents?: number | null

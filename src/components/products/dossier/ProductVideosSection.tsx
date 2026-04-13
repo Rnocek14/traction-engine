@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Video, Check, X, Play, RefreshCw, ChevronDown, ChevronUp } from "lucide-react";
+import { Loader2, Video, Check, X, Play, RefreshCw, ChevronDown, ChevronUp, Download } from "lucide-react";
 import { useGenerateVideoConcepts, useQueueVideoConcepts, useProductStoryJobs, type VideoConcept } from "@/hooks/use-product-videos";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useQuery } from "@tanstack/react-query";
@@ -264,7 +264,23 @@ export function ProductVideosSection({ productId }: { productId: string }) {
                 </div>
                 <div className="flex items-center gap-2 text-xs text-muted-foreground shrink-0">
                   {job.completed_clips}/{job.total_clips} clips
-                  {job.assembled_status === "succeeded" && (
+                  {job.assembled_status === "succeeded" && job.assembled_video_url && (
+                    <>
+                      <Badge className="bg-green-500/10 text-green-500 text-[10px]">Assembled</Badge>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 gap-1"
+                        asChild
+                      >
+                        <a href={job.assembled_video_url} download target="_blank" rel="noopener noreferrer">
+                          <Download className="w-3 h-3" />
+                          MP4
+                        </a>
+                      </Button>
+                    </>
+                  )}
+                  {job.assembled_status === "succeeded" && !job.assembled_video_url && (
                     <Badge className="bg-green-500/10 text-green-500 text-[10px]">Assembled</Badge>
                   )}
                 </div>
