@@ -131,6 +131,7 @@ export function AssembledVideoCard({ video, onApprove, onReject, onReassemble }:
                     </div>
                   </div>
                 )}
+              </div>
 
             {/* Actions */}
             {video.assembled_status === "succeeded" && (
