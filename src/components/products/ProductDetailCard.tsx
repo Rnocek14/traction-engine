@@ -30,6 +30,9 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
   const [imgIdx, setImgIdx] = useState(0);
   const analysis = product.product_analysis?.[0];
   const images = product.product_images || [];
+  const links = product.product_links || [];
+  const retailLinks = links.filter(l => l.link_type === "retail");
+  const wholesaleLinks = links.filter(l => l.link_type === "wholesale");
   const updateStatus = useUpdateProductStatus();
   const researchProduct = useResearchProduct();
   const generatePlan = useGenerateProductPlan();
