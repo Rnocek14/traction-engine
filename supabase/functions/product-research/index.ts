@@ -25,10 +25,13 @@ interface ResearchRequest {
 
 interface SearchIdentity {
   corePhrase: string;        // e.g. "diffuser necklace"
+  brandName: string;          // e.g. "RORRY" — extracted brand, empty if generic
   modifiers: string[];        // e.g. ["rechargeable", "aroma", "portable"]
   anchorTerms: string[];      // MUST appear in candidate title/URL — e.g. ["necklace"]
   excludedConcepts: string[]; // e.g. ["car", "room", "vent", "shoe"]
-  queries: string[];          // Pre-built search queries
+  queries: string[];          // Pre-built search queries (retail, brand-aware)
+  wholesaleDescription: string; // Physical description for sourcing: "5000mAh mini power bank keychain USB-C built-in cable"
+  wholesaleQueries: string[]; // Unbranded queries for AliExpress/Alibaba/DHgate
 }
 
 // ─── HELPERS ───
