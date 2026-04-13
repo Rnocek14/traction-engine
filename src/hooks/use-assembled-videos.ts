@@ -55,8 +55,6 @@ export function useAssembledVideos() {
         .select("id, title, story_type, assembled_status, assembled_video_url, assembled_at, assembled_meta, total_clips, completed_clips, continuity_score, account_id, status, script_experiment_id")
         .in("assembled_status", ["succeeded", "rendering", "queued", "failed"])
         .order("updated_at", { ascending: false });
-        .in("assembled_status", ["succeeded", "rendering", "queued", "failed"])
-        .order("updated_at", { ascending: false });
 
       if (error) throw error;
 
