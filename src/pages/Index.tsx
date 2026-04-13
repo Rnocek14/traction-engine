@@ -37,6 +37,7 @@ const ACTION_ICONS: Record<string, typeof Package> = {
   product_hot: Flame,
   winner_scale: TrendingUp,
   loser_cut: Eye,
+  assign_accounts: Users,
 };
 
 const ACTION_COLORS: Record<string, string> = {
@@ -48,6 +49,7 @@ const ACTION_COLORS: Record<string, string> = {
   product_hot: "border-l-red-500",
   winner_scale: "border-l-emerald-500",
   loser_cut: "border-l-gray-500",
+  assign_accounts: "border-l-cyan-500",
 };
 
 const ACTION_ROUTES: Record<string, string> = {
@@ -59,6 +61,7 @@ const ACTION_ROUTES: Record<string, string> = {
   product_hot: "/products",
   winner_scale: "/review",
   loser_cut: "/review",
+  assign_accounts: "/products",
 };
 
 const TREND_COLORS: Record<string, string> = {
