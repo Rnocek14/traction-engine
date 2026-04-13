@@ -383,6 +383,37 @@ Also suggest:
       await supabase.from("product_analysis").insert(analysisRow);
     }
 
+    // Save found product images
+    if (foundImageUrls.length > 0 && productId) {
+      // Clear old AI-found images for this product (keep manually verified ones)
+      await supabase
+        .from("product_images")
+        .delete()
+        .eq("product_id", productId)
+        .eq("verified", false);
+
+      // Insert new images
+      const imageRows = foundImageUrls.map((img, i) => ({
+        product_id: productId,
+        url: img.url,
+        source: img.source,
+        label: img.label,
+        is_primary: i === 0,
+        verified: false,
+      }));
+      
+      const { error: imgErr } = await supabase.from("product_images").insert(imageRows);
+      if (imgErr) {
+        console.warn("[product-research] Failed to save images:", imgErr);
+      } else {
+        // Update product's primary image_url to the first found image
+        await supabase.from("products")
+          .update({ image_url: foundImageUrls[0].url })
+          .eq("id", productId);
+      }
+      console.log(`[product-research] Saved ${foundImageUrls.length} images for product`);
+    }
+
     console.log(`[product-research] Scored "${analysis.product_name}": ${overallScore}/100`);
 
     return new Response(
