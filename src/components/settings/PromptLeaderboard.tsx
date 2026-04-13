@@ -20,18 +20,52 @@ export function PromptLeaderboard() {
   const { data: familyStats = [], isLoading: statsLoading } = usePromptFamilyStats();
   const { data: experiments = [], isLoading: experimentsLoading } = usePromptExperiments({ stage: stageFilter, limit: 20 });
 
+  const queryClient = useQueryClient();
+  const [seeding, setSeeding] = useState(false);
+
   const filteredStats = familyStats.filter(s => s.stage === stageFilter);
+
+  const handleSeedTemplates = async () => {
+    setSeeding(true);
+    try {
+      const { error } = await supabase.from("prompt_templates").upsert(
+        PROMPT_TEMPLATE_SEEDS.map(t => ({
+          ...t,
+          variables_schema: t.variables_schema,
+          scoring_weights: t.scoring_weights,
+          verticals: [] as string[],
+          platforms: [] as string[],
+        })),
+        { onConflict: "name" as any, ignoreDuplicates: true }
+      );
+      if (error) throw error;
+      toast.success(`Seeded ${PROMPT_TEMPLATE_SEEDS.length} prompt templates`);
+      queryClient.invalidateQueries({ queryKey: ["prompt-templates"] });
+    } catch (err: any) {
+      toast.error(`Seed failed: ${err.message}`);
+    } finally {
+      setSeeding(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
-      {/* Stage selector */}
-      <Tabs value={stageFilter} onValueChange={setStageFilter}>
-        <TabsList>
-          {STAGES.map(s => (
-            <TabsTrigger key={s} value={s} className="capitalize">{s}</TabsTrigger>
-          ))}
-        </TabsList>
-      </Tabs>
+      {/* Stage selector + seed button */}
+      <div className="flex items-center justify-between">
+        <Tabs value={stageFilter} onValueChange={setStageFilter}>
+          <TabsList>
+            {STAGES.map(s => (
+              <TabsTrigger key={s} value={s} className="capitalize">{s}</TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+        {templates.length === 0 && (
+          <Button variant="outline" size="sm" onClick={handleSeedTemplates} disabled={seeding} className="gap-2">
+            <Database className="h-4 w-4" />
+            {seeding ? "Seeding…" : "Seed Templates"}
+          </Button>
+        )}
+      </div>
 
       {/* Summary cards */}
       <div className="grid grid-cols-4 gap-4">
