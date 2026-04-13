@@ -1014,6 +1014,116 @@ export type Database = {
         }
         Relationships: []
       }
+      scrape_jobs: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          error: string | null
+          extracted_json: Json | null
+          extraction_duration_ms: number | null
+          fetch_duration_ms: number | null
+          fetch_method: string | null
+          id: string
+          raw_html: string | null
+          raw_text: string | null
+          source_type: string
+          status: string
+          url: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          error?: string | null
+          extracted_json?: Json | null
+          extraction_duration_ms?: number | null
+          fetch_duration_ms?: number | null
+          fetch_method?: string | null
+          id?: string
+          raw_html?: string | null
+          raw_text?: string | null
+          source_type?: string
+          status?: string
+          url: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          error?: string | null
+          extracted_json?: Json | null
+          extraction_duration_ms?: number | null
+          fetch_duration_ms?: number | null
+          fetch_method?: string | null
+          id?: string
+          raw_html?: string | null
+          raw_text?: string | null
+          source_type?: string
+          status?: string
+          url?: string
+        }
+        Relationships: []
+      }
+      scraped_insights: {
+        Row: {
+          content_format: string | null
+          created_at: string
+          emotional_triggers: string[] | null
+          hook_patterns: string[] | null
+          id: string
+          key_points: string[] | null
+          raw_extraction: Json | null
+          relevance_tags: string[] | null
+          scrape_job_id: string
+          source_type: string
+          source_url: string
+          title: string | null
+          topics: string[] | null
+          viral_score: number | null
+          visual_style: string | null
+        }
+        Insert: {
+          content_format?: string | null
+          created_at?: string
+          emotional_triggers?: string[] | null
+          hook_patterns?: string[] | null
+          id?: string
+          key_points?: string[] | null
+          raw_extraction?: Json | null
+          relevance_tags?: string[] | null
+          scrape_job_id: string
+          source_type: string
+          source_url: string
+          title?: string | null
+          topics?: string[] | null
+          viral_score?: number | null
+          visual_style?: string | null
+        }
+        Update: {
+          content_format?: string | null
+          created_at?: string
+          emotional_triggers?: string[] | null
+          hook_patterns?: string[] | null
+          id?: string
+          key_points?: string[] | null
+          raw_extraction?: Json | null
+          relevance_tags?: string[] | null
+          scrape_job_id?: string
+          source_type?: string
+          source_url?: string
+          title?: string | null
+          topics?: string[] | null
+          viral_score?: number | null
+          visual_style?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "scraped_insights_scrape_job_id_fkey"
+            columns: ["scrape_job_id"]
+            isOneToOne: false
+            referencedRelation: "scrape_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       script_fingerprints: {
         Row: {
           account_id: string
