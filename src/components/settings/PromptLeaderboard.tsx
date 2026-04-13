@@ -2,10 +2,15 @@ import { useState } from "react";
 import { usePromptTemplates, usePromptFamilyStats, usePromptExperiments } from "@/hooks/use-prompt-leaderboard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
-import { FlaskConical, Trophy, TrendingUp, AlertTriangle, CheckCircle, XCircle } from "lucide-react";
+import { FlaskConical, Trophy, TrendingUp, AlertTriangle, CheckCircle, XCircle, Database } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { PROMPT_TEMPLATE_SEEDS } from "@/data/prompt-template-seeds";
+import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
 
 const STAGES = ["hook", "script", "visual", "topic"] as const;
 
