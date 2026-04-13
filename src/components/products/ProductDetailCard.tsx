@@ -130,6 +130,7 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
             {linkedIdeas.map((idea) => (
               <div key={idea.id} className="flex items-center justify-between text-xs bg-muted/30 rounded px-2 py-1">
                 <div className="flex items-center gap-1.5 min-w-0">
+                  <Badge variant="outline" className="text-[10px] shrink-0">{idea.account_id || "unassigned"}</Badge>
                   <Badge variant="outline" className="text-[10px] shrink-0">{idea.status}</Badge>
                   <span className="truncate">{idea.title}</span>
                 </div>
