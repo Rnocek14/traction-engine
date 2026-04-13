@@ -607,6 +607,149 @@ Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, s
       }
     }
 
+    // ==========================================
+    // PHASE 7: EXTRACT SUPPLIER DATA
+    // ==========================================
+    console.log("[product-research] Phase 7: Extracting supplier data");
+    if (productId && wholesaleLinks.length > 0) {
+      // Use AI to extract structured supplier info from wholesale search results
+      try {
+        const supplierResp = await fetch("https://api.openai.com/v1/chat/completions", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${openaiKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: "gpt-4o-mini",
+            messages: [{
+              role: "system",
+              content: `You are a dropshipping supplier analyst. Extract structured supplier data from wholesale research. Be conservative with estimates — mark anything uncertain. For shipping, separate processing time from delivery time.`,
+            }, {
+              role: "user",
+              content: `Product: "${productName}"\n\nWholesale research:\n${wholesaleSearch.content}\n\nVerified wholesale links:\n${wholesaleLinks.map(l => `${l.platform}: ${l.url} ${l.priceCents ? `($${(l.priceCents/100).toFixed(2)})` : ""}`).join("\n")}`,
+            }],
+            tools: [{ type: "function", function: {
+              name: "store_suppliers",
+              parameters: {
+                type: "object",
+                properties: {
+                  suppliers: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        supplier_name: { type: "string" },
+                        platform: { type: "string", enum: ["AliExpress", "Alibaba", "1688", "DHgate", "Temu", "direct", "other"] },
+                        unit_cost_cents: { type: "integer", description: "Unit cost in cents" },
+                        shipping_cost_cents: { type: "integer", description: "Estimated shipping cost in cents to US" },
+                        shipping_country: { type: "string", description: "Where product ships from, e.g. CN, US" },
+                        processing_days: { type: "integer", description: "Days to process/prepare order" },
+                        delivery_days: { type: "integer", description: "Days for delivery after processing" },
+                        moq: { type: "integer", description: "Minimum order quantity, 1 if single-unit" },
+                        reliability_score: { type: "integer", minimum: 1, maximum: 5, description: "1=unknown/risky, 3=average, 5=established/trusted" },
+                        defect_risk: { type: "integer", minimum: 1, maximum: 5, description: "1=low risk, 5=high risk" },
+                        stock_status: { type: "string", enum: ["in_stock", "low_stock", "out_of_stock", "unknown"] },
+                        expected_return_rate_pct: { type: "number", description: "Expected return rate 0-100" },
+                        verification_status: { type: "string", enum: ["estimated", "partially_verified", "verified"] },
+                        notes: { type: "string" },
+                      },
+                      required: ["supplier_name", "platform", "unit_cost_cents"],
+                    },
+                  },
+                },
+                required: ["suppliers"],
+              },
+            }}],
+            tool_choice: { type: "function", function: { name: "store_suppliers" } },
+            temperature: 0.2,
+          }),
+        });
+
+        if (supplierResp.ok) {
+          const supplierData = await supplierResp.json();
+          const supplierCall = supplierData.choices?.[0]?.message?.tool_calls?.[0];
+          if (supplierCall) {
+            const { suppliers } = JSON.parse(supplierCall.function.arguments);
+            // Clear old estimated suppliers, keep verified ones
+            await supabase.from("product_suppliers")
+              .delete()
+              .eq("product_id", productId)
+              .neq("verification_status", "verified");
+
+            for (const s of (suppliers || []).slice(0, 5)) {
+              const supplierUrl = wholesaleLinks.find(l => 
+                l.platform.toLowerCase() === s.platform.toLowerCase()
+              )?.url || null;
+
+              const reliabilityScore = s.reliability_score || 3;
+              const defectRisk = s.defect_risk || 3;
+              const commScore = 3; // Default, can't know from search
+              const overallSupplierScore = Math.round(
+                (reliabilityScore * 0.4 + (6 - defectRisk) * 0.3 + commScore * 0.3) / 5 * 100
+              );
+
+              await supabase.from("product_suppliers").insert({
+                product_id: productId,
+                supplier_name: s.supplier_name,
+                platform: s.platform,
+                supplier_url: supplierUrl,
+                unit_cost_cents: s.unit_cost_cents,
+                shipping_cost_cents: s.shipping_cost_cents || 0,
+                shipping_country: s.shipping_country || "CN",
+                target_market: "US",
+                processing_days: s.processing_days || null,
+                delivery_days: s.delivery_days || null,
+                moq: s.moq || 1,
+                reliability_score: reliabilityScore,
+                defect_risk: defectRisk,
+                communication_score: commScore,
+                stock_status: s.stock_status || "unknown",
+                expected_return_rate_pct: s.expected_return_rate_pct || 5,
+                overall_supplier_score: overallSupplierScore,
+                verification_status: s.verification_status || "estimated",
+                notes: s.notes || null,
+                is_preferred: false,
+              });
+            }
+            // Mark cheapest as preferred
+            const { data: allSuppliers } = await supabase
+              .from("product_suppliers")
+              .select("id, unit_cost_cents")
+              .eq("product_id", productId)
+              .order("unit_cost_cents", { ascending: true })
+              .limit(1);
+            if (allSuppliers?.[0]) {
+              await supabase.from("product_suppliers")
+                .update({ is_preferred: true })
+                .eq("id", allSuppliers[0].id);
+            }
+            console.log(`[product-research] Saved ${suppliers?.length || 0} suppliers`);
+          }
+        }
+      } catch (e) { console.warn("[product-research] Supplier extraction error:", e); }
+    }
+
+    // ==========================================
+    // PHASE 8: AUTO-CALCULATE UNIT ECONOMICS
+    // ==========================================
+    console.log("[product-research] Phase 8: Auto-calculating unit economics");
+    if (productId) {
+      try {
+        const econResp = await fetch(`${supabaseUrl}/functions/v1/calculate-unit-economics`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${supabaseServiceKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ product_id: productId }),
+        });
+        if (econResp.ok) {
+          const econData = await econResp.json();
+          console.log(`[product-research] Economics: grade=${econData.viability_grade}, net_margin=${econData.net_margin_pct}%`);
+        } else {
+          console.warn(`[product-research] Economics calculation returned ${econResp.status}`);
+        }
+      } catch (e) { console.warn("[product-research] Economics calculation error:", e); }
+    }
+
     console.log(`[product-research] ===== COMPLETE: "${analysis.product_name}" score=${overallScore}/100, ${validatedLinks.length} links, ${foundImageUrls.length} images =====`);
 
     return new Response(
@@ -618,6 +761,8 @@ Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, s
         links_found: validatedLinks.length,
         retail_links: validatedLinks.filter(l => l.linkType === "retail").length,
         wholesale_links: validatedLinks.filter(l => l.linkType === "wholesale").length,
+        suppliers_extracted: true,
+        economics_calculated: true,
         analysis,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }

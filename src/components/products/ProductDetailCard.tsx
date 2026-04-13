@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ExternalLink, TrendingUp, Package, Search, Loader2, Sparkles, ChevronDown, ChevronUp, Lightbulb, Film, Users, ImageIcon, ChevronLeft, ChevronRight, Trash2, CheckCircle2, ShoppingCart, Warehouse } from "lucide-react";
+import { ExternalLink, TrendingUp, Package, Search, Loader2, Sparkles, ChevronDown, ChevronUp, Lightbulb, Film, Users, ImageIcon, ChevronLeft, ChevronRight, Trash2, CheckCircle2, ShoppingCart, Warehouse, DollarSign, Truck, Star, Calculator, AlertTriangle } from "lucide-react";
 import { type ProductWithAnalysis, type ProductStatus, useUpdateProductStatus, useResearchProduct, useGenerateProductPlan, useProductLinkedIdeas, useAssignProductAccounts } from "@/hooks/use-products";
 import { ProductScoringForm } from "./ProductScoringForm";
 import { ProductMarketingPlan } from "./ProductMarketingPlan";
@@ -27,10 +27,15 @@ const NEXT_STATUS: Partial<Record<ProductStatus, ProductStatus>> = {
 
 export function ProductDetailCard({ product }: { product: ProductWithAnalysis }) {
   const [showPlan, setShowPlan] = useState(false);
+  const [showSuppliers, setShowSuppliers] = useState(false);
+  const [showEconomics, setShowEconomics] = useState(false);
   const [imgIdx, setImgIdx] = useState(0);
+  const [calcPending, setCalcPending] = useState(false);
   const analysis = product.product_analysis?.[0];
   const images = product.product_images || [];
   const links = product.product_links || [];
+  const suppliers = product.product_suppliers || [];
+  const economics = product.product_unit_economics?.[0] || null;
   const retailLinks = links.filter(l => l.link_type === "retail");
   const wholesaleLinks = links.filter(l => l.link_type === "wholesale");
   const updateStatus = useUpdateProductStatus();
@@ -39,6 +44,22 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
   const assignAccounts = useAssignProductAccounts();
   const { data: linkedIdeas } = useProductLinkedIdeas(product.id);
   const qc = useQueryClient();
+
+  const handleRecalcEconomics = async () => {
+    setCalcPending(true);
+    try {
+      const { error } = await supabase.functions.invoke("calculate-unit-economics", {
+        body: { product_id: product.id },
+      });
+      if (error) throw error;
+      toast.success("Economics recalculated");
+      qc.invalidateQueries({ queryKey: ["products"] });
+    } catch (e: any) {
+      toast.error(`Calc failed: ${e.message}`);
+    } finally {
+      setCalcPending(false);
+    }
+  };
 
   const handleDeleteImage = async (imageId: string) => {
     const { error } = await supabase.from("product_images").delete().eq("id", imageId);
@@ -258,6 +279,158 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
             )}
           </div>
         )}
+
+        {/* Supplier Intelligence */}
+        {suppliers.length > 0 && (
+          <div className="border-t pt-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full justify-between text-xs h-7"
+              onClick={() => setShowSuppliers(!showSuppliers)}
+            >
+              <span className="flex items-center gap-1">
+                <Truck className="w-3 h-3" />
+                Suppliers ({suppliers.length})
+                {suppliers.find(s => s.is_preferred) && (
+                  <Badge variant="outline" className="text-[9px] ml-1">preferred set</Badge>
+                )}
+              </span>
+              {showSuppliers ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            </Button>
+            {showSuppliers && (
+              <div className="space-y-1.5 mt-1">
+                {suppliers
+                  .sort((a, b) => (b.is_preferred ? 1 : 0) - (a.is_preferred ? 1 : 0))
+                  .map(s => (
+                  <div key={s.id} className={`text-xs rounded px-2 py-1.5 space-y-0.5 ${s.is_preferred ? "bg-primary/5 border border-primary/20" : "bg-muted/30"}`}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <Badge variant="outline" className="text-[10px]">{s.platform}</Badge>
+                        <span className="font-medium">{s.supplier_name}</span>
+                        {s.is_preferred && <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />}
+                      </div>
+                      <Badge variant="outline" className={`text-[9px] ${
+                        s.verification_status === "verified" ? "text-green-500 border-green-500/30" :
+                        s.verification_status === "partially_verified" ? "text-yellow-500 border-yellow-500/30" :
+                        "text-muted-foreground"
+                      }`}>
+                        {s.verification_status}
+                      </Badge>
+                    </div>
+                    <div className="flex items-center gap-3 text-muted-foreground">
+                      {s.unit_cost_cents && <span>Unit: <span className="text-foreground font-medium">${(s.unit_cost_cents / 100).toFixed(2)}</span></span>}
+                      {s.shipping_cost_cents != null && <span>Ship: ${(s.shipping_cost_cents / 100).toFixed(2)}</span>}
+                      {s.delivery_days && <span>{s.processing_days ? `${s.processing_days}+` : ""}{s.delivery_days}d</span>}
+                      {s.moq && s.moq > 1 && <span>MOQ: {s.moq}</span>}
+                    </div>
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      {s.reliability_score && <span>Reliability: {s.reliability_score}/5</span>}
+                      {s.defect_risk && <span>Defect: {s.defect_risk}/5</span>}
+                      <Badge variant="outline" className={`text-[9px] ${
+                        s.stock_status === "in_stock" ? "text-green-500" :
+                        s.stock_status === "low_stock" ? "text-yellow-500" :
+                        s.stock_status === "out_of_stock" ? "text-destructive" : ""
+                      }`}>{s.stock_status}</Badge>
+                    </div>
+                    {s.supplier_url && (
+                      <a href={s.supplier_url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline flex items-center gap-0.5">
+                        View listing <ExternalLink className="w-2.5 h-2.5" />
+                      </a>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Unit Economics */}
+        {economics ? (
+          <div className="border-t pt-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full justify-between text-xs h-7"
+              onClick={() => setShowEconomics(!showEconomics)}
+            >
+              <span className="flex items-center gap-1">
+                <DollarSign className="w-3 h-3" />
+                Economics
+                <Badge variant="outline" className={`text-[10px] font-bold ${
+                  economics.viability_grade === "A" ? "text-green-500 border-green-500/30" :
+                  economics.viability_grade === "B" ? "text-blue-500 border-blue-500/30" :
+                  economics.viability_grade === "C" ? "text-yellow-500 border-yellow-500/30" :
+                  economics.viability_grade === "D" ? "text-orange-500 border-orange-500/30" :
+                  "text-destructive border-destructive/30"
+                }`}>
+                  Grade {economics.viability_grade}
+                </Badge>
+                {economics.net_margin_pct != null && (
+                  <span className={`text-[10px] ${
+                    economics.net_margin_pct >= 30 ? "text-green-500" :
+                    economics.net_margin_pct >= 15 ? "text-yellow-500" :
+                    "text-destructive"
+                  }`}>
+                    {economics.net_margin_pct}% net
+                  </span>
+                )}
+              </span>
+              {showEconomics ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            </Button>
+            {showEconomics && (
+              <div className="text-xs space-y-1.5 mt-1 bg-muted/30 rounded p-2">
+                <div className="space-y-0.5">
+                  <div className="flex justify-between"><span>Retail Price</span><span className="font-medium">${(economics.retail_price_cents / 100).toFixed(2)}</span></div>
+                  <div className="flex justify-between text-muted-foreground"><span>− Supplier Cost</span><span>-${(economics.supplier_cost_cents / 100).toFixed(2)}</span></div>
+                  {economics.shipping_cost_cents > 0 && <div className="flex justify-between text-muted-foreground"><span>− Shipping</span><span>-${(economics.shipping_cost_cents / 100).toFixed(2)}</span></div>}
+                  {economics.packaging_cost_cents > 0 && <div className="flex justify-between text-muted-foreground"><span>− Packaging</span><span>-${(economics.packaging_cost_cents / 100).toFixed(2)}</span></div>}
+                  <div className="flex justify-between border-t pt-0.5 font-medium">
+                    <span>Gross Margin</span>
+                    <span className={economics.gross_margin_pct && economics.gross_margin_pct >= 40 ? "text-green-500" : "text-yellow-500"}>
+                      ${((economics.gross_margin_cents || 0) / 100).toFixed(2)} ({economics.gross_margin_pct}%)
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-muted-foreground"><span>− Platform Fee ({economics.platform_fee_pct}%)</span><span>-${((economics.retail_price_cents * economics.platform_fee_pct / 100) / 100).toFixed(2)}</span></div>
+                  <div className="flex justify-between text-muted-foreground"><span>− Payment Fee ({economics.payment_fee_pct}%)</span><span>-${((economics.retail_price_cents * economics.payment_fee_pct / 100) / 100).toFixed(2)}</span></div>
+                  <div className="flex justify-between text-muted-foreground"><span>− Refund Reserve ({economics.expected_return_rate_pct}%)</span><span>-${((economics.retail_price_cents * economics.expected_return_rate_pct / 100) / 100).toFixed(2)}</span></div>
+                  <div className="flex justify-between border-t pt-0.5 font-bold">
+                    <span>Net Margin</span>
+                    <span className={economics.net_margin_pct && economics.net_margin_pct >= 20 ? "text-green-500" : economics.net_margin_pct && economics.net_margin_pct >= 0 ? "text-yellow-500" : "text-destructive"}>
+                      ${((economics.net_margin_cents || 0) / 100).toFixed(2)} ({economics.net_margin_pct}%)
+                    </span>
+                  </div>
+                </div>
+                <div className="border-t pt-1 flex items-center gap-3 text-muted-foreground">
+                  {economics.break_even_units && <span>BE Units: <span className="text-foreground font-medium">{economics.break_even_units}</span></span>}
+                  {economics.break_even_cpa_cents && <span>Max CPA: <span className="text-foreground font-medium">${(economics.break_even_cpa_cents / 100).toFixed(2)}</span></span>}
+                  {economics.break_even_roas && <span>Min ROAS: <span className="text-foreground font-medium">{economics.break_even_roas}x</span></span>}
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full h-6 text-[10px]"
+                  onClick={handleRecalcEconomics}
+                  disabled={calcPending}
+                >
+                  {calcPending ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Calculator className="w-3 h-3 mr-1" />}
+                  Recalculate
+                </Button>
+              </div>
+            )}
+          </div>
+        ) : suppliers.length > 0 ? (
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full text-xs h-7"
+            onClick={handleRecalcEconomics}
+            disabled={calcPending}
+          >
+            {calcPending ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Calculator className="w-3 h-3 mr-1" />}
+            Calculate Unit Economics
+          </Button>
+        ) : null}
 
         {/* Plan version indicator */}
         {hasPlan && (

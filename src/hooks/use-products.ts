@@ -63,10 +63,56 @@ export interface ProductLink {
   verified: boolean;
 }
 
+export interface ProductSupplier {
+  id: string;
+  supplier_name: string;
+  platform: string;
+  supplier_url: string | null;
+  unit_cost_cents: number | null;
+  shipping_cost_cents: number | null;
+  shipping_country: string | null;
+  target_market: string | null;
+  processing_days: number | null;
+  delivery_days: number | null;
+  moq: number | null;
+  reliability_score: number | null;
+  defect_risk: number | null;
+  communication_score: number | null;
+  stock_status: string;
+  expected_return_rate_pct: number | null;
+  overall_supplier_score: number | null;
+  verification_status: string;
+  is_preferred: boolean;
+  notes: string | null;
+}
+
+export interface ProductUnitEconomics {
+  id: string;
+  retail_price_cents: number;
+  supplier_cost_cents: number;
+  shipping_cost_cents: number;
+  packaging_cost_cents: number;
+  platform_fee_pct: number;
+  payment_fee_pct: number;
+  expected_return_rate_pct: number;
+  content_cost_per_sale_cents: number;
+  gross_margin_cents: number | null;
+  gross_margin_pct: number | null;
+  net_margin_cents: number | null;
+  net_margin_pct: number | null;
+  break_even_units: number | null;
+  break_even_cpa_cents: number | null;
+  break_even_roas: number | null;
+  viability_grade: string | null;
+  calculated_at: string;
+}
+
 export interface ProductWithAnalysis extends Product {
   product_analysis: ProductAnalysis[] | null;
   product_images: ProductImage[] | null;
   product_links: ProductLink[] | null;
+  product_suppliers: ProductSupplier[] | null;
+  product_unit_economics: ProductUnitEconomics[] | null;
 }
 
 export function useProducts(statusFilter?: ProductStatus) {
@@ -75,7 +121,7 @@ export function useProducts(statusFilter?: ProductStatus) {
     queryFn: async () => {
       let query = supabase
         .from("products")
-        .select("*, product_analysis(*), product_images(*), product_links(*)")
+        .select("*, product_analysis(*), product_images(*), product_links(*), product_suppliers(*), product_unit_economics(*)")
         .order("created_at", { ascending: false });
 
       if (statusFilter) {

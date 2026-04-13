@@ -750,6 +750,181 @@ export type Database = {
           },
         ]
       }
+      product_suppliers: {
+        Row: {
+          communication_score: number | null
+          created_at: string
+          defect_risk: number | null
+          delivery_days: number | null
+          expected_return_rate_pct: number | null
+          id: string
+          is_preferred: boolean
+          moq: number | null
+          notes: string | null
+          overall_supplier_score: number | null
+          platform: string
+          processing_days: number | null
+          product_id: string
+          reliability_score: number | null
+          return_policy: string | null
+          shipping_cost_cents: number | null
+          shipping_country: string | null
+          stock_status: string
+          supplier_name: string
+          supplier_url: string | null
+          target_market: string | null
+          unit_cost_cents: number | null
+          updated_at: string
+          verification_status: string
+          verified_at: string | null
+        }
+        Insert: {
+          communication_score?: number | null
+          created_at?: string
+          defect_risk?: number | null
+          delivery_days?: number | null
+          expected_return_rate_pct?: number | null
+          id?: string
+          is_preferred?: boolean
+          moq?: number | null
+          notes?: string | null
+          overall_supplier_score?: number | null
+          platform?: string
+          processing_days?: number | null
+          product_id: string
+          reliability_score?: number | null
+          return_policy?: string | null
+          shipping_cost_cents?: number | null
+          shipping_country?: string | null
+          stock_status?: string
+          supplier_name: string
+          supplier_url?: string | null
+          target_market?: string | null
+          unit_cost_cents?: number | null
+          updated_at?: string
+          verification_status?: string
+          verified_at?: string | null
+        }
+        Update: {
+          communication_score?: number | null
+          created_at?: string
+          defect_risk?: number | null
+          delivery_days?: number | null
+          expected_return_rate_pct?: number | null
+          id?: string
+          is_preferred?: boolean
+          moq?: number | null
+          notes?: string | null
+          overall_supplier_score?: number | null
+          platform?: string
+          processing_days?: number | null
+          product_id?: string
+          reliability_score?: number | null
+          return_policy?: string | null
+          shipping_cost_cents?: number | null
+          shipping_country?: string | null
+          stock_status?: string
+          supplier_name?: string
+          supplier_url?: string | null
+          target_market?: string | null
+          unit_cost_cents?: number | null
+          updated_at?: string
+          verification_status?: string
+          verified_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_suppliers_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      product_unit_economics: {
+        Row: {
+          break_even_cpa_cents: number | null
+          break_even_roas: number | null
+          break_even_units: number | null
+          calculated_at: string
+          calculator_version: string
+          content_cost_per_sale_cents: number
+          created_at: string
+          expected_return_rate_pct: number
+          gross_margin_cents: number | null
+          gross_margin_pct: number | null
+          id: string
+          net_margin_cents: number | null
+          net_margin_pct: number | null
+          packaging_cost_cents: number
+          payment_fee_pct: number
+          platform_fee_pct: number
+          product_id: string
+          retail_price_cents: number
+          shipping_cost_cents: number
+          supplier_cost_cents: number
+          updated_at: string
+          viability_grade: string | null
+        }
+        Insert: {
+          break_even_cpa_cents?: number | null
+          break_even_roas?: number | null
+          break_even_units?: number | null
+          calculated_at?: string
+          calculator_version?: string
+          content_cost_per_sale_cents?: number
+          created_at?: string
+          expected_return_rate_pct?: number
+          gross_margin_cents?: number | null
+          gross_margin_pct?: number | null
+          id?: string
+          net_margin_cents?: number | null
+          net_margin_pct?: number | null
+          packaging_cost_cents?: number
+          payment_fee_pct?: number
+          platform_fee_pct?: number
+          product_id: string
+          retail_price_cents: number
+          shipping_cost_cents?: number
+          supplier_cost_cents: number
+          updated_at?: string
+          viability_grade?: string | null
+        }
+        Update: {
+          break_even_cpa_cents?: number | null
+          break_even_roas?: number | null
+          break_even_units?: number | null
+          calculated_at?: string
+          calculator_version?: string
+          content_cost_per_sale_cents?: number
+          created_at?: string
+          expected_return_rate_pct?: number
+          gross_margin_cents?: number | null
+          gross_margin_pct?: number | null
+          id?: string
+          net_margin_cents?: number | null
+          net_margin_pct?: number | null
+          packaging_cost_cents?: number
+          payment_fee_pct?: number
+          platform_fee_pct?: number
+          product_id?: string
+          retail_price_cents?: number
+          shipping_cost_cents?: number
+          supplier_cost_cents?: number
+          updated_at?: string
+          viability_grade?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_unit_economics_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: true
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       products: {
         Row: {
           category: string | null
