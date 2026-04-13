@@ -1,154 +1,142 @@
 import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import { TrendingUp, TrendingDown, Play, Pause, AlertCircle, DollarSign } from "lucide-react";
-import { CostBadge } from "./CostOverlay";
+import { TrendingUp, Loader2 } from "lucide-react";
+import { useAccounts } from "@/hooks/use-accounts";
+import { Badge } from "@/components/ui/badge";
 
-interface Account {
-  id: string;
-  name: string;
-  handle: string;
-  platform: "tiktok" | "instagram";
-  vertical: "privacy" | "education" | "health";
-  followers: number;
-  engagement: number;
-  status: "active" | "paused" | "warmup" | "flagged";
-  videosToday: number;
-  trend: number;
-  monthlyCost: number;
-}
-
-const accounts: Account[] = [
-  { id: "1", name: "Footprint Finder", handle: "@FootprintFinder", platform: "tiktok", vertical: "privacy", followers: 45200, engagement: 8.2, status: "active", videosToday: 3, trend: 12, monthlyCost: 156 },
-  { id: "2", name: "Privacy Shield", handle: "@PrivacyShield", platform: "instagram", vertical: "privacy", followers: 32100, engagement: 6.8, status: "active", videosToday: 2, trend: 8, monthlyCost: 124 },
-  { id: "3", name: "Career Boost", handle: "@CareerBoostHQ", platform: "tiktok", vertical: "education", followers: 78500, engagement: 11.4, status: "active", videosToday: 4, trend: 23, monthlyCost: 198 },
-  { id: "4", name: "Resume Pro", handle: "@ResumeProTips", platform: "instagram", vertical: "education", followers: 24800, engagement: 7.1, status: "warmup", videosToday: 1, trend: 5, monthlyCost: 67 },
-  { id: "5", name: "Stroke Recovery", handle: "@StrokeRecovery", platform: "tiktok", vertical: "health", followers: 18300, engagement: 9.5, status: "active", videosToday: 2, trend: -3, monthlyCost: 89 },
-  { id: "6", name: "Data Eraser", handle: "@DataEraserPro", platform: "tiktok", vertical: "privacy", followers: 12400, engagement: 5.2, status: "paused", videosToday: 0, trend: 0, monthlyCost: 0 },
-  { id: "7", name: "Interview Ace", handle: "@InterviewAce", platform: "instagram", vertical: "education", followers: 56700, engagement: 10.2, status: "active", videosToday: 3, trend: 18, monthlyCost: 167 },
-  { id: "8", name: "Brain Health", handle: "@BrainHealthTips", platform: "instagram", vertical: "health", followers: 9800, engagement: 4.8, status: "flagged", videosToday: 0, trend: -8, monthlyCost: 0 },
-];
-
-const verticalColors = {
+const verticalColors: Record<string, string> = {
   privacy: "from-cyan-500/20 to-blue-500/20 border-cyan-500/30",
   education: "from-emerald-500/20 to-teal-500/20 border-emerald-500/30",
   health: "from-rose-500/20 to-pink-500/20 border-rose-500/30",
+  gadgets: "from-amber-500/20 to-orange-500/20 border-amber-500/30",
+  home: "from-violet-500/20 to-purple-500/20 border-violet-500/30",
+  toys: "from-yellow-500/20 to-lime-500/20 border-yellow-500/30",
+  ecommerce: "from-indigo-500/20 to-blue-500/20 border-indigo-500/30",
 };
 
-const verticalLabels = {
-  privacy: { label: "Privacy", color: "text-cyan-400" },
-  education: { label: "Education", color: "text-emerald-400" },
-  health: { label: "Health", color: "text-rose-400" },
+const verticalLabels: Record<string, { label: string; color: string }> = {
+  privacy: { label: "Privacy", color: "bg-cyan-400" },
+  education: { label: "Education", color: "bg-emerald-400" },
+  health: { label: "Health", color: "bg-rose-400" },
+  gadgets: { label: "Gadgets", color: "bg-amber-400" },
+  home: { label: "Home", color: "bg-violet-400" },
+  toys: { label: "Toys", color: "bg-yellow-400" },
+};
+
+const monetizationBadge: Record<string, { label: string; class: string }> = {
+  app_first: { label: "App", class: "bg-primary/10 text-primary border-primary/30" },
+  product_first: { label: "Product", class: "bg-warning/10 text-warning border-warning/30" },
+  hybrid: { label: "Hybrid", class: "bg-accent/10 text-accent-foreground border-accent/30" },
+};
+
+const statusConfig: Record<string, { class: string }> = {
+  active: { class: "bg-success status-pulse" },
+  paused: { class: "bg-muted-foreground" },
+  warmup: { class: "bg-warning" },
+  flagged: { class: "bg-destructive status-pulse" },
 };
 
 export function AccountsGrid() {
+  const { data: accounts, isLoading } = useAccounts();
+
+  if (isLoading) {
+    return (
+      <div className="glass-card p-6 flex items-center justify-center h-48">
+        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  const activeAccounts = accounts?.filter(a => a.status === "active") || [];
+  const verticals = [...new Set(accounts?.map(a => a.vertical) || [])];
+
   return (
     <div className="glass-card p-6">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h3 className="text-lg font-semibold">Account Network</h3>
           <p className="text-sm text-muted-foreground">
-            8 of 50 accounts shown • 6 active
+            {accounts?.length || 0} accounts • {activeAccounts.length} active • {verticals.length} verticals
           </p>
         </div>
-        <div className="flex gap-4 text-xs">
-          {Object.entries(verticalLabels).map(([key, { label, color }]) => (
-            <div key={key} className="flex items-center gap-1.5">
-              <div className={cn("w-2 h-2 rounded-full", color.replace("text-", "bg-"))} />
-              <span className="text-muted-foreground">{label}</span>
-            </div>
-          ))}
+        <div className="flex gap-4 text-xs flex-wrap">
+          {verticals.map((v) => {
+            const meta = verticalLabels[v] || { label: v, color: "bg-muted-foreground" };
+            return (
+              <div key={v} className="flex items-center gap-1.5">
+                <div className={cn("w-2 h-2 rounded-full", meta.color)} />
+                <span className="text-muted-foreground">{meta.label}</span>
+              </div>
+            );
+          })}
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {accounts.map((account, index) => (
-          <AccountCard key={account.id} account={account} index={index} />
+        {accounts?.map((account, index) => (
+          <Link key={account.id} to={`/account/${account.account_id}`}>
+            <div
+              className={cn(
+                "relative p-4 rounded-lg border bg-gradient-to-br transition-all duration-300 hover:scale-[1.02] cursor-pointer animate-fade-in",
+                verticalColors[account.vertical] || "from-muted/20 to-muted/10 border-border"
+              )}
+              style={{ animationDelay: `${index * 50}ms` }}
+            >
+              {/* Status indicator */}
+              <div className="absolute top-3 right-3">
+                <div className={cn("w-2 h-2 rounded-full", statusConfig[account.status]?.class || "bg-muted-foreground")} />
+              </div>
+
+              {/* Platform + monetization badges */}
+              <div className="flex items-center gap-2 mb-3">
+                <div className={cn("platform-badge", account.platform)}>
+                  {account.platform === "tiktok" ? "TikTok" : account.platform === "instagram" ? "Instagram" : "YT Shorts"}
+                </div>
+                <Badge variant="outline" className={cn("text-[10px] px-1.5 py-0", monetizationBadge[account.monetization_mode]?.class)}>
+                  {monetizationBadge[account.monetization_mode]?.label}
+                </Badge>
+              </div>
+
+              {/* Account info */}
+              <h4 className="font-semibold text-sm mb-0.5">{account.account_name || account.account_id}</h4>
+              <p className="text-xs text-muted-foreground mb-3">{account.handle || `@${account.account_id}`}</p>
+
+              {/* Promise */}
+              <p className="text-xs text-muted-foreground/80 mb-3 line-clamp-2 italic">
+                "{account.promise}"
+              </p>
+
+              {/* Metrics */}
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div>
+                  <p className="text-muted-foreground">Posts/day</p>
+                  <p className="font-mono font-medium">{account.posting_frequency_target}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Priority</p>
+                  <p className="font-mono font-medium">{account.priority_score}</p>
+                </div>
+              </div>
+
+              {/* Product categories */}
+              {account.allowed_product_categories && account.allowed_product_categories.length > 0 && (
+                <div className="mt-3 pt-3 border-t border-border/30">
+                  <div className="flex flex-wrap gap-1">
+                    {account.allowed_product_categories.slice(0, 3).map(cat => (
+                      <span key={cat} className="text-[10px] px-1.5 py-0.5 rounded bg-secondary/50 text-muted-foreground">
+                        {cat}
+                      </span>
+                    ))}
+                    {account.allowed_product_categories.length > 3 && (
+                      <span className="text-[10px] text-muted-foreground">+{account.allowed_product_categories.length - 3}</span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </Link>
         ))}
       </div>
     </div>
   );
-}
-
-function AccountCard({ account, index }: { account: Account; index: number }) {
-  return (
-    <Link to={`/account/${account.id}`}>
-      <div
-        className={cn(
-          "relative p-4 rounded-lg border bg-gradient-to-br transition-all duration-300 hover:scale-[1.02] cursor-pointer animate-fade-in",
-          verticalColors[account.vertical]
-        )}
-        style={{ animationDelay: `${index * 50}ms` }}
-      >
-        {/* Status indicator */}
-        <div className="absolute top-3 right-3">
-          <div
-            className={cn(
-              "w-2 h-2 rounded-full",
-              account.status === "active" && "bg-success status-pulse",
-              account.status === "paused" && "bg-muted-foreground",
-              account.status === "warmup" && "bg-warning",
-              account.status === "flagged" && "bg-destructive status-pulse"
-            )}
-          />
-        </div>
-
-        {/* Platform badge */}
-        <div className={cn("platform-badge mb-3", account.platform)}>
-          {account.platform === "tiktok" ? "TikTok" : "Instagram"}
-        </div>
-
-        {/* Account info */}
-        <h4 className="font-semibold text-sm mb-0.5">{account.name}</h4>
-        <p className="text-xs text-muted-foreground mb-3">{account.handle}</p>
-
-        {/* Metrics */}
-        <div className="grid grid-cols-2 gap-2 text-xs">
-          <div>
-            <p className="text-muted-foreground">Followers</p>
-            <p className="font-mono font-medium">{formatNumber(account.followers)}</p>
-          </div>
-          <div>
-            <p className="text-muted-foreground">Engagement</p>
-            <p className="font-mono font-medium">{account.engagement}%</p>
-          </div>
-        </div>
-
-        {/* Trend, cost, and videos */}
-        <div className="flex items-center justify-between mt-3 pt-3 border-t border-border/30">
-          <div className="flex items-center gap-2">
-            {account.trend > 0 ? (
-              <TrendingUp className="w-3 h-3 text-success" />
-            ) : account.trend < 0 ? (
-              <TrendingDown className="w-3 h-3 text-destructive" />
-            ) : null}
-            <span
-              className={cn(
-                "text-xs font-mono",
-                account.trend > 0 && "text-success",
-                account.trend < 0 && "text-destructive",
-                account.trend === 0 && "text-muted-foreground"
-              )}
-            >
-              {account.trend > 0 ? "+" : ""}{account.trend}%
-            </span>
-          </div>
-          {account.monthlyCost > 0 && (
-            <span className="text-xs font-mono text-muted-foreground flex items-center gap-1">
-              <DollarSign className="w-3 h-3" />
-              {account.monthlyCost}/mo
-            </span>
-          )}
-        </div>
-        <div className="mt-2 text-xs text-muted-foreground text-right">
-          {account.videosToday} videos today
-        </div>
-      </div>
-    </Link>
-  );
-}
-
-function formatNumber(num: number): string {
-  if (num >= 1000000) return (num / 1000000).toFixed(1) + "M";
-  if (num >= 1000) return (num / 1000).toFixed(1) + "K";
-  return num.toString();
 }
