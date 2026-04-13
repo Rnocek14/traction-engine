@@ -262,6 +262,7 @@ export function PromptLeaderboard() {
                 <TableRow>
                   <TableHead>Family</TableHead>
                   <TableHead>Provider</TableHead>
+                  <TableHead>Enriched</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Prompt</TableHead>
                   <TableHead>Created</TableHead>
