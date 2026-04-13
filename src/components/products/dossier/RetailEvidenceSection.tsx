@@ -114,7 +114,9 @@ export function RetailEvidenceSection({ product }: { product: ProductWithAnalysi
                               {link.extracted_product_name || link.title || "—"}
                             </span>
                             {warnings.length > 0 && (
-                              <AlertTriangle className="w-3 h-3 text-yellow-500 shrink-0" title={warnings.join(", ")} />
+                              <span title={warnings.join(", ")}>
+                                <AlertTriangle className="w-3 h-3 text-yellow-500 shrink-0" />
+                              </span>
                             )}
                           </div>
                         </TableCell>
