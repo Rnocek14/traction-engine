@@ -693,6 +693,7 @@ export function StoryEditor({
               </Button>
             </a>
           )}
+          <Button
             variant="ghost"
             size="sm"
             className="h-8 gap-1"
