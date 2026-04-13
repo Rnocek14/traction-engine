@@ -1,6 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 
+export type EnrichmentMeta = {
+  used: boolean;
+  hooks: string[];
+  emotions: string[];
+  format: string | null;
+  insight_ids: string[];
+};
+
 type AssembledVideoRow = {
   id: string;
   title: string | null;
@@ -13,6 +21,8 @@ type AssembledVideoRow = {
   continuity_score: number | null;
   account_id: string;
   status: string;
+  script_experiment_id: string | null;
+  enrichment?: EnrichmentMeta;
 };
 
 type AssemblyPollResponse = {
