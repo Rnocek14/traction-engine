@@ -52,7 +52,9 @@ export function useAssembledVideos() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("story_jobs")
-        .select("id, title, story_type, assembled_status, assembled_video_url, assembled_at, assembled_meta, total_clips, continuity_score, account_id, status, script_experiment_id")
+        .select("id, title, story_type, assembled_status, assembled_video_url, assembled_at, assembled_meta, total_clips, completed_clips, continuity_score, account_id, status, script_experiment_id")
+        .in("assembled_status", ["succeeded", "rendering", "queued", "failed"])
+        .order("updated_at", { ascending: false });
         .in("assembled_status", ["succeeded", "rendering", "queued", "failed"])
         .order("updated_at", { ascending: false });
 
