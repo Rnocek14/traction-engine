@@ -566,3 +566,96 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
     </Card>
   );
 }
+
+// ─── LINK ROW WITH CONFIDENCE + MANUAL OVERRIDE ───
+function ConfidenceBadge({ confidence, status }: { confidence: number | null; status: string | null }) {
+  if (!status || status === "pending") return null;
+  
+  const conf = confidence ?? 0;
+  const icon = status === "verified" ? <ShieldCheck className="w-3 h-3" /> :
+               status === "probable" ? <ShieldQuestion className="w-3 h-3" /> :
+               status === "candidate" ? <Eye className="w-3 h-3" /> :
+               <ShieldAlert className="w-3 h-3" />;
+  
+  const colorClass = status === "verified" ? "text-green-500 border-green-500/30" :
+                     status === "probable" ? "text-yellow-500 border-yellow-500/30" :
+                     status === "candidate" ? "text-orange-500 border-orange-500/30" :
+                     "text-destructive border-destructive/30";
+  
+  return (
+    <Badge variant="outline" className={`text-[9px] ${colorClass} shrink-0 gap-0.5`} title={`${status} (${conf}%)`}>
+      {icon} {conf}%
+    </Badge>
+  );
+}
+
+function LinkRow({ link, productId, qc, rejected }: { 
+  link: ProductLink; 
+  productId: string; 
+  qc: ReturnType<typeof useQueryClient>;
+  rejected?: boolean;
+}) {
+  const handleOverride = async (newStatus: string) => {
+    const { error } = await supabase
+      .from("product_links")
+      .update({ 
+        validation_status: newStatus, 
+        verified: newStatus === "verified",
+        validation_reasons: [
+          ...(link.validation_reasons || []),
+          `manual_override:${newStatus}_by_operator`,
+        ],
+      })
+      .eq("id", link.id);
+    if (error) { toast.error("Override failed"); return; }
+    toast.success(`Link ${newStatus === "rejected" ? "rejected" : "approved"}`);
+    qc.invalidateQueries({ queryKey: ["products"] });
+  };
+
+  return (
+    <div className={`flex items-center justify-between text-xs rounded px-2 py-1 mb-0.5 transition-colors ${
+      rejected ? "bg-destructive/5 opacity-60" : "bg-muted/30 hover:bg-muted/50"
+    }`}>
+      <div className="flex items-center gap-1.5 min-w-0">
+        <Badge variant="outline" className="text-[10px] shrink-0">{link.platform}</Badge>
+        <ConfidenceBadge confidence={link.match_confidence} status={link.validation_status} />
+        <a href={link.url} target="_blank" rel="noopener noreferrer" 
+          className="truncate text-muted-foreground hover:text-foreground hover:underline">
+          {link.extracted_product_name?.slice(0, 35) || link.title?.slice(0, 35) || link.url.slice(0, 35)}
+        </a>
+      </div>
+      <div className="flex items-center gap-1 shrink-0">
+        {link.price_cents && <span className="font-medium">${(link.price_cents / 100).toFixed(2)}</span>}
+        {/* Manual override buttons */}
+        {link.validation_status !== "verified" && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-5 w-5 p-0 hover:bg-green-500/20"
+            onClick={(e) => { e.preventDefault(); handleOverride("verified"); }}
+            title="Approve — this is the correct product"
+          >
+            <ThumbsUp className="w-3 h-3 text-green-500" />
+          </Button>
+        )}
+        {link.validation_status !== "rejected" && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-5 w-5 p-0 hover:bg-destructive/20"
+            onClick={(e) => { e.preventDefault(); handleOverride("rejected"); }}
+            title="Reject — wrong product"
+          >
+            <ThumbsDown className="w-3 h-3 text-destructive" />
+          </Button>
+        )}
+        <a href={link.url} target="_blank" rel="noopener noreferrer">
+          <ExternalLink className="w-3 h-3 text-muted-foreground" />
+        </a>
+      </div>
+    </div>
+  );
+}
+
+// Re-export types for LinkRow
+import type { ProductLink } from "@/hooks/use-products";
