@@ -89,3 +89,6 @@ verify_jwt = false
 
 [functions.scrape-content]
 verify_jwt = false
+
+[functions.ingest-performance]
+verify_jwt = false
