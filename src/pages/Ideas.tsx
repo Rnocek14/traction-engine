@@ -1,12 +1,28 @@
 import { GlobalNav } from "@/components/GlobalNav";
 import { TrendIntelligencePanel } from "@/components/ideas/TrendIntelligencePanel";
+import { ContentIdeasPanel } from "@/components/ideas/ContentIdeasPanel";
 import { IdeaQueuePanel } from "@/components/ideas/IdeaQueuePanel";
 import { Button } from "@/components/ui/button";
-import { useNavigate } from "react-router-dom";
-import { Plus } from "lucide-react";
+import { useGenerateIdeas } from "@/hooks/use-ideas-data";
+import { Sparkles, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 
 const Ideas = () => {
-  const navigate = useNavigate();
+  const generateIdeas = useGenerateIdeas();
+
+  const handleGenerate = () => {
+    generateIdeas.mutate(
+      { count: 5, mode: "manual" },
+      {
+        onSuccess: (data) => {
+          toast.success(`Generated ${data?.count || 0} new ideas from trends`);
+        },
+        onError: (err) => {
+          toast.error(`Failed to generate ideas: ${(err as Error).message}`);
+        },
+      }
+    );
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -18,12 +34,20 @@ const Ideas = () => {
           <div>
             <h1 className="text-2xl font-bold">Ideas</h1>
             <p className="text-sm text-muted-foreground">
-              Trends → Ideas → Prompts → Videos → Performance
+              Trends → Ideas → Approve → Produce → Measure
             </p>
           </div>
-          <Button onClick={() => navigate("/produce")} className="gap-2">
-            <Plus className="h-4 w-4" />
-            New Story
+          <Button
+            onClick={handleGenerate}
+            disabled={generateIdeas.isPending}
+            className="gap-2"
+          >
+            {generateIdeas.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Sparkles className="h-4 w-4" />
+            )}
+            Generate Ideas
           </Button>
         </div>
 
@@ -33,9 +57,15 @@ const Ideas = () => {
           <TrendIntelligencePanel />
         </section>
 
-        {/* Idea Pipeline */}
+        {/* AI-Proposed Ideas */}
         <section>
-          <h2 className="text-lg font-semibold mb-3">Idea Pipeline & Lineage</h2>
+          <h2 className="text-lg font-semibold mb-3">Content Ideas</h2>
+          <ContentIdeasPanel />
+        </section>
+
+        {/* Production Pipeline */}
+        <section>
+          <h2 className="text-lg font-semibold mb-3">Production Pipeline</h2>
           <IdeaQueuePanel />
         </section>
       </main>
