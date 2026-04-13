@@ -16,9 +16,14 @@ const STAGES = ["hook", "script", "visual", "topic"] as const;
 
 export function PromptLeaderboard() {
   const [stageFilter, setStageFilter] = useState<string>("hook");
+  const [enrichedOnly, setEnrichedOnly] = useState(false);
   const { data: templates = [], isLoading: templatesLoading } = usePromptTemplates(stageFilter);
   const { data: familyStats = [], isLoading: statsLoading } = usePromptFamilyStats();
-  const { data: experiments = [], isLoading: experimentsLoading } = usePromptExperiments({ stage: stageFilter, limit: 20 });
+  const { data: allExperiments = [], isLoading: experimentsLoading } = usePromptExperiments({ stage: stageFilter, limit: 20 });
+
+  const experiments = enrichedOnly
+    ? allExperiments.filter(e => (e.input_context as any)?.used_scraped_insights === true)
+    : allExperiments;
 
   const queryClient = useQueryClient();
   const [seeding, setSeeding] = useState(false);
