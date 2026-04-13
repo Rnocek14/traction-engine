@@ -217,7 +217,7 @@ export function useProductLinkedIdeas(productId: string) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("content_ideas")
-        .select("id, title, status, angle, suggested_format")
+        .select("id, title, status, angle, suggested_format, account_id")
         .eq("product_id", productId)
         .order("created_at", { ascending: false });
       if (error) throw error;
