@@ -226,3 +226,23 @@ export function useProductLinkedIdeas(productId: string) {
     enabled: !!productId,
   });
 }
+
+export function useAssignProductAccounts() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (productId: string) => {
+      const { data, error } = await supabase.functions.invoke("assign-product-accounts", {
+        body: { product_id: productId },
+      });
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["products"] });
+      qc.invalidateQueries({ queryKey: ["product-ideas", data.product_id] });
+      qc.invalidateQueries({ queryKey: ["content-ideas"] });
+      toast.success(`Assigned to ${data.assignments?.length || 0} accounts, ${data.ideas_created || 0} ideas created`);
+    },
+    onError: (e) => toast.error(`Assignment failed: ${e.message}`),
+  });
+}
