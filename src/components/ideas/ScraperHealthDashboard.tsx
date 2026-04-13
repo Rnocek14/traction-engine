@@ -1,6 +1,7 @@
 import { useScraperHealth } from "@/hooks/use-scraper-health";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -18,8 +19,14 @@ import {
   Hash,
   ExternalLink,
   Flame,
+  Sparkles,
+  Loader2,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
+import { supabase } from "@/integrations/supabase/client";
+import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { useState } from "react";
 
 export function ScraperHealthDashboard() {
   const { data: health, isLoading } = useScraperHealth();
