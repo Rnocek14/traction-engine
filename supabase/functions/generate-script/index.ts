@@ -538,7 +538,7 @@ Deno.serve(async (req) => {
     console.log({ requestId, event: "auth_passed", path: authPath, user_id: authUserId, internal_caller: internalCaller });
 
     const supabaseAdmin = getSupabaseAdmin();
-    const { account_id, preferred_pillar, topic_id: forcedTopicId, mode, regenerated_from_id, constraint }: GenerateRequest = await req.json();
+    const { account_id, preferred_pillar, topic_id: forcedTopicId, mode, regenerated_from_id, constraint, enrichment_mode }: GenerateRequest = await req.json();
 
     if (!account_id) {
       return new Response(
@@ -670,6 +670,18 @@ Deno.serve(async (req) => {
 
     console.log(`[pipeline] Topic selected: ${topic.topic_prompt.substring(0, 50)}...`);
 
+    // 3.5. Fetch trend enrichment from scraped insights
+    const trendEnrichment: TrendEnrichment = await fetchTrendEnrichment(supabaseAdmin, {
+      vertical: config.vertical,
+      pillar: topic.pillar,
+      topic_prompt: topic.topic_prompt,
+      mode: enrichment_mode || "light",
+    });
+
+    if (trendEnrichment.enabled) {
+      console.log(`[pipeline] Trend enrichment: ${trendEnrichment.mode}, ${trendEnrichment.insight_ids.length} insights, hooks=${trendEnrichment.hook_patterns.length}`);
+    }
+
     // 4. Generate content
     let content: ScriptContent;
     let generationCost = 1;
@@ -683,9 +695,9 @@ Deno.serve(async (req) => {
         );
       }
 
-      content = await generateWithOpenAI(config, topic, apiKey, constraint);
+      content = await generateWithOpenAI(config, topic, apiKey, constraint, trendEnrichment.prompt_block || undefined);
       generationCost = 3;
-      console.log("[pipeline] AI generation complete", { hasConstraint: !!constraint });
+      console.log("[pipeline] AI generation complete", { hasConstraint: !!constraint, enriched: trendEnrichment.enabled });
     } else {
       content = generateTemplateContent(config, topic);
       console.log("[pipeline] Template generation complete");
