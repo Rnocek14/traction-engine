@@ -59,7 +59,7 @@ export function useProducts(statusFilter?: ProductStatus) {
 
       const { data, error } = await query;
       if (error) throw error;
-      return data as ProductWithAnalysis[];
+      return data as unknown as ProductWithAnalysis[];
     },
   });
 }
