@@ -45,7 +45,10 @@ export type ContentVertical =
   | "entertainment"
   | "ecommerce"
   | "lifestyle"
-  | "news";
+  | "news"
+  | "gadgets"
+  | "home"
+  | "toys";
 
 // ─── Display Metadata ───────────────────────────────────────
 
@@ -69,6 +72,9 @@ export const VERTICAL_META: Record<ContentVertical, { label: string; icon: strin
   ecommerce:     { label: "E-Commerce",         icon: "🛒" },
   lifestyle:     { label: "Lifestyle",          icon: "✨" },
   news:          { label: "News",               icon: "📰" },
+  gadgets:       { label: "Gadgets",            icon: "🔧" },
+  home:          { label: "Home",               icon: "🏠" },
+  toys:          { label: "Toys",               icon: "🧸" },
 };
 
 export const GOAL_META: Record<ContentGoal, { label: string; icon: string }> = {
