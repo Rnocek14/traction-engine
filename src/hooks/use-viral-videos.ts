@@ -17,6 +17,11 @@ export interface ViralVideo {
   linked_product_id: string | null;
   demand_signals: Record<string, unknown> | null;
   source_hook: string | null;
+  hook_type: string | null;
+  extraction_confidence: number | null;
+  demand_score: number | null;
+  engagement_rate: number | null;
+  creative_strength_score: number | null;
   processing_status: string;
   processed_at: string | null;
   created_at: string;
@@ -67,9 +72,13 @@ export function useIngestViralVideo() {
       if (data.already_exists) {
         toast.info("This video was already ingested");
       } else {
+        const parts = [];
+        if (data.extracted_product) parts.push(data.extracted_product);
+        if (data.extraction_confidence) parts.push(`${data.extraction_confidence}% confidence`);
+        if (data.demand_score) parts.push(`demand: ${data.demand_score}`);
         toast.success(
-          data.extracted_product
-            ? `Ingested! Extracted product: ${data.extracted_product}`
+          parts.length > 0
+            ? `Ingested! ${parts.join(" · ")}`
             : "Video ingested — no product detected"
         );
       }
