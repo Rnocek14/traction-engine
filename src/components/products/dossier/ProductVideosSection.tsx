@@ -34,6 +34,33 @@ export function ProductVideosSection({ productId }: { productId: string }) {
   const queueMutation = useQueueVideoConcepts();
   const existingJobs = useProductStoryJobs(productId);
 
+  // Check if product has any images
+  const { data: imageCount = 0 } = useQuery({
+    queryKey: ["product-image-count", productId],
+    queryFn: async () => {
+      const { count } = await supabase
+        .from("product_images")
+        .select("id", { count: "exact", head: true })
+        .eq("product_id", productId);
+      return count || 0;
+    },
+  });
+
+  // Also check if product has image_url fallback
+  const { data: productImageUrl } = useQuery({
+    queryKey: ["product-image-url", productId],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("products")
+        .select("image_url")
+        .eq("id", productId)
+        .single();
+      return data?.image_url || null;
+    },
+  });
+
+  const hasImages = imageCount > 0 || !!productImageUrl;
+
   const { data: accounts } = useQuery({
     queryKey: ["accounts-for-video"],
     queryFn: async () => {
