@@ -139,11 +139,33 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
                     className="h-6 text-[10px] gap-1 shrink-0"
                     onClick={async () => {
                       try {
+                        // Build a proper storyboard from product + idea context
+                        const plan = product.marketing_plan as any;
+                        const hookType = plan?.marketing_plan?.best_hook_type || "visual_reveal";
+                        const first3s = plan?.marketing_plan?.best_first_3_seconds || `Show ${product.name} in action`;
+                        const angles = plan?.marketing_plan?.winning_angles || [];
+                        const angleDesc = angles[0]?.demo_concept || idea.angle || "product demo";
+
+                        const scenes = [
+                          { id: crypto.randomUUID(), prompt: `${first3s}. Hook type: ${hookType}. Product: ${product.name}`, sequence_index: 0, duration_target: 3 },
+                          { id: crypto.randomUUID(), prompt: `Demonstrate ${product.name}: ${angleDesc}. Show the product being used, close-up detail shot.`, sequence_index: 1, duration_target: 5 },
+                          { id: crypto.randomUUID(), prompt: `Show the transformation or result of using ${product.name}. Before/after or reaction shot.`, sequence_index: 2, duration_target: 4 },
+                          { id: crypto.randomUUID(), prompt: `Final shot of ${product.name} with text overlay for call-to-action. Clean product display.`, sequence_index: 3, duration_target: 3 },
+                        ];
+
                         const { error } = await supabase.functions.invoke("create-story", {
-                          body: { idea_id: idea.id, product_id: product.id },
+                          body: {
+                            title: idea.title,
+                            account_id: "ecommerce_default",
+                            story_type: "product_demo",
+                            continuity_anchors: { product_name: product.name, product_category: product.category },
+                            storyboard_json: { scenes },
+                            content_idea_id: idea.id,
+                            auto_generate: true,
+                          },
                         });
                         if (error) throw error;
-                        toast.success("Story created from idea");
+                        toast.success("Story created with product demo storyboard");
                       } catch (e: any) {
                         toast.error(`Story creation failed: ${e.message}`);
                       }
