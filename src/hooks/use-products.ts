@@ -75,7 +75,7 @@ export function useProducts(statusFilter?: ProductStatus) {
     queryFn: async () => {
       let query = supabase
         .from("products")
-        .select("*, product_analysis(*), product_images(*)")
+        .select("*, product_analysis(*), product_images(*), product_links(*)")
         .order("created_at", { ascending: false });
 
       if (statusFilter) {
