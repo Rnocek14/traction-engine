@@ -23,13 +23,13 @@ export function TrendIntelligencePanel() {
           icon={<Zap className="w-4 h-4" />}
         />
         <StatCard
-          label="Stories This Week"
-          value={statsLoading ? "—" : String(stats?.storiesThisWeek || 0)}
+          label="Ideas Proposed"
+          value={statsLoading ? "—" : String(stats?.proposedIdeas || 0)}
           icon={<Film className="w-4 h-4" />}
         />
         <StatCard
-          label="Approved"
-          value={statsLoading ? "—" : String(stats?.storiesApproved || 0)}
+          label="Ideas Approved"
+          value={statsLoading ? "—" : String(stats?.approvedIdeas || 0)}
           icon={<Heart className="w-4 h-4" />}
         />
       </div>
