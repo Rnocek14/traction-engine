@@ -3,7 +3,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { CheckCircle, XCircle, RotateCcw, Play, Clock, Film } from "lucide-react";
+import { CheckCircle, XCircle, RotateCcw, Play, Clock, Film, Flame } from "lucide-react";
+import type { EnrichmentMeta } from "@/hooks/use-assembled-videos";
 
 interface AssembledVideo {
   id: string;
