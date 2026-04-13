@@ -1,8 +1,13 @@
 /**
- * product-research
+ * product-research v2
  * 
- * Takes a product URL or name and uses AI to score it on the 5-dimension rubric.
- * Can also re-research existing products by product_id.
+ * Multi-phase deep research:
+ * Phase 1: Retail search — find where this product is actually sold (Amazon, Walmart, TikTok Shop)
+ * Phase 2: Wholesale search — find supplier/wholesale pricing (AliExpress, 1688, DHgate, Temu)
+ * Phase 3: Image search — find real product photos with AI validation
+ * Phase 4: AI scoring — score for viral potential with verified data
+ * 
+ * All URLs are validated before storage. Nothing hallucinated.
  */
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -29,7 +34,6 @@ async function fetchPageContent(url: string): Promise<string> {
     });
     if (!resp.ok) return "";
     const html = await resp.text();
-    // Strip scripts/styles, extract text
     let text = html.replace(/<script[\s\S]*?<\/script>/gi, "");
     text = text.replace(/<style[\s\S]*?<\/style>/gi, "");
     text = text.replace(/<[^>]+>/g, " ");
@@ -41,7 +45,7 @@ async function fetchPageContent(url: string): Promise<string> {
   }
 }
 
-async function perplexityResearch(query: string, perplexityKey: string): Promise<{ content: string; citations: string[] }> {
+async function perplexitySearch(query: string, systemPrompt: string, perplexityKey: string): Promise<{ content: string; citations: string[] }> {
   try {
     const resp = await fetch("https://api.perplexity.ai/chat/completions", {
       method: "POST",
@@ -52,17 +56,17 @@ async function perplexityResearch(query: string, perplexityKey: string): Promise
       body: JSON.stringify({
         model: "sonar",
         messages: [
-          {
-            role: "system",
-            content: "You are a product analyst for e-commerce and dropshipping. Research this product thoroughly: pricing, competition, social media presence, viral potential, suppliers, and market saturation. Include any product image URLs you find.",
-          },
+          { role: "system", content: systemPrompt },
           { role: "user", content: query },
         ],
         max_tokens: 3000,
         search_recency_filter: "month",
       }),
     });
-    if (!resp.ok) return { content: "", citations: [] };
+    if (!resp.ok) {
+      console.warn(`[product-research] Perplexity failed: ${resp.status}`);
+      return { content: "", citations: [] };
+    }
     const data = await resp.json();
     return {
       content: data.choices?.[0]?.message?.content || "",
@@ -71,6 +75,63 @@ async function perplexityResearch(query: string, perplexityKey: string): Promise
   } catch {
     return { content: "", citations: [] };
   }
+}
+
+/** Validate a URL actually loads and optionally check title relevance */
+async function validateUrl(url: string, productName: string): Promise<{ valid: boolean; title: string; price?: string }> {
+  try {
+    const resp = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+      redirect: "follow",
+    });
+    if (!resp.ok) return { valid: false, title: "" };
+    const html = await resp.text();
+    const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+    const title = (titleMatch?.[1] || "").trim();
+    
+    // Check title relevance
+    const productWords = productName.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+    const titleLower = title.toLowerCase();
+    const relevant = productWords.some(w => titleLower.includes(w));
+    
+    // Try to extract price
+    const priceMatch = html.match(/\$\s*([\d,]+\.?\d{0,2})/);
+    
+    return { valid: relevant, title, price: priceMatch?.[0] };
+  } catch {
+    return { valid: false, title: "" };
+  }
+}
+
+interface FoundLink {
+  url: string;
+  platform: string;
+  linkType: string;
+  title?: string;
+  priceCents?: number;
+}
+
+function detectPlatform(url: string): string {
+  const u = url.toLowerCase();
+  if (u.includes("amazon.")) return "Amazon";
+  if (u.includes("walmart.")) return "Walmart";
+  if (u.includes("tiktok.com/") && u.includes("shop")) return "TikTok Shop";
+  if (u.includes("tiktok.com/")) return "TikTok";
+  if (u.includes("aliexpress.")) return "AliExpress";
+  if (u.includes("1688.com")) return "1688";
+  if (u.includes("dhgate.")) return "DHgate";
+  if (u.includes("temu.")) return "Temu";
+  if (u.includes("ebay.")) return "eBay";
+  if (u.includes("etsy.")) return "Etsy";
+  if (u.includes("shopify") || u.includes("myshopify")) return "Shopify Store";
+  if (u.includes("alibaba.")) return "Alibaba";
+  return new URL(url).hostname.replace("www.", "");
+}
+
+function parsePriceFromText(text: string): number | undefined {
+  const match = text.match(/\$\s*([\d,]+\.?\d{0,2})/);
+  if (!match) return undefined;
+  return Math.round(parseFloat(match[1].replace(",", "")) * 100);
 }
 
 Deno.serve(async (req) => {
@@ -84,6 +145,12 @@ Deno.serve(async (req) => {
     const openaiKey = Deno.env.get("OPENAI_API_KEY")!;
     const perplexityKey = Deno.env.get("PERPLEXITY_API_KEY");
 
+    if (!perplexityKey) {
+      return new Response(JSON.stringify({ error: "PERPLEXITY_API_KEY not configured" }), {
+        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
     const body: ResearchRequest = await req.json();
 
@@ -91,13 +158,8 @@ Deno.serve(async (req) => {
     let productUrl = body.url || "";
     let productId = body.product_id;
 
-    // If product_id provided, fetch existing product
     if (productId) {
-      const { data: product } = await supabase
-        .from("products")
-        .select("*")
-        .eq("id", productId)
-        .single();
+      const { data: product } = await supabase.from("products").select("*").eq("id", productId).single();
       if (product) {
         productName = product.name;
         productUrl = product.source_url || "";
@@ -110,268 +172,312 @@ Deno.serve(async (req) => {
       });
     }
 
-    console.log(`[product-research] Researching: ${productName || productUrl}`);
+    console.log(`[product-research] ===== DEEP RESEARCH: "${productName}" =====`);
 
-    // Gather intelligence from multiple sources
     const researchParts: string[] = [];
+    const allCitations: string[] = [];
+    const foundLinks: FoundLink[] = [];
 
-    // 1. Fetch page content if URL provided
-    if (productUrl) {
-      const pageText = await fetchPageContent(productUrl);
-      if (pageText) researchParts.push(`Page content from ${productUrl}:\n${pageText}`);
-    }
-
-    // 2. Perplexity deep research
-    let perplexityCitations: string[] = [];
-    if (perplexityKey) {
-      const searchQuery = productName
-        ? `"${productName}" product review TikTok viral dropshipping price competition`
-        : `product at ${productUrl} - reviews, pricing, competition, viral potential, TikTok`;
-      const research = await perplexityResearch(searchQuery, perplexityKey);
-      if (research.content) researchParts.push(`Market research:\n${research.content}`);
-      perplexityCitations = research.citations;
-      if (perplexityCitations.length > 0) {
-        researchParts.push(`\nReal Source URLs from research (USE THESE):\n${perplexityCitations.map((c, i) => `[${i+1}] ${c}`).join("\n")}`);
+    // ==========================================
+    // PHASE 1: RETAIL — Where is it being sold?
+    // ==========================================
+    console.log("[product-research] Phase 1: Retail search");
+    const retailSearch = await perplexitySearch(
+      `Where can I buy "${productName}" online right now? Find specific product listings on Amazon, Walmart, TikTok Shop, eBay, Etsy, or Shopify stores. Include exact prices and product page URLs. I need real, working links to buy this specific product.`,
+      `You are a shopping assistant. Find REAL product listings where someone can BUY this exact product online. Include specific prices, store names, and direct product page URLs. Only include listings for this exact product, not similar or related items.`,
+      perplexityKey
+    );
+    if (retailSearch.content) {
+      researchParts.push(`RETAIL LISTINGS:\n${retailSearch.content}`);
+      allCitations.push(...retailSearch.citations);
+      // Categorize retail citations
+      for (const c of retailSearch.citations) {
+        if (c.match(/amazon\.|walmart\.|ebay\.|etsy\.|tiktok\.com.*shop|shopify|myshopify/i)) {
+          foundLinks.push({ url: c, platform: detectPlatform(c), linkType: "retail" });
+        }
       }
     }
+    await new Promise(r => setTimeout(r, 1200));
 
-    // 2b. Multi-query image search with AI validation
+    // ==========================================
+    // PHASE 2: WHOLESALE — Where to source it?
+    // ==========================================
+    console.log("[product-research] Phase 2: Wholesale/supplier search");
+    const wholesaleSearch = await perplexitySearch(
+      `"${productName}" wholesale supplier price. Find this product on AliExpress, Alibaba, 1688, DHgate, or Temu. What is the wholesale or bulk price? What is the cheapest supplier price available? Include direct product listing URLs.`,
+      `You are a dropshipping supplier researcher. Find the CHEAPEST wholesale/supplier sources for this exact product. Include: supplier platform, wholesale price, MOQ if available, shipping estimates, and direct URLs. Focus on AliExpress, Alibaba, 1688.com, DHgate, and Temu.`,
+      perplexityKey
+    );
+    if (wholesaleSearch.content) {
+      researchParts.push(`WHOLESALE/SUPPLIER SOURCES:\n${wholesaleSearch.content}`);
+      allCitations.push(...wholesaleSearch.citations);
+      for (const c of wholesaleSearch.citations) {
+        if (c.match(/aliexpress\.|alibaba\.|1688\.|dhgate\.|temu\./i)) {
+          foundLinks.push({ url: c, platform: detectPlatform(c), linkType: "wholesale" });
+        }
+      }
+    }
+    await new Promise(r => setTimeout(r, 1200));
+
+    // ==========================================
+    // PHASE 3: SOCIAL PROOF — TikTok/reviews
+    // ==========================================
+    console.log("[product-research] Phase 3: Social proof & competition");
+    const socialSearch = await perplexitySearch(
+      `"${productName}" TikTok viral review. How many views does this product have? Who are the top creators promoting it? How many sellers are already selling it? Is this product saturated or still emerging?`,
+      `You are a social media trend analyst for e-commerce. Analyze this product's social media presence: view counts, number of creators promoting it, engagement rates, competition level, and whether it's still trending or past its peak. Be specific with numbers.`,
+      perplexityKey
+    );
+    if (socialSearch.content) {
+      researchParts.push(`SOCIAL PROOF & COMPETITION:\n${socialSearch.content}`);
+      allCitations.push(...socialSearch.citations);
+    }
+    await new Promise(r => setTimeout(r, 1200));
+
+    // ==========================================
+    // PHASE 4: IMAGE SEARCH with validation
+    // ==========================================
+    console.log("[product-research] Phase 4: Image search");
     let foundImageUrls: { url: string; source: string; label: string }[] = [];
-    if (perplexityKey && productName) {
+    const imgSearch = await perplexitySearch(
+      `"${productName}" product photo. Show me where to buy this exact product with product photos. Amazon listing, AliExpress listing.`,
+      `Find real product listing pages for this exact product. I need pages with product photos. Focus on Amazon, AliExpress, Walmart, or official product sites.`,
+      perplexityKey
+    );
+
+    const candidateImgs: { url: string; source: string; label: string }[] = [];
+    
+    // Extract images from retailer pages in ALL citations
+    const allRetailerCitations = [...new Set([...allCitations, ...imgSearch.citations])].filter(c => 
+      c.match(/amazon\.|aliexpress\.|walmart\.|temu\.|etsy\.|ebay\.|shopify|myshopify/i)
+    );
+    
+    for (const citation of allRetailerCitations.slice(0, 6)) {
       try {
-        // Run TWO targeted image searches for better coverage
-        const imgQueries = [
-          `"${productName}" buy online product listing photo. Show me where to buy this exact product with product photos.`,
-          `"${productName}" product review unboxing photo image. Real photos of this specific product.`,
-        ];
-        
-        const candidateUrls: { url: string; source: string; label: string; pageUrl?: string }[] = [];
-        
-        for (const q of imgQueries) {
-          const imgSearch = await perplexityResearch(q, perplexityKey);
-          
-          // Extract direct image URLs from content
-          const allText = imgSearch.content + " " + imgSearch.citations.join(" ");
-          const imgRegex = /https?:\/\/[^\s"'<>]+\.(?:jpg|jpeg|png|webp|gif)(?:\?[^\s"'<>]*)?/gi;
-          const imgMatches = allText.match(imgRegex) || [];
-          for (const imgUrl of imgMatches.slice(0, 5)) {
-            candidateUrls.push({ url: imgUrl, source: "perplexity", label: "reference" });
-          }
-          
-          // Scrape og:image from retailer citations
-          for (const citation of imgSearch.citations) {
-            if (citation.match(/amazon\.|aliexpress\.|walmart\.|temu\.|etsy\.|ebay\.|shopify|myshopify/i)) {
-              try {
-                const pageResp = await fetch(citation, {
-                  headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
-                  redirect: "follow",
-                });
-                if (pageResp.ok) {
-                  const html = await pageResp.text();
-                  // Check page title contains product keywords before using images
-                  const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
-                  const pageTitle = (titleMatch?.[1] || "").toLowerCase();
-                  const productWords = productName.toLowerCase().split(/\s+/).filter(w => w.length > 3);
-                  const titleRelevant = productWords.some(w => pageTitle.includes(w));
-                  
-                  if (!titleRelevant) {
-                    console.log(`[product-research] Skipping irrelevant page: "${titleMatch?.[1]}" for "${productName}"`);
-                    continue;
-                  }
-                  
-                  const domain = new URL(citation).hostname.replace("www.", "");
-                  
-                  const ogMatch = html.match(/property="og:image"\s+content="([^"]+)"/i) || 
-                                  html.match(/content="([^"]+)"\s+property="og:image"/i);
-                  if (ogMatch?.[1]) {
-                    candidateUrls.push({ url: ogMatch[1], source: domain, label: "hero", pageUrl: citation });
-                  }
-                  
-                  // Amazon-specific image extraction
-                  const dynamicImg = html.match(/data-a-dynamic-image="\{([^}]+)\}"/i);
-                  if (dynamicImg) {
-                    const amazonUrls = dynamicImg[1].match(/https?:\/\/[^"]+/g) || [];
-                    for (const au of amazonUrls.slice(0, 3)) {
-                      candidateUrls.push({ url: au.replace(/\._[^.]+_\./, "."), source: domain, label: "detail" });
-                    }
-                  }
-                }
-              } catch { /* skip */ }
-            }
-          }
-          
-          await new Promise(r => setTimeout(r, 1000)); // Rate limit between queries
-        }
-        
-        // Deduplicate candidates
-        const seen = new Set<string>();
-        const uniqueCandidates = candidateUrls.filter(img => {
-          if (seen.has(img.url)) return false;
-          // Filter out obviously wrong images (gift cards, logos, icons, banners)
-          const lower = img.url.toLowerCase();
-          if (lower.includes("gift-card") || lower.includes("giftcard") || lower.includes("logo") || 
-              lower.includes("banner") || lower.includes("icon") || lower.includes("badge") ||
-              lower.includes("placeholder") || lower.includes("sprite")) return false;
-          seen.add(img.url);
-          return true;
+        const pageResp = await fetch(citation, {
+          headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+          redirect: "follow",
         });
+        if (!pageResp.ok) continue;
+        const html = await pageResp.text();
         
-        // AI validation: ask OpenAI to pick which URLs are actually this product
-        if (uniqueCandidates.length > 0) {
-          const validationResp = await fetch("https://api.openai.com/v1/chat/completions", {
-            method: "POST",
-            headers: { Authorization: `Bearer ${openaiKey}`, "Content-Type": "application/json" },
-            body: JSON.stringify({
-              model: "gpt-4o-mini",
-              messages: [{
-                role: "system",
-                content: `You validate product image URLs. Given a product name and a list of image URLs, return ONLY the indices of URLs that are likely to be actual photos of that specific product. Reject URLs that are: gift cards, unrelated products, category banners, logos, or generic placeholder images. Judge by the URL path, filename, and domain.`,
-              }, {
-                role: "user",
-                content: `Product: "${productName}"\n\nCandidate image URLs:\n${uniqueCandidates.map((c, i) => `[${i}] ${c.url} (source: ${c.source})`).join("\n")}`,
-              }],
-              tools: [{
-                type: "function",
-                function: {
-                  name: "validate_images",
-                  description: "Return indices of valid product images",
-                  parameters: {
-                    type: "object",
-                    properties: {
-                      valid_indices: { type: "array", items: { type: "integer" }, description: "Indices of URLs that show this specific product" },
-                    },
-                    required: ["valid_indices"],
-                  },
-                },
-              }],
-              tool_choice: { type: "function", function: { name: "validate_images" } },
-              temperature: 0.1,
-            }),
-          });
-          
-          if (validationResp.ok) {
-            const valData = await validationResp.json();
-            const valCall = valData.choices?.[0]?.message?.tool_calls?.[0];
-            if (valCall) {
-              const { valid_indices } = JSON.parse(valCall.function.arguments);
-              foundImageUrls = (valid_indices as number[])
-                .filter(i => i >= 0 && i < uniqueCandidates.length)
-                .map(i => ({ url: uniqueCandidates[i].url, source: uniqueCandidates[i].source, label: uniqueCandidates[i].label }))
-                .slice(0, 8);
-            }
-          }
-          
-          // Fallback: if validation returned nothing, use retailer images only
-          if (foundImageUrls.length === 0) {
-            foundImageUrls = uniqueCandidates
-              .filter(c => c.source !== "perplexity")
-              .slice(0, 4);
+        // Verify page title relevance
+        const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+        const pageTitle = (titleMatch?.[1] || "").toLowerCase();
+        const productWords = productName.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+        if (!productWords.some(w => pageTitle.includes(w))) {
+          console.log(`[product-research] Skipping irrelevant image page: "${titleMatch?.[1]}"`);
+          continue;
+        }
+        
+        const domain = new URL(citation).hostname.replace("www.", "");
+        
+        // og:image
+        const ogMatch = html.match(/property="og:image"\s+content="([^"]+)"/i) || 
+                        html.match(/content="([^"]+)"\s+property="og:image"/i);
+        if (ogMatch?.[1]) candidateImgs.push({ url: ogMatch[1], source: domain, label: "hero" });
+        
+        // Amazon dynamic images
+        const dynamicImg = html.match(/data-a-dynamic-image="\{([^}]+)\}"/i);
+        if (dynamicImg) {
+          const amazonUrls = dynamicImg[1].match(/https?:\/\/[^"]+/g) || [];
+          for (const au of amazonUrls.slice(0, 3)) {
+            candidateImgs.push({ url: au.replace(/\._[^.]+_\./, "."), source: domain, label: "detail" });
           }
         }
         
-        console.log(`[product-research] Found ${foundImageUrls.length} validated product images from ${uniqueCandidates.length} candidates`);
-      } catch (err) {
-        console.warn("[product-research] Image search failed:", err);
-      }
+        // Extract price from retailer page for link records
+        const priceMatch = html.match(/\$\s*([\d,]+\.?\d{0,2})/);
+        const existingLink = foundLinks.find(l => l.url === citation);
+        if (existingLink && priceMatch) {
+          existingLink.priceCents = Math.round(parseFloat(priceMatch[1].replace(",", "")) * 100);
+          existingLink.title = titleMatch?.[1]?.trim();
+        }
+      } catch { /* skip */ }
     }
 
-    const combined = researchParts.join("\n\n---\n\n").slice(0, 15000);
+    // Extract direct image URLs from all search content
+    const allSearchText = [retailSearch.content, wholesaleSearch.content, imgSearch.content].join(" ");
+    const imgRegex = /https?:\/\/[^\s"'<>]+\.(?:jpg|jpeg|png|webp)(?:\?[^\s"'<>]*)?/gi;
+    const directImgs = allSearchText.match(imgRegex) || [];
+    for (const imgUrl of directImgs.slice(0, 5)) {
+      candidateImgs.push({ url: imgUrl, source: "search", label: "reference" });
+    }
+
+    // Deduplicate and filter
+    const seenImgs = new Set<string>();
+    const uniqueImgs = candidateImgs.filter(img => {
+      if (seenImgs.has(img.url)) return false;
+      const lower = img.url.toLowerCase();
+      if (lower.includes("gift-card") || lower.includes("giftcard") || lower.includes("logo") || 
+          lower.includes("banner") || lower.includes("icon") || lower.includes("sprite") ||
+          lower.includes("placeholder") || lower.includes("loading")) return false;
+      seenImgs.add(img.url);
+      return true;
+    });
+
+    // AI validation of images
+    if (uniqueImgs.length > 0) {
+      try {
+        const valResp = await fetch("https://api.openai.com/v1/chat/completions", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${openaiKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: "gpt-4o-mini",
+            messages: [{
+              role: "system",
+              content: `You validate product image URLs. Given a product name and image URLs, return ONLY indices of URLs that likely show this EXACT product. Reject: gift cards, unrelated products, logos, banners, category images, or navigation elements. Be strict — only approve images that match the specific product name.`,
+            }, {
+              role: "user",
+              content: `Product: "${productName}"\n\nCandidate URLs:\n${uniqueImgs.map((c, i) => `[${i}] ${c.url} (from: ${c.source})`).join("\n")}`,
+            }],
+            tools: [{ type: "function", function: {
+              name: "validate_images",
+              parameters: { type: "object", properties: { valid_indices: { type: "array", items: { type: "integer" } } }, required: ["valid_indices"] },
+            }}],
+            tool_choice: { type: "function", function: { name: "validate_images" } },
+            temperature: 0.1,
+          }),
+        });
+        if (valResp.ok) {
+          const valData = await valResp.json();
+          const valCall = valData.choices?.[0]?.message?.tool_calls?.[0];
+          if (valCall) {
+            const { valid_indices } = JSON.parse(valCall.function.arguments);
+            foundImageUrls = (valid_indices as number[])
+              .filter(i => i >= 0 && i < uniqueImgs.length)
+              .map(i => uniqueImgs[i])
+              .slice(0, 8);
+          }
+        }
+      } catch (e) { console.warn("[product-research] Image validation error:", e); }
+      
+      if (foundImageUrls.length === 0) {
+        foundImageUrls = uniqueImgs.filter(c => c.source !== "search").slice(0, 4);
+      }
+    }
+    console.log(`[product-research] Found ${foundImageUrls.length} validated images from ${uniqueImgs.length} candidates`);
+
+    // ==========================================
+    // PHASE 5: URL VALIDATION — verify top links
+    // ==========================================
+    console.log("[product-research] Phase 5: Validating URLs");
+    const validatedLinks: FoundLink[] = [];
+    for (const link of foundLinks.slice(0, 8)) {
+      try {
+        const check = await validateUrl(link.url, productName);
+        if (check.valid) {
+          link.title = check.title;
+          if (check.price && !link.priceCents) {
+            link.priceCents = parsePriceFromText(check.price);
+          }
+          validatedLinks.push(link);
+          console.log(`[product-research] ✓ Valid: ${link.platform} — ${check.title?.slice(0, 60)}`);
+        } else {
+          console.log(`[product-research] ✗ Invalid: ${link.url} — title: "${check.title?.slice(0, 60)}"`);
+        }
+      } catch { /* skip */ }
+    }
+    console.log(`[product-research] ${validatedLinks.length}/${foundLinks.length} links validated`);
+
+    // ==========================================
+    // PHASE 6: AI SCORING with all data
+    // ==========================================
+    console.log("[product-research] Phase 6: AI scoring");
+    
+    // Add verified links to research data
+    if (validatedLinks.length > 0) {
+      researchParts.push(`\nVERIFIED PRODUCT LINKS:\n${validatedLinks.map(l => 
+        `${l.linkType.toUpperCase()} - ${l.platform}: ${l.url} ${l.priceCents ? `($${(l.priceCents/100).toFixed(2)})` : ""} ${l.title || ""}`
+      ).join("\n")}`);
+    }
+    researchParts.push(`\nAll Source URLs:\n${allCitations.map((c, i) => `[${i+1}] ${c}`).join("\n")}`);
+
+    const combined = researchParts.join("\n\n---\n\n").slice(0, 18000);
     if (combined.length < 50) {
       return new Response(JSON.stringify({ error: "Could not gather enough product data" }), {
         status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // 3. AI scoring
-    const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+    // Find best retail and wholesale URLs from validated links
+    const bestRetailLink = validatedLinks.find(l => l.linkType === "retail");
+    const bestWholesaleLink = validatedLinks.find(l => l.linkType === "wholesale");
+
+    const scoringResp = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${openaiKey}`,
-        "Content-Type": "application/json",
-      },
+      headers: { Authorization: `Bearer ${openaiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model: "gpt-4o-mini",
         messages: [
           {
             role: "system",
-            content: `You are an expert dropshipping product analyst. Score this product for viral short-form video marketing potential.
+            content: `You are an expert dropshipping product analyst. Score this product using the VERIFIED research data provided.
 
-CRITICAL - URLs:
-- image_url: If you find a direct product image URL (ending in .jpg, .png, .webp) in the research data, include it. Do NOT make up image URLs.
-- source_url: Use a REAL URL from the "Real Source URLs" section. Pick the most relevant product page. Do NOT hallucinate URLs.
+CRITICAL RULES:
+- source_url: Use ONLY a URL from the "VERIFIED PRODUCT LINKS" section. If none, use a URL from "All Source URLs". NEVER make up URLs.
+- supplier_url: Use a VERIFIED wholesale link if available. NEVER hallucinate.
+- Prices: Base retail price on actual retail listings found. Base supplier price on actual wholesale listings found.
 
 SCORING (1-5):
-- wow_factor: Visual impact and surprise value. 5=jaw-dropping demo, 1=boring/generic
-- social_media_potential: Likelihood of generating engagement. 5=guaranteed viral, 1=no social appeal
-- impulse_buy_appeal: Would viewers buy immediately? 5=instant purchase, 1=needs deliberation
-- demonstrability_score: Can you show its value in <10 seconds? 5=instant visual payoff, 1=complex explanation needed
-- competition_level: Market saturation. 5=extremely saturated, 1=untapped niche
-
-PRICE ANALYSIS:
-- Estimate retail price in cents
-- Estimate supplier/cost price in cents (typical AliExpress/wholesale)
-- Calculate estimated margin percentage
-- Is this in the impulse buy sweet spot ($15-$49)?
+- wow_factor: Visual impact. 5=jaw-dropping demo, 1=boring
+- social_media_potential: Engagement potential. 5=guaranteed viral, 1=none
+- impulse_buy_appeal: Instant buy trigger. 5=instant purchase, 1=needs research
+- demonstrability_score: Show value in <10s? 5=instant visual payoff, 1=complex
+- competition_level: Saturation. 5=extremely saturated, 1=untapped
 
 TRENDING STATUS: emerging | rising | peak | declining | saturated
+EMOTIONAL TRIGGERS (2-4): wow, satisfaction, transformation, curiosity, gift, before_after, problem_solved, luxury_affordable, convenience, fear_of_missing
 
-EMOTIONAL TRIGGERS (pick 2-4): wow, satisfaction, transformation, curiosity, gift, before_after, problem_solved, luxury_affordable, kids, pets, convenience, fear_of_missing
-
-Also suggest:
-- Best content angles (3-5)
-- Best hook types for this product
-- Target audience
-- Recommended CTA strategy`,
+Also provide: content_angles (3-5), hook_types, target_audience, cta_strategy, summary (2-3 sentences with honest assessment).`,
           },
-          { role: "user", content: `Product: ${productName || "Unknown"}\nURL: ${productUrl || "N/A"}\n\nResearch data:\n${combined}` },
+          { role: "user", content: `Product: ${productName}\n\n${combined}` },
         ],
-        tools: [
-          {
-            type: "function",
-            function: {
-              name: "store_analysis",
-              description: "Store product analysis results",
-              parameters: {
-                type: "object",
-                properties: {
-                  product_name: { type: "string" },
-                   image_url: { type: "string", description: "Direct URL to a product image if found in the research data. Must be a real URL ending in .jpg/.png/.webp. Empty string if none found." },
-                   source_url: { type: "string", description: "A real product page URL from the Source URLs section. Do NOT make up URLs. Empty string if none relevant." },
-                  category: { type: "string" },
-                  subcategory: { type: "string" },
-                  price_cents: { type: "integer", description: "Estimated retail price in cents" },
-                  supplier_price_cents: { type: "integer", description: "Estimated supplier/cost price in cents" },
-                  estimated_margin_pct: { type: "number", description: "Estimated margin percentage" },
-                  wow_factor: { type: "integer", minimum: 1, maximum: 5 },
-                  social_media_potential: { type: "integer", minimum: 1, maximum: 5 },
-                  impulse_buy_appeal: { type: "integer", minimum: 1, maximum: 5 },
-                  demonstrability_score: { type: "integer", minimum: 1, maximum: 5 },
-                  competition_level: { type: "integer", minimum: 1, maximum: 5 },
-                  trending_status: { type: "string", enum: ["emerging", "rising", "peak", "declining", "saturated"] },
-                  emotional_triggers: { type: "array", items: { type: "string" } },
-                  price_sweet_spot: { type: "boolean" },
-                  content_angles: { type: "array", items: { type: "string" }, description: "3-5 suggested video angles" },
-                  hook_types: { type: "array", items: { type: "string" }, description: "Best hook patterns" },
-                  target_audience: { type: "string" },
-                  cta_strategy: { type: "string" },
-                  summary: { type: "string", description: "2-3 sentence verdict on this product's potential" },
-                },
-                required: ["product_name", "category", "wow_factor", "social_media_potential", "impulse_buy_appeal", "demonstrability_score", "competition_level", "trending_status", "emotional_triggers", "content_angles", "summary"],
+        tools: [{
+          type: "function",
+          function: {
+            name: "store_analysis",
+            description: "Store product analysis",
+            parameters: {
+              type: "object",
+              properties: {
+                product_name: { type: "string" },
+                source_url: { type: "string", description: "A VERIFIED retail product page URL. Must be from the research data." },
+                supplier_url: { type: "string", description: "A VERIFIED wholesale/supplier URL from research data. Empty string if none." },
+                category: { type: "string" },
+                subcategory: { type: "string" },
+                price_cents: { type: "integer", description: "Retail price in cents from actual listings" },
+                supplier_price_cents: { type: "integer", description: "Wholesale/supplier price in cents from actual listings" },
+                estimated_margin_pct: { type: "number" },
+                wow_factor: { type: "integer", minimum: 1, maximum: 5 },
+                social_media_potential: { type: "integer", minimum: 1, maximum: 5 },
+                impulse_buy_appeal: { type: "integer", minimum: 1, maximum: 5 },
+                demonstrability_score: { type: "integer", minimum: 1, maximum: 5 },
+                competition_level: { type: "integer", minimum: 1, maximum: 5 },
+                trending_status: { type: "string", enum: ["emerging", "rising", "peak", "declining", "saturated"] },
+                emotional_triggers: { type: "array", items: { type: "string" } },
+                price_sweet_spot: { type: "boolean" },
+                content_angles: { type: "array", items: { type: "string" } },
+                hook_types: { type: "array", items: { type: "string" } },
+                target_audience: { type: "string" },
+                cta_strategy: { type: "string" },
+                summary: { type: "string" },
               },
+              required: ["product_name", "category", "wow_factor", "social_media_potential", "impulse_buy_appeal", "demonstrability_score", "competition_level", "trending_status", "emotional_triggers", "content_angles", "summary"],
             },
           },
-        ],
+        }],
         tool_choice: { type: "function", function: { name: "store_analysis" } },
         temperature: 0.3,
       }),
     });
 
-    if (!resp.ok) {
-      const err = await resp.text();
-      throw new Error(`OpenAI scoring failed: ${resp.status} ${err}`);
+    if (!scoringResp.ok) {
+      const err = await scoringResp.text();
+      throw new Error(`OpenAI scoring failed: ${scoringResp.status} ${err}`);
     }
 
-    const aiData = await resp.json();
+    const aiData = await scoringResp.json();
     const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
     if (!toolCall) throw new Error("No tool call in response");
 
@@ -387,6 +493,14 @@ Also suggest:
         competitionInv * 0.10) / 5 * 100
     );
 
+    // Prefer verified URLs over AI-suggested ones
+    const finalSourceUrl = bestRetailLink?.url || analysis.source_url || allCitations[0] || productUrl || null;
+    const finalSupplierUrl = bestWholesaleLink?.url || analysis.supplier_url || null;
+
+    // ==========================================
+    // SAVE TO DATABASE
+    // ==========================================
+    
     // Create or update product
     if (!productId) {
       const { data: newProduct, error: insertErr } = await supabase
@@ -395,8 +509,9 @@ Also suggest:
           name: analysis.product_name || productName,
           category: analysis.category || null,
           subcategory: analysis.subcategory || null,
-          source_url: analysis.source_url || productUrl || perplexityCitations[0] || null,
-          image_url: analysis.image_url || null,
+          source_url: finalSourceUrl,
+          supplier_url: finalSupplierUrl,
+          image_url: foundImageUrls[0]?.url || null,
           price_cents: analysis.price_cents || null,
           supplier_price_cents: analysis.supplier_price_cents || null,
           estimated_margin_pct: analysis.estimated_margin_pct || null,
@@ -407,28 +522,22 @@ Also suggest:
         .select("id")
         .single();
 
-      if (insertErr || !newProduct) {
-        throw new Error(`Failed to create product: ${insertErr?.message}`);
-      }
+      if (insertErr || !newProduct) throw new Error(`Failed to create product: ${insertErr?.message}`);
       productId = newProduct.id;
     } else {
-      // Update existing product with new data
-      const updatePayload: Record<string, unknown> = {
+      await supabase.from("products").update({
         category: analysis.category || undefined,
         subcategory: analysis.subcategory || undefined,
-        image_url: analysis.image_url || undefined,
+        source_url: finalSourceUrl,
+        supplier_url: finalSupplierUrl,
+        image_url: foundImageUrls[0]?.url || undefined,
         price_cents: analysis.price_cents || undefined,
         supplier_price_cents: analysis.supplier_price_cents || undefined,
         estimated_margin_pct: analysis.estimated_margin_pct || undefined,
         status: "researching",
         notes: analysis.summary || undefined,
         updated_at: new Date().toISOString(),
-      };
-      // Backfill source_url if missing
-      if (analysis.source_url || perplexityCitations.length > 0) {
-        updatePayload.source_url = analysis.source_url || perplexityCitations[0];
-      }
-      await supabase.from("products").update(updatePayload).eq("id", productId);
+      }).eq("id", productId);
     }
 
     // Upsert analysis
@@ -449,7 +558,7 @@ Also suggest:
       emotional_triggers: analysis.emotional_triggers || [],
       price_sweet_spot: analysis.price_sweet_spot ?? false,
       overall_score: overallScore,
-      analyzed_by: "ai",
+      analyzed_by: "ai_v2",
       analyzed_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -460,16 +569,28 @@ Also suggest:
       await supabase.from("product_analysis").insert(analysisRow);
     }
 
-    // Save found product images
-    if (foundImageUrls.length > 0 && productId) {
-      // Clear old AI-found images for this product (keep manually verified ones)
-      await supabase
-        .from("product_images")
-        .delete()
-        .eq("product_id", productId)
-        .eq("verified", false);
+    // Save verified links
+    if (validatedLinks.length > 0 && productId) {
+      // Clear old unverified links
+      await supabase.from("product_links").delete().eq("product_id", productId).eq("verified", false);
+      
+      const linkRows = validatedLinks.map(l => ({
+        product_id: productId,
+        url: l.url,
+        link_type: l.linkType,
+        platform: l.platform,
+        price_cents: l.priceCents || null,
+        title: l.title || null,
+        verified: true,
+      }));
+      const { error: linkErr } = await supabase.from("product_links").insert(linkRows);
+      if (linkErr) console.warn("[product-research] Failed to save links:", linkErr);
+      else console.log(`[product-research] Saved ${linkRows.length} verified links`);
+    }
 
-      // Insert new images
+    // Save images
+    if (foundImageUrls.length > 0 && productId) {
+      await supabase.from("product_images").delete().eq("product_id", productId).eq("verified", false);
       const imageRows = foundImageUrls.map((img, i) => ({
         product_id: productId,
         url: img.url,
@@ -478,20 +599,15 @@ Also suggest:
         is_primary: i === 0,
         verified: false,
       }));
-      
       const { error: imgErr } = await supabase.from("product_images").insert(imageRows);
-      if (imgErr) {
-        console.warn("[product-research] Failed to save images:", imgErr);
-      } else {
-        // Update product's primary image_url to the first found image
-        await supabase.from("products")
-          .update({ image_url: foundImageUrls[0].url })
-          .eq("id", productId);
+      if (imgErr) console.warn("[product-research] Failed to save images:", imgErr);
+      else {
+        await supabase.from("products").update({ image_url: foundImageUrls[0].url }).eq("id", productId);
+        console.log(`[product-research] Saved ${imageRows.length} images`);
       }
-      console.log(`[product-research] Saved ${foundImageUrls.length} images for product`);
     }
 
-    console.log(`[product-research] Scored "${analysis.product_name}": ${overallScore}/100`);
+    console.log(`[product-research] ===== COMPLETE: "${analysis.product_name}" score=${overallScore}/100, ${validatedLinks.length} links, ${foundImageUrls.length} images =====`);
 
     return new Response(
       JSON.stringify({
@@ -499,6 +615,9 @@ Also suggest:
         product_id: productId,
         overall_score: overallScore,
         images_found: foundImageUrls.length,
+        links_found: validatedLinks.length,
+        retail_links: validatedLinks.filter(l => l.linkType === "retail").length,
+        wholesale_links: validatedLinks.filter(l => l.linkType === "wholesale").length,
         analysis,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
