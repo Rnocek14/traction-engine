@@ -842,6 +842,89 @@ export type Database = {
           },
         ]
       }
+      product_unit_economics: {
+        Row: {
+          break_even_cpa_cents: number | null
+          break_even_roas: number | null
+          break_even_units: number | null
+          calculated_at: string
+          calculator_version: string
+          content_cost_per_sale_cents: number
+          created_at: string
+          expected_return_rate_pct: number
+          gross_margin_cents: number | null
+          gross_margin_pct: number | null
+          id: string
+          net_margin_cents: number | null
+          net_margin_pct: number | null
+          packaging_cost_cents: number
+          payment_fee_pct: number
+          platform_fee_pct: number
+          product_id: string
+          retail_price_cents: number
+          shipping_cost_cents: number
+          supplier_cost_cents: number
+          updated_at: string
+          viability_grade: string | null
+        }
+        Insert: {
+          break_even_cpa_cents?: number | null
+          break_even_roas?: number | null
+          break_even_units?: number | null
+          calculated_at?: string
+          calculator_version?: string
+          content_cost_per_sale_cents?: number
+          created_at?: string
+          expected_return_rate_pct?: number
+          gross_margin_cents?: number | null
+          gross_margin_pct?: number | null
+          id?: string
+          net_margin_cents?: number | null
+          net_margin_pct?: number | null
+          packaging_cost_cents?: number
+          payment_fee_pct?: number
+          platform_fee_pct?: number
+          product_id: string
+          retail_price_cents: number
+          shipping_cost_cents?: number
+          supplier_cost_cents: number
+          updated_at?: string
+          viability_grade?: string | null
+        }
+        Update: {
+          break_even_cpa_cents?: number | null
+          break_even_roas?: number | null
+          break_even_units?: number | null
+          calculated_at?: string
+          calculator_version?: string
+          content_cost_per_sale_cents?: number
+          created_at?: string
+          expected_return_rate_pct?: number
+          gross_margin_cents?: number | null
+          gross_margin_pct?: number | null
+          id?: string
+          net_margin_cents?: number | null
+          net_margin_pct?: number | null
+          packaging_cost_cents?: number
+          payment_fee_pct?: number
+          platform_fee_pct?: number
+          product_id?: string
+          retail_price_cents?: number
+          shipping_cost_cents?: number
+          supplier_cost_cents?: number
+          updated_at?: string
+          viability_grade?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_unit_economics_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: true
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       products: {
         Row: {
           category: string | null
