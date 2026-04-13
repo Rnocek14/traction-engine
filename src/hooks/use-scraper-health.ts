@@ -76,6 +76,11 @@ export function useScraperHealth() {
           .select("id, status, completed_at")
           .order("completed_at", { ascending: false })
           .limit(200),
+        supabase
+          .from("scraped_insights")
+          .select("id, title, viral_score, source_type, content_format, topics, emotional_triggers, created_at, source_url")
+          .order("viral_score", { ascending: false })
+          .limit(15),
       ]);
 
       const insights = allInsights.data || [];
