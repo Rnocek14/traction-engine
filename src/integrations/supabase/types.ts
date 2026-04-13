@@ -634,8 +634,12 @@ export type Database = {
           estimated_margin_pct: number | null
           id: string
           image_url: string | null
+          marketing_plan: Json | null
           name: string
           notes: string | null
+          plan_generated_at: string | null
+          plan_status: string
+          plan_version: number
           price_cents: number | null
           shipping_days: number | null
           source_url: string | null
@@ -652,8 +656,12 @@ export type Database = {
           estimated_margin_pct?: number | null
           id?: string
           image_url?: string | null
+          marketing_plan?: Json | null
           name: string
           notes?: string | null
+          plan_generated_at?: string | null
+          plan_status?: string
+          plan_version?: number
           price_cents?: number | null
           shipping_days?: number | null
           source_url?: string | null
@@ -670,8 +678,12 @@ export type Database = {
           estimated_margin_pct?: number | null
           id?: string
           image_url?: string | null
+          marketing_plan?: Json | null
           name?: string
           notes?: string | null
+          plan_generated_at?: string | null
+          plan_status?: string
+          plan_version?: number
           price_cents?: number | null
           shipping_days?: number | null
           source_url?: string | null
