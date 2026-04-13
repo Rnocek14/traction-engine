@@ -61,6 +61,18 @@ export interface ProductLink {
   price_cents: number | null;
   title: string | null;
   verified: boolean;
+  match_confidence: number | null;
+  validation_status: string | null;
+  validation_reasons: string[] | null;
+  matched_tokens: string[] | null;
+  distinctive_tokens_matched: string[] | null;
+  ai_verdict: boolean | null;
+  ai_confidence: number | null;
+  fetch_method: string | null;
+  extracted_product_name: string | null;
+  structured_price_cents: number | null;
+  content_quality_score: number | null;
+  evidence_summary: Record<string, number> | null;
 }
 
 export interface ProductSupplier {
