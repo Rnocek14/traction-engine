@@ -750,6 +750,98 @@ export type Database = {
           },
         ]
       }
+      product_suppliers: {
+        Row: {
+          communication_score: number | null
+          created_at: string
+          defect_risk: number | null
+          delivery_days: number | null
+          expected_return_rate_pct: number | null
+          id: string
+          is_preferred: boolean
+          moq: number | null
+          notes: string | null
+          overall_supplier_score: number | null
+          platform: string
+          processing_days: number | null
+          product_id: string
+          reliability_score: number | null
+          return_policy: string | null
+          shipping_cost_cents: number | null
+          shipping_country: string | null
+          stock_status: string
+          supplier_name: string
+          supplier_url: string | null
+          target_market: string | null
+          unit_cost_cents: number | null
+          updated_at: string
+          verification_status: string
+          verified_at: string | null
+        }
+        Insert: {
+          communication_score?: number | null
+          created_at?: string
+          defect_risk?: number | null
+          delivery_days?: number | null
+          expected_return_rate_pct?: number | null
+          id?: string
+          is_preferred?: boolean
+          moq?: number | null
+          notes?: string | null
+          overall_supplier_score?: number | null
+          platform?: string
+          processing_days?: number | null
+          product_id: string
+          reliability_score?: number | null
+          return_policy?: string | null
+          shipping_cost_cents?: number | null
+          shipping_country?: string | null
+          stock_status?: string
+          supplier_name: string
+          supplier_url?: string | null
+          target_market?: string | null
+          unit_cost_cents?: number | null
+          updated_at?: string
+          verification_status?: string
+          verified_at?: string | null
+        }
+        Update: {
+          communication_score?: number | null
+          created_at?: string
+          defect_risk?: number | null
+          delivery_days?: number | null
+          expected_return_rate_pct?: number | null
+          id?: string
+          is_preferred?: boolean
+          moq?: number | null
+          notes?: string | null
+          overall_supplier_score?: number | null
+          platform?: string
+          processing_days?: number | null
+          product_id?: string
+          reliability_score?: number | null
+          return_policy?: string | null
+          shipping_cost_cents?: number | null
+          shipping_country?: string | null
+          stock_status?: string
+          supplier_name?: string
+          supplier_url?: string | null
+          target_market?: string | null
+          unit_cost_cents?: number | null
+          updated_at?: string
+          verification_status?: string
+          verified_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_suppliers_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       products: {
         Row: {
           category: string | null
