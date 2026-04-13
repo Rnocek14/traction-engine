@@ -672,10 +672,18 @@ async function firecrawlFetch(url: string, apiKey: string): Promise<string | nul
       },
       body: JSON.stringify({ url, formats: ["html"], onlyMainContent: true }),
     });
-    if (!resp.ok) return null;
+    if (!resp.ok) {
+      console.warn(`[product-research] Firecrawl HTTP ${resp.status} for ${url.slice(0, 60)}`);
+      return null;
+    }
     const data = await resp.json();
-    return data.data?.html || data.html || null;
-  } catch {
+    const html = data.data?.html || data.data?.rawHtml || data.html || null;
+    if (!html) {
+      console.warn(`[product-research] Firecrawl empty response keys: ${Object.keys(data).join(",")}, data keys: ${data.data ? Object.keys(data.data).join(",") : "none"}`);
+    }
+    return html;
+  } catch (e) {
+    console.warn(`[product-research] Firecrawl error: ${e}`);
     return null;
   }
 }
