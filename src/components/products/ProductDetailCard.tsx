@@ -211,6 +211,54 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
         {product.category && <p className="text-xs text-muted-foreground">{product.category}{product.subcategory ? ` / ${product.subcategory}` : ""}</p>}
         {product.notes && <p className="text-xs text-muted-foreground line-clamp-2">{product.notes}</p>}
 
+        {/* Verified Links */}
+        {(retailLinks.length > 0 || wholesaleLinks.length > 0) && (
+          <div className="space-y-1.5 border-t pt-2">
+            {retailLinks.length > 0 && (
+              <div>
+                <p className="text-[10px] font-medium text-muted-foreground flex items-center gap-1 mb-1">
+                  <ShoppingCart className="w-3 h-3" /> Where to Buy ({retailLinks.length})
+                </p>
+                {retailLinks.map(link => (
+                  <a key={link.id} href={link.url} target="_blank" rel="noopener noreferrer"
+                    className="flex items-center justify-between text-xs bg-muted/30 rounded px-2 py-1 mb-0.5 hover:bg-muted/50 transition-colors">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <Badge variant="outline" className="text-[10px] shrink-0">{link.platform}</Badge>
+                      {link.verified && <CheckCircle2 className="w-3 h-3 text-green-500 shrink-0" />}
+                      <span className="truncate text-muted-foreground">{link.title?.slice(0, 40) || link.url.slice(0, 40)}</span>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {link.price_cents && <span className="font-medium">${(link.price_cents / 100).toFixed(2)}</span>}
+                      <ExternalLink className="w-3 h-3 text-muted-foreground" />
+                    </div>
+                  </a>
+                ))}
+              </div>
+            )}
+            {wholesaleLinks.length > 0 && (
+              <div>
+                <p className="text-[10px] font-medium text-muted-foreground flex items-center gap-1 mb-1">
+                  <Warehouse className="w-3 h-3" /> Wholesale Sources ({wholesaleLinks.length})
+                </p>
+                {wholesaleLinks.map(link => (
+                  <a key={link.id} href={link.url} target="_blank" rel="noopener noreferrer"
+                    className="flex items-center justify-between text-xs bg-muted/30 rounded px-2 py-1 mb-0.5 hover:bg-muted/50 transition-colors">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <Badge variant="outline" className="text-[10px] shrink-0">{link.platform}</Badge>
+                      {link.verified && <CheckCircle2 className="w-3 h-3 text-green-500 shrink-0" />}
+                      <span className="truncate text-muted-foreground">{link.title?.slice(0, 40) || "View listing"}</span>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {link.price_cents && <span className="font-medium">${(link.price_cents / 100).toFixed(2)}</span>}
+                      <ExternalLink className="w-3 h-3 text-muted-foreground" />
+                    </div>
+                  </a>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Plan version indicator */}
         {hasPlan && (
           <Button
