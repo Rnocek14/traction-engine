@@ -61,7 +61,7 @@ export function useScraperHealth() {
       const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
       // Parallel fetches
-      const [allInsights, recentInsights, scrapeJobs] = await Promise.all([
+      const [allInsights, recentInsights, scrapeJobs, topStories] = await Promise.all([
         supabase
           .from("scraped_insights")
           .select("id, viral_score, source_type, relevance_tags, hook_patterns, emotional_triggers, content_format, topics, created_at")
@@ -144,6 +144,18 @@ export function useScraperHealth() {
       const failedJobs = jobs.filter(j => j.status === "failed").length;
       const lastCompleted = jobs.find(j => j.status === "done" && j.completed_at);
 
+      const stories = (topStories.data || []).map(s => ({
+        id: s.id,
+        title: s.title,
+        viral_score: s.viral_score || 0,
+        source_type: s.source_type,
+        content_format: s.content_format,
+        topics: (s.topics as string[]) || [],
+        emotional_triggers: (s.emotional_triggers as string[]) || [],
+        created_at: s.created_at,
+        source_url: s.source_url,
+      }));
+
       return {
         totalInsights: insights.length,
         insightsLast24h: recent24h.length,
@@ -169,6 +181,7 @@ export function useScraperHealth() {
         topEmotions: toSorted(emotionMap),
         topFormats: toSorted(formatMap),
         topTopics: toSorted(topicMap, 12),
+        trendingStories: stories,
       };
     },
     staleTime: 30_000,
