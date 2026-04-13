@@ -41,7 +41,7 @@ async function fetchPageContent(url: string): Promise<string> {
   }
 }
 
-async function perplexityResearch(query: string, perplexityKey: string): Promise<string> {
+async function perplexityResearch(query: string, perplexityKey: string): Promise<{ content: string; citations: string[] }> {
   try {
     const resp = await fetch("https://api.perplexity.ai/chat/completions", {
       method: "POST",
@@ -54,7 +54,7 @@ async function perplexityResearch(query: string, perplexityKey: string): Promise
         messages: [
           {
             role: "system",
-            content: "You are a product analyst for e-commerce and dropshipping. Research this product thoroughly: pricing, competition, social media presence, viral potential, suppliers, and market saturation.",
+            content: "You are a product analyst for e-commerce and dropshipping. Research this product thoroughly: pricing, competition, social media presence, viral potential, suppliers, and market saturation. Include any product image URLs you find.",
           },
           { role: "user", content: query },
         ],
@@ -62,11 +62,14 @@ async function perplexityResearch(query: string, perplexityKey: string): Promise
         search_recency_filter: "month",
       }),
     });
-    if (!resp.ok) return "";
+    if (!resp.ok) return { content: "", citations: [] };
     const data = await resp.json();
-    return data.choices?.[0]?.message?.content || "";
+    return {
+      content: data.choices?.[0]?.message?.content || "",
+      citations: data.citations || [],
+    };
   } catch {
-    return "";
+    return { content: "", citations: [] };
   }
 }
 

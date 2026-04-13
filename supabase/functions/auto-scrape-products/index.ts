@@ -109,7 +109,7 @@ async function discoverProducts(
       const data = await resp.json();
       const content = data.choices?.[0]?.message?.content || "";
       const citations = data.citations || [];
-      rawTexts.push(`Query: ${query}\n\nResults:\n${content}\n\nSources: ${citations.join(", ")}`);
+      rawTexts.push(`Query: ${query}\n\nResults:\n${content}\n\nSource URLs (REAL, USE THESE for source_url):\n${citations.map((c: string, i: number) => `[${i+1}] ${c}`).join("\n")}`);
     } catch (err) {
       console.warn(`[product-scrape] Query error:`, err);
     }
@@ -135,6 +135,10 @@ async function discoverProducts(
         {
           role: "system",
           content: `You are a product intelligence analyst for a dropshipping business. Extract individual products from the research data. For each product, provide structured scoring.
+
+CRITICAL - URLs:
+- source_url: You MUST use a REAL URL from the "Source URLs" section of the research data. Pick the most relevant source URL for each product. These are real working URLs from Perplexity citations. Do NOT make up URLs. If no relevant source URL exists, use an empty string.
+- image_url: If you can identify a direct image URL (ending in .jpg, .png, .webp) from the research data, include it. Otherwise use an empty string. Do NOT hallucinate image URLs.
 
 SCORING RUBRIC (1-5 scale):
 - wow_factor: How visually impressive/surprising is this product? 5=jaw-dropping demo potential, 1=boring
