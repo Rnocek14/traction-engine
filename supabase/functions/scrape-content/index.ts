@@ -292,7 +292,7 @@ Source URL: ${url}`;
 
   if (!resp.ok) {
     const err = await resp.text();
-    throw new Error(\`OpenAI extraction failed: \${resp.status} \${err}\`);
+    throw new Error(`OpenAI extraction failed: ${resp.status} ${err}`);
   }
 
   const data = await resp.json();
