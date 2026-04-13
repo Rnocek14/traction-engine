@@ -1,9 +1,30 @@
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Package } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Package, ExternalLink, Save, Loader2 } from "lucide-react";
 import { type ProductWithAnalysis } from "@/hooks/use-products";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
 
 export function ProductIdentitySection({ product }: { product: ProductWithAnalysis }) {
+  const qc = useQueryClient();
+  const [purchaseUrl, setPurchaseUrl] = useState((product as any).purchase_url || "");
+  const [saving, setSaving] = useState(false);
+
+  const handleSavePurchaseUrl = async () => {
+    setSaving(true);
+    const { error } = await supabase
+      .from("products")
+      .update({ purchase_url: purchaseUrl || null })
+      .eq("id", product.id);
+    setSaving(false);
+    if (error) { toast.error("Failed to save purchase URL"); return; }
+    toast.success("Purchase URL saved");
+    qc.invalidateQueries({ queryKey: ["product-detail", product.id] });
+  };
   const analysis = product.product_analysis?.[0];
   const p = product as any;
 
@@ -82,6 +103,32 @@ export function ProductIdentitySection({ product }: { product: ProductWithAnalys
                 </div>
               </div>
             )}
+
+            {/* Purchase URL */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">Purchase URL (Shopify / Landing Page)</label>
+              <div className="flex gap-2">
+                <Input
+                  value={purchaseUrl}
+                  onChange={e => setPurchaseUrl(e.target.value)}
+                  placeholder="https://your-store.myshopify.com/products/..."
+                  className="text-sm"
+                />
+                <Button size="sm" onClick={handleSavePurchaseUrl} disabled={saving}>
+                  {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                </Button>
+                {purchaseUrl && (
+                  <Button size="sm" variant="outline" asChild>
+                    <a href={purchaseUrl} target="_blank" rel="noopener noreferrer">
+                      <ExternalLink className="w-4 h-4" />
+                    </a>
+                  </Button>
+                )}
+              </div>
+              {!purchaseUrl && (
+                <p className="text-xs text-amber-500">⚠ No purchase URL set — videos won't have a working buy link</p>
+              )}
+            </div>
 
             {/* Identity confidence summary */}
             <div className="bg-muted/30 rounded-lg p-3 space-y-1.5">

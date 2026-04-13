@@ -25,6 +25,7 @@ export interface Product {
   plan_version: number;
   plan_status: string;
   created_at: string;
+  purchase_url: string | null;
   updated_at: string;
 }
 
