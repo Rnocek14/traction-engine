@@ -18,6 +18,20 @@ export type ConfidenceScore = {
   level: "high" | "medium" | "low";
 };
 
+export type PerformanceData = {
+  views: number | null;
+  impressions: number | null;
+  likes: number | null;
+  shares: number | null;
+  saves: number | null;
+  comments: number | null;
+  avg_watch_time: number | null;
+  watch_3s_rate: number | null;
+  watch_15s_rate: number | null;
+  outcome_score: number | null;
+  platform: string | null;
+};
+
 type AssembledVideoRow = {
   id: string;
   title: string | null;
@@ -34,6 +48,7 @@ type AssembledVideoRow = {
   script_experiment_id: string | null;
   enrichment?: EnrichmentMeta;
   confidence?: ConfidenceScore;
+  performance?: PerformanceData;
 };
 
 type AssemblyPollResponse = {
