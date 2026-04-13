@@ -169,6 +169,8 @@ export function useCommandCenter() {
               title: `🔥 "${p.name}" is ${a.trending_status}`,
               subtitle: `Score ${a.overall_score} — create more content`,
               metadata: { product_id: p.id, score: a.overall_score },
+            });
+          }
         });
 
       // 7. Winner signals from performance data
