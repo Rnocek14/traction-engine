@@ -3,8 +3,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { CheckCircle, XCircle, RotateCcw, Play, Clock, Film, Flame, Shield } from "lucide-react";
-import type { EnrichmentMeta, ConfidenceScore } from "@/hooks/use-assembled-videos";
+import { CheckCircle, XCircle, RotateCcw, Play, Clock, Film, Flame, Shield, Eye, Heart, Share2 } from "lucide-react";
+import type { EnrichmentMeta, ConfidenceScore, PerformanceData } from "@/hooks/use-assembled-videos";
+import { PerformanceIngestForm } from "./PerformanceIngestForm";
 
 interface AssembledVideo {
   id: string;
@@ -19,6 +20,7 @@ interface AssembledVideo {
   account_id: string;
   enrichment?: EnrichmentMeta;
   confidence?: ConfidenceScore;
+  performance?: PerformanceData;
 }
 
 interface AssembledVideoCardProps {
@@ -26,9 +28,10 @@ interface AssembledVideoCardProps {
   onApprove?: (id: string) => void;
   onReject?: (id: string) => void;
   onReassemble?: (id: string) => void;
+  onRefresh?: () => void;
 }
 
-export function AssembledVideoCard({ video, onApprove, onReject, onReassemble }: AssembledVideoCardProps) {
+export function AssembledVideoCard({ video, onApprove, onReject, onReassemble, onRefresh }: AssembledVideoCardProps) {
   const [playing, setPlaying] = useState(false);
   const meta = (video.assembled_meta && typeof video.assembled_meta === 'object' && !Array.isArray(video.assembled_meta))
     ? video.assembled_meta as Record<string, unknown>
@@ -155,10 +158,49 @@ export function AssembledVideoCard({ video, onApprove, onReject, onReassemble }:
                     </div>
                   </div>
                 )}
+
+                {/* Performance Metrics (if available) */}
+                {video.performance && (
+                  <div className="rounded-md border border-success/20 bg-success/5 p-3 space-y-1.5">
+                    <div className="flex items-center gap-1.5 text-xs font-medium text-success">
+                      <Eye className="w-3.5 h-3.5" />
+                      Live Performance — Score: {video.performance.outcome_score ?? "—"}
+                    </div>
+                    <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+                      {video.performance.views != null && (
+                        <span className="flex items-center gap-1">
+                          <Eye className="w-3 h-3" /> {video.performance.views.toLocaleString()} views
+                        </span>
+                      )}
+                      {video.performance.likes != null && (
+                        <span className="flex items-center gap-1">
+                          <Heart className="w-3 h-3" /> {video.performance.likes.toLocaleString()}
+                        </span>
+                      )}
+                      {video.performance.shares != null && (
+                        <span className="flex items-center gap-1">
+                          <Share2 className="w-3 h-3" /> {video.performance.shares.toLocaleString()}
+                        </span>
+                      )}
+                      {video.performance.watch_3s_rate != null && (
+                        <span>3s: {video.performance.watch_3s_rate}%</span>
+                      )}
+                      {video.performance.avg_watch_time != null && (
+                        <span>Avg: {video.performance.avg_watch_time}s</span>
+                      )}
+                      {video.performance.platform && (
+                        <Badge variant="outline" className="text-xs capitalize">
+                          {video.performance.platform}
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
             {/* Actions */}
             {video.assembled_status === "succeeded" && (
+              <>
               <div className="flex items-center gap-2 mt-4 pt-4 border-t border-border/50">
                 <Button
                   size="sm"
@@ -199,6 +241,10 @@ export function AssembledVideoCard({ video, onApprove, onReject, onReassemble }:
                   </a>
                 )}
               </div>
+              {!video.performance && (
+                <PerformanceIngestForm storyJobId={video.id} onSuccess={onRefresh} />
+              )}
+              </>
             )}
 
             {(video.assembled_status === "rendering" || video.assembled_status === "queued") && (
