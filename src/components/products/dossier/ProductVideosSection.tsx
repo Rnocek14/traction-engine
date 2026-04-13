@@ -34,6 +34,33 @@ export function ProductVideosSection({ productId }: { productId: string }) {
   const queueMutation = useQueueVideoConcepts();
   const existingJobs = useProductStoryJobs(productId);
 
+  // Check if product has any images
+  const { data: imageCount = 0 } = useQuery({
+    queryKey: ["product-image-count", productId],
+    queryFn: async () => {
+      const { count } = await supabase
+        .from("product_images")
+        .select("id", { count: "exact", head: true })
+        .eq("product_id", productId);
+      return count || 0;
+    },
+  });
+
+  // Also check if product has image_url fallback
+  const { data: productImageUrl } = useQuery({
+    queryKey: ["product-image-url", productId],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("products")
+        .select("image_url")
+        .eq("id", productId)
+        .single();
+      return data?.image_url || null;
+    },
+  });
+
+  const hasImages = imageCount > 0 || !!productImageUrl;
+
   const { data: accounts } = useQuery({
     queryKey: ["accounts-for-video"],
     queryFn: async () => {
@@ -90,7 +117,8 @@ export function ProductVideosSection({ productId }: { productId: string }) {
           <Button
             size="sm"
             onClick={handleGenerate}
-            disabled={generateMutation.isPending}
+            disabled={generateMutation.isPending || !hasImages}
+            title={!hasImages ? "Run AI Research first to get product images" : undefined}
           >
             {generateMutation.isPending ? (
               <Loader2 className="w-4 h-4 animate-spin mr-1" />
@@ -237,7 +265,9 @@ export function ProductVideosSection({ productId }: { productId: string }) {
 
         {concepts.length === 0 && jobs.length === 0 && !generateMutation.isPending && (
           <p className="text-sm text-muted-foreground text-center py-4">
-            Generate AI video concepts from this product's images and marketing plan.
+            {hasImages
+              ? "Generate AI video concepts from this product's images and marketing plan."
+              : "No product images found. Run AI Research on this product first to scrape images, then generate video concepts."}
           </p>
         )}
       </CardContent>
