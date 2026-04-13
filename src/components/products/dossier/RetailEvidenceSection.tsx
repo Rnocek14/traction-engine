@@ -2,67 +2,85 @@ import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ShoppingCart, ExternalLink, ThumbsUp, ThumbsDown, ChevronDown, ChevronUp, ShieldCheck, ShieldQuestion, ShieldAlert, Eye, AlertTriangle } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { ShoppingCart, ExternalLink, Check, Loader2 } from "lucide-react";
 import { type ProductWithAnalysis, type ProductLink } from "@/hooks/use-products";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 
-function getWarningFlags(link: ProductLink): string[] {
-  const flags: string[] = [];
-  if (!link.extracted_product_name) flags.push("no extracted title");
-  if (!link.price_cents && !link.structured_price_cents) flags.push("no price found");
-  if ((link.match_confidence ?? 0) < 50) flags.push("low confidence");
-  if (link.fetch_method === "firecrawl") flags.push("JS-heavy page");
-  if ((link.content_quality_score ?? 100) < 30) flags.push("thin content");
-  return flags;
-}
-
-function ConfidenceIcon({ status }: { status: string | null }) {
-  if (status === "verified") return <ShieldCheck className="w-3.5 h-3.5 text-green-500" />;
-  if (status === "probable") return <ShieldQuestion className="w-3.5 h-3.5 text-yellow-500" />;
-  if (status === "candidate") return <Eye className="w-3.5 h-3.5 text-orange-500" />;
-  return <ShieldAlert className="w-3.5 h-3.5 text-destructive" />;
-}
-
-function statusColor(status: string | null) {
-  if (status === "verified") return "text-green-500 border-green-500/30";
-  if (status === "probable") return "text-yellow-500 border-yellow-500/30";
-  if (status === "candidate") return "text-orange-500 border-orange-500/30";
-  return "text-destructive border-destructive/30";
-}
-
 export function RetailEvidenceSection({ product }: { product: ProductWithAnalysis }) {
-  const [showRejected, setShowRejected] = useState(false);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
   const qc = useQueryClient();
   const links = product.product_links || [];
-  const retailLinks = links.filter(l => l.link_type === "retail" && l.validation_status !== "rejected");
-  const rejectedRetail = links.filter(l => l.link_type === "retail" && l.validation_status === "rejected");
+  const retailLinks = links.filter(l => l.link_type === "retail");
+  const confirmedLinks = retailLinks.filter(l => l.validation_status === "verified");
+  const pendingLinks = retailLinks.filter(l => l.validation_status === "pending");
+  
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [confirming, setConfirming] = useState(false);
 
-  // Compute price stats from verified/probable links
-  const pricedLinks = retailLinks.filter(l => (l.price_cents || l.structured_price_cents) && (l.validation_status === "verified" || l.validation_status === "probable"));
-  const prices = pricedLinks.map(l => (l.structured_price_cents || l.price_cents || 0));
-  const sortedPrices = [...prices].sort((a, b) => a - b);
-  const lowest = sortedPrices[0];
-  const highest = sortedPrices[sortedPrices.length - 1];
-  const median = sortedPrices.length > 0 ? sortedPrices[Math.floor(sortedPrices.length / 2)] : undefined;
+  const toggle = (id: string) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
 
-  const handleOverride = async (linkId: string, newStatus: string) => {
-    const { error } = await supabase
-      .from("product_links")
-      .update({
-        validation_status: newStatus,
-        verified: newStatus === "verified",
-        manually_overridden: true,
-        override_action: newStatus === "verified" ? "approve" : "reject",
-        validation_reasons: supabase.rpc ? undefined : undefined, // keep existing
-      })
-      .eq("id", linkId);
-    if (error) { toast.error("Override failed"); return; }
-    toast.success(`Link ${newStatus === "rejected" ? "rejected" : "approved"}`);
-    qc.invalidateQueries({ queryKey: ["product-detail"] });
+  const confirmSelected = async () => {
+    if (selected.size === 0) return;
+    setConfirming(true);
+    try {
+      // Mark selected as verified
+      const { error } = await supabase
+        .from("product_links")
+        .update({
+          validation_status: "verified",
+          verified: true,
+          manually_overridden: true,
+          override_action: "approve",
+          match_confidence: 100,
+        })
+        .in("id", [...selected]);
+      if (error) throw error;
+
+      // Reject the rest of the pending retail links
+      const rejectIds = pendingLinks.filter(l => !selected.has(l.id)).map(l => l.id);
+      if (rejectIds.length > 0) {
+        await supabase
+          .from("product_links")
+          .update({ validation_status: "rejected", verified: false })
+          .in("id", rejectIds);
+      }
+
+      // Update product with the best confirmed retail price
+      const confirmedPrices = pendingLinks
+        .filter(l => selected.has(l.id) && l.price_cents)
+        .map(l => l.price_cents!);
+      if (confirmedPrices.length > 0) {
+        const bestUrl = pendingLinks.find(l => selected.has(l.id))?.url;
+        await supabase.from("products").update({
+          price_cents: Math.min(...confirmedPrices),
+          source_url: bestUrl || product.source_url,
+          updated_at: new Date().toISOString(),
+        }).eq("id", product.id);
+      }
+
+      // Trigger unit economics recalculation
+      try {
+        await supabase.functions.invoke("calculate-unit-economics", {
+          body: { product_id: product.id },
+        });
+      } catch { /* economics calc is optional */ }
+
+      toast.success(`Confirmed ${selected.size} retail link${selected.size > 1 ? "s" : ""}`);
+      setSelected(new Set());
+      qc.invalidateQueries({ queryKey: ["product-detail"] });
+    } catch (e: any) {
+      toast.error(`Failed: ${e.message}`);
+    } finally {
+      setConfirming(false);
+    }
   };
 
   return (
@@ -70,192 +88,93 @@ export function RetailEvidenceSection({ product }: { product: ProductWithAnalysi
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
           <CardTitle className="text-lg flex items-center gap-2">
-            <ShoppingCart className="w-5 h-5" /> Retail Evidence
-            <Badge variant="outline" className="text-xs ml-1">{retailLinks.length} listings</Badge>
+            <ShoppingCart className="w-5 h-5" /> Retail Links
+            {confirmedLinks.length > 0 && (
+              <Badge className="text-xs bg-green-500/10 text-green-500 border-green-500/30">{confirmedLinks.length} confirmed</Badge>
+            )}
+            {pendingLinks.length > 0 && (
+              <Badge variant="outline" className="text-xs">{pendingLinks.length} to review</Badge>
+            )}
           </CardTitle>
-          {sortedPrices.length > 0 && (
-            <div className="flex items-center gap-3 text-xs">
-              <span className="text-muted-foreground">Low: <span className="text-foreground font-medium">${((lowest || 0) / 100).toFixed(2)}</span></span>
-              {median !== undefined && <span className="text-muted-foreground">Median: <span className="text-foreground font-medium">${(median / 100).toFixed(2)}</span></span>}
-              <span className="text-muted-foreground">High: <span className="text-foreground font-medium">${((highest || 0) / 100).toFixed(2)}</span></span>
-            </div>
+          {selected.size > 0 && (
+            <Button size="sm" onClick={confirmSelected} disabled={confirming}>
+              {confirming ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Check className="w-4 h-4 mr-1" />}
+              Confirm {selected.size} selected
+            </Button>
           )}
         </div>
       </CardHeader>
       <CardContent>
         {retailLinks.length === 0 ? (
-          <p className="text-sm text-muted-foreground text-center py-6">No retail listings found yet. Run AI Research to discover retail evidence.</p>
+          <p className="text-sm text-muted-foreground text-center py-6">No retail candidates yet. Run Research to find listings.</p>
         ) : (
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-[120px]">Store</TableHead>
-                  <TableHead>Product Title</TableHead>
-                  <TableHead className="w-[80px]">Price</TableHead>
-                  <TableHead className="w-[100px]">Confidence</TableHead>
-                  <TableHead className="w-[80px]">Status</TableHead>
-                  <TableHead className="w-[60px]">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {retailLinks.map(link => {
-                  const warnings = getWarningFlags(link);
-                  const expanded = expandedId === link.id;
-                  return (
-                    <>
-                      <TableRow key={link.id} className="cursor-pointer hover:bg-muted/50" onClick={() => setExpandedId(expanded ? null : link.id)}>
-                        <TableCell>
-                          <Badge variant="outline" className="text-xs">{link.platform}</Badge>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-sm truncate max-w-[250px]">
-                              {link.extracted_product_name || link.title || "—"}
-                            </span>
-                            {warnings.length > 0 && (
-                              <span title={warnings.join(", ")}>
-                                <AlertTriangle className="w-3 h-3 text-yellow-500 shrink-0" />
-                              </span>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          {(link.structured_price_cents || link.price_cents) ? (
-                            <span className="font-medium">${((link.structured_price_cents || link.price_cents || 0) / 100).toFixed(2)}</span>
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-1">
-                            <ConfidenceIcon status={link.validation_status} />
-                            <span className="text-xs font-medium">{link.match_confidence ?? 0}%</span>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className={`text-[10px] ${statusColor(link.validation_status)}`}>
-                            {link.validation_status || "pending"}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-0.5">
-                            {link.validation_status !== "verified" && (
-                              <Button variant="ghost" size="sm" className="h-6 w-6 p-0 hover:bg-green-500/20"
-                                onClick={(e) => { e.stopPropagation(); handleOverride(link.id, "verified"); }}>
-                                <ThumbsUp className="w-3 h-3 text-green-500" />
-                              </Button>
-                            )}
-                            {link.validation_status !== "rejected" && (
-                              <Button variant="ghost" size="sm" className="h-6 w-6 p-0 hover:bg-destructive/20"
-                                onClick={(e) => { e.stopPropagation(); handleOverride(link.id, "rejected"); }}>
-                                <ThumbsDown className="w-3 h-3 text-destructive" />
-                              </Button>
-                            )}
-                            <a href={link.url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
-                              <ExternalLink className="w-3.5 h-3.5 text-muted-foreground hover:text-foreground" />
-                            </a>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                      {expanded && (
-                        <TableRow key={`${link.id}-detail`}>
-                          <TableCell colSpan={6} className="bg-muted/20">
-                            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-xs py-1">
-                              {link.matched_tokens && link.matched_tokens.length > 0 && (
-                                <div>
-                                  <span className="text-muted-foreground">Matched tokens:</span>
-                                  <div className="flex flex-wrap gap-1 mt-0.5">
-                                    {link.matched_tokens.map(t => <Badge key={t} variant="secondary" className="text-[10px]">{t}</Badge>)}
-                                  </div>
-                                </div>
-                              )}
-                              {link.distinctive_tokens_matched && link.distinctive_tokens_matched.length > 0 && (
-                                <div>
-                                  <span className="text-muted-foreground">Distinctive tokens:</span>
-                                  <div className="flex flex-wrap gap-1 mt-0.5">
-                                    {link.distinctive_tokens_matched.map(t => <Badge key={t} className="text-[10px] bg-primary/10 text-primary">{t}</Badge>)}
-                                  </div>
-                                </div>
-                              )}
-                              {link.ai_verdict != null && (
-                                <div>
-                                  <span className="text-muted-foreground">AI verdict:</span>{" "}
-                                  <span className={link.ai_verdict ? "text-green-500" : "text-destructive"}>
-                                    {link.ai_verdict ? "Match" : "No match"} ({link.ai_confidence ?? 0}%)
-                                  </span>
-                                </div>
-                              )}
-                              <div>
-                                <span className="text-muted-foreground">Fetch method:</span>{" "}
-                                <span>{link.fetch_method || "native"}</span>
-                              </div>
-                              {link.content_quality_score != null && (
-                                <div>
-                                  <span className="text-muted-foreground">Content quality:</span>{" "}
-                                  <span>{link.content_quality_score}/100</span>
-                                </div>
-                              )}
-                              {warnings.length > 0 && (
-                                <div>
-                                  <span className="text-muted-foreground">Warnings:</span>
-                                  <div className="flex flex-wrap gap-1 mt-0.5">
-                                    {warnings.map(w => (
-                                      <Badge key={w} variant="outline" className="text-[10px] text-yellow-500 border-yellow-500/30">{w}</Badge>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-                              {link.validation_reasons && link.validation_reasons.length > 0 && (
-                                <div className="col-span-full">
-                                  <span className="text-muted-foreground">Validation reasons:</span>{" "}
-                                  <span className="text-xs">{link.validation_reasons.join(" · ")}</span>
-                                </div>
-                              )}
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </div>
-        )}
-
-        {/* Rejected links */}
-        {rejectedRetail.length > 0 && (
-          <div className="mt-3">
-            <Button variant="ghost" size="sm" className="w-full justify-between text-xs"
-              onClick={() => setShowRejected(!showRejected)}>
-              <span className="flex items-center gap-1 text-muted-foreground">
-                <ShieldAlert className="w-3.5 h-3.5" /> {rejectedRetail.length} rejected
-              </span>
-              {showRejected ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-            </Button>
-            {showRejected && (
-              <div className="space-y-1 mt-1">
-                {rejectedRetail.map(link => (
-                  <div key={link.id} className="flex items-center justify-between text-xs bg-destructive/5 rounded px-3 py-1.5 opacity-60">
-                    <div className="flex items-center gap-2">
-                      <Badge variant="outline" className="text-[10px]">{link.platform}</Badge>
-                      <span className="truncate max-w-[300px]">{link.extracted_product_name || link.title || link.url.slice(0, 50)}</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-destructive">{link.match_confidence ?? 0}%</span>
-                      <Button variant="ghost" size="sm" className="h-5 w-5 p-0 hover:bg-green-500/20"
-                        onClick={() => handleOverride(link.id, "verified")}>
-                        <ThumbsUp className="w-3 h-3 text-green-500" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
+          <div className="space-y-1.5">
+            {/* Confirmed links first */}
+            {confirmedLinks.map(link => (
+              <LinkRow key={link.id} link={link} confirmed />
+            ))}
+            
+            {/* Pending links — selectable */}
+            {pendingLinks.length > 0 && confirmedLinks.length > 0 && (
+              <div className="border-t pt-2 mt-2">
+                <p className="text-xs text-muted-foreground mb-1.5">Review candidates — select the correct ones:</p>
               </div>
             )}
+            {pendingLinks.map(link => (
+              <LinkRow
+                key={link.id}
+                link={link}
+                selectable
+                isSelected={selected.has(link.id)}
+                onToggle={() => toggle(link.id)}
+              />
+            ))}
           </div>
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function LinkRow({ link, confirmed, selectable, isSelected, onToggle }: {
+  link: ProductLink;
+  confirmed?: boolean;
+  selectable?: boolean;
+  isSelected?: boolean;
+  onToggle?: () => void;
+}) {
+  const displayPrice = link.price_cents || link.structured_price_cents;
+  
+  return (
+    <div className={`flex items-center gap-2 rounded px-3 py-2 text-sm ${
+      confirmed ? "bg-green-500/5 border border-green-500/20" :
+      isSelected ? "bg-primary/5 border border-primary/20" :
+      "bg-muted/30 hover:bg-muted/50"
+    }`}>
+      {selectable && (
+        <Checkbox
+          checked={isSelected}
+          onCheckedChange={onToggle}
+          className="shrink-0"
+        />
+      )}
+      {confirmed && <Check className="w-4 h-4 text-green-500 shrink-0" />}
+      
+      <Badge variant="outline" className="text-[10px] shrink-0">{link.platform}</Badge>
+      
+      <span className="truncate flex-1 min-w-0">
+        {link.title || link.extracted_product_name || link.url.replace(/https?:\/\/(www\.)?/, "").slice(0, 60)}
+      </span>
+      
+      {displayPrice && (
+        <span className="font-medium shrink-0">${(displayPrice / 100).toFixed(2)}</span>
+      )}
+      
+      <a href={link.url} target="_blank" rel="noopener noreferrer"
+        className="shrink-0 hover:text-foreground text-muted-foreground"
+        onClick={e => e.stopPropagation()}>
+        <ExternalLink className="w-3.5 h-3.5" />
+      </a>
+    </div>
   );
 }
