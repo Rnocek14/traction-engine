@@ -11,9 +11,24 @@ export function useProductDetail(productId: string | undefined) {
         .from("products")
         .select("*, product_analysis(*), product_images(*), product_links(*), product_suppliers!product_suppliers_product_id_fkey(*), product_unit_economics(*)")
         .eq("id", productId)
-        .single();
+        .maybeSingle();
       if (error) throw error;
-      return data as unknown as ProductWithAnalysis;
+      if (!data) throw new Error("Product not found");
+      
+      // Normalize one-to-one relations that come back as objects into arrays
+      const normalized = {
+        ...data,
+        product_analysis: data.product_analysis
+          ? Array.isArray(data.product_analysis) ? data.product_analysis : [data.product_analysis]
+          : [],
+        product_images: Array.isArray(data.product_images) ? data.product_images : data.product_images ? [data.product_images] : [],
+        product_links: Array.isArray(data.product_links) ? data.product_links : data.product_links ? [data.product_links] : [],
+        product_suppliers: Array.isArray(data.product_suppliers) ? data.product_suppliers : data.product_suppliers ? [data.product_suppliers] : [],
+        product_unit_economics: data.product_unit_economics
+          ? Array.isArray(data.product_unit_economics) ? data.product_unit_economics : [data.product_unit_economics]
+          : [],
+      };
+      return normalized as unknown as ProductWithAnalysis;
     },
     enabled: !!productId,
   });
