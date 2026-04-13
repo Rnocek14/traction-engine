@@ -104,3 +104,6 @@ verify_jwt = false
 
 [functions.product-research]
 verify_jwt = false
+
+[functions.generate-product-plan]
+verify_jwt = false

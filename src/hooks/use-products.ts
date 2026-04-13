@@ -20,6 +20,10 @@ export interface Product {
   status: ProductStatus;
   discovered_via: string;
   notes: string | null;
+  marketing_plan: any | null;
+  plan_generated_at: string | null;
+  plan_version: number;
+  plan_status: string;
   created_at: string;
   updated_at: string;
 }
@@ -185,5 +189,40 @@ export function useSaveProductAnalysis() {
       toast.success("Analysis saved");
     },
     onError: (e) => toast.error(e.message),
+  });
+}
+
+export function useGenerateProductPlan() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (productId: string) => {
+      const { data, error } = await supabase.functions.invoke("generate-product-plan", {
+        body: { product_id: productId },
+      });
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["products"] });
+      qc.invalidateQueries({ queryKey: ["content-ideas"] });
+      toast.success(`Marketing plan v${data.plan_version} generated with ${data.ideas_created} content ideas`);
+    },
+    onError: (e) => toast.error(`Plan generation failed: ${e.message}`),
+  });
+}
+
+export function useProductLinkedIdeas(productId: string) {
+  return useQuery({
+    queryKey: ["product-ideas", productId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("content_ideas")
+        .select("id, title, status, angle, suggested_format")
+        .eq("product_id", productId)
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: !!productId,
   });
 }
