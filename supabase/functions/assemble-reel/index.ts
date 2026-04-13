@@ -182,6 +182,38 @@ async function updateAssemblyStatus(
   }
 }
 
+async function getRemoteJobState(
+  ffmpegServiceUrl: string | undefined,
+  jobId?: string,
+): Promise<"active" | "done" | "missing" | "unknown"> {
+  if (!jobId) return "missing";
+  if (!ffmpegServiceUrl) return "unknown";
+
+  try {
+    const response = await fetch(`${ffmpegServiceUrl}/jobs/${jobId}`, {
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
+    });
+
+    if (response.status === 404) return "missing";
+    if (!response.ok) return "unknown";
+
+    const result = await response.json();
+    const status = result?.status;
+
+    if (status === "queued" || status === "rendering") return "active";
+    if (status === "succeeded" || status === "failed") return "done";
+    return "unknown";
+  } catch (error) {
+    console.log(JSON.stringify({
+      at: "assemble-reel:remote_job_probe_error",
+      job_id: jobId,
+      error: error instanceof Error ? error.message : "Unknown error",
+    }));
+    return "unknown";
+  }
+}
+
 // ============================================
 // Main Handler
 // ============================================
@@ -246,19 +278,31 @@ Deno.serve(async (req) => {
 
       const { data: existingStory } = await supabase
         .from("story_jobs")
-        .select("status, active_voiceover_id, assembled_status")
+        .select("status, active_voiceover_id, assembled_status, assembled_meta")
         .eq("id", story_job_id)
         .single();
 
       if (existingStory?.assembled_status === "rendering") {
-        return new Response(
-          JSON.stringify({
-            success: false,
-            error: "Assembly already in progress",
-            status: "rendering",
-          }),
-          { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+        const currentMeta = existingStory.assembled_meta as AssembledMeta | null;
+        const remoteJobState = await getRemoteJobState(ffmpegServiceUrl, currentMeta?.ffmpeg_job_id);
+
+        if (remoteJobState !== "missing") {
+          return new Response(
+            JSON.stringify({
+              success: false,
+              error: "Assembly already in progress",
+              status: "rendering",
+              job_id: currentMeta?.ffmpeg_job_id,
+            }),
+            { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        console.log(JSON.stringify({
+          at: "assemble-reel:stale_rendering_job_recovered",
+          primary_id: primaryId,
+          job_id: currentMeta?.ffmpeg_job_id,
+        }));
       }
 
       // Fetch active voiceover
@@ -327,15 +371,26 @@ Deno.serve(async (req) => {
         .single();
 
       if (existingRun?.assembled_status === "rendering") {
-        return new Response(
-          JSON.stringify({
-            success: false,
-            error: "Assembly already in progress",
-            status: "rendering",
-            job_id: (existingRun.assembled_meta as AssembledMeta)?.ffmpeg_job_id,
-          }),
-          { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+        const currentMeta = existingRun.assembled_meta as AssembledMeta | null;
+        const remoteJobState = await getRemoteJobState(ffmpegServiceUrl, currentMeta?.ffmpeg_job_id);
+
+        if (remoteJobState !== "missing") {
+          return new Response(
+            JSON.stringify({
+              success: false,
+              error: "Assembly already in progress",
+              status: "rendering",
+              job_id: currentMeta?.ffmpeg_job_id,
+            }),
+            { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        console.log(JSON.stringify({
+          at: "assemble-reel:stale_rendering_job_recovered",
+          primary_id: primaryId,
+          job_id: currentMeta?.ffmpeg_job_id,
+        }));
       }
 
       const { data: scriptRun, error: scriptError } = await supabase
