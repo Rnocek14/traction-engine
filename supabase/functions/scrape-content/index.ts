@@ -432,19 +432,28 @@ Deno.serve(async (req) => {
 
         // Store insight
         if (jobId) {
+          // hook_patterns now come as objects {type, example} — store the typed array as JSON
+          const hookPatterns = Array.isArray(extracted.hook_patterns)
+            ? (extracted.hook_patterns as Array<{type?: string; example?: string} | string>).map(h =>
+                typeof h === "object" && h !== null ? `${h.type || "unknown"}: ${h.example || ""}` : String(h)
+              )
+            : [];
+
           await supabase.from("scraped_insights").insert({
             scrape_job_id: jobId,
             source_url: targetUrl,
             source_type: sourceType,
             title: extracted.title as string || null,
             topics: (extracted.topics as string[]) || [],
-            hook_patterns: (extracted.hook_patterns as string[]) || [],
+            hook_patterns: hookPatterns,
             emotional_triggers: (extracted.emotional_triggers as string[]) || [],
             content_format: (extracted.content_format as string) || null,
             visual_style: (extracted.visual_style as string) || null,
             key_points: (extracted.key_points as string[]) || [],
             viral_score: (extracted.viral_score as number) || null,
             relevance_tags: (extracted.relevance_tags as string[]) || [],
+            novelty_level: (extracted.novelty_level as string) || null,
+            controversy_level: (extracted.controversy_level as string) || null,
             raw_extraction: extracted,
           });
 
