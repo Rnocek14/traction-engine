@@ -32,6 +32,12 @@ const STOPWORDS = new Set([
   "new", "best", "top", "pro", "mini", "max", "ultra", "plus", "super", "great",
   "buy", "shop", "store", "sale", "deal", "price", "cheap", "free", "online",
   "product", "item", "set", "kit", "pack", "piece", "unit", "size", "color", "style",
+  // Platform/channel names — these describe WHERE it was found, not WHAT the product is
+  "tiktok", "youtube", "instagram", "facebook", "pinterest", "snapchat", "twitter",
+  "amazon", "walmart", "aliexpress", "alibaba", "temu", "shopify", "etsy", "ebay",
+  // Filler/grouping words common in product names
+  "assorted", "models", "various", "mixed", "random", "bundle", "collection",
+  "version", "edition", "type", "types", "model", "variant", "variants",
 ]);
 
 // ─── RETAIL DOMAIN ALLOWLIST ───
@@ -764,10 +770,12 @@ Deno.serve(async (req) => {
     let productUrl = body.url || "";
     let productId = body.product_id;
 
+    let canonicalName = "";
     if (productId) {
       const { data: product } = await supabase.from("products").select("*").eq("id", productId).single();
       if (product) {
         productName = product.name;
+        canonicalName = product.canonical_name || "";
         productUrl = product.source_url || "";
       }
     }
@@ -778,8 +786,17 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Use canonical_name for search if available; otherwise clean the raw name
+    // by stripping parentheticals and platform references
+    const searchName = canonicalName || productName
+      .replace(/\([^)]*\)/g, "")  // Remove parentheticals like "(Assorted Models)"
+      .replace(/\b(tiktok|youtube|instagram|facebook|viral)\b/gi, "")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+
     console.log(`[product-research] ===== DEEP RESEARCH v3: "${productName}" =====`);
-    const productTokens = analyzeProductTokens(productName);
+    console.log(`[product-research] Search name: "${searchName}"`);
+    const productTokens = analyzeProductTokens(searchName);
     console.log(`[product-research] Tokens: distinctive=[${productTokens.distinctiveTokens}] generic=[${productTokens.genericTokens}]`);
 
     const researchParts: string[] = [];
@@ -793,18 +810,29 @@ Deno.serve(async (req) => {
     // ==========================================
     console.log("[product-research] Phase 1: Retail search");
     const retailSearch = await perplexitySearch(
-      `Where can I buy "${productName}" online right now? Find specific product listings on Amazon, Walmart, TikTok Shop, eBay, Etsy, or Shopify stores. Include exact prices and product page URLs. I need real, working links to buy this specific product.`,
+      `Where can I buy "${searchName}" online right now? Find specific product listings on Amazon, Walmart, TikTok Shop, eBay, Etsy, or Shopify stores. Include exact prices and product page URLs. I need real, working links to buy this specific product.`,
       `You are a shopping assistant. Find REAL product listings where someone can BUY this exact product online. Include specific prices, store names, and direct product page URLs. Only include listings for this exact product, not similar or related items.`,
       perplexityKey
     );
     if (retailSearch.content) {
       researchParts.push(`RETAIL LISTINGS:\n${retailSearch.content}`);
       allCitations.push(...retailSearch.citations);
+      console.log(`[product-research] Retail citations (${retailSearch.citations.length}): ${retailSearch.citations.slice(0, 5).join(", ")}`);
       for (const c of retailSearch.citations) {
-        if (c.match(/amazon\.|walmart\.|ebay\.|etsy\.|tiktok\.com.*shop|shopify|myshopify/i)) {
+        // Accept any retail domain OR any URL from a retail search (let verification decide)
+        if (isRetailDomain(c) || c.match(/amazon\.|walmart\.|ebay\.|etsy\.|tiktok\.com.*shop|shopify|myshopify|target\./i)) {
           candidateLinks.push({ url: c, platform: detectPlatform(c), linkType: "retail" });
         }
       }
+      // Also extract URLs from the response text itself
+      const urlsInText = retailSearch.content.match(/https?:\/\/[^\s"'<>)\]]+/gi) || [];
+      for (const u of urlsInText) {
+        if (isRetailDomain(u) && !candidateLinks.some(cl => cl.url === u)) {
+          candidateLinks.push({ url: u, platform: detectPlatform(u), linkType: "retail" });
+        }
+      }
+    } else {
+      console.warn("[product-research] Retail search returned no content");
     }
     await new Promise(r => setTimeout(r, 1200));
 
@@ -813,18 +841,54 @@ Deno.serve(async (req) => {
     // ==========================================
     console.log("[product-research] Phase 2: Wholesale/supplier search");
     const wholesaleSearch = await perplexitySearch(
-      `"${productName}" wholesale supplier price. Find this product on AliExpress, Alibaba, 1688, DHgate, or Temu. What is the wholesale or bulk price? What is the cheapest supplier price available? Include direct product listing URLs.`,
+      `"${searchName}" wholesale supplier price. Find this product on AliExpress, Alibaba, 1688, DHgate, or Temu. What is the wholesale or bulk price? What is the cheapest supplier price available? Include direct product listing URLs.`,
       `You are a dropshipping supplier researcher. Find the CHEAPEST wholesale/supplier sources for this exact product. Include: supplier platform, wholesale price, MOQ if available, shipping estimates, and direct URLs. Focus on AliExpress, Alibaba, 1688.com, DHgate, and Temu.`,
       perplexityKey
     );
     if (wholesaleSearch.content) {
       researchParts.push(`WHOLESALE/SUPPLIER SOURCES:\n${wholesaleSearch.content}`);
       allCitations.push(...wholesaleSearch.citations);
+      console.log(`[product-research] Wholesale citations (${wholesaleSearch.citations.length}): ${wholesaleSearch.citations.slice(0, 5).join(", ")}`);
       for (const c of wholesaleSearch.citations) {
         if (c.match(/aliexpress\.|alibaba\.|1688\.|dhgate\.|temu\./i)) {
           candidateLinks.push({ url: c, platform: detectPlatform(c), linkType: "wholesale" });
         }
       }
+      // Also extract URLs from wholesale text
+      const wUrls = wholesaleSearch.content.match(/https?:\/\/[^\s"'<>)\]]+/gi) || [];
+      for (const u of wUrls) {
+        if (u.match(/aliexpress\.|alibaba\.|1688\.|dhgate\.|temu\./i) && !candidateLinks.some(cl => cl.url === u)) {
+          candidateLinks.push({ url: u, platform: detectPlatform(u), linkType: "wholesale" });
+        }
+      }
+    }
+
+    // ─── FALLBACK: If no candidates yet, do a URL-focused search ───
+    if (candidateLinks.length === 0) {
+      console.log("[product-research] No candidates from citations — running URL-focused fallback search");
+      const fallbackSearch = await perplexitySearch(
+        `Find exact product listing URLs for "${searchName}" on Amazon.com, AliExpress.com, or Temu.com. I need the actual product page links, not review articles. Give me amazon.com/dp/ links or aliexpress.com/item/ links.`,
+        `Return ONLY direct product page URLs from major retailers. No blog posts, no review sites. Only amazon.com, aliexpress.com, walmart.com, temu.com, ebay.com product pages.`,
+        perplexityKey
+      );
+      if (fallbackSearch.citations.length > 0) {
+        console.log(`[product-research] Fallback citations (${fallbackSearch.citations.length}): ${fallbackSearch.citations.slice(0, 5).join(", ")}`);
+        for (const c of fallbackSearch.citations) {
+          if (isRetailDomain(c)) {
+            const lt = c.match(/aliexpress\.|alibaba\.|1688\.|dhgate\.|temu\./i) ? "wholesale" : "retail";
+            candidateLinks.push({ url: c, platform: detectPlatform(c), linkType: lt });
+          }
+        }
+      }
+      // Extract URLs from text
+      const fbUrls = (fallbackSearch.content || "").match(/https?:\/\/[^\s"'<>)\]]+/gi) || [];
+      for (const u of fbUrls) {
+        if (isRetailDomain(u) && !candidateLinks.some(cl => cl.url === u)) {
+          const lt = u.match(/aliexpress\.|alibaba\.|1688\.|dhgate\.|temu\./i) ? "wholesale" : "retail";
+          candidateLinks.push({ url: u, platform: detectPlatform(u), linkType: lt });
+        }
+      }
+      console.log(`[product-research] After fallback: ${candidateLinks.length} candidates`);
     }
     await new Promise(r => setTimeout(r, 1200));
 
@@ -833,7 +897,7 @@ Deno.serve(async (req) => {
     // ==========================================
     console.log("[product-research] Phase 3: Social proof & competition");
     const socialSearch = await perplexitySearch(
-      `"${productName}" TikTok viral review. How many views does this product have? Who are the top creators promoting it? How many sellers are already selling it? Is this product saturated or still emerging?`,
+      `"${searchName}" TikTok viral review. How many views does this product have? Who are the top creators promoting it? How many sellers are already selling it? Is this product saturated or still emerging?`,
       `You are a social media trend analyst for e-commerce. Analyze this product's social media presence: view counts, number of creators promoting it, engagement rates, competition level, and whether it's still trending or past its peak. Be specific with numbers.`,
       perplexityKey
     );
@@ -849,7 +913,7 @@ Deno.serve(async (req) => {
     console.log("[product-research] Phase 4: Image search");
     let foundImageUrls: { url: string; source: string; label: string }[] = [];
     const imgSearch = await perplexitySearch(
-      `"${productName}" product photo. Show me where to buy this exact product with product photos. Amazon listing, AliExpress listing.`,
+      `"${searchName}" product photo. Show me where to buy this exact product with product photos. Amazon listing, AliExpress listing.`,
       `Find real product listing pages for this exact product. I need pages with product photos. Focus on Amazon, AliExpress, Walmart, or official product sites.`,
       perplexityKey
     );
