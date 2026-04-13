@@ -52,6 +52,7 @@ interface DiscoveredProduct {
   category: string;
   price_range: string;
   source_url: string;
+  image_url: string;
   why_viral: string;
   wow_factor: number;
   social_media_potential: number;
@@ -168,6 +169,7 @@ Extract up to 15 unique products. Deduplicate similar items.`,
                       category: { type: "string", enum: ["gadgets", "home", "beauty", "toys", "fitness", "kitchen", "fashion", "pets", "outdoor", "other"] },
                       price_range: { type: "string", description: "Approximate price like '$15-25' or '$39.99'" },
                       source_url: { type: "string", description: "URL where product was found, or empty string" },
+                      image_url: { type: "string", description: "Direct URL to a product image if available, or empty string" },
                       why_viral: { type: "string", description: "1-2 sentences on why this product is trending" },
                       wow_factor: { type: "integer", minimum: 1, maximum: 5 },
                       social_media_potential: { type: "integer", minimum: 1, maximum: 5 },
@@ -283,6 +285,7 @@ Deno.serve(async (req) => {
           name: p.name,
           category: p.category,
           source_url: p.source_url || null,
+          image_url: p.image_url || null,
           price_cents: priceCents,
           status: "discovered",
           discovered_via: "scraper",

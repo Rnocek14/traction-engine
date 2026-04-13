@@ -1,10 +1,11 @@
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ExternalLink, TrendingUp, Package } from "lucide-react";
-import { type ProductWithAnalysis, type ProductStatus, useUpdateProductStatus, useResearchProduct } from "@/hooks/use-products";
+import { ExternalLink, TrendingUp, Package, Search, Loader2, Sparkles, ChevronDown, ChevronUp, Lightbulb, Image } from "lucide-react";
+import { type ProductWithAnalysis, type ProductStatus, useUpdateProductStatus, useResearchProduct, useGenerateProductPlan, useProductLinkedIdeas } from "@/hooks/use-products";
 import { ProductScoringForm } from "./ProductScoringForm";
-import { Search, Loader2 } from "lucide-react";
+import { ProductMarketingPlan } from "./ProductMarketingPlan";
 
 const STATUS_COLORS: Record<ProductStatus, string> = {
   discovered: "bg-blue-500/10 text-blue-500",
@@ -22,14 +23,19 @@ const NEXT_STATUS: Partial<Record<ProductStatus, ProductStatus>> = {
 };
 
 export function ProductDetailCard({ product }: { product: ProductWithAnalysis }) {
+  const [showPlan, setShowPlan] = useState(false);
   const analysis = product.product_analysis?.[0];
   const updateStatus = useUpdateProductStatus();
   const researchProduct = useResearchProduct();
+  const generatePlan = useGenerateProductPlan();
+  const { data: linkedIdeas } = useProductLinkedIdeas(product.id);
 
   const priceDollars = product.price_cents ? (product.price_cents / 100).toFixed(2) : null;
   const costDollars = product.supplier_price_cents ? (product.supplier_price_cents / 100).toFixed(2) : null;
   const margin = product.estimated_margin_pct;
   const next = NEXT_STATUS[product.status];
+  const hasPlan = product.plan_status === "ready" && product.marketing_plan;
+  const isGenerating = product.plan_status === "generating" || generatePlan.isPending;
 
   return (
     <Card className="group hover:shadow-md transition-shadow">
@@ -45,9 +51,17 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
             )}
             <CardTitle className="text-sm truncate">{product.name}</CardTitle>
           </div>
-          <Badge className={`${STATUS_COLORS[product.status]} text-xs flex-shrink-0`} variant="outline">
-            {product.status}
-          </Badge>
+          <div className="flex items-center gap-1 flex-shrink-0">
+            {linkedIdeas && linkedIdeas.length > 0 && (
+              <Badge variant="secondary" className="text-xs">
+                <Lightbulb className="w-3 h-3 mr-0.5" />
+                {linkedIdeas.length}
+              </Badge>
+            )}
+            <Badge className={`${STATUS_COLORS[product.status]} text-xs`} variant="outline">
+              {product.status}
+            </Badge>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
@@ -86,6 +100,26 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
         {product.category && <p className="text-xs text-muted-foreground">{product.category}{product.subcategory ? ` / ${product.subcategory}` : ""}</p>}
         {product.notes && <p className="text-xs text-muted-foreground line-clamp-2">{product.notes}</p>}
 
+        {/* Plan version indicator */}
+        {hasPlan && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full justify-between text-xs h-7"
+            onClick={() => setShowPlan(!showPlan)}
+          >
+            <span className="flex items-center gap-1">
+              <Sparkles className="w-3 h-3" />
+              Marketing Plan v{product.plan_version}
+            </span>
+            {showPlan ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+          </Button>
+        )}
+
+        {showPlan && hasPlan && (
+          <ProductMarketingPlan plan={product.marketing_plan} />
+        )}
+
         {/* Actions */}
         <div className="flex items-center gap-2 pt-1 flex-wrap">
           <Button
@@ -96,6 +130,15 @@ export function ProductDetailCard({ product }: { product: ProductWithAnalysis })
           >
             {researchProduct.isPending ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Search className="w-3 h-3 mr-1" />}
             AI Research
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => generatePlan.mutate(product.id)}
+            disabled={isGenerating}
+          >
+            {isGenerating ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Sparkles className="w-3 h-3 mr-1" />}
+            {hasPlan ? "Regen Plan" : "Gen Plan"}
           </Button>
           <ProductScoringForm product={product} />
           {next && (
