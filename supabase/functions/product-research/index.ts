@@ -1090,11 +1090,11 @@ Deno.serve(async (req) => {
     // PHASE 3: SOCIAL PROOF
     // ==========================================
     console.log("[product-research] Phase 3: Social proof & competition");
-    const socialSearch = await perplexitySearch(
+    const socialSearch = perplexityKey ? await perplexitySearch(
       `"${searchName}" TikTok viral review. How many views does this product have? Who are the top creators promoting it? How many sellers are already selling it? Is this product saturated or still emerging?`,
       `You are a social media trend analyst for e-commerce. Analyze this product's social media presence: view counts, number of creators promoting it, engagement rates, competition level, and whether it's still trending or past its peak. Be specific with numbers.`,
       perplexityKey
-    );
+    ) : { content: "", citations: [] as string[] };
     if (socialSearch.content) {
       researchParts.push(`SOCIAL PROOF & COMPETITION:\n${socialSearch.content}`);
       allCitations.push(...socialSearch.citations);
