@@ -738,6 +738,43 @@ function detectPlatform(url: string): string {
   try { return new URL(url).hostname.replace("www.", ""); } catch { return "unknown"; }
 }
 
+function isLikelyProductPageUrl(url: string): boolean {
+  try {
+    const lower = url.toLowerCase();
+    if (!isRetailDomain(url)) return false;
+
+    // Reject obvious non-product pages
+    if (
+      lower.includes("/blog/") ||
+      lower.includes("/blogs/") ||
+      lower.includes("/article/") ||
+      lower.includes("/articles/") ||
+      lower.includes("/category/") ||
+      lower.includes("/collections/") ||
+      lower.includes("/search") ||
+      lower.includes("trueprofit.io")
+    ) {
+      return false;
+    }
+
+    return (
+      /amazon\.[^/]+\/(?:[^/]+\/)?dp\//.test(lower) ||
+      /walmart\.[^/]+\/ip\//.test(lower) ||
+      /tiktok\.com\/.*\/product\//.test(lower) ||
+      /aliexpress\.[^/]+\/item\//.test(lower) ||
+      /alibaba\.[^/]+\/product-detail\//.test(lower) ||
+      /1688\.com\/offer\//.test(lower) ||
+      /dhgate\.[^/]+\/product\//.test(lower) ||
+      /temu\.[^/]+\/.*-g-\d+/.test(lower) ||
+      /ebay\.[^/]+\/itm\//.test(lower) ||
+      /etsy\.[^/]+\/listing\//.test(lower) ||
+      /\/products\//.test(lower)
+    );
+  } catch {
+    return false;
+  }
+}
+
 function parsePriceFromText(text: string): number | undefined {
   const match = text.match(/\$\s*([\d,]+\.?\d{0,2})/);
   if (!match) return undefined;
