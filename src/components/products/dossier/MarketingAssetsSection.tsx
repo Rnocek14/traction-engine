@@ -133,7 +133,9 @@ export function MarketingAssetsSection({ product }: { product: ProductWithAnalys
               />
               {/* Status badges */}
               <div className="absolute top-2 left-2 flex items-center gap-1">
-                {current?.verified ? (
+                {current?.source === "pinned_supplier" ? (
+                  <Badge className="text-[10px] bg-green-500/20 text-green-500 border-green-500/30">📌 supplier</Badge>
+                ) : current?.verified ? (
                   <Badge className="text-[10px] bg-green-500/20 text-green-500 border-green-500/30">✓ verified</Badge>
                 ) : current?.manually_approved ? (
                   <Badge className="text-[10px] bg-blue-500/20 text-blue-500 border-blue-500/30">✓ approved</Badge>
@@ -142,7 +144,7 @@ export function MarketingAssetsSection({ product }: { product: ProductWithAnalys
                 )}
               </div>
               <Badge variant="outline" className="absolute top-2 right-2 text-[10px] bg-background/80">
-                {current?.source} · {current?.label}
+                {current?.source === "pinned_supplier" ? "Pinned Supplier" : current?.source} · {current?.label}
               </Badge>
               {/* Actions */}
               {current?.origin === "product_images" && (
