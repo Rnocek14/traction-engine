@@ -146,6 +146,7 @@ export function useCommandCenter() {
               metadata: { product_id: p.id },
             });
           }
+        });
 
       // 4. Ideas waiting for approval
       const proposedIdeas = ideas.filter(i => i.status === "proposed").slice(0, 5);
