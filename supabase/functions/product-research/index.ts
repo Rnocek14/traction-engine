@@ -398,22 +398,30 @@ async function verifyLink(
     
     const html = await resp.text();
     
-    // STAGE 5: Thin content / anti-bot / redirect detection
-    if (html.length < 500) {
-      // Try Firecrawl for JS-heavy pages
-      if (firecrawlKey) {
-        const fcData = await firecrawlFetch(candidateUrl, firecrawlKey);
-        if (fcData) {
-          pageData = extractStructuredData(fcData, candidateUrl);
-          fetchMethod = "firecrawl";
-          reasons.push("fetch:firecrawl_fallback");
-        }
+    // Known JS-heavy marketplaces that need Firecrawl
+    const jsHeavyMarketplaces = ["aliexpress", "dhgate", "temu", "1688"];
+    const marketplace = getMarketplace(candidateUrl);
+    const isJsHeavy = marketplace && jsHeavyMarketplaces.includes(marketplace);
+    
+    // STAGE 5: Thin content / anti-bot / JS-heavy detection
+    const needsFirecrawl = html.length < 500 || 
+      (isJsHeavy && !html.includes('"@type":"Product"') && !html.match(/<h1[^>]*>[^<]{5,}/i));
+    
+    if (needsFirecrawl && firecrawlKey) {
+      const fcData = await firecrawlFetch(candidateUrl, firecrawlKey);
+      if (fcData) {
+        pageData = extractStructuredData(fcData, candidateUrl);
+        fetchMethod = "firecrawl";
+        reasons.push("fetch:firecrawl_js_heavy");
       }
-      if (!pageData) {
-        reasons.push("fetch:thin_content");
-        return null;
-      }
-    } else {
+    }
+    
+    if (!pageData && html.length < 500) {
+      reasons.push("fetch:thin_content");
+      return null;
+    }
+    
+    if (!pageData) {
       pageData = extractStructuredData(html, candidateUrl);
     }
     
