@@ -86,3 +86,6 @@ verify_jwt = false
 
 [functions.continue-story-myth-mode]
 verify_jwt = false
+
+[functions.scrape-content]
+verify_jwt = false
