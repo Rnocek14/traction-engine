@@ -141,7 +141,7 @@ export function useResearchProduct() {
     },
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["products"] });
-      toast.success(`Research complete — Score: ${data.overall_score}/100`);
+      toast.success(`Research complete — Score: ${data.overall_score}/100, ${data.images_found || 0} images found`);
     },
     onError: (e) => toast.error(`Research failed: ${e.message}`),
   });
