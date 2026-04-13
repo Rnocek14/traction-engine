@@ -195,7 +195,8 @@ Also suggest:
                 type: "object",
                 properties: {
                   product_name: { type: "string" },
-                  image_url: { type: "string", description: "Direct URL to a product image if found in the research data" },
+                   image_url: { type: "string", description: "Direct URL to a product image if found in the research data. Must be a real URL ending in .jpg/.png/.webp. Empty string if none found." },
+                   source_url: { type: "string", description: "A real product page URL from the Source URLs section. Do NOT make up URLs. Empty string if none relevant." },
                   category: { type: "string" },
                   subcategory: { type: "string" },
                   price_cents: { type: "integer", description: "Estimated retail price in cents" },
@@ -254,7 +255,7 @@ Also suggest:
           name: analysis.product_name || productName,
           category: analysis.category || null,
           subcategory: analysis.subcategory || null,
-          source_url: productUrl || null,
+          source_url: analysis.source_url || productUrl || perplexityCitations[0] || null,
           image_url: analysis.image_url || null,
           price_cents: analysis.price_cents || null,
           supplier_price_cents: analysis.supplier_price_cents || null,
@@ -272,7 +273,7 @@ Also suggest:
       productId = newProduct.id;
     } else {
       // Update existing product with new data
-      await supabase.from("products").update({
+      const updatePayload: Record<string, unknown> = {
         category: analysis.category || undefined,
         subcategory: analysis.subcategory || undefined,
         image_url: analysis.image_url || undefined,
@@ -282,7 +283,12 @@ Also suggest:
         status: "researching",
         notes: analysis.summary || undefined,
         updated_at: new Date().toISOString(),
-      }).eq("id", productId);
+      };
+      // Backfill source_url if missing
+      if (analysis.source_url || perplexityCitations.length > 0) {
+        updatePayload.source_url = analysis.source_url || perplexityCitations[0];
+      }
+      await supabase.from("products").update(updatePayload).eq("id", productId);
     }
 
     // Upsert analysis
