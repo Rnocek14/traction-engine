@@ -443,7 +443,9 @@ Deno.serve(async (req) => {
           .select()
           .single();
 
-        if (!createErr && newProduct) {
+        if (createErr) {
+          console.error(`[ingest-viral] Product create failed:`, JSON.stringify(createErr));
+        } else if (newProduct) {
           linkedProductId = newProduct.id;
           console.log(`[ingest-viral] Created product: "${newProduct.name}" (${newProduct.id})`);
         }
