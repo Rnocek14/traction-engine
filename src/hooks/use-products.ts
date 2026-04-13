@@ -53,9 +53,20 @@ export interface ProductImage {
   verified: boolean;
 }
 
+export interface ProductLink {
+  id: string;
+  url: string;
+  link_type: string;
+  platform: string;
+  price_cents: number | null;
+  title: string | null;
+  verified: boolean;
+}
+
 export interface ProductWithAnalysis extends Product {
   product_analysis: ProductAnalysis[] | null;
   product_images: ProductImage[] | null;
+  product_links: ProductLink[] | null;
 }
 
 export function useProducts(statusFilter?: ProductStatus) {
@@ -64,7 +75,7 @@ export function useProducts(statusFilter?: ProductStatus) {
     queryFn: async () => {
       let query = supabase
         .from("products")
-        .select("*, product_analysis(*), product_images(*)")
+        .select("*, product_analysis(*), product_images(*), product_links(*)")
         .order("created_at", { ascending: false });
 
       if (statusFilter) {
@@ -141,7 +152,10 @@ export function useResearchProduct() {
     },
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["products"] });
-      toast.success(`Research complete — Score: ${data.overall_score}/100, ${data.images_found || 0} images found`);
+      const parts = [`Score: ${data.overall_score}/100`];
+      if (data.images_found) parts.push(`${data.images_found} images`);
+      if (data.links_found) parts.push(`${data.links_found} verified links`);
+      toast.success(`Research complete — ${parts.join(", ")}`);
     },
     onError: (e) => toast.error(`Research failed: ${e.message}`),
   });
