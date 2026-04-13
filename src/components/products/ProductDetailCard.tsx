@@ -2,8 +2,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ExternalLink, TrendingUp, Package } from "lucide-react";
-import { type ProductWithAnalysis, type ProductStatus, useUpdateProductStatus } from "@/hooks/use-products";
+import { type ProductWithAnalysis, type ProductStatus, useUpdateProductStatus, useResearchProduct } from "@/hooks/use-products";
 import { ProductScoringForm } from "./ProductScoringForm";
+import { Search, Loader2 } from "lucide-react";
 
 const STATUS_COLORS: Record<ProductStatus, string> = {
   discovered: "bg-blue-500/10 text-blue-500",
