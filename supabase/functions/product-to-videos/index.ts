@@ -232,9 +232,11 @@ CRITICAL RULES:
 AVAILABLE FORMATS: ${VIDEO_FORMATS.join(", ")}
 
 SCENE TYPES:
-- "image_motion": Uses a product photo with pan/zoom/motion effects (PREFERRED for product shots)
-- "ai_generated": AI-generated video clip from prompt (use for lifestyle/context shots)
+- "image_motion": Uses a product photo with pan/zoom/motion effects (PREFERRED for product shots, only if images are available)
+- "ai_generated": AI-generated video clip from prompt (use for lifestyle/context shots, or ALL scenes if no product images available)
 - "text_overlay": Bold text on dark background (use sparingly, for hooks or stats)
+
+${images.length === 0 ? "IMPORTANT: No product images are available. Use ONLY 'ai_generated' and 'text_overlay' scene types. Generate vivid, descriptive prompts based on the product description." : ""}
 
 OUTPUT: Return a JSON array of exactly 5 video concepts. Each must have a different angle.`;
 
