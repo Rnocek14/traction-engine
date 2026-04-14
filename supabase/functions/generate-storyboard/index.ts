@@ -26,10 +26,59 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// ─── Content Type Prompt Blocks ──────────────────────────────
+function buildContentTypeBlock(contentType: string): string {
+  if (contentType === "product_promo") {
+    return `
+═══ CONTENT TYPE: PRODUCT PROMOTION ═══
+This video is a PRODUCT-FOCUSED piece. The product IS the star.
+- Product can be central to every scene
+- "Problem → Product → Solution → CTA" structure is appropriate
+- Include direct CTA ("Link in bio", "Shop now", "Check link in comments")
+- Demo the product clearly: show it being used, unboxed, or compared
+- Still be specific: mention price points, features, or comparisons when possible`;
+  }
+
+  // Default: growth content
+  return `
+═══ CONTENT TYPE: GROWTH / AUDIENCE BUILDING (CRITICAL) ═══
+This video must deliver GENUINE VALUE to viewers — it should feel like advice from a knowledgeable creator, NOT an ad.
+
+STRUCTURE RULES:
+- DO NOT use "problem → product → CTA" structure
+- DO use: "hook → teach/reveal → teach/reveal → teach/reveal → engagement CTA"
+- The video must be useful even if no product is ever mentioned
+- Product mention is OPTIONAL and can appear in at most 1 scene (never more than 1 out of 5+ scenes)
+
+NARRATION RULES:
+- Every value beat must contain a SPECIFIC, CONCRETE piece of information:
+  ✅ "The $8 magnetic clips from Amazon hold cables better than the $40 management systems"
+  ✅ "Turn your phone charger upside down — the cable bends less and lasts 3x longer"
+  ✅ "Most people mount their monitor too high — eye level should hit the top third"
+  ❌ "A solution awaits" (vague, says nothing)
+  ❌ "Discover the answer" (teaser with no substance)
+  ❌ "Watch them snap right into place" (product demo, not information)
+- Include at least ONE of: specific price, percentage, comparison, test result, or expert technique
+- Narration should sound like a real person sharing what they learned, not a sales script
+
+CTA RULES:
+- DO NOT use "Link in bio" or "Shop now" — these are for product_promo only
+- DO use engagement CTAs: "Follow for more", "Save this for later", "Comment which one you'd try", "Part 2 tomorrow"
+- The final scene should invite continued engagement, not purchase
+
+VISUAL RULES:
+- Show the INFORMATION being demonstrated, not a product being advertised
+- Show real-world scenarios: a messy desk being reorganized, a before/after comparison, hands demonstrating a technique
+- Vary the visual subjects: different angles, different items, different environments
+- No "product glamour shots" or "product reveal" moments`;
+}
+
+
 interface GenerateRequest {
   concept: string;
   story_type?: "short_story" | "brainrot" | "info" | "hybrid";
   scene_count?: number;
+  content_type?: "growth" | "product_promo";
   story_engine?: {
     vertical: string;
     goal: string;
@@ -66,6 +115,7 @@ Deno.serve(async (req) => {
     const body = await req.json() as GenerateRequest;
     const { concept, story_type = "short_story", scene_count } = body;
     const tier = body.tier || "volume";
+    const contentType = body.content_type || "growth";
 
     // ═══════════════════════════════════════════════════════════
     // TEMPLATE MODE: story_engine provided → use routeStory() pipeline
@@ -174,6 +224,10 @@ Deno.serve(async (req) => {
         const styleBlock = buildStyleControlBlock(accountStyle);
         console.log(`[generate-storyboard] P4: realism=${accountStyle.realism_level} style=${accountStyle.visual_style}`);
 
+        // ── CONTENT TYPE RULES (growth vs product_promo) ──
+        const contentTypeBlock = buildContentTypeBlock(contentType);
+        console.log(`[generate-storyboard] Content type: ${contentType}`);
+
         // P3: Platform optimization — detect format + inject pacing/overlay rules
         const detectedFormat = detectContentFormat(concept);
         const platformBlock = buildPlatformOptimizationBlock(concept);
@@ -204,11 +258,13 @@ Deno.serve(async (req) => {
 CONCEPT: "${concept}"
 STORY TYPE: ${selection.type} (${template.name})
 VERTICAL: ${vertical}
+CONTENT PURPOSE: ${contentType === "product_promo" ? "PRODUCT PROMOTION — product demo with CTA is appropriate" : "GROWTH / AUDIENCE BUILDING — information-first, no product demo"}
 TONE: ${constraints.allowed_tones.join(", ")}
 ${claimConstraints}
 ${titlePromiseBlock}${hookInstruction}
 ${platformBlock}
 ${styleBlock}
+${contentTypeBlock}
 
 BEAT STRUCTURE (generate content for each):
 ${beatPrompts.join("\n")}
@@ -234,8 +290,11 @@ NARRATION QUALITY (CRITICAL):
 - If a beat is about advice/tips/hacks, the narration must contain the ACTUAL advice, not a teaser
 - Start value beats with actionable verbs: "Use...", "Add...", "Replace...", "Try...", "Set...", "Turn off..."
 CTA SCENES (CRITICAL):
-- CTA must include a specific next action ("Follow for part 2", "Save this for later", "Link in bio")
-- NEVER end with "person relaxes" or "person smiles" — end with ENGAGEMENT
+${contentType === "growth" 
+  ? `- Growth content: use engagement CTAs ONLY ("Follow for more", "Save this", "Comment which one") — NEVER "Link in bio" or "Shop now"
+- NEVER end with "person relaxes" or "person smiles" — end with ENGAGEMENT`
+  : `- CTA must include a specific next action ("Link in bio", "Shop now", "Check the link")
+- NEVER end with "person relaxes" or "person smiles" — end with ENGAGEMENT`}
 
 Return ONLY valid JSON: {"beats":[{...}]}`;
 
@@ -646,7 +705,7 @@ Return ONLY valid JSON: {"beats":[{...}]}`;
     // ═══════════════════════════════════════════════════════════
     // LEGACY MODE: GPT-4o freeform storyboard generation
     // ═══════════════════════════════════════════════════════════
-    console.log(`[generate-storyboard] Legacy mode: concept="${concept.slice(0, 60)}..." type=${story_type}`);
+    console.log(`[generate-storyboard] Legacy mode: concept="${concept.slice(0, 60)}..." type=${story_type} content_type=${contentType}`);
 
     if (!concept?.trim()) {
       return new Response(
@@ -657,8 +716,9 @@ Return ONLY valid JSON: {"beats":[{...}]}`;
 
     const typeGuidance = STORY_TYPE_GUIDANCE[story_type] || STORY_TYPE_GUIDANCE.short_story;
     const sceneGuidance = scene_count ? `Create exactly ${scene_count} scenes.` : "";
+    const legacyContentTypeBlock = buildContentTypeBlock(contentType);
 
-    const userPrompt = `Create a storyboard for this concept:\n\n"${concept}"\n\nStory Type: ${story_type}\n${typeGuidance}\n${sceneGuidance}\n\nGenerate a complete, filmable storyboard with vivid, specific visual prompts for each scene.`;
+    const userPrompt = `Create a storyboard for this concept:\n\n"${concept}"\n\nStory Type: ${story_type}\n${typeGuidance}\n${sceneGuidance}\n${legacyContentTypeBlock}\n\nGenerate a complete, filmable storyboard with vivid, specific visual prompts for each scene.`;
 
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
