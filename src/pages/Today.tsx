@@ -171,6 +171,7 @@ export default function Today() {
                     onReject={handleReject}
                     onProduce={handleProduce}
                     onGenerateIdeas={handleGenerateIdeas}
+                    onSlotClick={setSelectedSlot}
                   />
                 ))}
               </div>
