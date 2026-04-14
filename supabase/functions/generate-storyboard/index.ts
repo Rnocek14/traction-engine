@@ -210,11 +210,13 @@ Deno.serve(async (req) => {
 CONCEPT: "${concept}"
 STORY TYPE: ${selection.type} (${template.name})
 VERTICAL: ${vertical}
+CONTENT PURPOSE: ${contentType === "product_promo" ? "PRODUCT PROMOTION — product demo with CTA is appropriate" : "GROWTH / AUDIENCE BUILDING — information-first, no product demo"}
 TONE: ${constraints.allowed_tones.join(", ")}
 ${claimConstraints}
 ${titlePromiseBlock}${hookInstruction}
 ${platformBlock}
 ${styleBlock}
+${contentTypeBlock}
 
 BEAT STRUCTURE (generate content for each):
 ${beatPrompts.join("\n")}
