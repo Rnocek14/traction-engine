@@ -137,11 +137,34 @@ Deno.serve(async (req) => {
       const ctaResult = getVerticalCTA(vertical, rng);
       console.log(`[generate-storyboard] Hook category: ${hookCategory}, CTA: "${ctaResult.phrase}"`);
 
+      // 3b. Multi-candidate hook generation & scoring
+      let hookResult: { hook_text: string; hook_overlay: string; hook_score: ReturnType<typeof selectBestHook>["hook_score"]; candidates_count: number } | null = null;
+      let allHookCandidates: ScoredHook[] = [];
+
+      if (constraints.compiler !== "cinematic") {
+        try {
+          allHookCandidates = await generateAndScoreHooks(
+            concept, vertical, hookCategory as HookCategory, openaiKey, 3,
+          );
+          hookResult = selectBestHook(allHookCandidates, concept, hookCategory as HookCategory);
+          console.log(`[generate-storyboard] Hook scoring: ${allHookCandidates.length} candidates, winner score=${hookResult.hook_score.total.toFixed(2)}`);
+          if (allHookCandidates.length > 1) {
+            console.log(`[generate-storyboard] Hook candidates: ${allHookCandidates.map((h, i) => `#${i + 1} (${h.score.total.toFixed(2)}): "${h.candidate.text.slice(0, 50)}..."`).join(" | ")}`);
+          }
+        } catch (hookErr) {
+          console.warn(`[generate-storyboard] Hook generation failed, using default:`, hookErr);
+        }
+      }
+
       // 4. Compiler fork
       if (constraints.compiler === "cinematic") {
         console.log(`[generate-storyboard] Cinematic compiler → falling through to legacy GPT`);
       } else {
         // ── VIRAL TEMPLATE PIPELINE ──
+        const hookInstruction = hookResult
+          ? `\n\nWINNING HOOK (use this as the hook beat narration):\nText: "${hookResult.hook_text}"\nOverlay: "${hookResult.hook_overlay}"\nScore: ${hookResult.hook_score.total.toFixed(1)}/10\nIMPORTANT: Use this exact hook text as the narration_line for the hook beat. You may adjust slightly for flow but keep the core message.`
+          : "";
+
         const beatPrompts = template.beats.map((beat, i) => {
           const isHook = beat.is_hook;
           const isCTA = beat.role.includes("cta") || beat.role === "proof_cta" || beat.role === "value_cta" || beat.role === "how_cta" || beat.role === "credibility_cta" || beat.role === "item_3_cta";
