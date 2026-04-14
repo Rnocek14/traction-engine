@@ -134,6 +134,7 @@ export default function VerticalDetail() {
                     account={a as any}
                     vertical={vertical!}
                     storyCount={stories.filter(s => s.account_id === a.account_id).length}
+                    ideas={ideas.filter(i => i.account_id === a.account_id) as any}
                   />
                 ))}
               </div>
