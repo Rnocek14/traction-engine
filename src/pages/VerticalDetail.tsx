@@ -81,7 +81,7 @@ export default function VerticalDetail() {
               {accounts.length} accounts · {assembled.length} videos · {proposedIdeas.length} ideas pending
             </p>
           </div>
-          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => matchProducts.mutate()}>
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => matchProducts.mutate(undefined)}>
             <Wand2 className="w-3.5 h-3.5" />
             Match Products
           </Button>
