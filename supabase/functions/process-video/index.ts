@@ -134,14 +134,19 @@ Deno.serve(async (req) => {
     const body: ProcessRequest = await req.json().catch(() => ({}));
     const { job_id } = body;
 
-    // Fetch jobs to process with retry for transient network errors
+    // Fetch jobs to process — prioritize newest first so new jobs aren't buried
+    // behind stale ones. Also skip jobs older than 48h (likely abandoned).
     const jobs = await withRetry(async () => {
+      const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+
       let query = supabase
         .from("video_jobs")
         .select("*")
         .eq("provider", "sora")
         .in("status", ["running", "queued"])
-        .not("openai_video_id", "is", null);
+        .not("openai_video_id", "is", null)
+        .gte("created_at", cutoff)
+        .order("created_at", { ascending: false });
 
       if (job_id) {
         query = query.eq("id", job_id);
