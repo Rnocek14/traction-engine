@@ -76,6 +76,8 @@ import {
   type ModerationLadderContext,
 } from "../_shared/moderation-ladder.ts";
 import { sanitizePromptText } from "../_shared/prompt-compliance.ts";
+import { sanitizePromptForProvider } from "../_shared/prompt-sanitizer.ts";
+import { checkProviderHealth, getHealthyProviders, logProviderHealth } from "../_shared/provider-health.ts";
 import type { ContentVertical } from "../_shared/vertical-profiles.ts";
 
 const corsHeaders = {
@@ -795,17 +797,23 @@ Deno.serve(async (req) => {
       // (approximate: count completed Sora-routed scenes from the clips we fetched)
       const completedSoraCount = (clips || []).filter(c => c.status === "done" && c.provider === "sora").length;
       
-      // === PROVIDER SELECTION ===
-      // Check for Character Continuity Mode - override routing if enabled
+      // === PROVIDER SELECTION (with P0 circuit breaker) ===
+      const providerHealth = await checkProviderHealth(supabase);
+      const healthyProviders = getHealthyProviders(providerHealth);
+      
       let selectedProvider: VideoProvider;
       let routingReason: string;
       
       if (characterContinuityMode && lockedProviderName) {
-        // LOCKED: Use the specified provider for ALL scenes
-        selectedProvider = lockedProviderName;
-        routingReason = `Character Continuity Mode → locked to ${lockedProviderName}`;
+        if (healthyProviders.includes(lockedProviderName)) {
+          selectedProvider = lockedProviderName;
+          routingReason = `Character Continuity Mode → locked to ${lockedProviderName}`;
+        } else {
+          selectedProvider = healthyProviders[0];
+          routingReason = `CCM → ${lockedProviderName} UNHEALTHY, circuit breaker → ${selectedProvider}`;
+          console.warn(`[chain-continue] Circuit breaker: ${lockedProviderName} disabled, using ${selectedProvider}`);
+        }
       } else {
-        // NORMAL: Use role-based routing with tier/chaining/template awareness
         const routingResult = routeBySceneRole(sceneRole, {
           tier: storyTier,
           isChained: !isFirstScene,
@@ -814,6 +822,14 @@ Deno.serve(async (req) => {
         });
         selectedProvider = routingResult.provider;
         routingReason = routingResult.routingReason;
+        
+        // P0: Check if routed provider is healthy
+        if (!healthyProviders.includes(selectedProvider)) {
+          const fallback = healthyProviders[0];
+          console.warn(`[chain-continue] Circuit breaker: ${selectedProvider} unhealthy → ${fallback}`);
+          routingReason += ` | CIRCUIT BREAKER → ${fallback}`;
+          selectedProvider = fallback;
+        }
       }
       
       // Process duration: clamp to role range first, then snap to provider
@@ -1185,6 +1201,17 @@ Deno.serve(async (req) => {
         }
       }
       
+      // === P0 FIX: SANITIZE PROMPT (strip routing metadata) ===
+      // This is the LAST PASS before the prompt reaches the video model.
+      // Strips all [LABEL:...], KEY=VALUE, and structural markers.
+      const { cleanPrompt: sanitizedPrompt, strippedChars, wasTrimmed } = sanitizePromptForProvider(
+        finalPrompt,
+        selectedProvider
+      );
+      if (strippedChars > 0 || wasTrimmed) {
+        console.log(`[chain-continue] P0 Sanitized scene ${nextSceneIndex + 1}: stripped ${strippedChars} chars, trimmed=${wasTrimmed}, final=${sanitizedPrompt.length} chars for ${selectedProvider}`);
+      }
+      
       // === PROVIDER FALLBACK ORDER ===
       // When a provider fails with credits/quota, try the next one
       const PROVIDER_FALLBACK_ORDER: VideoProvider[] = ["runway", "luma", "sora"];
@@ -1219,7 +1246,7 @@ Deno.serve(async (req) => {
       
       let queueSuccess = false;
       let data: { success: boolean; job?: { id: string }; error?: string } = { success: false };
-      let currentPrompt = finalPrompt;
+      let currentPrompt = sanitizedPrompt; // P0: Use sanitized prompt
       let currentProvider = selectedProvider;
       let currentProviderEndpoint = providerEndpoint;
       let currentStartingFrame = startingFrameUrl;
