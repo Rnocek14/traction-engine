@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 
-export type PostSlotStatus = "idea" | "generating" | "ready" | "approved" | "rejected";
+export type PostSlotStatus = "idea" | "draft" | "generating" | "ready" | "approved" | "rejected";
 
 export interface PostSlot {
   id: string;
@@ -61,6 +61,7 @@ function mapJobToSlot(job: any, qualityMap: Map<string, { avg: number; done: num
   if (job.review_status === "approved") status = "approved";
   else if (job.review_status === "rejected") status = "rejected";
   else if (job.assembled_video_url) status = "ready";
+  else if (job.status === "draft") status = "draft";
   else if (["pending", "generating", "assembling"].includes(job.status)) status = "generating";
 
   const q = qualityMap.get(job.id);
