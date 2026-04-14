@@ -85,11 +85,16 @@ async function queueClipsForJobs(supabaseUrl: string, serviceKey: string, jobIds
           });
 
           const qvData = await qvRes.json();
-          if (qvData.id) {
+          // queue-video returns { success, job: { id }, jobs: [...] }
+          const videoJobId = qvData?.job?.id || qvData?.jobs?.[0]?.id;
+          if (videoJobId) {
             await supabase
               .from("video_jobs")
               .update({ story_job_id: storyJobId, sequence_index: i, is_primary: true })
-              .eq("id", qvData.id);
+              .eq("id", videoJobId);
+            console.log(`Linked video_job ${videoJobId} to story ${storyJobId} scene ${i}`);
+          } else {
+            console.error(`No video job ID in queue-video response for story ${storyJobId} scene ${i}:`, JSON.stringify(qvData).slice(0, 200));
           }
         } catch (e) {
           console.error(`Failed to queue scene ${i} for story ${storyJobId}:`, e);
