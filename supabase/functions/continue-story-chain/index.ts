@@ -797,17 +797,23 @@ Deno.serve(async (req) => {
       // (approximate: count completed Sora-routed scenes from the clips we fetched)
       const completedSoraCount = (clips || []).filter(c => c.status === "done" && c.provider === "sora").length;
       
-      // === PROVIDER SELECTION ===
-      // Check for Character Continuity Mode - override routing if enabled
+      // === PROVIDER SELECTION (with P0 circuit breaker) ===
+      const providerHealth = await checkProviderHealth(supabase);
+      const healthyProviders = getHealthyProviders(providerHealth);
+      
       let selectedProvider: VideoProvider;
       let routingReason: string;
       
       if (characterContinuityMode && lockedProviderName) {
-        // LOCKED: Use the specified provider for ALL scenes
-        selectedProvider = lockedProviderName;
-        routingReason = `Character Continuity Mode → locked to ${lockedProviderName}`;
+        if (healthyProviders.includes(lockedProviderName)) {
+          selectedProvider = lockedProviderName;
+          routingReason = `Character Continuity Mode → locked to ${lockedProviderName}`;
+        } else {
+          selectedProvider = healthyProviders[0];
+          routingReason = `CCM → ${lockedProviderName} UNHEALTHY, circuit breaker → ${selectedProvider}`;
+          console.warn(`[chain-continue] Circuit breaker: ${lockedProviderName} disabled, using ${selectedProvider}`);
+        }
       } else {
-        // NORMAL: Use role-based routing with tier/chaining/template awareness
         const routingResult = routeBySceneRole(sceneRole, {
           tier: storyTier,
           isChained: !isFirstScene,
@@ -816,6 +822,14 @@ Deno.serve(async (req) => {
         });
         selectedProvider = routingResult.provider;
         routingReason = routingResult.routingReason;
+        
+        // P0: Check if routed provider is healthy
+        if (!healthyProviders.includes(selectedProvider)) {
+          const fallback = healthyProviders[0];
+          console.warn(`[chain-continue] Circuit breaker: ${selectedProvider} unhealthy → ${fallback}`);
+          routingReason += ` | CIRCUIT BREAKER → ${fallback}`;
+          selectedProvider = fallback;
+        }
       }
       
       // Process duration: clamp to role range first, then snap to provider
