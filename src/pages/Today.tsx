@@ -16,6 +16,7 @@ import { LayoutList, LayoutGrid } from "lucide-react";
 export default function Today() {
   const { data, isLoading } = useTodayFeed();
   const [compact, setCompact] = useState(false);
+  const [selectedSlot, setSelectedSlot] = useState<PostSlot | null>(null);
   const queryClient = useQueryClient();
 
   const feed = data?.feed || [];
