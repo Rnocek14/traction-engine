@@ -17,9 +17,10 @@ interface PostSlotProps {
   onApprove?: (jobId: string) => void;
   onReject?: (jobId: string) => void;
   onProduce?: (ideaId: string) => void;
+  onClick?: (slot: PostSlotType) => void;
 }
 
-export function PostSlotCard({ slot, onApprove, onReject, onProduce }: PostSlotProps) {
+export function PostSlotCard({ slot, onApprove, onReject, onProduce, onClick }: PostSlotProps) {
   const config = STATUS_CONFIG[slot.status];
   const Icon = config.icon;
 
