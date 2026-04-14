@@ -93,7 +93,7 @@ export function AccountIdentityCard({
 
           <p className="text-xs text-muted-foreground italic line-clamp-2">"{account.promise}"</p>
 
-          <div className="grid grid-cols-3 gap-2 text-xs">
+          <div className="grid grid-cols-4 gap-2 text-xs">
             <div className="flex items-center gap-1 text-muted-foreground">
               <Sparkles className="w-3 h-3" />
               <span>{account.hook_style || "curiosity"}</span>
@@ -105,6 +105,10 @@ export function AccountIdentityCard({
             <div className="flex items-center gap-1 text-muted-foreground">
               <Users className="w-3 h-3" />
               <span>{(account.audience as any)?.who?.split(" ").slice(0, 2).join(" ") || "general"}</span>
+            </div>
+            <div className="flex items-center gap-1 text-muted-foreground">
+              <Palette className="w-3 h-3" />
+              <span>{account.visual_style || "cinematic"} ({account.realism_level ?? 70}%)</span>
             </div>
           </div>
 
