@@ -207,6 +207,9 @@ function AccountEditDialog({ open, onOpenChange, account, vertical }: {
   const [audienceWho, setAudienceWho] = useState((account.audience as any)?.who || "");
   const [pillars, setPillars] = useState(account.content_pillars.join(", "));
   const [promise, setPromise] = useState(account.promise);
+  const [realismLevel, setRealismLevel] = useState(account.realism_level ?? 70);
+  const [visualStyle, setVisualStyle] = useState(account.visual_style || "cinematic");
+  const [styleNotes, setStyleNotes] = useState(account.style_notes || "");
 
   const handleSave = async () => {
     setSaving(true);
