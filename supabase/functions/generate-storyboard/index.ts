@@ -18,6 +18,7 @@ import type { SceneRole, CutZone, CutType, ChangeType, GeneratedStoryboard } fro
 import { SYSTEM_PROMPT, STORY_TYPE_GUIDANCE } from "../_shared/storyboard-prompts.ts";
 import { parseTitlePromise, buildTitlePromiseBlock, validateContentQuality } from "../_shared/content-quality.ts";
 import { generateAndScoreHooks, selectBestHook, type ScoredHook, type HookCategory } from "../_shared/hook-optimizer.ts";
+import { buildPlatformOptimizationBlock, detectContentFormat, getPacingProfile, enhanceVisualInstruction, getFormatHookOverride } from "../_shared/platform-optimizer.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
