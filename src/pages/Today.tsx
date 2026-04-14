@@ -60,7 +60,7 @@ export default function Today() {
     toast({ title: "Producing…", description: "Generating storyboard from idea" });
     
     try {
-      // Step 1: Fetch the idea to get concept info
+      // Step 1: Fetch the idea AND its account config for template mode
       const { data: idea, error: ideaErr } = await supabase
         .from("content_ideas")
         .select("title, account_id, content_type, subject, angle")
@@ -72,11 +72,33 @@ export default function Today() {
         return;
       }
 
-      // Step 2: Generate storyboard from the idea concept
+      // Fetch account config for template mode context
+      const { data: accountConfig } = await supabase
+        .from("account_configs")
+        .select("vertical, promise, visual_style, realism_level, style_notes, hook_style, voice_id, voice_provider")
+        .eq("account_id", idea.account_id)
+        .maybeSingle();
+
+      // Step 2: Generate storyboard using TEMPLATE MODE with account context
       const concept = `${idea.title}${idea.angle ? ` — ${idea.angle}` : ""}${idea.subject ? `. Subject: ${idea.subject}` : ""}`;
       const contentType = idea.content_type === "product_promo" ? "product_promo" : "growth";
       const { data: storyboard, error: sbErr } = await supabase.functions.invoke("generate-storyboard", {
-        body: { concept, story_type: "short_story", scene_count: 5, content_type: contentType },
+        body: {
+          concept,
+          story_type: "short_story",
+          scene_count: 5,
+          content_type: contentType,
+          generator_mode: "template",
+          story_engine: accountConfig ? {
+            vertical: accountConfig.vertical,
+            goal: contentType === "product_promo" ? "sell" : "grow",
+          } : undefined,
+          account_style: accountConfig ? {
+            realism_level: accountConfig.realism_level ?? 70,
+            visual_style: accountConfig.visual_style ?? "cinematic",
+            style_notes: accountConfig.style_notes ?? undefined,
+          } : undefined,
+        },
       });
 
       if (sbErr || !storyboard?.scenes?.length) {
