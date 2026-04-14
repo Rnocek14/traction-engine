@@ -101,7 +101,9 @@ export function AccountRow({ item, compact, onApprove, onReject, onProduce, onRe
               onApprove={onApprove}
               onReject={onReject}
               onProduce={onProduce}
+              onRegenerate={onRegenerate}
               onClick={onSlotClick}
+              isProducing={producingIds?.has(slot.ideaId || slot.storyJobId || "")}
             />
           ))}
           {emptyCount > 0 && Array.from({ length: emptyCount }).map((_, i) => (
