@@ -1,6 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { ShoppingBag, Lightbulb, Star, ImageIcon } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import type { TodaysPlan } from "@/hooks/use-vertical-engine";
@@ -19,7 +18,7 @@ export function SuggestionsCard({ plan }: Props) {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm flex items-center gap-2">
-              <Star className="w-4 h-4 text-amber-500" />
+              <Star className="w-4 h-4 text-primary" />
               Recommended Products
             </CardTitle>
           </CardHeader>
@@ -47,7 +46,7 @@ export function SuggestionsCard({ plan }: Props) {
                       <Badge variant="outline" className="text-[10px] h-4">{p.estimated_margin_pct}% margin</Badge>
                     )}
                     {p.has_images ? (
-                      <ImageIcon className="w-3 h-3 text-green-500" />
+                      <ImageIcon className="w-3 h-3 text-primary" />
                     ) : (
                       <ImageIcon className="w-3 h-3 text-destructive" />
                     )}
@@ -65,7 +64,7 @@ export function SuggestionsCard({ plan }: Props) {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm flex items-center gap-2">
-              <Lightbulb className="w-4 h-4 text-amber-500" />
+              <Lightbulb className="w-4 h-4 text-primary" />
               Top Ideas to Produce
             </CardTitle>
           </CardHeader>
