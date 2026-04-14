@@ -30,6 +30,7 @@ interface GenerateRequest {
   concept: string;
   story_type?: "short_story" | "brainrot" | "info" | "hybrid";
   scene_count?: number;
+  content_type?: "growth" | "product_promo";
   story_engine?: {
     vertical: string;
     goal: string;
@@ -66,6 +67,7 @@ Deno.serve(async (req) => {
     const body = await req.json() as GenerateRequest;
     const { concept, story_type = "short_story", scene_count } = body;
     const tier = body.tier || "volume";
+    const contentType = body.content_type || "growth";
 
     // ═══════════════════════════════════════════════════════════
     // TEMPLATE MODE: story_engine provided → use routeStory() pipeline
