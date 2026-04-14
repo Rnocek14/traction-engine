@@ -705,7 +705,7 @@ Return ONLY valid JSON: {"beats":[{...}]}`;
     // ═══════════════════════════════════════════════════════════
     // LEGACY MODE: GPT-4o freeform storyboard generation
     // ═══════════════════════════════════════════════════════════
-    console.log(`[generate-storyboard] Legacy mode: concept="${concept.slice(0, 60)}..." type=${story_type}`);
+    console.log(`[generate-storyboard] Legacy mode: concept="${concept.slice(0, 60)}..." type=${story_type} content_type=${contentType}`);
 
     if (!concept?.trim()) {
       return new Response(
@@ -716,8 +716,9 @@ Return ONLY valid JSON: {"beats":[{...}]}`;
 
     const typeGuidance = STORY_TYPE_GUIDANCE[story_type] || STORY_TYPE_GUIDANCE.short_story;
     const sceneGuidance = scene_count ? `Create exactly ${scene_count} scenes.` : "";
+    const legacyContentTypeBlock = buildContentTypeBlock(contentType);
 
-    const userPrompt = `Create a storyboard for this concept:\n\n"${concept}"\n\nStory Type: ${story_type}\n${typeGuidance}\n${sceneGuidance}\n\nGenerate a complete, filmable storyboard with vivid, specific visual prompts for each scene.`;
+    const userPrompt = `Create a storyboard for this concept:\n\n"${concept}"\n\nStory Type: ${story_type}\n${typeGuidance}\n${sceneGuidance}\n${legacyContentTypeBlock}\n\nGenerate a complete, filmable storyboard with vivid, specific visual prompts for each scene.`;
 
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
