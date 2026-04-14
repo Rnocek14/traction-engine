@@ -179,7 +179,7 @@ export function useTodayFeed() {
         const accountJobs = jobsByAccount.get(acc.account_id) || [];
         const accountIdeas = ideasByAccount.get(acc.account_id) || [];
 
-        const jobSlots = accountJobs.map(mapJobToSlot);
+        const jobSlots = accountJobs.map((j: any) => mapJobToSlot(j, qualityMap));
         const ideaSlots = accountIdeas.map(mapIdeaToSlot);
 
         // Combine: jobs first, then ideas to fill up to max_daily_posts
