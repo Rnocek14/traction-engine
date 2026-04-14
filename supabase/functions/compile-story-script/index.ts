@@ -12,6 +12,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { buildCompileQualityRules } from "../_shared/content-quality.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -94,6 +95,7 @@ function buildCompilationPrompt(
   title: string | null
 ): string {
   const styleGuide = NARRATIVE_STYLES[storyType] || NARRATIVE_STYLES.default;
+  const qualityRules = buildCompileQualityRules(title || "");
   
   const sceneList = scenes
     .map((s, i) => `Scene ${i + 1} (${s.beat_type || "scene"}, ~${s.duration_seconds || 5}s):\n"${s.narration}"`)
@@ -102,6 +104,7 @@ function buildCompilationPrompt(
   return `${styleGuide}
 
 ${title ? `Story Title: "${title}"` : ""}
+${qualityRules}
 
 You have ${scenes.length} scene narrations that need to be compiled into a single cohesive script.
 Each scene's narration will be spoken while that scene plays, so timing matters.
@@ -115,6 +118,8 @@ YOUR TASK:
 3. Even if a scene has minimal narration, return a segment for it (can be a short pause phrase like "...")
 4. Ensure consistent voice, tense, and style throughout
 5. Each segment should be roughly similar in length to the original scene narration
+6. CRITICAL: If any segment contains generic motivational filler, REPLACE it with specific, actionable content
+7. Every value segment must teach something concrete — a technique, fact, or step
 
 OUTPUT FORMAT:
 Return a JSON object with:
