@@ -222,7 +222,10 @@ function AccountEditDialog({ open, onOpenChange, account, vertical }: {
         audience: { who: audienceWho, pain_points: (account.audience as any)?.pain_points || [] },
         content_pillars: pillars.split(",").map(s => s.trim()).filter(Boolean),
         promise,
-      })
+        realism_level: realismLevel,
+        visual_style: visualStyle,
+        style_notes: styleNotes || null,
+      } as any)
       .eq("id", account.id);
 
     setSaving(false);
@@ -283,6 +286,48 @@ function AccountEditDialog({ open, onOpenChange, account, vertical }: {
           <div>
             <Label className="text-xs font-medium">Content Pillars (comma-separated)</Label>
             <Input value={pillars} onChange={e => setPillars(e.target.value)} placeholder="gadgets, reviews, unboxings, comparisons" className="mt-1 h-8" />
+          </div>
+
+          {/* Visual Style Control */}
+          <div className="border-t pt-3 space-y-3">
+            <Label className="text-xs font-semibold flex items-center gap-1.5">
+              <Palette className="w-3.5 h-3.5" /> Visual Style Control
+            </Label>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs text-muted-foreground">Visual Style</Label>
+                <Select value={visualStyle} onValueChange={setVisualStyle}>
+                  <SelectTrigger className="mt-1 h-8"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {VISUAL_STYLES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <div className="flex justify-between">
+                  <Label className="text-xs text-muted-foreground">Realism Level</Label>
+                  <span className="text-xs text-muted-foreground">{realismLevel}%</span>
+                </div>
+                <Slider
+                  value={[realismLevel]}
+                  onValueChange={([v]) => setRealismLevel(v)}
+                  min={0}
+                  max={100}
+                  step={5}
+                  className="mt-2"
+                />
+                <div className="flex justify-between text-[9px] text-muted-foreground mt-0.5">
+                  <span>Abstract/Sci-Fi</span>
+                  <span>Grounded/Real</span>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <Label className="text-xs text-muted-foreground">Style Notes (optional)</Label>
+              <Input value={styleNotes} onChange={e => setStyleNotes(e.target.value)} placeholder="e.g., neon accents OK, no fantasy creatures..." className="mt-1 h-8" />
+            </div>
           </div>
 
           <Button className="w-full" onClick={handleSave} disabled={saving}>
