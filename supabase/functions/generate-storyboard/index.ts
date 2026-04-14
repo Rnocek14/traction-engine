@@ -17,6 +17,7 @@ import { logExperiment, logScore } from "../_shared/prompt-experiment-logger.ts"
 import type { SceneRole, CutZone, CutType, ChangeType, GeneratedStoryboard } from "../_shared/storyboard-prompts.ts";
 import { SYSTEM_PROMPT, STORY_TYPE_GUIDANCE } from "../_shared/storyboard-prompts.ts";
 import { parseTitlePromise, buildTitlePromiseBlock, validateContentQuality } from "../_shared/content-quality.ts";
+import { generateAndScoreHooks, selectBestHook, type ScoredHook, type HookCategory } from "../_shared/hook-optimizer.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
