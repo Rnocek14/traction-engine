@@ -118,15 +118,9 @@ Deno.serve(async (req) => {
       images = [{ url: product.image_url, label: "hero", is_primary: true }] as any;
     }
 
+    // If no images at all, allow AI-only generation with description-based scenes
     if (images.length === 0) {
-      return new Response(
-        JSON.stringify({ 
-          success: false, 
-          error: "No product images found. Run AI Research first to scrape product images, or add images manually.",
-          image_count: 0,
-        }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      console.log("No images found — will generate AI-only scenes from product description");
     }
 
     if (mode === "generate") {
