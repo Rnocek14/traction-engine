@@ -227,8 +227,10 @@ export default function Today() {
                     onApprove={handleApprove}
                     onReject={handleReject}
                     onProduce={handleProduce}
+                    onRegenerate={handleRegenerate}
                     onGenerateIdeas={handleGenerateIdeas}
                     onSlotClick={setSelectedSlot}
+                    producingIds={producingIds}
                   />
                 ))}
               </div>
