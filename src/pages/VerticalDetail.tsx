@@ -1,41 +1,50 @@
 /**
- * VerticalDetail — Single vertical workspace
- * 
- * Shows accounts, content queue, assigned products, and apps for one vertical.
+ * VerticalDetail — Single vertical workspace with content engine
  */
+import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { GlobalNav } from "@/components/GlobalNav";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "@/integrations/supabase/client";
+import { TodaysPlanCard } from "@/components/vertical/TodaysPlanCard";
+import { SuggestionsCard } from "@/components/vertical/SuggestionsCard";
+import { ReviewQueue } from "@/components/vertical/ReviewQueue";
+import { EngineSettingsDialog } from "@/components/vertical/EngineSettingsDialog";
+import { useVerticalEngine, useRunEngine, useUpdateVerticalConfig, useMatchProducts } from "@/hooks/use-vertical-engine";
 import {
   ArrowLeft, Film, Lightbulb, Users, ShoppingBag,
-  AppWindow, Sparkles, CheckCircle, Clock, Eye,
+  Clock, Eye, Wand2,
 } from "lucide-react";
 
 export default function VerticalDetail() {
   const { vertical } = useParams<{ vertical: string }>();
   const navigate = useNavigate();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  const { data: engine, isLoading: engineLoading } = useVerticalEngine(vertical);
+  const runEngine = useRunEngine();
+  const updateConfig = useUpdateVerticalConfig();
+  const matchProducts = useMatchProducts();
 
   const { data, isLoading } = useQuery({
     queryKey: ["vertical-detail", vertical],
     queryFn: async () => {
       const [accountsRes, storiesRes, ideasRes, productsRes] = await Promise.all([
         supabase.from("account_configs").select("*").eq("vertical", vertical! as any).eq("status", "active"),
-        supabase.from("story_jobs").select("id, title, status, assembled_status, review_status, account_id, product_id, created_at, assembled_video_url")
+        supabase.from("story_jobs").select("id, title, status, assembled_status, review_status, account_id, product_id, created_at, assembled_video_url, content_type")
           .order("created_at", { ascending: false }).limit(100),
         supabase.from("content_ideas").select("id, title, status, account_id, opportunity_score, angle, suggested_format, product_id, content_type")
           .order("created_at", { ascending: false }).limit(200),
-        supabase.from("products").select("id, name, image_url, status, price_cents, estimated_margin_pct").neq("status", "dead"),
+        supabase.from("products").select("id, name, image_url, status, price_cents, estimated_margin_pct, verticals").contains("verticals", [vertical!]),
       ]);
 
       const accounts = accountsRes.data || [];
       const accountIds = new Set(accounts.map(a => a.account_id));
-
       const stories = (storiesRes.data || []).filter(s => accountIds.has(s.account_id));
       const ideas = (ideasRes.data || []).filter(i => accountIds.has(i.account_id));
 
@@ -51,7 +60,7 @@ export default function VerticalDetail() {
 
   const assembled = stories.filter(s => s.assembled_status === "succeeded");
   const generating = stories.filter(s => s.status === "generating");
-  const pendingReview = stories.filter(s => s.assembled_status === "succeeded" && s.review_status === "pending");
+  const pendingReview = stories.filter(s => s.assembled_status === "succeeded" && (s.review_status === "pending" || !s.review_status));
   const proposedIdeas = ideas.filter(i => i.status === "proposed");
 
   const verticalLabel = vertical ? vertical.charAt(0).toUpperCase() + vertical.slice(1) : "";
@@ -72,6 +81,10 @@ export default function VerticalDetail() {
               {accounts.length} accounts · {assembled.length} videos · {proposedIdeas.length} ideas pending
             </p>
           </div>
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => matchProducts.mutate(undefined)}>
+            <Wand2 className="w-3.5 h-3.5" />
+            Match Products
+          </Button>
         </div>
 
         {/* Stats */}
@@ -83,15 +96,32 @@ export default function VerticalDetail() {
           <StatCard icon={<Lightbulb className="w-4 h-4" />} label="Ideas" value={proposedIdeas.length} />
         </div>
 
+        {/* Today's Plan + Suggestions (Engine Layer) */}
+        {engine && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="lg:col-span-2 space-y-4">
+              <TodaysPlanCard
+                plan={engine}
+                vertical={vertical!}
+                onRunEngine={() => runEngine.mutate(vertical!)}
+                isRunning={runEngine.isPending}
+                onOpenSettings={() => setSettingsOpen(true)}
+              />
+              <ReviewQueue plan={engine} vertical={vertical!} />
+            </div>
+            <SuggestionsCard plan={engine} />
+          </div>
+        )}
+        {engineLoading && <Skeleton className="h-40" />}
+
         <Tabs defaultValue="accounts">
           <TabsList>
             <TabsTrigger value="accounts">Accounts</TabsTrigger>
             <TabsTrigger value="content">Content ({stories.length})</TabsTrigger>
             <TabsTrigger value="ideas">Ideas ({ideas.length})</TabsTrigger>
-            <TabsTrigger value="products">Products</TabsTrigger>
+            <TabsTrigger value="products">Products ({products.length})</TabsTrigger>
           </TabsList>
 
-          {/* Accounts Tab */}
           <TabsContent value="accounts" className="mt-4">
             {isLoading ? (
               <div className="space-y-3">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-20" />)}</div>
@@ -119,7 +149,6 @@ export default function VerticalDetail() {
             )}
           </TabsContent>
 
-          {/* Content Tab */}
           <TabsContent value="content" className="mt-4">
             {stories.length === 0 ? (
               <Card><CardContent className="py-8 text-center text-muted-foreground">
@@ -142,6 +171,9 @@ export default function VerticalDetail() {
                               {s.review_status}
                             </Badge>
                           )}
+                          {s.content_type && (
+                            <Badge variant="outline" className="text-[10px]">{s.content_type}</Badge>
+                          )}
                           {s.product_id && <ShoppingBag className="w-3 h-3 text-muted-foreground" />}
                         </div>
                       </div>
@@ -155,7 +187,6 @@ export default function VerticalDetail() {
             )}
           </TabsContent>
 
-          {/* Ideas Tab */}
           <TabsContent value="ideas" className="mt-4">
             {ideas.length === 0 ? (
               <Card><CardContent className="py-8 text-center text-muted-foreground">
@@ -186,33 +217,47 @@ export default function VerticalDetail() {
             )}
           </TabsContent>
 
-          {/* Products Tab */}
           <TabsContent value="products" className="mt-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {products.slice(0, 12).map(p => (
-                <Card key={p.id} className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => navigate(`/products/${p.id}`)}>
-                  <CardContent className="p-3 flex items-center gap-3">
-                    {p.image_url ? (
-                      <img src={p.image_url} alt="" className="w-10 h-10 rounded object-cover shrink-0" />
-                    ) : (
-                      <div className="w-10 h-10 rounded bg-muted flex items-center justify-center shrink-0">
-                        <ShoppingBag className="w-4 h-4 text-muted-foreground" />
+            {products.length === 0 ? (
+              <Card><CardContent className="py-8 text-center text-muted-foreground">
+                <ShoppingBag className="w-8 h-8 mx-auto mb-2" />
+                <p className="text-sm">No products assigned to this vertical</p>
+                <p className="text-xs mt-1">Click "Match Products" above to auto-assign products</p>
+              </CardContent></Card>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {products.map(p => (
+                  <Card key={p.id} className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => navigate(`/products/${p.id}`)}>
+                    <CardContent className="p-3 flex items-center gap-3">
+                      {p.image_url ? (
+                        <img src={p.image_url} alt="" className="w-10 h-10 rounded object-cover shrink-0" />
+                      ) : (
+                        <div className="w-10 h-10 rounded bg-muted flex items-center justify-center shrink-0">
+                          <ShoppingBag className="w-4 h-4 text-muted-foreground" />
+                        </div>
+                      )}
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate">{p.name}</p>
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <Badge variant="outline" className="text-[10px]">{p.status}</Badge>
+                          {p.price_cents && <span>${(p.price_cents / 100).toFixed(2)}</span>}
+                        </div>
                       </div>
-                    )}
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium truncate">{p.name}</p>
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <Badge variant="outline" className="text-[10px]">{p.status}</Badge>
-                        {p.price_cents && <span>${(p.price_cents / 100).toFixed(2)}</span>}
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
           </TabsContent>
         </Tabs>
       </main>
+
+      <EngineSettingsDialog
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        config={engine?.config || null}
+        onSave={(updates) => updateConfig.mutate({ vertical: vertical!, updates })}
+      />
     </div>
   );
 }

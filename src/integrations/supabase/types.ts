@@ -1249,6 +1249,7 @@ export type Database = {
           supplier_url: string | null
           synonyms: string[] | null
           updated_at: string
+          verticals: string[]
         }
         Insert: {
           canonical_name?: string | null
@@ -1282,6 +1283,7 @@ export type Database = {
           supplier_url?: string | null
           synonyms?: string[] | null
           updated_at?: string
+          verticals?: string[]
         }
         Update: {
           canonical_name?: string | null
@@ -1315,6 +1317,7 @@ export type Database = {
           supplier_url?: string | null
           synonyms?: string[] | null
           updated_at?: string
+          verticals?: string[]
         }
         Relationships: [
           {
@@ -2385,7 +2388,9 @@ export type Database = {
           assembled_meta: Json | null
           assembled_status: string | null
           assembled_video_url: string | null
+          auto_generated: boolean
           completed_clips: number | null
+          content_type: string
           continuity_anchors: Json | null
           continuity_score: number | null
           created_at: string
@@ -2394,6 +2399,7 @@ export type Database = {
           product_id: string | null
           review_status: string
           script_experiment_id: string | null
+          source_idea_id: string | null
           status: string
           story_type: string
           storyboard_json: Json | null
@@ -2411,7 +2417,9 @@ export type Database = {
           assembled_meta?: Json | null
           assembled_status?: string | null
           assembled_video_url?: string | null
+          auto_generated?: boolean
           completed_clips?: number | null
+          content_type?: string
           continuity_anchors?: Json | null
           continuity_score?: number | null
           created_at?: string
@@ -2420,6 +2428,7 @@ export type Database = {
           product_id?: string | null
           review_status?: string
           script_experiment_id?: string | null
+          source_idea_id?: string | null
           status?: string
           story_type?: string
           storyboard_json?: Json | null
@@ -2437,7 +2446,9 @@ export type Database = {
           assembled_meta?: Json | null
           assembled_status?: string | null
           assembled_video_url?: string | null
+          auto_generated?: boolean
           completed_clips?: number | null
+          content_type?: string
           continuity_anchors?: Json | null
           continuity_score?: number | null
           created_at?: string
@@ -2446,6 +2457,7 @@ export type Database = {
           product_id?: string | null
           review_status?: string
           script_experiment_id?: string | null
+          source_idea_id?: string | null
           status?: string
           story_type?: string
           storyboard_json?: Json | null
@@ -2483,6 +2495,13 @@ export type Database = {
             columns: ["script_experiment_id"]
             isOneToOne: false
             referencedRelation: "prompt_experiments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "story_jobs_source_idea_id_fkey"
+            columns: ["source_idea_id"]
+            isOneToOne: false
+            referencedRelation: "content_ideas"
             referencedColumns: ["id"]
           },
           {
@@ -2786,6 +2805,45 @@ export type Database = {
           id?: string
           role?: Database["public"]["Enums"]["app_role"]
           user_id?: string
+        }
+        Relationships: []
+      }
+      vertical_configs: {
+        Row: {
+          auto_generate: boolean
+          created_at: string
+          daily_app_target: number
+          daily_growth_target: number
+          daily_product_target: number
+          growth_ratio: number
+          id: string
+          last_engine_run_at: string | null
+          updated_at: string
+          vertical: string
+        }
+        Insert: {
+          auto_generate?: boolean
+          created_at?: string
+          daily_app_target?: number
+          daily_growth_target?: number
+          daily_product_target?: number
+          growth_ratio?: number
+          id?: string
+          last_engine_run_at?: string | null
+          updated_at?: string
+          vertical: string
+        }
+        Update: {
+          auto_generate?: boolean
+          created_at?: string
+          daily_app_target?: number
+          daily_growth_target?: number
+          daily_product_target?: number
+          growth_ratio?: number
+          id?: string
+          last_engine_run_at?: string | null
+          updated_at?: string
+          vertical?: string
         }
         Relationships: []
       }
