@@ -7,6 +7,7 @@ import type { PostSlot as PostSlotType } from "@/hooks/use-today-feed";
 
 const STATUS_CONFIG = {
   idea: { label: "Idea", icon: Lightbulb, color: "bg-yellow-500/10 text-yellow-600 border-yellow-500/30" },
+  draft: { label: "Draft", icon: Play, color: "bg-orange-500/10 text-orange-600 border-orange-500/30" },
   generating: { label: "Generating", icon: Loader2, color: "bg-blue-500/10 text-blue-600 border-blue-500/30" },
   ready: { label: "Ready", icon: CheckCircle, color: "bg-green-500/10 text-green-600 border-green-500/30" },
   approved: { label: "Approved", icon: Send, color: "bg-primary/10 text-primary border-primary/30" },
@@ -164,6 +165,22 @@ export function PostSlotCard({ slot, onApprove, onReject, onProduce, onRegenerat
                   </Button>
                 )}
               </div>
+            )}
+            {slot.status === "draft" && slot.storyJobId && (
+              <Button
+                size="sm"
+                variant="default"
+                className="h-7 text-xs flex-1"
+                disabled={isProducing}
+                onClick={() => onRegenerate?.(slot.storyJobId!)}
+              >
+                {isProducing ? (
+                  <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                ) : (
+                  <Play className="w-3 h-3 mr-1" />
+                )}
+                {isProducing ? "Starting…" : "Generate Video"}
+              </Button>
             )}
             {slot.status === "generating" && (
               <p className="text-[10px] text-muted-foreground italic">Processing…</p>
