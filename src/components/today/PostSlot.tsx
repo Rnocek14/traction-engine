@@ -104,6 +104,11 @@ export function PostSlotCard({ slot, onApprove, onReject, onProduce, onRegenerat
                 <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => onReject?.(slot.storyJobId!)}>
                   <XCircle className="w-3 h-3" />
                 </Button>
+                {slot.storyJobId && (
+                  <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => onRegenerate?.(slot.storyJobId!)}>
+                    <RotateCcw className="w-3 h-3" />
+                  </Button>
+                )}
                 {slot.assembledVideoUrl && (
                   <Button size="sm" variant="ghost" className="h-7 text-xs" asChild>
                     <a href={slot.assembledVideoUrl} target="_blank" rel="noopener noreferrer">
@@ -114,16 +119,51 @@ export function PostSlotCard({ slot, onApprove, onReject, onProduce, onRegenerat
               </>
             )}
             {slot.status === "idea" && (
-              <Button size="sm" variant="secondary" className="h-7 text-xs flex-1" onClick={() => onProduce?.(slot.ideaId!)}>
-                <Play className="w-3 h-3 mr-1" /> Produce
+              <Button
+                size="sm"
+                variant="secondary"
+                className="h-7 text-xs flex-1"
+                disabled={isProducing}
+                onClick={() => onProduce?.(slot.ideaId!)}
+              >
+                {isProducing ? (
+                  <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                ) : (
+                  <Play className="w-3 h-3 mr-1" />
+                )}
+                {isProducing ? "Producing…" : "Produce"}
               </Button>
             )}
-            {slot.status === "approved" && slot.assembledVideoUrl && (
-              <Button size="sm" variant="outline" className="h-7 text-xs flex-1" asChild>
-                <a href={slot.assembledVideoUrl} target="_blank" rel="noopener noreferrer">
-                  <Download className="w-3 h-3 mr-1" /> Download
-                </a>
-              </Button>
+            {slot.status === "approved" && (
+              <div className="flex gap-1.5 flex-1">
+                {slot.assembledVideoUrl ? (
+                  <Button size="sm" variant="outline" className="h-7 text-xs flex-1" asChild>
+                    <a href={slot.assembledVideoUrl} target="_blank" rel="noopener noreferrer">
+                      <Download className="w-3 h-3 mr-1" /> Download
+                    </a>
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="default"
+                    className="h-7 text-xs flex-1"
+                    disabled={isProducing}
+                    onClick={() => slot.ideaId ? onProduce?.(slot.ideaId) : onRegenerate?.(slot.storyJobId!)}
+                  >
+                    {isProducing ? (
+                      <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                    ) : (
+                      <Play className="w-3 h-3 mr-1" />
+                    )}
+                    {isProducing ? "Generating…" : "Generate Video"}
+                  </Button>
+                )}
+                {slot.storyJobId && slot.assembledVideoUrl && (
+                  <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => onRegenerate?.(slot.storyJobId!)}>
+                    <RotateCcw className="w-3 h-3" />
+                  </Button>
+                )}
+              </div>
             )}
             {slot.status === "generating" && (
               <p className="text-[10px] text-muted-foreground italic">Processing…</p>
