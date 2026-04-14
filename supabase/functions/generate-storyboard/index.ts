@@ -565,6 +565,16 @@ Return ONLY valid JSON: {"beats":[{...}]}`;
             allowed_tones: constraints.allowed_tones,
             allowed_hook_categories: constraints.allowed_hook_categories,
             hook_category: hookCategory, cta_phrase: ctaResult.phrase,
+            hook_optimization: hookResult ? {
+              winner: hookResult.hook_text,
+              winner_score: hookResult.hook_score,
+              candidates_evaluated: hookResult.candidates_count,
+              all_candidates: allHookCandidates.map(h => ({
+                text: h.candidate.text,
+                score: h.score.total,
+                rank: h.rank,
+              })),
+            } : undefined,
             preflight, compliance: {
               disclaimer: storyCompliance.disclaimer,
               total_replacements: storyCompliance.total_replacements,
