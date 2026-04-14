@@ -1,12 +1,90 @@
+import { useState, useRef, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Video, FileText, Loader2, CheckCircle, XCircle, AlertCircle, Image } from "lucide-react";
+import { Video, FileText, Loader2, CheckCircle, XCircle, AlertCircle, Image, Play, Pause, Volume2, VolumeX } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+// ─── Scene Video Player ─────────────────────────────────────
+
+function SceneVideoPlayer({ url, poster }: { url: string; poster?: string }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [muted, setMuted] = useState(true);
+  const [failed, setFailed] = useState(false);
+
+  const togglePlay = useCallback(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (v.paused) {
+      v.play().catch(() => setFailed(true));
+      setPlaying(true);
+    } else {
+      v.pause();
+      setPlaying(false);
+    }
+  }, []);
+
+  if (failed) {
+    return (
+      <div className="w-full aspect-video bg-secondary/30 rounded-md flex flex-col items-center justify-center gap-1.5">
+        <p className="text-[10px] text-muted-foreground">Preview unavailable</p>
+        <Button size="sm" variant="ghost" className="h-6 text-[10px]" onClick={() => window.open(url, "_blank")}>
+          Open in new tab
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative w-full aspect-video bg-black rounded-md overflow-hidden group">
+      <video
+        ref={videoRef}
+        src={url}
+        poster={poster}
+        muted={muted}
+        playsInline
+        loop
+        className="w-full h-full object-contain"
+        onError={() => setFailed(true)}
+        onEnded={() => setPlaying(false)}
+      />
+      {/* Play/pause overlay */}
+      <div
+        className="absolute inset-0 flex items-center justify-center cursor-pointer bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity"
+        onClick={togglePlay}
+      >
+        {playing ? (
+          <Pause className="h-8 w-8 text-white drop-shadow-lg" />
+        ) : (
+          <Play className="h-8 w-8 text-white drop-shadow-lg" />
+        )}
+      </div>
+      {/* Mute toggle */}
+      <button
+        className="absolute bottom-1.5 right-1.5 h-6 w-6 rounded-full bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+        onClick={(e) => { e.stopPropagation(); setMuted(!muted); if (videoRef.current) videoRef.current.muted = !muted; }}
+      >
+        {muted ? <VolumeX className="h-3 w-3 text-white" /> : <Volume2 className="h-3 w-3 text-white" />}
+      </button>
+      {/* Click to play when not playing */}
+      {!playing && (
+        <div className="absolute inset-0 flex items-center justify-center cursor-pointer" onClick={togglePlay}>
+          <div className="h-10 w-10 rounded-full bg-primary/90 flex items-center justify-center shadow-lg">
+            <Play className="h-5 w-5 text-primary-foreground ml-0.5" />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── PostDetailDrawer ───────────────────────────────────────
 
 interface PostDetailDrawerProps {
   open: boolean;
@@ -16,7 +94,6 @@ interface PostDetailDrawerProps {
 }
 
 export function PostDetailDrawer({ open, onOpenChange, storyJobId, ideaId }: PostDetailDrawerProps) {
-  // Fetch story job details (storyboard, status)
   const { data: storyJob, isLoading: jobLoading } = useQuery({
     queryKey: ["post-detail-job", storyJobId],
     queryFn: async () => {
@@ -32,7 +109,6 @@ export function PostDetailDrawer({ open, onOpenChange, storyJobId, ideaId }: Pos
     enabled: open && !!storyJobId,
   });
 
-  // Fetch video_jobs for this story
   const { data: videoJobs, isLoading: clipsLoading } = useQuery({
     queryKey: ["post-detail-clips", storyJobId],
     queryFn: async () => {
@@ -48,7 +124,6 @@ export function PostDetailDrawer({ open, onOpenChange, storyJobId, ideaId }: Pos
     enabled: open && !!storyJobId,
   });
 
-  // Fetch idea details if no job yet
   const { data: idea } = useQuery({
     queryKey: ["post-detail-idea", ideaId],
     queryFn: async () => {
@@ -67,7 +142,6 @@ export function PostDetailDrawer({ open, onOpenChange, storyJobId, ideaId }: Pos
   const scenes = (storyJob?.storyboard_json as any)?.scenes || [];
   const isLoading = jobLoading || clipsLoading;
 
-  // Group clips by scene_id or sequence_index
   const clipsByScene = new Map<string, typeof videoJobs>();
   for (const clip of videoJobs || []) {
     const key = clip.scene_id || `idx-${clip.sequence_index}`;
@@ -118,7 +192,7 @@ export function PostDetailDrawer({ open, onOpenChange, storyJobId, ideaId }: Pos
               </div>
             )}
 
-            {/* Idea-only view (no story job yet) */}
+            {/* Idea-only view */}
             {!storyJobId && idea && (
               <div className="space-y-3">
                 <div className="bg-muted/50 rounded-lg p-3 space-y-2">
@@ -147,28 +221,27 @@ export function PostDetailDrawer({ open, onOpenChange, storyJobId, ideaId }: Pos
 
             {/* Assembled video preview */}
             {storyJob?.assembled_video_url && (
-              <div className="rounded-lg overflow-hidden bg-black">
-                <video
-                  src={storyJob.assembled_video_url}
-                  controls
-                  playsInline
-                  className="w-full max-h-[300px] object-contain"
-                />
-                <p className="text-[10px] text-muted-foreground px-2 py-1">Assembled output</p>
+              <div className="space-y-1.5">
+                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                  <Video className="h-3.5 w-3.5" />
+                  Final Assembled Video
+                </h3>
+                <SceneVideoPlayer url={storyJob.assembled_video_url} />
               </div>
             )}
 
-            {/* Scene-by-scene breakdown */}
+            {/* Scene-by-scene breakdown with playable clips */}
             {scenes.length > 0 && (
               <div className="space-y-3">
                 <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
                   <FileText className="h-3.5 w-3.5" />
-                  Storyboard — {scenes.length} scenes
+                  Scenes — {scenes.length} total
                 </h3>
 
                 {scenes.map((scene: any, idx: number) => {
                   const sceneClips = clipsByScene.get(scene.id) || clipsByScene.get(`idx-${idx}`) || [];
-                  const primaryClip = sceneClips.find((c: any) => c.is_primary) || sceneClips[0];
+                  const primaryClip = sceneClips.find((c: any) => c.is_primary) || sceneClips.find((c: any) => c.status === "done" && c.output_url) || sceneClips[0];
+                  const hasPlayableClip = primaryClip?.output_url && primaryClip.status === "done";
 
                   return (
                     <div key={scene.id || idx} className="bg-muted/30 border rounded-lg overflow-hidden">
@@ -178,10 +251,8 @@ export function PostDetailDrawer({ open, onOpenChange, storyJobId, ideaId }: Pos
                           <Badge variant="outline" className="text-[10px] shrink-0">
                             Scene {idx + 1}
                           </Badge>
-                          {scene.camera_direction && (
-                            <span className="text-[10px] text-muted-foreground truncate">
-                              📹 {scene.camera_direction}
-                            </span>
+                          {scene.beat_role && (
+                            <Badge variant="secondary" className="text-[10px]">{scene.beat_role}</Badge>
                           )}
                           {scene.duration_target && (
                             <span className="text-[10px] text-muted-foreground ml-auto">
@@ -190,67 +261,78 @@ export function PostDetailDrawer({ open, onOpenChange, storyJobId, ideaId }: Pos
                           )}
                         </div>
 
-                        {/* Scene prompt — the key thing the user wants to see */}
-                        <p className="text-xs leading-relaxed">{scene.prompt}</p>
+                        {/* Narration line */}
+                        {scene.narration_line && (
+                          <p className="text-xs leading-relaxed italic text-muted-foreground">
+                            🎙 "{scene.narration_line}"
+                          </p>
+                        )}
+
+                        {/* Text overlay */}
+                        {scene.onscreen_text && (
+                          <p className="text-[10px] text-muted-foreground">
+                            📝 Overlay: <span className="font-medium text-foreground">{scene.onscreen_text}</span>
+                          </p>
+                        )}
                       </div>
 
-                      {/* Clips for this scene */}
-                      {sceneClips.length > 0 && (
-                        <div className="border-t bg-background/50">
-                          {sceneClips.map((clip: any) => (
-                            <div key={clip.id} className="p-2 flex gap-2 items-start border-b last:border-b-0">
-                              {/* Thumbnail or video */}
-                              <div className="w-20 h-14 rounded bg-black shrink-0 overflow-hidden relative">
-                                {clip.thumbnail_url ? (
-                                  <img src={clip.thumbnail_url} alt="" className="w-full h-full object-cover" />
-                                ) : clip.output_url ? (
-                                  <video src={clip.output_url} className="w-full h-full object-cover" muted playsInline />
-                                ) : (
-                                  <div className="w-full h-full flex items-center justify-center">
-                                    <Image className="h-4 w-4 text-muted-foreground" />
-                                  </div>
-                                )}
-                                {clip.is_primary && (
-                                  <Badge className="absolute top-0.5 left-0.5 text-[8px] h-3.5 px-1 bg-primary/80">
-                                    Primary
-                                  </Badge>
-                                )}
-                              </div>
+                      {/* Playable video for the primary/best clip */}
+                      {hasPlayableClip && (
+                        <div className="px-3 pb-2">
+                          <SceneVideoPlayer
+                            url={primaryClip.output_url!}
+                            poster={primaryClip.thumbnail_url || undefined}
+                          />
+                          <div className="flex items-center gap-1.5 mt-1.5">
+                            {getClipStatusIcon(primaryClip.status)}
+                            <Badge variant="outline" className="text-[10px] h-4">{primaryClip.provider}</Badge>
+                            {primaryClip.is_primary && (
+                              <Badge className="text-[10px] h-4 bg-primary/80">Primary</Badge>
+                            )}
+                            {primaryClip.auto_overall_score != null && (
+                              <span className="text-[10px] text-muted-foreground ml-auto">
+                                Quality: {primaryClip.auto_overall_score}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      )}
 
-                              {/* Clip details */}
-                              <div className="flex-1 min-w-0 space-y-0.5">
+                      {/* Other clips (if multiple generated) */}
+                      {sceneClips.length > 1 && (
+                        <details className="border-t">
+                          <summary className="p-2 text-[10px] text-muted-foreground cursor-pointer hover:text-foreground">
+                            {sceneClips.length - 1} other clip{sceneClips.length > 2 ? "s" : ""} generated
+                          </summary>
+                          <div className="px-2 pb-2 space-y-2">
+                            {sceneClips.filter((c: any) => c.id !== primaryClip?.id).map((clip: any) => (
+                              <div key={clip.id} className="space-y-1">
+                                {clip.output_url && clip.status === "done" && (
+                                  <SceneVideoPlayer url={clip.output_url} poster={clip.thumbnail_url || undefined} />
+                                )}
                                 <div className="flex items-center gap-1.5">
                                   {getClipStatusIcon(clip.status)}
-                                  <Badge variant="outline" className="text-[10px] h-4">
-                                    {clip.provider}
-                                  </Badge>
+                                  <Badge variant="outline" className="text-[10px] h-4">{clip.provider}</Badge>
                                   {clip.auto_overall_score != null && (
-                                    <span className="text-[10px] text-muted-foreground ml-auto">
-                                      Q:{clip.auto_overall_score}
-                                    </span>
+                                    <span className="text-[10px] text-muted-foreground ml-auto">Q:{clip.auto_overall_score}</span>
                                   )}
                                 </div>
-
-                                {/* Show enriched prompt if different from original */}
-                                {clip.enriched_prompt && clip.enriched_prompt !== clip.original_prompt ? (
-                                  <details className="text-[10px]">
-                                    <summary className="text-muted-foreground cursor-pointer hover:text-foreground">
-                                      Enriched prompt
-                                    </summary>
-                                    <p className="mt-1 text-muted-foreground leading-relaxed whitespace-pre-wrap">
-                                      {clip.enriched_prompt}
-                                    </p>
-                                  </details>
-                                ) : clip.original_prompt ? (
-                                  <p className="text-[10px] text-muted-foreground line-clamp-2">{clip.original_prompt}</p>
-                                ) : null}
-
-                                {clip.error && (
-                                  <p className="text-[10px] text-destructive">{clip.error}</p>
-                                )}
+                                {clip.error && <p className="text-[10px] text-destructive">{clip.error}</p>}
                               </div>
-                            </div>
-                          ))}
+                            ))}
+                          </div>
+                        </details>
+                      )}
+
+                      {/* Single non-playable clip info */}
+                      {sceneClips.length === 1 && !hasPlayableClip && (
+                        <div className="border-t p-2 flex items-center gap-1.5">
+                          {getClipStatusIcon(sceneClips[0].status)}
+                          <Badge variant="outline" className="text-[10px] h-4">{sceneClips[0].provider}</Badge>
+                          <span className="text-[10px] text-muted-foreground">{sceneClips[0].status}</span>
+                          {sceneClips[0].error && (
+                            <span className="text-[10px] text-destructive truncate ml-auto">{sceneClips[0].error}</span>
+                          )}
                         </div>
                       )}
 
@@ -274,8 +356,8 @@ export function PostDetailDrawer({ open, onOpenChange, storyJobId, ideaId }: Pos
                   Clips — {videoJobs!.length}
                 </h3>
                 {videoJobs!.map((clip: any) => (
-                  <div key={clip.id} className="bg-muted/30 border rounded-lg p-3 space-y-2">
-                    <div className="flex items-center gap-1.5">
+                  <div key={clip.id} className="bg-muted/30 border rounded-lg overflow-hidden space-y-2">
+                    <div className="p-3 flex items-center gap-1.5">
                       {getClipStatusIcon(clip.status)}
                       <Badge variant="outline" className="text-[10px]">{clip.provider}</Badge>
                       {clip.auto_overall_score != null && (
@@ -283,16 +365,12 @@ export function PostDetailDrawer({ open, onOpenChange, storyJobId, ideaId }: Pos
                       )}
                     </div>
                     {clip.original_prompt && (
-                      <p className="text-xs text-muted-foreground">{clip.original_prompt}</p>
+                      <p className="text-xs text-muted-foreground px-3">{clip.original_prompt}</p>
                     )}
-                    {clip.enriched_prompt && clip.enriched_prompt !== clip.original_prompt && (
-                      <details className="text-[10px]">
-                        <summary className="text-muted-foreground cursor-pointer">Enriched prompt</summary>
-                        <p className="mt-1 text-muted-foreground whitespace-pre-wrap">{clip.enriched_prompt}</p>
-                      </details>
-                    )}
-                    {clip.output_url && (
-                      <video src={clip.output_url} controls playsInline className="w-full rounded max-h-[200px] object-contain bg-black" />
+                    {clip.output_url && clip.status === "done" && (
+                      <div className="px-3 pb-3">
+                        <SceneVideoPlayer url={clip.output_url} poster={clip.thumbnail_url || undefined} />
+                      </div>
                     )}
                   </div>
                 ))}
