@@ -19,11 +19,13 @@ interface AccountRowProps {
   onApprove?: (jobId: string) => void;
   onReject?: (jobId: string) => void;
   onProduce?: (ideaId: string) => void;
+  onRegenerate?: (jobId: string) => void;
   onGenerateIdeas?: (accountId: string) => void;
   onSlotClick?: (slot: PostSlot) => void;
+  producingIds?: Set<string>;
 }
 
-export function AccountRow({ item, compact, onApprove, onReject, onProduce, onGenerateIdeas, onSlotClick }: AccountRowProps) {
+export function AccountRow({ item, compact, onApprove, onReject, onProduce, onRegenerate, onGenerateIdeas, onSlotClick, producingIds }: AccountRowProps) {
   if (compact) {
     return (
       <Card>
