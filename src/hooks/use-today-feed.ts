@@ -12,6 +12,10 @@ export interface PostSlot {
   storyJobId: string | null;
   ideaId: string | null;
   createdAt: string;
+  // Quality signals
+  qualityScore: number | null;       // 0-100 avg auto_overall_score
+  completionPct: number | null;      // % clips done
+  confidence: "ready" | "review" | "regenerate" | null;
 }
 
 export interface AccountFeedItem {
@@ -44,12 +48,24 @@ function getStartOfToday() {
   return d.toISOString();
 }
 
-function mapJobToSlot(job: any): PostSlot {
+function deriveConfidence(qualityScore: number | null, completionPct: number | null, hasVideo: boolean): PostSlot["confidence"] {
+  if (!hasVideo) return null;
+  if (qualityScore != null && qualityScore >= 70 && completionPct != null && completionPct >= 80) return "ready";
+  if (qualityScore != null && qualityScore < 40) return "regenerate";
+  if (qualityScore != null || completionPct != null) return "review";
+  return null;
+}
+
+function mapJobToSlot(job: any, qualityMap: Map<string, { avg: number; done: number; total: number }>): PostSlot {
   let status: PostSlotStatus = "generating";
   if (job.review_status === "approved") status = "approved";
   else if (job.review_status === "rejected") status = "rejected";
   else if (job.assembled_video_url) status = "ready";
   else if (["pending", "generating", "assembling"].includes(job.status)) status = "generating";
+
+  const q = qualityMap.get(job.id);
+  const qualityScore = q?.avg ?? null;
+  const completionPct = q && q.total > 0 ? Math.round((q.done / q.total) * 100) : null;
 
   return {
     id: job.id,
@@ -60,6 +76,9 @@ function mapJobToSlot(job: any): PostSlot {
     storyJobId: job.id,
     ideaId: job.source_idea_id,
     createdAt: job.created_at,
+    qualityScore: qualityScore != null ? Math.round(qualityScore) : null,
+    completionPct,
+    confidence: deriveConfidence(qualityScore, completionPct, !!job.assembled_video_url),
   };
 }
 
@@ -73,6 +92,9 @@ function mapIdeaToSlot(idea: any): PostSlot {
     storyJobId: null,
     ideaId: idea.id,
     createdAt: idea.created_at,
+    qualityScore: null,
+    completionPct: null,
+    confidence: null,
   };
 }
 
@@ -107,6 +129,30 @@ export function useTodayFeed() {
         .limit(200);
       if (ideaErr) throw ideaErr;
 
+      // Fetch quality scores for today's jobs
+      const jobIds = (jobs || []).map((j: any) => j.id);
+      const qualityMap = new Map<string, { avg: number; done: number; total: number }>();
+      if (jobIds.length > 0) {
+        const { data: clips } = await supabase
+          .from("video_jobs")
+          .select("story_job_id, status, auto_overall_score, is_primary")
+          .in("story_job_id", jobIds);
+        
+        // Group by story_job_id
+        const byJob = new Map<string, any[]>();
+        for (const c of clips || []) {
+          const arr = byJob.get(c.story_job_id) || [];
+          arr.push(c);
+          byJob.set(c.story_job_id, arr);
+        }
+        for (const [jobId, jobClips] of byJob) {
+          const scored = jobClips.filter((c: any) => c.auto_overall_score != null && c.is_primary);
+          const avg = scored.length > 0 ? scored.reduce((s: number, c: any) => s + c.auto_overall_score, 0) / scored.length : 0;
+          const done = jobClips.filter((c: any) => c.status === "done").length;
+          qualityMap.set(jobId, { avg: scored.length > 0 ? avg : 0, done, total: jobClips.length });
+        }
+      }
+
       // Group by account
       const jobsByAccount = new Map<string, any[]>();
       for (const j of jobs || []) {
@@ -133,7 +179,7 @@ export function useTodayFeed() {
         const accountJobs = jobsByAccount.get(acc.account_id) || [];
         const accountIdeas = ideasByAccount.get(acc.account_id) || [];
 
-        const jobSlots = accountJobs.map(mapJobToSlot);
+        const jobSlots = accountJobs.map((j: any) => mapJobToSlot(j, qualityMap));
         const ideaSlots = accountIdeas.map(mapIdeaToSlot);
 
         // Combine: jobs first, then ideas to fill up to max_daily_posts
