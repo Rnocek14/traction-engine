@@ -2388,7 +2388,9 @@ export type Database = {
           assembled_meta: Json | null
           assembled_status: string | null
           assembled_video_url: string | null
+          auto_generated: boolean
           completed_clips: number | null
+          content_type: string
           continuity_anchors: Json | null
           continuity_score: number | null
           created_at: string
@@ -2397,6 +2399,7 @@ export type Database = {
           product_id: string | null
           review_status: string
           script_experiment_id: string | null
+          source_idea_id: string | null
           status: string
           story_type: string
           storyboard_json: Json | null
@@ -2414,7 +2417,9 @@ export type Database = {
           assembled_meta?: Json | null
           assembled_status?: string | null
           assembled_video_url?: string | null
+          auto_generated?: boolean
           completed_clips?: number | null
+          content_type?: string
           continuity_anchors?: Json | null
           continuity_score?: number | null
           created_at?: string
@@ -2423,6 +2428,7 @@ export type Database = {
           product_id?: string | null
           review_status?: string
           script_experiment_id?: string | null
+          source_idea_id?: string | null
           status?: string
           story_type?: string
           storyboard_json?: Json | null
@@ -2440,7 +2446,9 @@ export type Database = {
           assembled_meta?: Json | null
           assembled_status?: string | null
           assembled_video_url?: string | null
+          auto_generated?: boolean
           completed_clips?: number | null
+          content_type?: string
           continuity_anchors?: Json | null
           continuity_score?: number | null
           created_at?: string
@@ -2449,6 +2457,7 @@ export type Database = {
           product_id?: string | null
           review_status?: string
           script_experiment_id?: string | null
+          source_idea_id?: string | null
           status?: string
           story_type?: string
           storyboard_json?: Json | null
@@ -2486,6 +2495,13 @@ export type Database = {
             columns: ["script_experiment_id"]
             isOneToOne: false
             referencedRelation: "prompt_experiments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "story_jobs_source_idea_id_fkey"
+            columns: ["source_idea_id"]
+            isOneToOne: false
+            referencedRelation: "content_ideas"
             referencedColumns: ["id"]
           },
           {
