@@ -5,6 +5,8 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+const IDEA_REFILL_THRESHOLD = 3;
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
@@ -27,12 +29,10 @@ Deno.serve(async (req) => {
     const { data: configs, error: cfgErr } = await query;
     if (cfgErr) throw cfgErr;
     if (!configs?.length) {
-      return new Response(JSON.stringify({ success: true, message: "No verticals configured", created: 0 }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return respond({ success: true, message: "No verticals configured", created: 0 });
     }
 
-    // 2. Load accounts with FULL identity (grouped by vertical)
+    // 2. Load accounts
     const { data: accounts } = await supabase
       .from("account_configs")
       .select("account_id, vertical, account_name, platform, monetization_mode, content_pillars, promise, content_style, hook_style, persona, audience, cta_style, cta_phrases, max_daily_posts")
@@ -45,13 +45,13 @@ Deno.serve(async (req) => {
       accountsByVertical.set(a.vertical, list);
     });
 
-    // 3. Load products assigned to verticals
+    // 3. Load products
     const { data: products } = await supabase
       .from("products")
       .select("id, name, image_url, verticals, price_cents, estimated_margin_pct, status")
       .neq("status", "dead");
 
-    // 4. Load today's existing story_jobs to avoid duplicates
+    // 4. Load today's existing story_jobs
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
     const { data: todayJobs } = await supabase
@@ -59,32 +59,28 @@ Deno.serve(async (req) => {
       .select("id, account_id, product_id, content_type")
       .gte("created_at", todayStart.toISOString());
 
-    // Count today's jobs PER ACCOUNT (not just per vertical)
     const todayJobsByAccount = new Map<string, number>();
     (todayJobs || []).forEach(j => {
       todayJobsByAccount.set(j.account_id, (todayJobsByAccount.get(j.account_id) || 0) + 1);
     });
 
-    // 5. Load top content ideas per vertical
-    const { data: ideas } = await supabase
+    // 5. Load ALL proposed ideas (we'll check per-account counts)
+    const { data: allIdeas } = await supabase
       .from("content_ideas")
       .select("id, title, subject, account_id, opportunity_score, angle, suggested_format, content_type, vertical")
       .eq("status", "proposed")
       .order("opportunity_score", { ascending: false })
-      .limit(100);
+      .limit(200);
 
-    const ideasByVertical = new Map<string, typeof ideas>();
-    (ideas || []).forEach(i => {
-      const v = i.vertical || ((accounts || []).find(a => a.account_id === i.account_id)?.vertical);
-      if (v) {
-        const list = ideasByVertical.get(v) || [];
-        list.push(i);
-        ideasByVertical.set(v, list);
-      }
+    const ideasByAccount = new Map<string, typeof allIdeas>();
+    (allIdeas || []).forEach(i => {
+      const list = ideasByAccount.get(i.account_id) || [];
+      list.push(i);
+      ideasByAccount.set(i.account_id, list);
     });
 
-    // 6. Process each vertical — generate content PER ACCOUNT
-    const results: Array<{ vertical: string; account_results: Array<{ account: string; growth: number; product: number }>; skipped: string }> = [];
+    // 6. Process each vertical
+    const results: Array<{ vertical: string; account_results: Array<{ account: string; growth: number; product: number; ideas_generated: number }>; skipped: string }> = [];
 
     for (const config of configs) {
       const vAccounts = accountsByVertical.get(config.vertical) || [];
@@ -93,34 +89,60 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      const vIdeas = ideasByVertical.get(config.vertical) || [];
       const vProducts = (products || []).filter(p => p.verticals?.includes(config.vertical) && p.image_url);
-      let ideaIdx = 0;
       let productIdx = 0;
 
-      const accountResults: Array<{ account: string; growth: number; product: number }> = [];
+      const accountResults: Array<{ account: string; growth: number; product: number; ideas_generated: number }> = [];
 
       for (const acct of vAccounts) {
         const existingToday = todayJobsByAccount.get(acct.account_id) || 0;
         const maxDaily = acct.max_daily_posts || 4;
+        let accountIdeas = ideasByAccount.get(acct.account_id) || [];
+        let ideasGenerated = 0;
 
-        // Per-account targets based on vertical config ratio
+        // AUTO-REFILL: if below threshold, generate more ideas
+        if (accountIdeas.length < IDEA_REFILL_THRESHOLD) {
+          try {
+            console.log(`[daily-engine] Auto-refilling ideas for ${acct.account_id} (${accountIdeas.length} remaining)`);
+            const { data: genResult } = await supabase.functions.invoke("generate-ideas", {
+              body: { account_id: acct.account_id, vertical: config.vertical, count: 5, mode: "auto" },
+            });
+            ideasGenerated = genResult?.count || 0;
+
+            // Reload ideas for this account
+            if (ideasGenerated > 0) {
+              const { data: refreshed } = await supabase
+                .from("content_ideas")
+                .select("id, title, subject, account_id, opportunity_score, angle, suggested_format, content_type, vertical")
+                .eq("account_id", acct.account_id)
+                .eq("status", "proposed")
+                .order("opportunity_score", { ascending: false })
+                .limit(20);
+              accountIdeas = refreshed || [];
+            }
+          } catch (refillErr) {
+            console.error(`[daily-engine] Refill failed for ${acct.account_id}:`, refillErr);
+          }
+        }
+
+        // Per-account targets
         const growthForAccount = Math.max(0, Math.ceil(config.daily_growth_target / vAccounts.length) - Math.floor(existingToday * (config.growth_ratio / 100)));
         const productForAccount = Math.max(0, Math.ceil(config.daily_product_target / vAccounts.length));
         const totalForAccount = Math.min(growthForAccount + productForAccount, maxDaily - existingToday);
 
         if (totalForAccount <= 0) {
-          accountResults.push({ account: acct.account_id, growth: 0, product: 0 });
+          accountResults.push({ account: acct.account_id, growth: 0, product: 0, ideas_generated: ideasGenerated });
           continue;
         }
 
         let growthCreated = 0;
         let productCreated = 0;
+        let ideaIdx = 0;
 
-        // Create growth posts from ideas — tailored to this account
+        // Create growth posts from ideas
         const growthSlots = Math.min(growthForAccount, totalForAccount);
-        for (let i = 0; i < growthSlots && ideaIdx < vIdeas.length; i++) {
-          const idea = vIdeas[ideaIdx++];
+        for (let i = 0; i < growthSlots && ideaIdx < accountIdeas.length; i++) {
+          const idea = accountIdeas[ideaIdx++];
           const title = buildAccountTitle(acct, idea.title);
 
           const { error } = await supabase.from("story_jobs").insert({
@@ -138,7 +160,7 @@ Deno.serve(async (req) => {
           }
         }
 
-        // Create product posts — tailored to this account
+        // Create product posts
         const productSlots = Math.min(productForAccount, totalForAccount - growthCreated);
         for (let i = 0; i < productSlots && productIdx < vProducts.length; i++) {
           const product = vProducts[productIdx++];
@@ -156,7 +178,7 @@ Deno.serve(async (req) => {
           if (!error) productCreated++;
         }
 
-        accountResults.push({ account: acct.account_id, growth: growthCreated, product: productCreated });
+        accountResults.push({ account: acct.account_id, growth: growthCreated, product: productCreated, ideas_generated: ideasGenerated });
       }
 
       // Update last run timestamp
@@ -170,26 +192,26 @@ Deno.serve(async (req) => {
     const totalCreated = results.reduce((s, r) =>
       s + r.account_results.reduce((a, ar) => a + ar.growth + ar.product, 0), 0);
 
-    return new Response(JSON.stringify({ success: true, created: totalCreated, results }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return respond({ success: true, created: totalCreated, results });
 
   } catch (err) {
-    return new Response(JSON.stringify({ success: false, error: (err as Error).message }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return respond({ success: false, error: (err as Error).message }, 500);
   }
 });
 
-/** Build a growth title reflecting the account's style */
+function respond(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
 function buildAccountTitle(acct: Record<string, unknown>, ideaTitle: string): string {
   const style = (acct.content_style as string) || "";
   if (style) return `[${style}] ${ideaTitle}`;
   return ideaTitle;
 }
 
-/** Build a product title reflecting the account's hook style */
 function buildProductTitle(acct: Record<string, unknown>, productName: string): string {
   const hookStyle = (acct.hook_style as string) || "curiosity";
   const prefixes: Record<string, string> = {
