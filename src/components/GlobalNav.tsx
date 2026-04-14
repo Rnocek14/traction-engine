@@ -1,21 +1,18 @@
 /**
  * GlobalNav - Persistent top navigation bar
  * 
- * Always visible. Never clever. Four workspaces.
- * Dashboard | Produce | Review | Settings
+ * Four workspaces: Verticals | Products | Studio | Settings
  */
 
 import { Link, useLocation } from "react-router-dom";
-import { Zap, LayoutDashboard, Lightbulb, Clapperboard, ShieldCheck, Settings, ShoppingBag } from "lucide-react";
+import { Zap, Network, ShoppingBag, Clapperboard, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AuthHeader } from "@/components/auth/AuthHeader";
 
 const NAV_ITEMS = [
-  { label: "Dashboard", path: "/", icon: LayoutDashboard },
-  { label: "Ideas", path: "/ideas", icon: Lightbulb },
+  { label: "Verticals", path: "/", icon: Network },
   { label: "Products", path: "/products", icon: ShoppingBag },
-  { label: "Produce", path: "/produce", icon: Clapperboard },
-  { label: "Review", path: "/review", icon: ShieldCheck },
+  { label: "Studio", path: "/studio", icon: Clapperboard },
   { label: "Settings", path: "/settings", icon: Settings },
 ] as const;
 
@@ -23,7 +20,7 @@ export function GlobalNav() {
   const location = useLocation();
   
   const isActive = (path: string) => {
-    if (path === "/") return location.pathname === "/";
+    if (path === "/") return location.pathname === "/" || location.pathname.startsWith("/verticals");
     return location.pathname.startsWith(path);
   };
 

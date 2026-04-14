@@ -113,6 +113,42 @@ export type Database = {
         }
         Relationships: []
       }
+      apps: {
+        Row: {
+          created_at: string
+          description: string | null
+          icon_url: string | null
+          id: string
+          name: string
+          status: string
+          updated_at: string
+          url: string | null
+          verticals: string[]
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          icon_url?: string | null
+          id?: string
+          name: string
+          status?: string
+          updated_at?: string
+          url?: string | null
+          verticals?: string[]
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          icon_url?: string | null
+          id?: string
+          name?: string
+          status?: string
+          updated_at?: string
+          url?: string | null
+          verticals?: string[]
+        }
+        Relationships: []
+      }
       career_profiles: {
         Row: {
           alt_pathways: string[] | null
@@ -257,6 +293,7 @@ export type Database = {
         Row: {
           account_id: string
           angle: string | null
+          content_type: string
           created_at: string
           cta_type: string | null
           cta_url: string | null
@@ -279,6 +316,7 @@ export type Database = {
         Insert: {
           account_id: string
           angle?: string | null
+          content_type?: string
           created_at?: string
           cta_type?: string | null
           cta_url?: string | null
@@ -301,6 +339,7 @@ export type Database = {
         Update: {
           account_id?: string
           angle?: string | null
+          content_type?: string
           created_at?: string
           cta_type?: string | null
           cta_url?: string | null
@@ -1805,6 +1844,56 @@ export type Database = {
           wins?: number
         }
         Relationships: []
+      }
+      published_posts: {
+        Row: {
+          account_id: string
+          created_at: string
+          external_post_id: string | null
+          id: string
+          notes: string | null
+          performance_data: Json | null
+          platform: string
+          posted_at: string | null
+          status: string
+          story_job_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          account_id: string
+          created_at?: string
+          external_post_id?: string | null
+          id?: string
+          notes?: string | null
+          performance_data?: Json | null
+          platform?: string
+          posted_at?: string | null
+          status?: string
+          story_job_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          account_id?: string
+          created_at?: string
+          external_post_id?: string | null
+          id?: string
+          notes?: string | null
+          performance_data?: Json | null
+          platform?: string
+          posted_at?: string | null
+          status?: string
+          story_job_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "published_posts_story_job_id_fkey"
+            columns: ["story_job_id"]
+            isOneToOne: false
+            referencedRelation: "story_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       resume_exports: {
         Row: {
