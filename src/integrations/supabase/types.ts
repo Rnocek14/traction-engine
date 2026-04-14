@@ -305,6 +305,7 @@ export type Database = {
         Row: {
           account_id: string
           angle: string | null
+          content_category: string | null
           content_type: string
           created_at: string
           cta_type: string | null
@@ -328,6 +329,7 @@ export type Database = {
         Insert: {
           account_id: string
           angle?: string | null
+          content_category?: string | null
           content_type?: string
           created_at?: string
           cta_type?: string | null
@@ -351,6 +353,7 @@ export type Database = {
         Update: {
           account_id?: string
           angle?: string | null
+          content_category?: string | null
           content_type?: string
           created_at?: string
           cta_type?: string | null
