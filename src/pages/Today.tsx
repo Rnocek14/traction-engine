@@ -2,11 +2,12 @@ import { useState } from "react";
 import { GlobalNav } from "@/components/GlobalNav";
 import { SummaryBar } from "@/components/today/SummaryBar";
 import { AccountRow } from "@/components/today/AccountRow";
+import { PostDetailDrawer } from "@/components/today/PostDetailDrawer";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { useTodayFeed } from "@/hooks/use-today-feed";
+import { useTodayFeed, type PostSlot } from "@/hooks/use-today-feed";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/hooks/use-toast";
@@ -15,6 +16,7 @@ import { LayoutList, LayoutGrid } from "lucide-react";
 export default function Today() {
   const { data, isLoading } = useTodayFeed();
   const [compact, setCompact] = useState(false);
+  const [selectedSlot, setSelectedSlot] = useState<PostSlot | null>(null);
   const queryClient = useQueryClient();
 
   const feed = data?.feed || [];
@@ -169,12 +171,20 @@ export default function Today() {
                     onReject={handleReject}
                     onProduce={handleProduce}
                     onGenerateIdeas={handleGenerateIdeas}
+                    onSlotClick={setSelectedSlot}
                   />
                 ))}
               </div>
             </section>
           ))
         )}
+        {/* Post Detail Drawer */}
+        <PostDetailDrawer
+          open={!!selectedSlot}
+          onOpenChange={(open) => { if (!open) setSelectedSlot(null); }}
+          storyJobId={selectedSlot?.storyJobId || null}
+          ideaId={selectedSlot?.ideaId}
+        />
       </main>
     </div>
   );
