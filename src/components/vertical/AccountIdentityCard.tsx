@@ -5,13 +5,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Slider } from "@/components/ui/slider";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Pencil, Sparkles, Users, MessageSquare, ChevronDown, Lightbulb, Loader2, AlertTriangle } from "lucide-react";
+import { Pencil, Sparkles, Users, MessageSquare, ChevronDown, Lightbulb, Loader2, AlertTriangle, Palette } from "lucide-react";
 import type { ContentIdea } from "@/hooks/use-ideas-data";
 
 interface AccountConfig {
