@@ -35,7 +35,7 @@ interface PostSlotProps {
   isProducing?: boolean;
 }
 
-export function PostSlotCard({ slot, onApprove, onReject, onProduce, onClick }: PostSlotProps) {
+export function PostSlotCard({ slot, onApprove, onReject, onProduce, onRegenerate, onClick, isProducing }: PostSlotProps) {
   const config = STATUS_CONFIG[slot.status];
   const Icon = config.icon;
   const confidenceConfig = slot.confidence ? CONFIDENCE_CONFIG[slot.confidence] : null;
