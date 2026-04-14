@@ -19,6 +19,7 @@ import { SYSTEM_PROMPT, STORY_TYPE_GUIDANCE } from "../_shared/storyboard-prompt
 import { parseTitlePromise, buildTitlePromiseBlock, validateContentQuality } from "../_shared/content-quality.ts";
 import { generateAndScoreHooks, selectBestHook, type ScoredHook, type HookCategory } from "../_shared/hook-optimizer.ts";
 import { buildPlatformOptimizationBlock, detectContentFormat, getPacingProfile, enhanceVisualInstruction, getFormatHookOverride } from "../_shared/platform-optimizer.ts";
+import { buildStyleControlBlock, type AccountStyleProfile } from "../_shared/style-control.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
