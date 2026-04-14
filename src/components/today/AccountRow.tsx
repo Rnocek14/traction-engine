@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Settings, CheckCircle, Loader2, Lightbulb } from "lucide-react";
 import { PostSlotCard, EmptySlot } from "./PostSlot";
-import type { AccountFeedItem } from "@/hooks/use-today-feed";
+import type { AccountFeedItem, PostSlot } from "@/hooks/use-today-feed";
 
 const PLATFORM_SHORT: Record<string, string> = {
   tiktok: "TT",
@@ -20,9 +20,10 @@ interface AccountRowProps {
   onReject?: (jobId: string) => void;
   onProduce?: (ideaId: string) => void;
   onGenerateIdeas?: (accountId: string) => void;
+  onSlotClick?: (slot: PostSlot) => void;
 }
 
-export function AccountRow({ item, compact, onApprove, onReject, onProduce, onGenerateIdeas }: AccountRowProps) {
+export function AccountRow({ item, compact, onApprove, onReject, onProduce, onGenerateIdeas, onSlotClick }: AccountRowProps) {
   if (compact) {
     return (
       <Card>
@@ -98,6 +99,7 @@ export function AccountRow({ item, compact, onApprove, onReject, onProduce, onGe
               onApprove={onApprove}
               onReject={onReject}
               onProduce={onProduce}
+              onClick={onSlotClick}
             />
           ))}
           {emptyCount > 0 && Array.from({ length: emptyCount }).map((_, i) => (
