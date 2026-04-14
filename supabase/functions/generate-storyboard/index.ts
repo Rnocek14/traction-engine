@@ -36,6 +36,11 @@ interface GenerateRequest {
     requested_story_type?: string;
     research_mode?: "auto" | "on" | "off";
   };
+  account_style?: {
+    realism_level: number;
+    visual_style: string;
+    style_notes?: string;
+  };
   generator_mode?: "legacy" | "template";
   tier?: "volume" | "hero";
   brutality_mode?: boolean;
