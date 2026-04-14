@@ -4,6 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
+import Today from "./pages/Today";
 import Verticals from "./pages/Verticals";
 import VerticalDetail from "./pages/VerticalDetail";
 import AccountDetail from "./pages/AccountDetail";
@@ -28,7 +29,8 @@ const App = () => (
         <BrowserRouter>
           <Routes>
             {/* Core Workspaces */}
-            <Route path="/" element={<Verticals />} />
+            <Route path="/" element={<Today />} />
+            <Route path="/verticals" element={<Verticals />} />
             <Route path="/verticals/:vertical" element={<VerticalDetail />} />
             <Route path="/products" element={<Products />} />
             <Route path="/products/:productId" element={<ProductDossier />} />

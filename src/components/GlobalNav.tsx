@@ -5,14 +5,14 @@
  */
 
 import { Link, useLocation } from "react-router-dom";
-import { Zap, Network, ShoppingBag, Clapperboard, Settings } from "lucide-react";
+import { Zap, Network, ShoppingBag, CalendarCheck, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AuthHeader } from "@/components/auth/AuthHeader";
 
 const NAV_ITEMS = [
-  { label: "Verticals", path: "/", icon: Network },
+  { label: "Today", path: "/", icon: CalendarCheck },
+  { label: "Verticals", path: "/verticals", icon: Network },
   { label: "Products", path: "/products", icon: ShoppingBag },
-  { label: "Studio", path: "/studio", icon: Clapperboard },
   { label: "Settings", path: "/settings", icon: Settings },
 ] as const;
 
@@ -20,7 +20,7 @@ export function GlobalNav() {
   const location = useLocation();
   
   const isActive = (path: string) => {
-    if (path === "/") return location.pathname === "/" || location.pathname.startsWith("/verticals");
+    if (path === "/") return location.pathname === "/";
     return location.pathname.startsWith(path);
   };
 
