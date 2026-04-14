@@ -30,7 +30,9 @@ interface PostSlotProps {
   onApprove?: (jobId: string) => void;
   onReject?: (jobId: string) => void;
   onProduce?: (ideaId: string) => void;
+  onRegenerate?: (jobId: string) => void;
   onClick?: (slot: PostSlotType) => void;
+  isProducing?: boolean;
 }
 
 export function PostSlotCard({ slot, onApprove, onReject, onProduce, onClick }: PostSlotProps) {
