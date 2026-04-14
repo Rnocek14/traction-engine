@@ -1,14 +1,8 @@
 /**
  * produce-product-video
  * 
- * Full end-to-end orchestrator: product → concepts → story_jobs → video_jobs → clips → assembly.
- * Returns immediately with a batch_id. Client polls story_jobs for progress.
- * 
- * Steps:
- * 1. Generate concepts via GPT
- * 2. Create story_jobs (auto-approved)
- * 3. For each story_job scene, create a video_job via queue-video
- * 4. Background: poll video_jobs until clips are done, then trigger assembly
+ * Full end-to-end orchestrator: product → concepts → story_jobs → video_jobs.
+ * Returns 202 quickly after queuing story_jobs. Background work queues clips.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -17,62 +11,14 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
+async function queueClipsForJobs(supabaseUrl: string, serviceKey: string, jobIds: string[]) {
+  const supabase = createClient(supabaseUrl, serviceKey);
 
-  try {
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, serviceKey);
-
-    const { product_id, account_id } = await req.json();
-    if (!product_id) throw new Error("product_id required");
-    if (!account_id) throw new Error("account_id required");
-
-    // Step 1: Generate concepts by calling product-to-videos
-    const genRes = await fetch(`${supabaseUrl}/functions/v1/product-to-videos`, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${serviceKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ product_id, mode: "generate" }),
-    });
-    const genData = await genRes.json();
-    if (!genData.success || !genData.concepts?.length) {
-      throw new Error("Concept generation failed: " + (genData.error || "no concepts"));
-    }
-
-    // Step 2: Queue concepts as story_jobs
-    const queueRes = await fetch(`${supabaseUrl}/functions/v1/product-to-videos`, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${serviceKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        product_id,
-        mode: "queue",
-        approved_concepts: genData.concepts,
-        account_id,
-      }),
-    });
-    const queueData = await queueRes.json();
-    if (!queueData.success) {
-      throw new Error("Queue failed: " + (queueData.error || "unknown"));
-    }
-
-    const jobIds: string[] = queueData.job_ids;
-
-    // Step 3: For each story_job, kick off clip generation for all scenes
-    // We need a script_run_id for each story_job — create a lightweight one
-    for (const storyJobId of jobIds) {
-      // Fetch storyboard
+  for (const storyJobId of jobIds) {
+    try {
       const { data: storyJob } = await supabase
         .from("story_jobs")
-        .select("storyboard_json, account_id, total_clips")
+        .select("storyboard_json, account_id")
         .eq("id", storyJobId)
         .single();
 
@@ -101,20 +47,17 @@ Deno.serve(async (req) => {
 
       if (srErr || !scriptRun) {
         console.error("Failed to create script_run for story", storyJobId, srErr);
-        // Update story_job to failed
         await supabase.from("story_jobs").update({ status: "failed" }).eq("id", storyJobId);
         continue;
       }
 
-      // Update story_job status to "generating"
       await supabase.from("story_jobs").update({ status: "generating" }).eq("id", storyJobId);
 
-      // Queue each scene as a video job
+      // Queue each scene
       for (let i = 0; i < scenes.length; i++) {
         const scene = scenes[i];
         const prompt = (scene.prompt as string) || "Product showcase";
         const durationSec = Number(scene.duration_sec) || 5;
-        // Sora buckets: 4, 8, 12
         const providerSeconds = durationSec <= 4 ? 4 : durationSec <= 8 ? 8 : 12;
 
         try {
@@ -143,7 +86,6 @@ Deno.serve(async (req) => {
 
           const qvData = await qvRes.json();
           if (qvData.id) {
-            // Link video_job to story_job
             await supabase
               .from("video_jobs")
               .update({ story_job_id: storyJobId, sequence_index: i, is_primary: true })
@@ -153,15 +95,75 @@ Deno.serve(async (req) => {
           console.error(`Failed to queue scene ${i} for story ${storyJobId}:`, e);
         }
       }
+    } catch (e) {
+      console.error(`Error processing story job ${storyJobId}:`, e);
+    }
+  }
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  try {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+    const { product_id, account_id } = await req.json();
+    if (!product_id) throw new Error("product_id required");
+    if (!account_id) throw new Error("account_id required");
+
+    // Step 1: Generate concepts
+    const genRes = await fetch(`${supabaseUrl}/functions/v1/product-to-videos`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${serviceKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ product_id, mode: "generate" }),
+    });
+    const genData = await genRes.json();
+    if (!genData.success || !genData.concepts?.length) {
+      throw new Error("Concept generation failed: " + (genData.error || "no concepts"));
     }
 
-    // Return immediately — client polls story_jobs for progress
+    // Step 2: Queue as story_jobs
+    const queueRes = await fetch(`${supabaseUrl}/functions/v1/product-to-videos`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${serviceKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        product_id,
+        mode: "queue",
+        approved_concepts: genData.concepts,
+        account_id,
+      }),
+    });
+    const queueData = await queueRes.json();
+    if (!queueData.success) {
+      throw new Error("Queue failed: " + (queueData.error || "unknown"));
+    }
+
+    const jobIds: string[] = queueData.job_ids;
+
+    // Step 3: Kick off clip generation in background
+    // @ts-ignore - EdgeRuntime.waitUntil is available in Supabase Edge Functions
+    if (typeof EdgeRuntime !== "undefined" && EdgeRuntime.waitUntil) {
+      EdgeRuntime.waitUntil(queueClipsForJobs(supabaseUrl, serviceKey, jobIds));
+    } else {
+      // Fallback: run inline (may timeout for many jobs)
+      await queueClipsForJobs(supabaseUrl, serviceKey, jobIds);
+    }
+
     return new Response(
       JSON.stringify({
         success: true,
         job_ids: jobIds,
         total: jobIds.length,
-        message: "Pipeline started. Poll story_jobs for progress.",
+        message: "Pipeline started. Clips are being queued.",
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
