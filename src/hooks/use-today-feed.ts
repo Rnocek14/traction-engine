@@ -113,12 +113,13 @@ export function useTodayFeed() {
         .order("priority_score", { ascending: false });
       if (accErr) throw accErr;
 
-      // Fetch today's story_jobs
+      // Fetch recent story_jobs (today + any active drafts)
       const { data: jobs, error: jobErr } = await supabase
         .from("story_jobs")
         .select("id, account_id, title, content_type, status, review_status, assembled_video_url, source_idea_id, created_at")
-        .gte("created_at", todayStart)
-        .order("created_at", { ascending: false });
+        .or(`created_at.gte.${todayStart},status.eq.draft,status.eq.generating,status.eq.assembling`)
+        .order("created_at", { ascending: false })
+        .limit(200);
       if (jobErr) throw jobErr;
 
       // Fetch proposed ideas (up to 5 per account as fallback)
