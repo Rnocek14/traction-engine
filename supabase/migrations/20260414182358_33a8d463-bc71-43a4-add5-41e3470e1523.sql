@@ -1,0 +1,1 @@
+ALTER TABLE public.content_ideas ADD COLUMN content_category text;
