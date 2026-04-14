@@ -12,6 +12,10 @@ export interface PostSlot {
   storyJobId: string | null;
   ideaId: string | null;
   createdAt: string;
+  // Quality signals
+  qualityScore: number | null;       // 0-100 avg auto_overall_score
+  completionPct: number | null;      // % clips done
+  confidence: "ready" | "review" | "regenerate" | null;
 }
 
 export interface AccountFeedItem {
