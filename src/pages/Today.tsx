@@ -91,6 +91,7 @@ export default function Today() {
         storyboard_json: { scenes: storyboard.scenes },
         auto_generate: true,
         content_idea_id: ideaId,
+        content_type: contentType,
       },
     });
 
