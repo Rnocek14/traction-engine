@@ -16,6 +16,7 @@ import {
 import { logExperiment, logScore } from "../_shared/prompt-experiment-logger.ts";
 import type { SceneRole, CutZone, CutType, ChangeType, GeneratedStoryboard } from "../_shared/storyboard-prompts.ts";
 import { SYSTEM_PROMPT, STORY_TYPE_GUIDANCE } from "../_shared/storyboard-prompts.ts";
+import { parseTitlePromise, buildTitlePromiseBlock, validateContentQuality } from "../_shared/content-quality.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -146,6 +147,9 @@ Deno.serve(async (req) => {
           return `Beat ${i + 1} (${beat.role}): ${beat.description}${isHook ? ` [hook_category: ${hookCategory}]` : ""}${isCTA ? ` [CTA: "${ctaResult.phrase}"]` : ""}`;
         });
 
+        // Detect title promise for listicle enforcement
+        const titlePromiseBlock = buildTitlePromiseBlock(concept);
+
         const templatePrompt = `You are an elite short-form video scriptwriter who creates VIRAL, FASCINATING content. Given a concept and beat structure, generate scene content.
 
 CONCEPT: "${concept}"
@@ -153,6 +157,7 @@ STORY TYPE: ${selection.type} (${template.name})
 VERTICAL: ${vertical}
 TONE: ${constraints.allowed_tones.join(", ")}
 ${claimConstraints}
+${titlePromiseBlock}
 BEAT STRUCTURE (generate content for each):
 ${beatPrompts.join("\n")}
 
@@ -162,12 +167,16 @@ For each beat, return:
 - environment: Where — MUST match the setting implied by the fact
 - mood: Single word
 - text_overlay: Short punchy text (MAX 6 words)
-- narration_line: REQUIRED voiceover line (10-25 words, specific, surprising, conversational)
+- narration_line: REQUIRED voiceover line (12-25 words, MUST contain a specific actionable instruction, fact, or technique — NOT generic motivation)
 ${researchBrief.activated && researchBrief.grounded ? '- claim_ids: Array of claim IDs this beat references (e.g., ["claim_001"])' : ""}
 
 VISUAL-NARRATION ALIGNMENT: The subject and environment MUST visually depict the specific fact in narration_line.
 TONE CONSISTENCY: The LAST scene MUST maintain the same mood as the rest.
-NARRATION: Must be SPECIFIC, FACTUAL, SURPRISING, CONVERSATIONAL. No vague filler or clickbait.
+NARRATION QUALITY (CRITICAL):
+- Each narration_line must teach something SPECIFIC (a technique, fact, statistic, or step)
+- BANNED phrases: "confidence is key", "believe in yourself", "unlock your potential", "game changer", "you won't believe"
+- If a beat is about advice/tips/hacks, the narration must contain the ACTUAL advice, not a teaser
+- Start value beats with actionable verbs: "Use...", "Add...", "Replace...", "Try..."
 
 Return ONLY valid JSON: {"beats":[{...}]}`;
 
@@ -180,13 +189,13 @@ Return ONLY valid JSON: {"beats":[{...}]}`;
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            model: "gpt-4o-mini",
+            model: "gpt-4o",
             messages: [
-              { role: "system", content: "You generate scene content for short-form video. Return ONLY valid JSON, no markdown." },
+              { role: "system", content: "You generate scene content for short-form video. Return ONLY valid JSON, no markdown. Every narration_line must contain a SPECIFIC, ACTIONABLE piece of advice or information — never generic motivational filler." },
               { role: "user", content: templatePrompt },
             ],
             temperature: 0.7,
-            max_tokens: 1500,
+            max_tokens: 2000,
           }),
         });
 
@@ -223,6 +232,23 @@ Return ONLY valid JSON: {"beats":[{...}]}`;
               mood: "intense", text_overlay: "Watch this", narration_line: "Something incredible happened next.",
             });
           }
+        }
+
+        // 4b. Content quality validation
+        const qualityReport = validateContentQuality(
+          concept,
+          sceneContents.map((c, i) => ({
+            narration_line: c.narration_line,
+            beat_role: template.beats[i]?.role,
+          })),
+        );
+
+        console.log(`[generate-storyboard] Content quality: ${qualityReport.summary}`);
+        if (qualityReport.narration_issues.length > 0) {
+          console.warn(`[generate-storyboard] Narration issues: ${qualityReport.narration_issues.map(i => `Scene ${i.scene_index}: ${i.issue} — ${i.detail}`).join("; ")}`);
+        }
+        if (qualityReport.structure_issues.length > 0) {
+          console.warn(`[generate-storyboard] Structure issues: ${qualityReport.structure_issues.join("; ")}`);
         }
 
         // 5. Validate claim IDs
@@ -521,6 +547,14 @@ Return ONLY valid JSON: {"beats":[{...}]}`;
               has_hard_blocks: storyCompliance.has_hard_blocks,
             },
             story_engine_audit: audit,
+            content_quality: {
+              pass: qualityReport.overall_pass,
+              title_promise: qualityReport.title_promise,
+              narration_issues: qualityReport.narration_issues.length,
+              filler_scenes: qualityReport.filler_scene_count,
+              structure_issues: qualityReport.structure_issues,
+              summary: qualityReport.summary,
+            },
             ...(debugPersistId ? { debug_persist_id: debugPersistId } : {}),
           }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
