@@ -26,6 +26,54 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// ─── Content Type Prompt Blocks ──────────────────────────────
+function buildContentTypeBlock(contentType: string): string {
+  if (contentType === "product_promo") {
+    return `
+═══ CONTENT TYPE: PRODUCT PROMOTION ═══
+This video is a PRODUCT-FOCUSED piece. The product IS the star.
+- Product can be central to every scene
+- "Problem → Product → Solution → CTA" structure is appropriate
+- Include direct CTA ("Link in bio", "Shop now", "Check link in comments")
+- Demo the product clearly: show it being used, unboxed, or compared
+- Still be specific: mention price points, features, or comparisons when possible`;
+  }
+
+  // Default: growth content
+  return `
+═══ CONTENT TYPE: GROWTH / AUDIENCE BUILDING (CRITICAL) ═══
+This video must deliver GENUINE VALUE to viewers — it should feel like advice from a knowledgeable creator, NOT an ad.
+
+STRUCTURE RULES:
+- DO NOT use "problem → product → CTA" structure
+- DO use: "hook → teach/reveal → teach/reveal → teach/reveal → engagement CTA"
+- The video must be useful even if no product is ever mentioned
+- Product mention is OPTIONAL and can appear in at most 1 scene (never more than 1 out of 5+ scenes)
+
+NARRATION RULES:
+- Every value beat must contain a SPECIFIC, CONCRETE piece of information:
+  ✅ "The $8 magnetic clips from Amazon hold cables better than the $40 management systems"
+  ✅ "Turn your phone charger upside down — the cable bends less and lasts 3x longer"
+  ✅ "Most people mount their monitor too high — eye level should hit the top third"
+  ❌ "A solution awaits" (vague, says nothing)
+  ❌ "Discover the answer" (teaser with no substance)
+  ❌ "Watch them snap right into place" (product demo, not information)
+- Include at least ONE of: specific price, percentage, comparison, test result, or expert technique
+- Narration should sound like a real person sharing what they learned, not a sales script
+
+CTA RULES:
+- DO NOT use "Link in bio" or "Shop now" — these are for product_promo only
+- DO use engagement CTAs: "Follow for more", "Save this for later", "Comment which one you'd try", "Part 2 tomorrow"
+- The final scene should invite continued engagement, not purchase
+
+VISUAL RULES:
+- Show the INFORMATION being demonstrated, not a product being advertised
+- Show real-world scenarios: a messy desk being reorganized, a before/after comparison, hands demonstrating a technique
+- Vary the visual subjects: different angles, different items, different environments
+- No "product glamour shots" or "product reveal" moments`;
+}
+
+
 interface GenerateRequest {
   concept: string;
   story_type?: "short_story" | "brainrot" | "info" | "hybrid";
