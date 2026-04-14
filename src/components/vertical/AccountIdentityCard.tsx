@@ -7,10 +7,12 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Pencil, Sparkles, Users, MessageSquare } from "lucide-react";
+import { Pencil, Sparkles, Users, MessageSquare, ChevronDown, Lightbulb, Loader2, AlertTriangle } from "lucide-react";
+import type { ContentIdea } from "@/hooks/use-ideas-data";
 
 interface AccountConfig {
   id: string;
@@ -30,9 +32,42 @@ interface AccountConfig {
 }
 
 const HOOK_STYLES = ["curiosity", "shock", "problem", "aesthetic", "demo", "listicle"];
+const IDEA_LOW_THRESHOLD = 3;
 
-export function AccountIdentityCard({ account, vertical, storyCount }: { account: AccountConfig; vertical: string; storyCount: number }) {
+export function AccountIdentityCard({
+  account,
+  vertical,
+  storyCount,
+  ideas = [],
+}: {
+  account: AccountConfig;
+  vertical: string;
+  storyCount: number;
+  ideas?: ContentIdea[];
+}) {
   const [editing, setEditing] = useState(false);
+  const [ideasOpen, setIdeasOpen] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const queryClient = useQueryClient();
+
+  const proposedIdeas = ideas.filter(i => i.status === "proposed");
+  const isLow = proposedIdeas.length < IDEA_LOW_THRESHOLD;
+
+  const handleGenerateIdeas = async () => {
+    setGenerating(true);
+    try {
+      const { error } = await supabase.functions.invoke("generate-ideas", {
+        body: { account_id: account.account_id, vertical, count: 5, mode: "manual" },
+      });
+      if (error) throw error;
+      toast.success(`Ideas generated for ${account.account_name || account.account_id}`);
+      queryClient.invalidateQueries({ queryKey: ["vertical-detail", vertical] });
+    } catch {
+      toast.error("Failed to generate ideas");
+    } finally {
+      setGenerating(false);
+    }
+  };
 
   return (
     <>
@@ -77,7 +112,61 @@ export function AccountIdentityCard({ account, vertical, storyCount }: { account
             </div>
           )}
 
-          <div className="flex items-center justify-between text-xs text-muted-foreground pt-1 border-t">
+          {/* Upcoming Ideas Section */}
+          <Collapsible open={ideasOpen} onOpenChange={setIdeasOpen}>
+            <div className="flex items-center justify-between border-t pt-2">
+              <CollapsibleTrigger className="flex items-center gap-1.5 text-xs font-medium hover:text-primary transition-colors">
+                <Lightbulb className="w-3 h-3" />
+                Upcoming Ideas ({proposedIdeas.length})
+                {isLow && <AlertTriangle className="w-3 h-3 text-amber-500" />}
+                <ChevronDown className={`w-3 h-3 transition-transform ${ideasOpen ? "rotate-180" : ""}`} />
+              </CollapsibleTrigger>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 text-[10px] gap-1"
+                onClick={handleGenerateIdeas}
+                disabled={generating}
+              >
+                {generating ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                Generate
+              </Button>
+            </div>
+
+            <CollapsibleContent className="mt-2 space-y-1.5">
+              {isLow && proposedIdeas.length === 0 && (
+                <p className="text-[11px] text-amber-600 dark:text-amber-400 bg-amber-500/10 rounded px-2 py-1.5">
+                  No ideas queued. Click "Generate" to create content ideas for this account.
+                </p>
+              )}
+              {proposedIdeas.slice(0, 5).map(idea => (
+                <div key={idea.id} className="text-xs p-2 rounded bg-muted/50 space-y-0.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-medium truncate">{idea.title}</p>
+                    <Badge variant="outline" className="text-[9px] shrink-0">
+                      {idea.opportunity_score}/100
+                    </Badge>
+                  </div>
+                  {idea.angle && (
+                    <p className="text-muted-foreground text-[11px] truncate">{idea.angle}</p>
+                  )}
+                  <div className="flex gap-1">
+                    {idea.suggested_hook_type && (
+                      <Badge variant="secondary" className="text-[9px]">{idea.suggested_hook_type}</Badge>
+                    )}
+                    {idea.suggested_format && (
+                      <Badge variant="secondary" className="text-[9px]">{idea.suggested_format}</Badge>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {proposedIdeas.length > 5 && (
+                <p className="text-[10px] text-muted-foreground text-center">+{proposedIdeas.length - 5} more</p>
+              )}
+            </CollapsibleContent>
+          </Collapsible>
+
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
             <span>{account.content_style || "No style set"}</span>
             <span>{storyCount} stories</span>
           </div>
