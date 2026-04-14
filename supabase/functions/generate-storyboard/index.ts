@@ -189,13 +189,13 @@ Return ONLY valid JSON: {"beats":[{...}]}`;
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            model: "gpt-4o-mini",
+            model: "gpt-4o",
             messages: [
-              { role: "system", content: "You generate scene content for short-form video. Return ONLY valid JSON, no markdown." },
+              { role: "system", content: "You generate scene content for short-form video. Return ONLY valid JSON, no markdown. Every narration_line must contain a SPECIFIC, ACTIONABLE piece of advice or information — never generic motivational filler." },
               { role: "user", content: templatePrompt },
             ],
             temperature: 0.7,
-            max_tokens: 1500,
+            max_tokens: 2000,
           }),
         });
 
