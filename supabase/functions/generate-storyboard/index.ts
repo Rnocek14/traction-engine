@@ -181,7 +181,7 @@ STORY TYPE: ${selection.type} (${template.name})
 VERTICAL: ${vertical}
 TONE: ${constraints.allowed_tones.join(", ")}
 ${claimConstraints}
-${titlePromiseBlock}
+${titlePromiseBlock}${hookInstruction}
 BEAT STRUCTURE (generate content for each):
 ${beatPrompts.join("\n")}
 
