@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 
-export type PostSlotStatus = "idea" | "generating" | "ready" | "approved" | "rejected";
+export type PostSlotStatus = "idea" | "draft" | "generating" | "ready" | "approved" | "rejected";
 
 export interface PostSlot {
   id: string;
@@ -61,6 +61,7 @@ function mapJobToSlot(job: any, qualityMap: Map<string, { avg: number; done: num
   if (job.review_status === "approved") status = "approved";
   else if (job.review_status === "rejected") status = "rejected";
   else if (job.assembled_video_url) status = "ready";
+  else if (job.status === "draft") status = "draft";
   else if (["pending", "generating", "assembling"].includes(job.status)) status = "generating";
 
   const q = qualityMap.get(job.id);
@@ -112,12 +113,13 @@ export function useTodayFeed() {
         .order("priority_score", { ascending: false });
       if (accErr) throw accErr;
 
-      // Fetch today's story_jobs
+      // Fetch recent story_jobs (today + any active drafts)
       const { data: jobs, error: jobErr } = await supabase
         .from("story_jobs")
         .select("id, account_id, title, content_type, status, review_status, assembled_video_url, source_idea_id, created_at")
-        .gte("created_at", todayStart)
-        .order("created_at", { ascending: false });
+        .or(`created_at.gte.${todayStart},status.eq.draft,status.eq.generating,status.eq.assembling`)
+        .order("created_at", { ascending: false })
+        .limit(200);
       if (jobErr) throw jobErr;
 
       // Fetch proposed ideas (up to 5 per account as fallback)
