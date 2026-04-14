@@ -327,10 +327,10 @@ export function PrimaryActionEngine({ product }: { product: ProductWithAnalysis 
         </div>
         <Progress value={Math.min(progressValue, 99)} className="h-2" />
         <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
-          <StepDot label="Concepts" active={phase === "generating"} done={["clips", "assembling", "done"].includes(phase)} />
-          <StepDot label="Clips" active={phase === "clips"} done={["assembling", "done"].includes(phase)} 
+          <StepDot label="Concepts" active={phase === "generating"} done={phase === "clips" || phase === "assembling"} />
+          <StepDot label="Clips" active={phase === "clips"} done={phase === "assembling"} 
             detail={clipProgress.total > 0 ? `${clipProgress.done}/${clipProgress.total}` : undefined} />
-          <StepDot label="Assembly" active={phase === "assembling"} done={phase === "done"} />
+          <StepDot label="Assembly" active={phase === "assembling"} done={false} />
         </div>
       </div>
     );
