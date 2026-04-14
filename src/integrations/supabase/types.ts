@@ -40,11 +40,14 @@ export type Database = {
           posting_frequency_target: number
           priority_score: number
           promise: string
+          realism_level: number
           status: Database["public"]["Enums"]["account_status"]
+          style_notes: string | null
           style_rules: Json
           uniqueness_salt: string | null
           updated_at: string
           vertical: Database["public"]["Enums"]["content_vertical"]
+          visual_style: string
           voice_id: string | null
           voice_provider: string | null
         }
@@ -73,11 +76,14 @@ export type Database = {
           posting_frequency_target?: number
           priority_score?: number
           promise: string
+          realism_level?: number
           status?: Database["public"]["Enums"]["account_status"]
+          style_notes?: string | null
           style_rules?: Json
           uniqueness_salt?: string | null
           updated_at?: string
           vertical: Database["public"]["Enums"]["content_vertical"]
+          visual_style?: string
           voice_id?: string | null
           voice_provider?: string | null
         }
@@ -106,11 +112,14 @@ export type Database = {
           posting_frequency_target?: number
           priority_score?: number
           promise?: string
+          realism_level?: number
           status?: Database["public"]["Enums"]["account_status"]
+          style_notes?: string | null
           style_rules?: Json
           uniqueness_salt?: string | null
           updated_at?: string
           vertical?: Database["public"]["Enums"]["content_vertical"]
+          visual_style?: string
           voice_id?: string | null
           voice_provider?: string | null
         }
