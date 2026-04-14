@@ -169,6 +169,11 @@ Deno.serve(async (req) => {
       } else {
         // ── VIRAL TEMPLATE PIPELINE ──
         
+        // P4: Style control — account-level visual identity
+        const accountStyle: AccountStyleProfile = body.account_style ?? { realism_level: 70, visual_style: "cinematic" };
+        const styleBlock = buildStyleControlBlock(accountStyle);
+        console.log(`[generate-storyboard] P4: realism=${accountStyle.realism_level} style=${accountStyle.visual_style}`);
+
         // P3: Platform optimization — detect format + inject pacing/overlay rules
         const detectedFormat = detectContentFormat(concept);
         const platformBlock = buildPlatformOptimizationBlock(concept);
@@ -203,25 +208,34 @@ TONE: ${constraints.allowed_tones.join(", ")}
 ${claimConstraints}
 ${titlePromiseBlock}${hookInstruction}
 ${platformBlock}
+${styleBlock}
+
 BEAT STRUCTURE (generate content for each):
 ${beatPrompts.join("\n")}
 
 For each beat, return:
-- subject: Who/what is on screen — MUST directly illustrate the narration fact. Be SPECIFIC (e.g., "close-up of hands typing on a MacBook" not "person at computer")
-- action: What they DO physically — visible, concrete motion (e.g., "drags resume section to the top" not "works on resume")
-- environment: Where — MUST match the setting implied by the fact. Include lighting and key objects.
+- subject: Who/what is on screen — MUST directly illustrate the narration fact. Be SPECIFIC and VARIED (e.g., "close-up of hands reorganizing a color-coded filing system" not "person at computer"). NEVER repeat the same subject across beats.
+- action: What they DO physically — visible, concrete motion with a clear START and END state (e.g., "slides the phone across the table revealing the screen" not "uses phone")
+- environment: Where — MUST match the setting implied by the fact. Include lighting, textures, and at least one unique prop or detail per scene. VARY environments across beats.
 - mood: Single word
 - text_overlay: Short punchy text (MAX 6 words) — hook overlay must be LARGE and attention-grabbing
 - narration_line: REQUIRED voiceover line (12-25 words, MUST contain a specific actionable instruction, fact, or technique — NOT generic motivation)
 ${researchBrief.activated && researchBrief.grounded ? '- claim_ids: Array of claim IDs this beat references (e.g., ["claim_001"])' : ""}
 
 VISUAL-NARRATION ALIGNMENT: The subject and environment MUST visually depict the specific fact in narration_line.
+VISUAL VARIETY (CRITICAL):
+- NEVER use "person sitting at computer/desk" more than once in a video
+- Each scene must have a DIFFERENT subject or camera perspective
+- If multiple scenes involve the same topic, show DIFFERENT aspects (close-up detail, wide context, hands-on action, result/outcome)
 TONE CONSISTENCY: The LAST scene MUST maintain the same mood as the rest.
 NARRATION QUALITY (CRITICAL):
 - Each narration_line must teach something SPECIFIC (a technique, fact, statistic, or step)
-- BANNED phrases: "confidence is key", "believe in yourself", "unlock your potential", "game changer", "you won't believe"
+- BANNED phrases: "confidence is key", "believe in yourself", "unlock your potential", "game changer", "you won't believe", "stay informed", "stay protected", "knowledge is power", "take control"
 - If a beat is about advice/tips/hacks, the narration must contain the ACTUAL advice, not a teaser
-- Start value beats with actionable verbs: "Use...", "Add...", "Replace...", "Try..."
+- Start value beats with actionable verbs: "Use...", "Add...", "Replace...", "Try...", "Set...", "Turn off..."
+CTA SCENES (CRITICAL):
+- CTA must include a specific next action ("Follow for part 2", "Save this for later", "Link in bio")
+- NEVER end with "person relaxes" or "person smiles" — end with ENGAGEMENT
 
 Return ONLY valid JSON: {"beats":[{...}]}`;
 
