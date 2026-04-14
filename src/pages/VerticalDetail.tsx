@@ -25,7 +25,7 @@ export default function VerticalDetail() {
     queryKey: ["vertical-detail", vertical],
     queryFn: async () => {
       const [accountsRes, storiesRes, ideasRes, productsRes] = await Promise.all([
-        supabase.from("account_configs").select("*").eq("vertical", vertical!).eq("status", "active"),
+        supabase.from("account_configs").select("*").eq("vertical", vertical! as any).eq("status", "active"),
         supabase.from("story_jobs").select("id, title, status, assembled_status, review_status, account_id, product_id, created_at, assembled_video_url")
           .order("created_at", { ascending: false }).limit(100),
         supabase.from("content_ideas").select("id, title, status, account_id, opportunity_score, angle, suggested_format, product_id, content_type")
