@@ -36,6 +36,7 @@ interface AccountConfig {
 }
 
 const HOOK_STYLES = ["curiosity", "shock", "problem", "aesthetic", "demo", "listicle"];
+const VISUAL_STYLES = ["realistic", "cinematic", "sci-fi", "abstract", "hybrid"];
 const IDEA_LOW_THRESHOLD = 3;
 
 export function AccountIdentityCard({
