@@ -129,6 +129,30 @@ export function useTodayFeed() {
         .limit(200);
       if (ideaErr) throw ideaErr;
 
+      // Fetch quality scores for today's jobs
+      const jobIds = (jobs || []).map((j: any) => j.id);
+      const qualityMap = new Map<string, { avg: number; done: number; total: number }>();
+      if (jobIds.length > 0) {
+        const { data: clips } = await supabase
+          .from("video_jobs")
+          .select("story_job_id, status, auto_overall_score, is_primary")
+          .in("story_job_id", jobIds);
+        
+        // Group by story_job_id
+        const byJob = new Map<string, any[]>();
+        for (const c of clips || []) {
+          const arr = byJob.get(c.story_job_id) || [];
+          arr.push(c);
+          byJob.set(c.story_job_id, arr);
+        }
+        for (const [jobId, jobClips] of byJob) {
+          const scored = jobClips.filter((c: any) => c.auto_overall_score != null && c.is_primary);
+          const avg = scored.length > 0 ? scored.reduce((s: number, c: any) => s + c.auto_overall_score, 0) / scored.length : 0;
+          const done = jobClips.filter((c: any) => c.status === "done").length;
+          qualityMap.set(jobId, { avg: scored.length > 0 ? avg : 0, done, total: jobClips.length });
+        }
+      }
+
       // Group by account
       const jobsByAccount = new Map<string, any[]>();
       for (const j of jobs || []) {
