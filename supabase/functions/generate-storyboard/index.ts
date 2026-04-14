@@ -586,6 +586,12 @@ Return ONLY valid JSON: {"beats":[{...}]}`;
             allowed_tones: constraints.allowed_tones,
             allowed_hook_categories: constraints.allowed_hook_categories,
             hook_category: hookCategory, cta_phrase: ctaResult.phrase,
+            platform_optimization: {
+              detected_format: detectedFormat,
+              pacing: pacingProfile.pacing_instruction.split(":")[0],
+              hook_max_seconds: pacingProfile.hook_max_seconds,
+              value_max_seconds: pacingProfile.value_max_seconds,
+            },
             hook_optimization: hookResult ? {
               winner: hookResult.hook_text,
               winner_score: hookResult.hook_score,
