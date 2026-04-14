@@ -176,6 +176,10 @@ Deno.serve(async (req) => {
         const styleBlock = buildStyleControlBlock(accountStyle);
         console.log(`[generate-storyboard] P4: realism=${accountStyle.realism_level} style=${accountStyle.visual_style}`);
 
+        // ── CONTENT TYPE RULES (growth vs product_promo) ──
+        const contentTypeBlock = buildContentTypeBlock(contentType);
+        console.log(`[generate-storyboard] Content type: ${contentType}`);
+
         // P3: Platform optimization — detect format + inject pacing/overlay rules
         const detectedFormat = detectContentFormat(concept);
         const platformBlock = buildPlatformOptimizationBlock(concept);
