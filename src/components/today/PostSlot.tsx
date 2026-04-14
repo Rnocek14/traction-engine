@@ -25,9 +25,11 @@ export function PostSlotCard({ slot, onApprove, onReject, onProduce, onClick }: 
   const Icon = config.icon;
 
   return (
-    <Card className="min-w-[180px] flex-1 cursor-pointer hover:border-primary/50 transition-colors" onClick={() => onClick?.(slot)}>
-      <CardContent className="p-3 space-y-2" onClick={(e) => e.stopPropagation()}>
-        <div onClick={() => onClick?.(slot)} className="cursor-pointer space-y-2">
+    <Card
+      className="min-w-[180px] flex-1 cursor-pointer hover:border-primary/50 transition-colors"
+      onClick={() => onClick?.(slot)}
+    >
+      <CardContent className="p-3 space-y-2">
         <Badge variant="outline" className={`text-[10px] ${config.color}`}>
           <Icon className={`w-3 h-3 mr-1 ${slot.status === "generating" ? "animate-spin" : ""}`} />
           {config.label}
@@ -39,7 +41,7 @@ export function PostSlotCard({ slot, onApprove, onReject, onProduce, onClick }: 
 
         <p className="text-[10px] text-muted-foreground">{slot.contentType}</p>
 
-        <div className="flex gap-1.5 pt-1">
+        <div className="flex gap-1.5 pt-1" onClick={(e) => e.stopPropagation()}>
           {slot.status === "ready" && (
             <>
               <Button size="sm" className="h-7 text-xs flex-1" onClick={() => onApprove?.(slot.storyJobId!)}>
