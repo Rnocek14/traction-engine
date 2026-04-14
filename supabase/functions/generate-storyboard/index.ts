@@ -334,7 +334,13 @@ Return ONLY valid JSON: {"beats":[{...}]}`;
 
           const compiled = compileViralPrompt(sceneInput, constraints);
           const compliance = sanitizePromptText(compiled.prompt, vertical);
-          const finalPrompt = compliance.text;
+          
+          // P3: Enhance visual specificity
+          const visualEnhanced = enhanceVisualInstruction(compliance.text);
+          const finalPrompt = visualEnhanced.enhanced;
+          if (visualEnhanced.was_modified) {
+            console.log(`[generate-storyboard] P3: Visual enhancement applied to scene ${i}`);
+          }
 
           if (compliance.replacements.length > 0) {
             allSanitizedTerms.push(...compliance.replacements.map(r => `Scene ${i}: ${r}`));
