@@ -1249,6 +1249,7 @@ export type Database = {
           supplier_url: string | null
           synonyms: string[] | null
           updated_at: string
+          verticals: string[]
         }
         Insert: {
           canonical_name?: string | null
@@ -1282,6 +1283,7 @@ export type Database = {
           supplier_url?: string | null
           synonyms?: string[] | null
           updated_at?: string
+          verticals?: string[]
         }
         Update: {
           canonical_name?: string | null
@@ -1315,6 +1317,7 @@ export type Database = {
           supplier_url?: string | null
           synonyms?: string[] | null
           updated_at?: string
+          verticals?: string[]
         }
         Relationships: [
           {
@@ -2786,6 +2789,45 @@ export type Database = {
           id?: string
           role?: Database["public"]["Enums"]["app_role"]
           user_id?: string
+        }
+        Relationships: []
+      }
+      vertical_configs: {
+        Row: {
+          auto_generate: boolean
+          created_at: string
+          daily_app_target: number
+          daily_growth_target: number
+          daily_product_target: number
+          growth_ratio: number
+          id: string
+          last_engine_run_at: string | null
+          updated_at: string
+          vertical: string
+        }
+        Insert: {
+          auto_generate?: boolean
+          created_at?: string
+          daily_app_target?: number
+          daily_growth_target?: number
+          daily_product_target?: number
+          growth_ratio?: number
+          id?: string
+          last_engine_run_at?: string | null
+          updated_at?: string
+          vertical: string
+        }
+        Update: {
+          auto_generate?: boolean
+          created_at?: string
+          daily_app_target?: number
+          daily_growth_target?: number
+          daily_product_target?: number
+          growth_ratio?: number
+          id?: string
+          last_engine_run_at?: string | null
+          updated_at?: string
+          vertical?: string
         }
         Relationships: []
       }
