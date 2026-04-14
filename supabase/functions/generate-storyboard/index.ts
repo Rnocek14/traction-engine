@@ -162,6 +162,19 @@ Deno.serve(async (req) => {
         console.log(`[generate-storyboard] Cinematic compiler → falling through to legacy GPT`);
       } else {
         // ── VIRAL TEMPLATE PIPELINE ──
+        
+        // P3: Platform optimization — detect format + inject pacing/overlay rules
+        const detectedFormat = detectContentFormat(concept);
+        const platformBlock = buildPlatformOptimizationBlock(concept);
+        const pacingProfile = getPacingProfile(detectedFormat);
+        console.log(`[generate-storyboard] P3: format=${detectedFormat} pacing=${pacingProfile.hook_max_seconds}s hook max`);
+
+        // P3: Override hook category if format has strong preference
+        const hookOverride = getFormatHookOverride(concept, hookCategory);
+        if (hookOverride && hookResult === null) {
+          console.log(`[generate-storyboard] P3: Hook category override ${hookCategory} → ${hookOverride}`);
+        }
+
         const hookInstruction = hookResult
           ? `\n\nWINNING HOOK (use this as the hook beat narration):\nText: "${hookResult.hook_text}"\nOverlay: "${hookResult.hook_overlay}"\nScore: ${hookResult.hook_score.total.toFixed(1)}/10\nIMPORTANT: Use this exact hook text as the narration_line for the hook beat. You may adjust slightly for flow but keep the core message.`
           : "";
@@ -175,7 +188,7 @@ Deno.serve(async (req) => {
         // Detect title promise for listicle enforcement
         const titlePromiseBlock = buildTitlePromiseBlock(concept);
 
-        const templatePrompt = `You are an elite short-form video scriptwriter who creates VIRAL, FASCINATING content. Given a concept and beat structure, generate scene content.
+        const templatePrompt = `You are an elite short-form video scriptwriter who creates VIRAL, FASCINATING content optimized for TikTok and Instagram Reels. Given a concept and beat structure, generate scene content.
 
 CONCEPT: "${concept}"
 STORY TYPE: ${selection.type} (${template.name})
@@ -183,15 +196,16 @@ VERTICAL: ${vertical}
 TONE: ${constraints.allowed_tones.join(", ")}
 ${claimConstraints}
 ${titlePromiseBlock}${hookInstruction}
+${platformBlock}
 BEAT STRUCTURE (generate content for each):
 ${beatPrompts.join("\n")}
 
 For each beat, return:
-- subject: Who/what is on screen — MUST directly illustrate the narration fact
-- action: What they DO physically (use action verbs)
-- environment: Where — MUST match the setting implied by the fact
+- subject: Who/what is on screen — MUST directly illustrate the narration fact. Be SPECIFIC (e.g., "close-up of hands typing on a MacBook" not "person at computer")
+- action: What they DO physically — visible, concrete motion (e.g., "drags resume section to the top" not "works on resume")
+- environment: Where — MUST match the setting implied by the fact. Include lighting and key objects.
 - mood: Single word
-- text_overlay: Short punchy text (MAX 6 words)
+- text_overlay: Short punchy text (MAX 6 words) — hook overlay must be LARGE and attention-grabbing
 - narration_line: REQUIRED voiceover line (12-25 words, MUST contain a specific actionable instruction, fact, or technique — NOT generic motivation)
 ${researchBrief.activated && researchBrief.grounded ? '- claim_ids: Array of claim IDs this beat references (e.g., ["claim_001"])' : ""}
 
