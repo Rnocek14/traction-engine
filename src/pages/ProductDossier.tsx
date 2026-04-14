@@ -9,6 +9,7 @@ import { MarketingAssetsSection } from "@/components/products/dossier/MarketingA
 import { RetailEvidenceSection } from "@/components/products/dossier/RetailEvidenceSection";
 import { WholesaleEvidenceSection } from "@/components/products/dossier/WholesaleEvidenceSection";
 import { DossierHeader } from "@/components/products/dossier/DossierHeader";
+import { PrimaryActionEngine } from "@/components/products/dossier/PrimaryActionEngine";
 import { ViralVideoList } from "@/components/products/ViralVideoList";
 import { ProductVideosSection } from "@/components/products/dossier/ProductVideosSection";
 import { TestScoreboard } from "@/components/products/dossier/TestScoreboard";
@@ -55,6 +56,7 @@ export default function ProductDossier() {
         </Button>
 
         <DossierHeader product={product} />
+        <PrimaryActionEngine product={product} />
         <TestScoreboard productId={productId!} />
         <ConversionTracker productId={productId!} productName={product.name} />
         <MarketingAssetsSection product={product} />
