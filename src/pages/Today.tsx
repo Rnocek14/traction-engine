@@ -17,6 +17,7 @@ export default function Today() {
   const { data, isLoading } = useTodayFeed();
   const [compact, setCompact] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<PostSlot | null>(null);
+  const [producingIds, setProducingIds] = useState<Set<string>>(new Set());
   const queryClient = useQueryClient();
 
   const feed = data?.feed || [];
