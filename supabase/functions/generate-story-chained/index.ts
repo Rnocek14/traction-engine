@@ -6,6 +6,10 @@
  * 2. Scenes 2+: Handled by continue-story-chain cron (Image-to-Video)
  * 3. This function only queues the FIRST scene to avoid timeouts
  * 
+ * P0 FIXES:
+ * - Prompt sanitization: strips all routing metadata before sending to provider
+ * - Provider circuit breaker: checks provider health before queueing
+ * 
  * The continue-story-chain cron runs every 30s to advance the chain.
  */
 
@@ -26,6 +30,8 @@ import {
   type CoverageType,
 } from "../_shared/capture-contract.ts";
 import { inferCoverageFromPrompt } from "../_shared/narrative-context.ts";
+import { sanitizePromptForProvider, hasRoutingMetadata } from "../_shared/prompt-sanitizer.ts";
+import { checkProviderHealth, getHealthyProviders, logProviderHealth } from "../_shared/provider-health.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -203,14 +209,26 @@ Deno.serve(async (req) => {
       s.role || inferRoleFromPosition(i, scenes.length)
     );
     
+    // P0 FIX: Check provider health before routing
+    const providerHealth = await checkProviderHealth(supabase);
+    logProviderHealth(providerHealth);
+    const healthyProviders = getHealthyProviders(providerHealth);
+    
     // Check for Character Continuity Mode - override routing if enabled
     let selectedProvider: VideoProvider;
     let routingReason: string;
     
     if (characterContinuityMode && lockedProviderName) {
-      // LOCKED: Use the specified provider for ALL scenes
-      selectedProvider = lockedProviderName;
-      routingReason = `Character Continuity Mode → locked to ${lockedProviderName}`;
+      // Check if locked provider is healthy
+      if (healthyProviders.includes(lockedProviderName)) {
+        selectedProvider = lockedProviderName;
+        routingReason = `Character Continuity Mode → locked to ${lockedProviderName}`;
+      } else {
+        // Locked provider is unhealthy — fall back to best healthy option
+        selectedProvider = healthyProviders[0];
+        routingReason = `Character Continuity Mode → ${lockedProviderName} UNHEALTHY, circuit breaker → ${selectedProvider}`;
+        console.warn(`[chained] Circuit breaker: ${lockedProviderName} disabled, using ${selectedProvider}`);
+      }
     } else {
       // NORMAL: Use role-based routing
       const routingResult = routeBySceneRole(sceneRole, {
@@ -221,6 +239,14 @@ Deno.serve(async (req) => {
       });
       selectedProvider = routingResult.provider;
       routingReason = routingResult.routingReason;
+      
+      // P0: Check if routed provider is healthy
+      if (!healthyProviders.includes(selectedProvider)) {
+        const fallback = healthyProviders[0];
+        console.warn(`[chained] Circuit breaker: ${selectedProvider} unhealthy → ${fallback}`);
+        routingReason += ` | CIRCUIT BREAKER: ${selectedProvider} → ${fallback}`;
+        selectedProvider = fallback;
+      }
     }
     
     // Process duration: clamp to role range first, then snap to provider
