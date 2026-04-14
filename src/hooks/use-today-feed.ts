@@ -48,12 +48,24 @@ function getStartOfToday() {
   return d.toISOString();
 }
 
-function mapJobToSlot(job: any): PostSlot {
+function deriveConfidence(qualityScore: number | null, completionPct: number | null, hasVideo: boolean): PostSlot["confidence"] {
+  if (!hasVideo) return null;
+  if (qualityScore != null && qualityScore >= 70 && completionPct != null && completionPct >= 80) return "ready";
+  if (qualityScore != null && qualityScore < 40) return "regenerate";
+  if (qualityScore != null || completionPct != null) return "review";
+  return null;
+}
+
+function mapJobToSlot(job: any, qualityMap: Map<string, { avg: number; done: number; total: number }>): PostSlot {
   let status: PostSlotStatus = "generating";
   if (job.review_status === "approved") status = "approved";
   else if (job.review_status === "rejected") status = "rejected";
   else if (job.assembled_video_url) status = "ready";
   else if (["pending", "generating", "assembling"].includes(job.status)) status = "generating";
+
+  const q = qualityMap.get(job.id);
+  const qualityScore = q?.avg ?? null;
+  const completionPct = q && q.total > 0 ? Math.round((q.done / q.total) * 100) : null;
 
   return {
     id: job.id,
@@ -64,6 +76,9 @@ function mapJobToSlot(job: any): PostSlot {
     storyJobId: job.id,
     ideaId: job.source_idea_id,
     createdAt: job.created_at,
+    qualityScore: qualityScore != null ? Math.round(qualityScore) : null,
+    completionPct,
+    confidence: deriveConfidence(qualityScore, completionPct, !!job.assembled_video_url),
   };
 }
 
@@ -77,6 +92,9 @@ function mapIdeaToSlot(idea: any): PostSlot {
     storyJobId: null,
     ideaId: idea.id,
     createdAt: idea.created_at,
+    qualityScore: null,
+    completionPct: null,
+    confidence: null,
   };
 }
 
