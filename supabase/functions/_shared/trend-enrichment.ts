@@ -81,7 +81,9 @@ export async function fetchTrendEnrichment(
 
     const insights = data as ScrapedInsight[];
 
-    // Filter by relevance_tags first (structured vertical matching)
+    // P0 FIX: HARD VERTICAL GATE
+    // If vertical is provided, ONLY use insights that match via relevance_tags.
+    // If no matches found, return empty — do NOT fall through to loose keyword matching.
     let relevant = insights;
     if (opts.vertical) {
       const verticalLower = opts.vertical.toLowerCase();
@@ -90,10 +92,12 @@ export async function fetchTrendEnrichment(
         const tags: string[] = i.relevance_tags || [];
         return tags.some((t: string) => t.toLowerCase() === verticalLower);
       });
-      if (tagFiltered.length >= 2) {
-        relevant = tagFiltered as ScrapedInsight[];
+      if (tagFiltered.length < 2) {
+        // HARD GATE: No relevant insights for this vertical — return empty
+        console.log(`[trend-enrichment] Hard gate: only ${tagFiltered.length} insights match vertical "${opts.vertical}" — skipping enrichment`);
+        return EMPTY_ENRICHMENT;
       }
-      // Fall back to keyword matching only if tag matching found <2
+      relevant = tagFiltered as ScrapedInsight[];
     }
 
     // Secondary: keyword relevance scoring
