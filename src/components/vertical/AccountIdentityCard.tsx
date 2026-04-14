@@ -29,6 +29,9 @@ interface AccountConfig {
   cta_style: string;
   cta_phrases: string[];
   handle: string | null;
+  realism_level?: number;
+  visual_style?: string;
+  style_notes?: string;
 }
 
 const HOOK_STYLES = ["curiosity", "shock", "problem", "aesthetic", "demo", "listicle"];
