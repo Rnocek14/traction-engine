@@ -76,6 +76,8 @@ import {
   type ModerationLadderContext,
 } from "../_shared/moderation-ladder.ts";
 import { sanitizePromptText } from "../_shared/prompt-compliance.ts";
+import { sanitizePromptForProvider } from "../_shared/prompt-sanitizer.ts";
+import { checkProviderHealth, getHealthyProviders, logProviderHealth } from "../_shared/provider-health.ts";
 import type { ContentVertical } from "../_shared/vertical-profiles.ts";
 
 const corsHeaders = {
@@ -1185,6 +1187,17 @@ Deno.serve(async (req) => {
         }
       }
       
+      // === P0 FIX: SANITIZE PROMPT (strip routing metadata) ===
+      // This is the LAST PASS before the prompt reaches the video model.
+      // Strips all [LABEL:...], KEY=VALUE, and structural markers.
+      const { cleanPrompt: sanitizedPrompt, strippedChars, wasTrimmed } = sanitizePromptForProvider(
+        finalPrompt,
+        selectedProvider
+      );
+      if (strippedChars > 0 || wasTrimmed) {
+        console.log(`[chain-continue] P0 Sanitized scene ${nextSceneIndex + 1}: stripped ${strippedChars} chars, trimmed=${wasTrimmed}, final=${sanitizedPrompt.length} chars for ${selectedProvider}`);
+      }
+      
       // === PROVIDER FALLBACK ORDER ===
       // When a provider fails with credits/quota, try the next one
       const PROVIDER_FALLBACK_ORDER: VideoProvider[] = ["runway", "luma", "sora"];
@@ -1219,7 +1232,7 @@ Deno.serve(async (req) => {
       
       let queueSuccess = false;
       let data: { success: boolean; job?: { id: string }; error?: string } = { success: false };
-      let currentPrompt = finalPrompt;
+      let currentPrompt = sanitizedPrompt; // P0: Use sanitized prompt
       let currentProvider = selectedProvider;
       let currentProviderEndpoint = providerEndpoint;
       let currentStartingFrame = startingFrameUrl;
