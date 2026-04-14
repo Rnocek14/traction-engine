@@ -178,6 +178,13 @@ export default function Today() {
             </section>
           ))
         )}
+        {/* Post Detail Drawer */}
+        <PostDetailDrawer
+          open={!!selectedSlot}
+          onOpenChange={(open) => { if (!open) setSelectedSlot(null); }}
+          storyJobId={selectedSlot?.storyJobId || null}
+          ideaId={selectedSlot?.ideaId}
+        />
       </main>
     </div>
   );
