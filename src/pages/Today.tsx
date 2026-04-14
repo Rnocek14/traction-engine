@@ -17,6 +17,7 @@ export default function Today() {
   const { data, isLoading } = useTodayFeed();
   const [compact, setCompact] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<PostSlot | null>(null);
+  const [producingIds, setProducingIds] = useState<Set<string>>(new Set());
   const queryClient = useQueryClient();
 
   const feed = data?.feed || [];
@@ -55,51 +56,105 @@ export default function Today() {
   };
 
   const handleProduce = async (ideaId: string) => {
+    setProducingIds(prev => new Set(prev).add(ideaId));
     toast({ title: "Producing…", description: "Generating storyboard from idea" });
     
-    // Step 1: Fetch the idea to get concept info
-    const { data: idea, error: ideaErr } = await supabase
-      .from("content_ideas")
-      .select("title, account_id, content_type, subject, angle")
-      .eq("id", ideaId)
-      .single();
+    try {
+      // Step 1: Fetch the idea to get concept info
+      const { data: idea, error: ideaErr } = await supabase
+        .from("content_ideas")
+        .select("title, account_id, content_type, subject, angle")
+        .eq("id", ideaId)
+        .single();
+      
+      if (ideaErr || !idea) {
+        toast({ title: "Error", description: "Could not load idea", variant: "destructive" });
+        return;
+      }
+
+      // Step 2: Generate storyboard from the idea concept
+      const concept = `${idea.title}${idea.angle ? ` — ${idea.angle}` : ""}${idea.subject ? `. Subject: ${idea.subject}` : ""}`;
+      const contentType = idea.content_type === "product_promo" ? "product_promo" : "growth";
+      const { data: storyboard, error: sbErr } = await supabase.functions.invoke("generate-storyboard", {
+        body: { concept, story_type: "short_story", scene_count: 5, content_type: contentType },
+      });
+
+      if (sbErr || !storyboard?.scenes?.length) {
+        toast({ title: "Error", description: "Storyboard generation failed", variant: "destructive" });
+        return;
+      }
+
+      // Step 3: Create story job with the generated storyboard
+      const { error: createErr } = await supabase.functions.invoke("create-story", {
+        body: {
+          title: idea.title,
+          account_id: idea.account_id,
+          story_type: "short_story",
+          continuity_anchors: {},
+          storyboard_json: { scenes: storyboard.scenes },
+          auto_generate: true,
+          content_idea_id: ideaId,
+          content_type: contentType,
+        },
+      });
+
+      if (createErr) {
+        toast({ title: "Error", description: createErr.message, variant: "destructive" });
+      } else {
+        toast({ title: "Story created & generating!" });
+        queryClient.invalidateQueries({ queryKey: ["today-feed"] });
+      }
+    } finally {
+      setProducingIds(prev => {
+        const next = new Set(prev);
+        next.delete(ideaId);
+        return next;
+      });
+    }
+  };
+
+  const handleRegenerate = async (jobId: string) => {
+    setProducingIds(prev => new Set(prev).add(jobId));
+    toast({ title: "Regenerating…", description: "Creating new video clips for this story" });
     
-    if (ideaErr || !idea) {
-      toast({ title: "Error", description: "Could not load idea", variant: "destructive" });
-      return;
-    }
+    try {
+      // Fetch the existing story job to get its config
+      const { data: job, error: jobErr } = await supabase
+        .from("story_jobs")
+        .select("title, account_id, story_type, storyboard_json, content_type")
+        .eq("id", jobId)
+        .single();
 
-    // Step 2: Generate storyboard from the idea concept
-    const concept = `${idea.title}${idea.angle ? ` — ${idea.angle}` : ""}${idea.subject ? `. Subject: ${idea.subject}` : ""}`;
-    const contentType = idea.content_type === "product_promo" ? "product_promo" : "growth";
-    const { data: storyboard, error: sbErr } = await supabase.functions.invoke("generate-storyboard", {
-      body: { concept, story_type: "short_story", scene_count: 5, content_type: contentType },
-    });
+      if (jobErr || !job) {
+        toast({ title: "Error", description: "Could not load story job", variant: "destructive" });
+        return;
+      }
 
-    if (sbErr || !storyboard?.scenes?.length) {
-      toast({ title: "Error", description: "Storyboard generation failed", variant: "destructive" });
-      return;
-    }
+      // Create a new story job with same config but fresh generation
+      const { error: createErr } = await supabase.functions.invoke("create-story", {
+        body: {
+          title: job.title,
+          account_id: job.account_id,
+          story_type: job.story_type || "short_story",
+          continuity_anchors: {},
+          storyboard_json: job.storyboard_json,
+          auto_generate: true,
+          content_type: job.content_type || "growth",
+        },
+      });
 
-    // Step 3: Create story job with the generated storyboard
-    const { error: createErr } = await supabase.functions.invoke("create-story", {
-      body: {
-        title: idea.title,
-        account_id: idea.account_id,
-        story_type: "short_story",
-        continuity_anchors: {},
-        storyboard_json: { scenes: storyboard.scenes },
-        auto_generate: true,
-        content_idea_id: ideaId,
-        content_type: contentType,
-      },
-    });
-
-    if (createErr) {
-      toast({ title: "Error", description: createErr.message, variant: "destructive" });
-    } else {
-      toast({ title: "Story created & generating!" });
-      queryClient.invalidateQueries({ queryKey: ["today-feed"] });
+      if (createErr) {
+        toast({ title: "Error", description: createErr.message, variant: "destructive" });
+      } else {
+        toast({ title: "Regenerating!", description: "New clips are being generated" });
+        queryClient.invalidateQueries({ queryKey: ["today-feed"] });
+      }
+    } finally {
+      setProducingIds(prev => {
+        const next = new Set(prev);
+        next.delete(jobId);
+        return next;
+      });
     }
   };
 
@@ -172,8 +227,10 @@ export default function Today() {
                     onApprove={handleApprove}
                     onReject={handleReject}
                     onProduce={handleProduce}
+                    onRegenerate={handleRegenerate}
                     onGenerateIdeas={handleGenerateIdeas}
                     onSlotClick={setSelectedSlot}
+                    producingIds={producingIds}
                   />
                 ))}
               </div>
