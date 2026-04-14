@@ -71,8 +71,9 @@ export default function Today() {
 
     // Step 2: Generate storyboard from the idea concept
     const concept = `${idea.title}${idea.angle ? ` — ${idea.angle}` : ""}${idea.subject ? `. Subject: ${idea.subject}` : ""}`;
+    const contentType = idea.content_type === "product_promo" ? "product_promo" : "growth";
     const { data: storyboard, error: sbErr } = await supabase.functions.invoke("generate-storyboard", {
-      body: { concept, story_type: "short_story", scene_count: 5 },
+      body: { concept, story_type: "short_story", scene_count: 5, content_type: contentType },
     });
 
     if (sbErr || !storyboard?.scenes?.length) {

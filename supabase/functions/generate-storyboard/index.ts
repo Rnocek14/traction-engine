@@ -290,8 +290,11 @@ NARRATION QUALITY (CRITICAL):
 - If a beat is about advice/tips/hacks, the narration must contain the ACTUAL advice, not a teaser
 - Start value beats with actionable verbs: "Use...", "Add...", "Replace...", "Try...", "Set...", "Turn off..."
 CTA SCENES (CRITICAL):
-- CTA must include a specific next action ("Follow for part 2", "Save this for later", "Link in bio")
-- NEVER end with "person relaxes" or "person smiles" — end with ENGAGEMENT
+${contentType === "growth" 
+  ? `- Growth content: use engagement CTAs ONLY ("Follow for more", "Save this", "Comment which one") — NEVER "Link in bio" or "Shop now"
+- NEVER end with "person relaxes" or "person smiles" — end with ENGAGEMENT`
+  : `- CTA must include a specific next action ("Link in bio", "Shop now", "Check the link")
+- NEVER end with "person relaxes" or "person smiles" — end with ENGAGEMENT`}
 
 Return ONLY valid JSON: {"beats":[{...}]}`;
 
