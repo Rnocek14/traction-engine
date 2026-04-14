@@ -31,6 +31,7 @@ export type Database = {
           cta_style: Database["public"]["Enums"]["cta_style"]
           disclaimer_rules: Json
           handle: string | null
+          hook_style: string
           id: string
           max_daily_posts: number
           monetization_mode: Database["public"]["Enums"]["monetization_mode"]
@@ -63,6 +64,7 @@ export type Database = {
           cta_style?: Database["public"]["Enums"]["cta_style"]
           disclaimer_rules?: Json
           handle?: string | null
+          hook_style?: string
           id?: string
           max_daily_posts?: number
           monetization_mode?: Database["public"]["Enums"]["monetization_mode"]
@@ -95,6 +97,7 @@ export type Database = {
           cta_style?: Database["public"]["Enums"]["cta_style"]
           disclaimer_rules?: Json
           handle?: string | null
+          hook_style?: string
           id?: string
           max_daily_posts?: number
           monetization_mode?: Database["public"]["Enums"]["monetization_mode"]

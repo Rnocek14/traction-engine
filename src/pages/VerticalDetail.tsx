@@ -16,6 +16,7 @@ import { SuggestionsCard } from "@/components/vertical/SuggestionsCard";
 import { ReviewQueue } from "@/components/vertical/ReviewQueue";
 import { EngineSettingsDialog } from "@/components/vertical/EngineSettingsDialog";
 import { useVerticalEngine, useRunEngine, useUpdateVerticalConfig, useMatchProducts } from "@/hooks/use-vertical-engine";
+import { AccountIdentityCard } from "@/components/vertical/AccountIdentityCard";
 import {
   ArrowLeft, Film, Lightbulb, Users, ShoppingBag,
   Clock, Eye, Wand2,
@@ -128,22 +129,12 @@ export default function VerticalDetail() {
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {accounts.map(a => (
-                  <Card key={a.id} className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => navigate(`/account/${a.account_id}`)}>
-                    <CardContent className="p-4 flex items-center justify-between">
-                      <div>
-                        <p className="font-medium text-sm">{a.account_name || a.account_id}</p>
-                        <div className="flex items-center gap-2 mt-1">
-                          <Badge variant="outline" className="text-[10px]">{a.platform}</Badge>
-                          <Badge variant="secondary" className="text-[10px]">{a.monetization_mode}</Badge>
-                          {a.handle && <span className="text-xs text-muted-foreground">@{a.handle}</span>}
-                        </div>
-                        <p className="text-xs text-muted-foreground mt-1 line-clamp-1">{a.promise}</p>
-                      </div>
-                      <div className="text-right text-xs text-muted-foreground">
-                        <p>{stories.filter(s => s.account_id === a.account_id).length} stories</p>
-                      </div>
-                    </CardContent>
-                  </Card>
+                  <AccountIdentityCard
+                    key={a.id}
+                    account={a as any}
+                    vertical={vertical!}
+                    storyCount={stories.filter(s => s.account_id === a.account_id).length}
+                  />
                 ))}
               </div>
             )}
