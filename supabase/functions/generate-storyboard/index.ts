@@ -547,6 +547,14 @@ Return ONLY valid JSON: {"beats":[{...}]}`;
               has_hard_blocks: storyCompliance.has_hard_blocks,
             },
             story_engine_audit: audit,
+            content_quality: {
+              pass: qualityReport.overall_pass,
+              title_promise: qualityReport.title_promise,
+              narration_issues: qualityReport.narration_issues.length,
+              filler_scenes: qualityReport.filler_scene_count,
+              structure_issues: qualityReport.structure_issues,
+              summary: qualityReport.summary,
+            },
             ...(debugPersistId ? { debug_persist_id: debugPersistId } : {}),
           }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
