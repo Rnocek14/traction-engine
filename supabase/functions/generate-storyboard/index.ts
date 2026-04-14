@@ -16,6 +16,7 @@ import {
 import { logExperiment, logScore } from "../_shared/prompt-experiment-logger.ts";
 import type { SceneRole, CutZone, CutType, ChangeType, GeneratedStoryboard } from "../_shared/storyboard-prompts.ts";
 import { SYSTEM_PROMPT, STORY_TYPE_GUIDANCE } from "../_shared/storyboard-prompts.ts";
+import { parseTitlePromise, buildTitlePromiseBlock, validateContentQuality } from "../_shared/content-quality.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -146,6 +147,9 @@ Deno.serve(async (req) => {
           return `Beat ${i + 1} (${beat.role}): ${beat.description}${isHook ? ` [hook_category: ${hookCategory}]` : ""}${isCTA ? ` [CTA: "${ctaResult.phrase}"]` : ""}`;
         });
 
+        // Detect title promise for listicle enforcement
+        const titlePromiseBlock = buildTitlePromiseBlock(concept);
+
         const templatePrompt = `You are an elite short-form video scriptwriter who creates VIRAL, FASCINATING content. Given a concept and beat structure, generate scene content.
 
 CONCEPT: "${concept}"
@@ -153,6 +157,7 @@ STORY TYPE: ${selection.type} (${template.name})
 VERTICAL: ${vertical}
 TONE: ${constraints.allowed_tones.join(", ")}
 ${claimConstraints}
+${titlePromiseBlock}
 BEAT STRUCTURE (generate content for each):
 ${beatPrompts.join("\n")}
 
@@ -162,12 +167,16 @@ For each beat, return:
 - environment: Where — MUST match the setting implied by the fact
 - mood: Single word
 - text_overlay: Short punchy text (MAX 6 words)
-- narration_line: REQUIRED voiceover line (10-25 words, specific, surprising, conversational)
+- narration_line: REQUIRED voiceover line (12-25 words, MUST contain a specific actionable instruction, fact, or technique — NOT generic motivation)
 ${researchBrief.activated && researchBrief.grounded ? '- claim_ids: Array of claim IDs this beat references (e.g., ["claim_001"])' : ""}
 
 VISUAL-NARRATION ALIGNMENT: The subject and environment MUST visually depict the specific fact in narration_line.
 TONE CONSISTENCY: The LAST scene MUST maintain the same mood as the rest.
-NARRATION: Must be SPECIFIC, FACTUAL, SURPRISING, CONVERSATIONAL. No vague filler or clickbait.
+NARRATION QUALITY (CRITICAL):
+- Each narration_line must teach something SPECIFIC (a technique, fact, statistic, or step)
+- BANNED phrases: "confidence is key", "believe in yourself", "unlock your potential", "game changer", "you won't believe"
+- If a beat is about advice/tips/hacks, the narration must contain the ACTUAL advice, not a teaser
+- Start value beats with actionable verbs: "Use...", "Add...", "Replace...", "Try..."
 
 Return ONLY valid JSON: {"beats":[{...}]}`;
 
