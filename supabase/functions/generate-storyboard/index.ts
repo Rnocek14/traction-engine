@@ -234,6 +234,23 @@ Return ONLY valid JSON: {"beats":[{...}]}`;
           }
         }
 
+        // 4b. Content quality validation
+        const qualityReport = validateContentQuality(
+          concept,
+          sceneContents.map((c, i) => ({
+            narration_line: c.narration_line,
+            beat_role: template.beats[i]?.role,
+          })),
+        );
+
+        console.log(`[generate-storyboard] Content quality: ${qualityReport.summary}`);
+        if (qualityReport.narration_issues.length > 0) {
+          console.warn(`[generate-storyboard] Narration issues: ${qualityReport.narration_issues.map(i => `Scene ${i.scene_index}: ${i.issue} — ${i.detail}`).join("; ")}`);
+        }
+        if (qualityReport.structure_issues.length > 0) {
+          console.warn(`[generate-storyboard] Structure issues: ${qualityReport.structure_issues.join("; ")}`);
+        }
+
         // 5. Validate claim IDs
         if (researchBrief.activated && researchBrief.grounded) {
           // Validate claim IDs against research brief
