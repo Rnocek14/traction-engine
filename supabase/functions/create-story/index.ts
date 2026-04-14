@@ -73,27 +73,33 @@ Deno.serve(async (req) => {
     }
 
     // ── Trend enrichment injection ──
-    // Fetch trend context and enrich scene prompts with trending signals
+    // P0 FIX: Always pass account vertical to prevent cross-vertical pollution
+    // Look up account vertical before enrichment
+    let accountVertical: string | undefined;
+    try {
+      const { data: accountConfig } = await supabase
+        .from("account_configs")
+        .select("vertical")
+        .eq("account_id", account_id)
+        .maybeSingle();
+      accountVertical = accountConfig?.vertical;
+    } catch (err) {
+      console.warn("[create-story] Could not look up account vertical:", err);
+    }
+
     const enrichment = await fetchTrendEnrichment(supabase, {
-      vertical: undefined, // will use whatever insights are available
+      vertical: accountVertical,
       topic_prompt: title,
-      mode: "light",
+      mode: accountVertical ? "light" : "none", // P0: No vertical = no trends
     });
 
-    let enrichedStoryboard = storyboard_json;
-    if (enrichment.enabled && enrichment.prompt_block) {
-      // Inject trend context into the first scene's prompt as grounding
-      const enrichedScenes = storyboard_json.scenes.map((scene, idx) => {
-        if (idx === 0) {
-          return {
-            ...scene,
-            prompt: `${scene.prompt}\n\n${enrichment.prompt_block}`,
-          };
-        }
-        return scene;
-      });
-      enrichedStoryboard = { scenes: enrichedScenes };
-      console.log(`[create-story] Enriched with ${enrichment.insight_ids.length} trend insights`);
+    // P0 FIX: Trend data is stored in metadata for traceability but 
+    // NO LONGER injected into scene prompts. Trend intelligence should
+    // influence storyboard GENERATION (topic selection), not individual
+    // scene prompts sent to video models.
+    const enrichedStoryboard = storyboard_json;
+    if (enrichment.enabled) {
+      console.log(`[create-story] Trend metadata captured (${enrichment.insight_ids.length} insights) but NOT injected into scene prompts`);
     }
 
     // Create the story job
