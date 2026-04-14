@@ -53,14 +53,48 @@ export default function Today() {
   };
 
   const handleProduce = async (ideaId: string) => {
-    toast({ title: "Producing…", description: "Creating story from idea" });
-    const { error } = await supabase.functions.invoke("create-story", {
-      body: { idea_id: ideaId },
+    toast({ title: "Producing…", description: "Generating storyboard from idea" });
+    
+    // Step 1: Fetch the idea to get concept info
+    const { data: idea, error: ideaErr } = await supabase
+      .from("content_ideas")
+      .select("title, account_id, content_type, subject, angle")
+      .eq("id", ideaId)
+      .single();
+    
+    if (ideaErr || !idea) {
+      toast({ title: "Error", description: "Could not load idea", variant: "destructive" });
+      return;
+    }
+
+    // Step 2: Generate storyboard from the idea concept
+    const concept = `${idea.title}${idea.angle ? ` — ${idea.angle}` : ""}${idea.subject ? `. Subject: ${idea.subject}` : ""}`;
+    const { data: storyboard, error: sbErr } = await supabase.functions.invoke("generate-storyboard", {
+      body: { concept, story_type: "short_story", scene_count: 5 },
     });
-    if (error) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
+
+    if (sbErr || !storyboard?.scenes?.length) {
+      toast({ title: "Error", description: "Storyboard generation failed", variant: "destructive" });
+      return;
+    }
+
+    // Step 3: Create story job with the generated storyboard
+    const { error: createErr } = await supabase.functions.invoke("create-story", {
+      body: {
+        title: idea.title,
+        account_id: idea.account_id,
+        story_type: "short_story",
+        continuity_anchors: {},
+        storyboard_json: { scenes: storyboard.scenes },
+        auto_generate: true,
+        content_idea_id: ideaId,
+      },
+    });
+
+    if (createErr) {
+      toast({ title: "Error", description: createErr.message, variant: "destructive" });
     } else {
-      toast({ title: "Story created" });
+      toast({ title: "Story created & generating!" });
       queryClient.invalidateQueries({ queryKey: ["today-feed"] });
     }
   };
