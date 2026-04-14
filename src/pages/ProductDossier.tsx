@@ -56,6 +56,7 @@ export default function ProductDossier() {
         </Button>
 
         <DossierHeader product={product} />
+        <PrimaryActionEngine product={product} />
         <TestScoreboard productId={productId!} />
         <ConversionTracker productId={productId!} productName={product.name} />
         <MarketingAssetsSection product={product} />
