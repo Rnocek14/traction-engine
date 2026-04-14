@@ -281,7 +281,7 @@ Deno.serve(async (req) => {
     
     // === CAPTURE CONTRACT + CINEMATOGRAPHY (Film Realism Prior) ===
     // Build capture contract and cinematography directive for scene 1
-    // This ensures the first scene also gets the film-look treatment
+    // These are used internally for routing decisions but stripped before sending to provider
     const resolvedCoverage: CoverageType = inferCoverageFromPrompt(prompt, sceneRole);
     const { difficulty, isInterior, hasMetalArmor } = autoScoreDifficulty(prompt, resolvedCoverage);
     const captureContract = buildCaptureContract(difficulty);
@@ -291,8 +291,19 @@ Deno.serve(async (req) => {
     console.log(`[chained] Scene 1 capture: difficulty=${difficulty} (interior=${isInterior}, metal=${hasMetalArmor}) → ${describeCaptureContract(difficulty)}`);
     console.log(`[chained] Scene 1 cinematography: ${roleCine.lens} lens, ${roleCine.motion} motion, ${roleCine.lighting} lighting`);
     
-    // Build final prompt with capture contract at top
-    const finalPrompt = captureContract + cinematographyDirective + prompt;
+    // Build raw prompt with all metadata (for debugging/storage)
+    const rawEnrichedPrompt = captureContract + cinematographyDirective + prompt;
+    
+    // P0 FIX: Sanitize prompt before sending to video model
+    // Strip ALL routing metadata ([CAPTURE:...], [CINEMATOGRAPHY...], ESC=, FORCE=, etc.)
+    const { cleanPrompt: finalPrompt, strippedChars, wasTrimmed } = sanitizePromptForProvider(
+      rawEnrichedPrompt,
+      selectedProvider
+    );
+    
+    if (strippedChars > 0 || wasTrimmed) {
+      console.log(`[chained] P0 Sanitized: stripped ${strippedChars} chars of metadata, trimmed=${wasTrimmed}, final=${finalPrompt.length} chars`);
+    }
     
     const response = await fetch(`${supabaseUrl}/functions/v1/${providerEndpoint}`, {
       method: "POST",
