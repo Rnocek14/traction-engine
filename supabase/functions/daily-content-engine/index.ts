@@ -35,7 +35,7 @@ Deno.serve(async (req) => {
     // 2. Load accounts
     const { data: accounts } = await supabase
       .from("account_configs")
-      .select("account_id, vertical, account_name, platform, monetization_mode, content_pillars, promise, content_style, hook_style, persona, audience, cta_style, cta_phrases, max_daily_posts")
+      .select("account_id, vertical, account_name, platform, monetization_mode, content_pillars, promise, content_style, hook_style, persona, audience, cta_style, cta_phrases, max_daily_posts, realism_level, visual_style, style_notes")
       .eq("status", "active");
 
     const accountsByVertical = new Map<string, typeof accounts>();

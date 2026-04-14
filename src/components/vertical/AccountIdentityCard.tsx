@@ -5,13 +5,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Slider } from "@/components/ui/slider";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Pencil, Sparkles, Users, MessageSquare, ChevronDown, Lightbulb, Loader2, AlertTriangle } from "lucide-react";
+import { Pencil, Sparkles, Users, MessageSquare, ChevronDown, Lightbulb, Loader2, AlertTriangle, Palette } from "lucide-react";
 import type { ContentIdea } from "@/hooks/use-ideas-data";
 
 interface AccountConfig {
@@ -29,9 +30,13 @@ interface AccountConfig {
   cta_style: string;
   cta_phrases: string[];
   handle: string | null;
+  realism_level?: number;
+  visual_style?: string;
+  style_notes?: string;
 }
 
 const HOOK_STYLES = ["curiosity", "shock", "problem", "aesthetic", "demo", "listicle"];
+const VISUAL_STYLES = ["realistic", "cinematic", "sci-fi", "abstract", "hybrid"];
 const IDEA_LOW_THRESHOLD = 3;
 
 export function AccountIdentityCard({
@@ -89,7 +94,7 @@ export function AccountIdentityCard({
 
           <p className="text-xs text-muted-foreground italic line-clamp-2">"{account.promise}"</p>
 
-          <div className="grid grid-cols-3 gap-2 text-xs">
+          <div className="grid grid-cols-4 gap-2 text-xs">
             <div className="flex items-center gap-1 text-muted-foreground">
               <Sparkles className="w-3 h-3" />
               <span>{account.hook_style || "curiosity"}</span>
@@ -101,6 +106,10 @@ export function AccountIdentityCard({
             <div className="flex items-center gap-1 text-muted-foreground">
               <Users className="w-3 h-3" />
               <span>{(account.audience as any)?.who?.split(" ").slice(0, 2).join(" ") || "general"}</span>
+            </div>
+            <div className="flex items-center gap-1 text-muted-foreground">
+              <Palette className="w-3 h-3" />
+              <span>{account.visual_style || "cinematic"} ({account.realism_level ?? 70}%)</span>
             </div>
           </div>
 
@@ -198,6 +207,9 @@ function AccountEditDialog({ open, onOpenChange, account, vertical }: {
   const [audienceWho, setAudienceWho] = useState((account.audience as any)?.who || "");
   const [pillars, setPillars] = useState(account.content_pillars.join(", "));
   const [promise, setPromise] = useState(account.promise);
+  const [realismLevel, setRealismLevel] = useState(account.realism_level ?? 70);
+  const [visualStyle, setVisualStyle] = useState(account.visual_style || "cinematic");
+  const [styleNotes, setStyleNotes] = useState(account.style_notes || "");
 
   const handleSave = async () => {
     setSaving(true);
@@ -210,7 +222,10 @@ function AccountEditDialog({ open, onOpenChange, account, vertical }: {
         audience: { who: audienceWho, pain_points: (account.audience as any)?.pain_points || [] },
         content_pillars: pillars.split(",").map(s => s.trim()).filter(Boolean),
         promise,
-      })
+        realism_level: realismLevel,
+        visual_style: visualStyle,
+        style_notes: styleNotes || null,
+      } as any)
       .eq("id", account.id);
 
     setSaving(false);
@@ -271,6 +286,48 @@ function AccountEditDialog({ open, onOpenChange, account, vertical }: {
           <div>
             <Label className="text-xs font-medium">Content Pillars (comma-separated)</Label>
             <Input value={pillars} onChange={e => setPillars(e.target.value)} placeholder="gadgets, reviews, unboxings, comparisons" className="mt-1 h-8" />
+          </div>
+
+          {/* Visual Style Control */}
+          <div className="border-t pt-3 space-y-3">
+            <Label className="text-xs font-semibold flex items-center gap-1.5">
+              <Palette className="w-3.5 h-3.5" /> Visual Style Control
+            </Label>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs text-muted-foreground">Visual Style</Label>
+                <Select value={visualStyle} onValueChange={setVisualStyle}>
+                  <SelectTrigger className="mt-1 h-8"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {VISUAL_STYLES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <div className="flex justify-between">
+                  <Label className="text-xs text-muted-foreground">Realism Level</Label>
+                  <span className="text-xs text-muted-foreground">{realismLevel}%</span>
+                </div>
+                <Slider
+                  value={[realismLevel]}
+                  onValueChange={([v]) => setRealismLevel(v)}
+                  min={0}
+                  max={100}
+                  step={5}
+                  className="mt-2"
+                />
+                <div className="flex justify-between text-[9px] text-muted-foreground mt-0.5">
+                  <span>Abstract/Sci-Fi</span>
+                  <span>Grounded/Real</span>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <Label className="text-xs text-muted-foreground">Style Notes (optional)</Label>
+              <Input value={styleNotes} onChange={e => setStyleNotes(e.target.value)} placeholder="e.g., neon accents OK, no fantasy creatures..." className="mt-1 h-8" />
+            </div>
           </div>
 
           <Button className="w-full" onClick={handleSave} disabled={saving}>
