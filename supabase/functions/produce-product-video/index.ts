@@ -86,7 +86,7 @@ Deno.serve(async (req) => {
         .from("script_runs")
         .insert({
           account_id: storyJob.account_id,
-          status: "approved",
+          status: "qa_passed",
           script_content: {
             title: storyboard.hook || "Product Ad",
             scenes: scenes.map((s) => ({
