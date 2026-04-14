@@ -799,6 +799,21 @@ Return ONLY valid JSON: {"beats":[{...}]}`;
     // Assign IDs, zones, durations
     const scenesWithIds = assignSceneIdsAndZones(storyboard, tier);
 
+    // VALIDATION GATE: Ensure every scene has narration_line
+    // Legacy GPT sometimes omits it — generate fallback from prompt
+    let narrationFilled = 0;
+    for (const scene of scenesWithIds) {
+      if (!(scene as any).narration_line || (scene as any).narration_line.trim().length === 0) {
+        // Generate a fallback narration from the prompt (first 20 words)
+        const promptWords = ((scene as any).prompt || "").split(/\s+/).slice(0, 15).join(" ");
+        (scene as any).narration_line = promptWords.length > 10 ? promptWords : "Watch what happens next.";
+        narrationFilled++;
+      }
+    }
+    if (narrationFilled > 0) {
+      console.log(`[generate-storyboard] Legacy narration gate: filled ${narrationFilled}/${scenesWithIds.length} missing narration_line fields`);
+    }
+
     return new Response(
       JSON.stringify({
         title: storyboard.title,

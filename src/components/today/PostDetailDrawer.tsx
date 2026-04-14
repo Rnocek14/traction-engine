@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Video, FileText, Loader2, CheckCircle, XCircle, AlertCircle, Image, Play, Pause, Volume2, VolumeX } from "lucide-react";
+import { toast } from "@/hooks/use-toast";
+import { Video, FileText, Loader2, CheckCircle, XCircle, AlertCircle, Image, Play, Pause, Volume2, VolumeX, Zap, Mic } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // ─── Scene Video Player ─────────────────────────────────────
@@ -94,6 +95,8 @@ interface PostDetailDrawerProps {
 }
 
 export function PostDetailDrawer({ open, onOpenChange, storyJobId, ideaId }: PostDetailDrawerProps) {
+  const queryClient = useQueryClient();
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
   const { data: storyJob, isLoading: jobLoading } = useQuery({
     queryKey: ["post-detail-job", storyJobId],
     queryFn: async () => {
@@ -179,6 +182,72 @@ export function PostDetailDrawer({ open, onOpenChange, storyJobId, ideaId }: Pos
             </div>
           )}
         </SheetHeader>
+
+        {/* Action buttons for draft/generating stories */}
+        {storyJob && (storyJob.status === "draft" || storyJob.status === "generating") && (
+          <div className="px-4 pb-2 flex gap-2">
+            <Button
+              size="sm"
+              className="text-xs flex-1"
+              disabled={!!actionLoading}
+              onClick={async () => {
+                setActionLoading("generate");
+                try {
+                  const { error } = await supabase.functions.invoke("generate-story-chained", {
+                    body: {
+                      story_job_id: storyJob.id,
+                      scenes: (storyJob.storyboard_json as any)?.scenes || [],
+                      anchors: storyJob.continuity_anchors || {},
+                      settings: { size: "720x1280" },
+                    },
+                  });
+                  if (error) throw error;
+                  toast({ title: "Clips queued!", description: "Scene 1 is generating, the rest will chain automatically." });
+                  queryClient.invalidateQueries({ queryKey: ["post-detail-job", storyJobId] });
+                  queryClient.invalidateQueries({ queryKey: ["post-detail-clips", storyJobId] });
+                  queryClient.invalidateQueries({ queryKey: ["today-feed"] });
+                } catch (err: any) {
+                  toast({ title: "Error", description: err.message, variant: "destructive" });
+                } finally {
+                  setActionLoading(null);
+                }
+              }}
+            >
+              {actionLoading === "generate" ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Zap className="h-3.5 w-3.5 mr-1" />}
+              Generate Clips
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-xs"
+              disabled={!!actionLoading}
+              onClick={async () => {
+                setActionLoading("voiceover");
+                try {
+                  const { data, error } = await supabase.functions.invoke("compile-story-script", {
+                    body: { story_job_id: storyJob.id },
+                  });
+                  if (error) throw error;
+                  if (data?.voiceover_id) {
+                    await supabase.functions.invoke("generate-story-voiceover", {
+                      body: { voiceover_id: data.voiceover_id },
+                    });
+                    toast({ title: "Voiceover generating!", description: "Audio is being produced." });
+                  } else {
+                    toast({ title: "No narration", description: "Scenes have no narration lines to voice.", variant: "destructive" });
+                  }
+                } catch (err: any) {
+                  toast({ title: "Error", description: err.message, variant: "destructive" });
+                } finally {
+                  setActionLoading(null);
+                }
+              }}
+            >
+              {actionLoading === "voiceover" ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Mic className="h-3.5 w-3.5 mr-1" />}
+              Voiceover
+            </Button>
+          </div>
+        )}
 
         <Separator />
 
