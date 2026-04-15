@@ -706,12 +706,12 @@ Deno.serve(async (req) => {
       try {
         // Skip unenriched links — LLM gets garbage data and wastes tokens
         const enrichStatus = link.source_enrichment_status || "pending";
-        if (enrichStatus === "pending" || enrichStatus === "blocked" || enrichStatus === "failed") {
-          // Only skip if there's no useful title data at all
-          const hasUsableData = (link.source_title_full && link.source_title_full.length > 10) || 
-                                (link.title && link.title.length > 10);
-          if (!hasUsableData) {
-            console.log(`[validator] ⏭️ Skipping ${link.link_type} link ${link.id} — enrichment=${enrichStatus}, no usable data`);
+        if (enrichStatus !== "enriched") {
+          // For non-enriched links, require substantial data: enriched title + features
+          const hasFullTitle = link.source_title_full && link.source_title_full.length > 20;
+          const hasFeatures = link.source_features && link.source_features.length > 0;
+          if (!hasFullTitle || !hasFeatures) {
+            console.log(`[validator] ⏭️ Skipping ${link.link_type} link ${link.id} — enrichment=${enrichStatus}, insufficient data`);
             continue;
           }
         }
