@@ -377,6 +377,8 @@ Deno.serve(async (req) => {
     for (const { category, products } of allResults) {
       const scored = await scoreProducts(openaiKey, products, category);
       allScored.push(...scored);
+      // Avoid OpenAI rate limits between batches
+      await new Promise(r => setTimeout(r, 1000));
     }
 
     console.log(`[product-scrape] ${allScored.length} products passed AI scoring`);
