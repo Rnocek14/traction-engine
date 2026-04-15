@@ -30,7 +30,8 @@ export type ContentVertical =
   | "news"
   | "gadgets"
   | "home"
-  | "toys";
+  | "toys"
+  | "privacy";
 
 // ─── Moderation Strictness ──────────────────────────────────
 
@@ -329,12 +330,118 @@ export const VERTICAL_PROFILES: Record<ContentVertical, VerticalProfile> = {
       overlay_density: "moderate",
     },
   },
+
+  gadgets: {
+    vertical: "gadgets",
+    name: "Gadgets & Tech Accessories",
+    moderation: "relaxed",
+    max_emotional_intensity: "high",
+    claim_rules: {
+      allow_unverified_claims: false,
+      allow_income_claims: false,
+      allow_health_claims: false,
+      allow_guarantees: false,
+      require_disclaimer: false,
+    },
+    preferred_tones: ["playful", "friendly", "urgent"],
+    banned_tones: [],
+    banned_hook_categories: [],
+    preferred_hook_categories: ["curiosity", "novelty", "shock", "promise"],
+    excluded_story_types: [],
+    visual_style: {
+      aesthetic: "product-forward, UGC, satisfying demos",
+      lighting: "bright, studio or desk setup",
+      pacing: "fast",
+    },
+    render_hints: {
+      camera_bias: ["product-focus", "close-up", "dynamic"],
+      overlay_density: "dense",
+    },
+  },
+
+  home: {
+    vertical: "home",
+    name: "Home & Living",
+    moderation: "relaxed",
+    max_emotional_intensity: "high",
+    claim_rules: {
+      allow_unverified_claims: false,
+      allow_income_claims: false,
+      allow_health_claims: false,
+      allow_guarantees: false,
+      require_disclaimer: false,
+    },
+    preferred_tones: ["friendly", "inspirational", "playful"],
+    banned_tones: [],
+    banned_hook_categories: [],
+    preferred_hook_categories: ["curiosity", "novelty", "social_proof", "promise"],
+    excluded_story_types: [],
+    visual_style: {
+      aesthetic: "cozy, aspirational, before-after reveals",
+      lighting: "warm, natural, golden hour",
+      pacing: "moderate",
+    },
+    render_hints: {
+      camera_bias: ["medium", "product-focus", "close-up"],
+      overlay_density: "moderate",
+    },
+  },
+
+  toys: {
+    vertical: "toys",
+    name: "Toys & Kids Products",
+    moderation: "moderate",
+    max_emotional_intensity: "high",
+    claim_rules: {
+      allow_unverified_claims: false,
+      allow_income_claims: false,
+      allow_health_claims: false,
+      allow_guarantees: false,
+      require_disclaimer: false,
+    },
+    preferred_tones: ["playful", "friendly"],
+    banned_tones: ["urgent"],
+    banned_hook_categories: ["fear", "shock"],
+    preferred_hook_categories: ["curiosity", "novelty", "social_proof"],
+    excluded_story_types: [],
+    visual_style: {
+      aesthetic: "colorful, fun, family-friendly",
+      lighting: "bright, cheerful",
+      pacing: "fast",
+    },
+    render_hints: {
+      camera_bias: ["product-focus", "close-up", "dynamic"],
+      overlay_density: "moderate",
+    },
+  },
+};
+
+// Default fallback profile for unknown verticals
+const DEFAULT_PROFILE: VerticalProfile = {
+  vertical: "ecommerce" as ContentVertical,
+  name: "Default",
+  moderation: "moderate",
+  max_emotional_intensity: "high",
+  claim_rules: {
+    allow_unverified_claims: false,
+    allow_income_claims: false,
+    allow_health_claims: false,
+    allow_guarantees: false,
+    require_disclaimer: false,
+  },
+  preferred_tones: ["friendly"],
+  banned_tones: [],
+  banned_hook_categories: [],
+  preferred_hook_categories: ["curiosity", "novelty"],
+  excluded_story_types: [],
+  visual_style: { aesthetic: "modern", lighting: "bright", pacing: "fast" },
+  render_hints: { camera_bias: ["medium"], overlay_density: "moderate" },
 };
 
 // ─── Helpers ────────────────────────────────────────────────
 
 export function getVerticalProfile(vertical: ContentVertical): VerticalProfile {
-  return VERTICAL_PROFILES[vertical];
+  return VERTICAL_PROFILES[vertical] || DEFAULT_PROFILE;
 }
 
 /**
