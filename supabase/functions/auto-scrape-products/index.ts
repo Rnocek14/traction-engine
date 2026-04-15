@@ -174,9 +174,11 @@ async function discoverProducts(
           messages: [
             {
               role: "system",
-              content: `You are a product trend researcher for dropshipping and e-commerce. Find specific products (not brands/categories) that are going viral. For each product include: exact product name WITH BRAND if possible, approximate price, why it's going viral, what platform it's trending on, and a URL if available. Focus on products that are visually demonstrable in short-form video.
+              content: `You are a product trend researcher for dropshipping and e-commerce. Find specific products (not brands/categories) that are going viral.
 
-CRITICAL: Every product must be a SPECIFIC item you can buy, not a category. Include brand name, model details, and distinguishing specs.`,
+CRITICAL PRICE REQUIREMENT: Only include products that retail between $30 and $80. Skip anything under $30 or over $80.
+
+For each product include: exact product name WITH BRAND if possible, approximate retail price ($30-$80 range ONLY), why it's going viral, what platform it's trending on, and a URL if available. Focus on products that are visually demonstrable in short-form video and have obvious "wow factor" or problem-solving appeal.`,
             },
             { role: "user", content: query },
           ],
@@ -218,6 +220,8 @@ CRITICAL: Every product must be a SPECIFIC item you can buy, not a category. Inc
           role: "system",
           content: `You are a product intelligence analyst for a dropshipping business. Extract individual SPECIFIC products from the research data.
 
+CRITICAL PRICE FILTER: Only include products with retail price between $30 and $80. REJECT anything under $30 or over $80. This is the most important filter.
+
 CRITICAL PRODUCT IDENTITY RULES:
 - Every product MUST be a specific, identifiable item — NOT a category.
 - BAD: "Crystal Lamp" (too vague — there are thousands of crystal lamps)
@@ -228,6 +232,12 @@ CRITICAL PRODUCT IDENTITY RULES:
 - Include distinguishing specs: size, capacity, color count, power source, material
 - Include pack count if it's a set/bundle
 - The name should be specific enough that searching it returns ONLY that exact product
+
+SELLABILITY REQUIREMENTS — each product must have:
+- Strong visual hook: can you make someone stop scrolling in 2 seconds?
+- Obvious problem → solution OR "wow/satisfaction" factor
+- Plausible wholesale source (not luxury/designer brands)
+- Room for $10+ net profit at the retail price
 
 PRODUCT IDENTITY FIELDS (required for each product):
 - canonical_name: The precise product name with brand + key specs (3-10 words)
@@ -244,9 +254,12 @@ CRITICAL - URLs:
 - image_url: Include direct image URL if available, empty string otherwise.
 
 REJECTION RULES — do NOT include:
+- Products under $30 or over $80 retail price
 - Products with no brand AND no distinguishing specs (too vague to validate)
 - Generic category descriptions ("LED lights", "phone case")
 - Products where you cannot identify the exact item being discussed
+- Products with weak visual demo potential (boring utility items)
+- Products that are hard to explain in one sentence
 
 SCORING RUBRIC (1-5 scale):
 - wow_factor: Visual impact for short-form video demo
@@ -258,7 +271,7 @@ SCORING RUBRIC (1-5 scale):
 TRENDING STATUS: emerging | rising | peak | declining | saturated
 EMOTIONAL TRIGGERS: pick 2-4 from: wow, satisfaction, transformation, curiosity, gift, before_after, problem_solved, luxury_affordable, kids, pets, convenience, fear_of_missing
 
-Extract up to 15 unique products. Deduplicate similar items. REJECT anything too vague to identify.`,
+Extract up to 15 unique products IN THE $30-$80 RANGE. Deduplicate similar items. REJECT anything too vague to identify or outside price range.`,
         },
         { role: "user", content: combined },
       ],
