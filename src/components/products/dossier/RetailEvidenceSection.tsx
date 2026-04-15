@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { ShoppingCart, ExternalLink, Check, Loader2 } from "lucide-react";
+import { ShoppingCart, ExternalLink, Check, Loader2, ShieldCheck } from "lucide-react";
 import { type ProductWithAnalysis, type ProductLink } from "@/hooks/use-products";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -18,6 +18,8 @@ export function RetailEvidenceSection({ product }: { product: ProductWithAnalysi
   
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirming, setConfirming] = useState(false);
+  const [validating, setValidating] = useState(false);
+  const rejectedLinks = retailLinks.filter(l => l.validation_status === "rejected");
 
   const toggle = (id: string) => {
     setSelected(prev => {
@@ -83,6 +85,22 @@ export function RetailEvidenceSection({ product }: { product: ProductWithAnalysi
     }
   };
 
+  const runValidation = async () => {
+    setValidating(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("validate-product-links", {
+        body: { product_id: product.id, mode: "all_pending" },
+      });
+      if (error) throw error;
+      toast.success(`Validated ${data.validated} links: ${data.confirmed} confirmed, ${data.rejected} rejected`);
+      qc.invalidateQueries({ queryKey: ["product-detail"] });
+    } catch (e: any) {
+      toast.error(`Validation failed: ${e.message}`);
+    } finally {
+      setValidating(false);
+    }
+  };
+
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -95,13 +113,24 @@ export function RetailEvidenceSection({ product }: { product: ProductWithAnalysi
             {pendingLinks.length > 0 && (
               <Badge variant="outline" className="text-xs">{pendingLinks.length} to review</Badge>
             )}
+            {rejectedLinks.length > 0 && (
+              <Badge variant="outline" className="text-xs text-red-400">{rejectedLinks.length} rejected</Badge>
+            )}
           </CardTitle>
-          {selected.size > 0 && (
-            <Button size="sm" onClick={confirmSelected} disabled={confirming}>
-              {confirming ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Check className="w-4 h-4 mr-1" />}
-              Confirm {selected.size} selected
-            </Button>
-          )}
+          <div className="flex items-center gap-2">
+            {pendingLinks.length > 0 && (
+              <Button size="sm" variant="outline" onClick={runValidation} disabled={validating}>
+                {validating ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <ShieldCheck className="w-4 h-4 mr-1" />}
+                Validate {pendingLinks.length} links
+              </Button>
+            )}
+            {selected.size > 0 && (
+              <Button size="sm" onClick={confirmSelected} disabled={confirming}>
+                {confirming ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Check className="w-4 h-4 mr-1" />}
+                Confirm {selected.size} selected
+              </Button>
+            )}
+          </div>
         </div>
       </CardHeader>
       <CardContent>
