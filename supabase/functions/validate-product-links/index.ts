@@ -106,14 +106,27 @@ async function buildCanonicalProfile(supabase: any, productId: string, openaiKey
     }
   }
 
+  // Build richer core_features from the full product name + distinctive_attributes
+  const fullName = product.name || product.canonical_name || "";
+  const nameTokens = fullName.toLowerCase().split(/[\s,\-\/]+/).filter((w: string) => w.length > 2);
+  // Merge distinctive_attributes with meaningful name tokens (dedup)
+  const rawFeatures = [...(product.distinctive_attributes || [])];
+  const featureSet = new Set(rawFeatures.map((f: string) => f.toLowerCase()));
+  for (const t of nameTokens) {
+    if (!featureSet.has(t) && !["the", "and", "for", "with"].includes(t)) {
+      rawFeatures.push(t);
+      featureSet.add(t);
+    }
+  }
+
   // If we already have good canonical data, use it
   if (product.canonical_name && product.distinctive_attributes?.length > 0) {
     return {
       product_id: productId,
-      canonical_name: product.canonical_name || product.name,
+      canonical_name: inferredBrand ? `${inferredBrand} ${product.canonical_name}` : product.canonical_name,
       brand: inferredBrand,
       product_type: product.category || "",
-      core_features: product.distinctive_attributes || [],
+      core_features: rawFeatures,
       variant: { pack_count: 1, color: null, size: null },
       physical_attributes: { material: null, dimensions: null },
       identity_markers: { model_number: null, sku: null, asin: null, upc: null },
