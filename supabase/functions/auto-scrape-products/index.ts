@@ -13,36 +13,40 @@ const corsHeaders = {
 };
 
 const PRODUCT_QUERIES = [
-  "viral TikTok products this week that are selling fast",
-  "trending TikTok Shop items with millions of views right now",
-  "most popular impulse buy products going viral on social media this week",
-  "Amazon movers and shakers products trending on TikTok and Instagram",
-  "best selling products on TikTok Shop this week with high engagement",
-  "viral product demos on TikTok Reels with millions of views this week",
-  "trending gadgets and home products going viral on social media right now",
-  "dropshipping winning products trending on TikTok this week",
+  "viral TikTok products $30-$80 price range selling fast this week",
+  "trending TikTok Shop items $30-$70 with millions of views right now",
+  "best selling mid-price products $30-$60 going viral on social media this week",
+  "Amazon movers and shakers $30-$80 products trending on TikTok and Instagram",
+  "best selling products on TikTok Shop this week $30-$80 with high engagement",
+  "viral product demos $30-$80 on TikTok Reels with millions of views this week",
+  "trending gadgets and home products $30-$80 going viral on social media right now",
+  "dropshipping winning products $30-$80 trending on TikTok this week",
 ];
 
 const CATEGORY_QUERIES: Record<string, string[]> = {
   gadgets: [
-    "trending tech gadgets going viral on TikTok this week under $50",
-    "most satisfying gadget demos on TikTok and Instagram Reels this week",
+    "trending tech gadgets $30-$80 going viral on TikTok this week with strong visual demos",
+    "most satisfying gadget demos $30-$70 on TikTok and Instagram Reels this week",
+    "viral car gadgets and desk accessories $30-$60 trending on TikTok",
   ],
   home: [
-    "viral home products and LED lamps trending on TikTok this week",
-    "most popular home organization products on TikTok Shop right now",
+    "viral home products and smart devices $30-$80 trending on TikTok this week",
+    "most popular home upgrade products $30-$70 on TikTok Shop with before-after demos",
+    "trending kitchen gadgets and home tools $30-$60 going viral with satisfying demos",
   ],
   beauty: [
-    "trending beauty and skincare products going viral on TikTok this week",
-    "best selling beauty tools on TikTok Shop with demo videos",
+    "trending beauty tools and skincare devices $30-$80 going viral on TikTok this week",
+    "best selling beauty gadgets $30-$70 on TikTok Shop with transformation demos",
+    "viral self-care devices and beauty tools $30-$60 with obvious before-after results",
   ],
   toys: [
-    "viral toys and fidget products trending on TikTok this week",
-    "most popular kids toys and games going viral on social media right now",
+    "viral premium toys and STEM kits $30-$80 trending on TikTok this week",
+    "most popular kids electronics and creative kits $30-$60 going viral right now",
   ],
   fitness: [
-    "trending fitness products and workout gadgets on TikTok this week",
-    "viral fitness equipment and accessories on TikTok Shop",
+    "trending fitness gadgets and recovery tools $30-$80 on TikTok this week",
+    "viral workout equipment and massage devices $30-$70 on TikTok Shop",
+    "best selling portable fitness tools $30-$60 with strong demo videos",
   ],
 };
 
@@ -170,9 +174,11 @@ async function discoverProducts(
           messages: [
             {
               role: "system",
-              content: `You are a product trend researcher for dropshipping and e-commerce. Find specific products (not brands/categories) that are going viral. For each product include: exact product name WITH BRAND if possible, approximate price, why it's going viral, what platform it's trending on, and a URL if available. Focus on products that are visually demonstrable in short-form video.
+              content: `You are a product trend researcher for dropshipping and e-commerce. Find specific products (not brands/categories) that are going viral.
 
-CRITICAL: Every product must be a SPECIFIC item you can buy, not a category. Include brand name, model details, and distinguishing specs.`,
+CRITICAL PRICE REQUIREMENT: Only include products that retail between $30 and $80. Skip anything under $30 or over $80.
+
+For each product include: exact product name WITH BRAND if possible, approximate retail price ($30-$80 range ONLY), why it's going viral, what platform it's trending on, and a URL if available. Focus on products that are visually demonstrable in short-form video and have obvious "wow factor" or problem-solving appeal.`,
             },
             { role: "user", content: query },
           ],
@@ -214,6 +220,8 @@ CRITICAL: Every product must be a SPECIFIC item you can buy, not a category. Inc
           role: "system",
           content: `You are a product intelligence analyst for a dropshipping business. Extract individual SPECIFIC products from the research data.
 
+CRITICAL PRICE FILTER: Only include products with retail price between $30 and $80. REJECT anything under $30 or over $80. This is the most important filter.
+
 CRITICAL PRODUCT IDENTITY RULES:
 - Every product MUST be a specific, identifiable item — NOT a category.
 - BAD: "Crystal Lamp" (too vague — there are thousands of crystal lamps)
@@ -224,6 +232,12 @@ CRITICAL PRODUCT IDENTITY RULES:
 - Include distinguishing specs: size, capacity, color count, power source, material
 - Include pack count if it's a set/bundle
 - The name should be specific enough that searching it returns ONLY that exact product
+
+SELLABILITY REQUIREMENTS — each product must have:
+- Strong visual hook: can you make someone stop scrolling in 2 seconds?
+- Obvious problem → solution OR "wow/satisfaction" factor
+- Plausible wholesale source (not luxury/designer brands)
+- Room for $10+ net profit at the retail price
 
 PRODUCT IDENTITY FIELDS (required for each product):
 - canonical_name: The precise product name with brand + key specs (3-10 words)
@@ -240,9 +254,12 @@ CRITICAL - URLs:
 - image_url: Include direct image URL if available, empty string otherwise.
 
 REJECTION RULES — do NOT include:
+- Products under $30 or over $80 retail price
 - Products with no brand AND no distinguishing specs (too vague to validate)
 - Generic category descriptions ("LED lights", "phone case")
 - Products where you cannot identify the exact item being discussed
+- Products with weak visual demo potential (boring utility items)
+- Products that are hard to explain in one sentence
 
 SCORING RUBRIC (1-5 scale):
 - wow_factor: Visual impact for short-form video demo
@@ -254,7 +271,7 @@ SCORING RUBRIC (1-5 scale):
 TRENDING STATUS: emerging | rising | peak | declining | saturated
 EMOTIONAL TRIGGERS: pick 2-4 from: wow, satisfaction, transformation, curiosity, gift, before_after, problem_solved, luxury_affordable, kids, pets, convenience, fear_of_missing
 
-Extract up to 15 unique products. Deduplicate similar items. REJECT anything too vague to identify.`,
+Extract up to 15 unique products IN THE $30-$80 RANGE. Deduplicate similar items. REJECT anything too vague to identify or outside price range.`,
         },
         { role: "user", content: combined },
       ],
@@ -408,8 +425,16 @@ Deno.serve(async (req) => {
     console.log(`[product-scrape] ${newProducts.length} new products (${passed.length - newProducts.length} duplicates skipped)`);
 
     let added = 0;
+    let priceRejected = 0;
     for (const { product: p, quality } of newProducts) {
       const priceCents = parsePriceCents(p.price_range);
+
+      // Hard price gate: reject products outside $30-$80 range
+      if (priceCents && (priceCents < 3000 || priceCents > 8000)) {
+        console.log(`[product-scrape] PRICE REJECTED: "${p.canonical_name}" — $${(priceCents/100).toFixed(2)} outside $30-$80 range`);
+        priceRejected++;
+        continue;
+      }
 
       const { data: product, error: prodErr } = await supabase
         .from("products")
@@ -449,7 +474,7 @@ Deno.serve(async (req) => {
           trending_status: p.trending_status,
           emotional_triggers: p.emotional_triggers,
           overall_score: overallScore,
-          price_sweet_spot: priceCents ? priceCents >= 1500 && priceCents <= 4999 : false,
+          price_sweet_spot: priceCents ? priceCents >= 3000 && priceCents <= 8000 : false,
           analyzed_by: "ai",
           analyzed_at: new Date().toISOString(),
         });
@@ -470,7 +495,9 @@ Deno.serve(async (req) => {
         products_found: discovered.length,
         products_added: added,
         quality_rejected: failed.length,
+        price_rejected: priceRejected,
         quality_threshold: qualityThreshold,
+        price_range: "$30-$80",
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
