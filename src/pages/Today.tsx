@@ -18,7 +18,33 @@ export default function Today() {
   const [compact, setCompact] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<PostSlot | null>(null);
   const [producingIds, setProducingIds] = useState<Set<string>>(new Set());
+  const [autoGenByVertical, setAutoGenByVertical] = useState<Record<string, boolean>>({});
   const queryClient = useQueryClient();
+
+  // Load vertical_configs auto_generate flags
+  useEffect(() => {
+    supabase.from("vertical_configs").select("vertical, auto_generate").then(({ data: configs }) => {
+      if (configs) {
+        const map: Record<string, boolean> = {};
+        configs.forEach(c => { map[c.vertical] = c.auto_generate; });
+        setAutoGenByVertical(map);
+      }
+    });
+  }, []);
+
+  const toggleAutoGenerate = async (vertical: string, enabled: boolean) => {
+    setAutoGenByVertical(prev => ({ ...prev, [vertical]: enabled }));
+    const { error } = await supabase
+      .from("vertical_configs")
+      .update({ auto_generate: enabled })
+      .eq("vertical", vertical);
+    if (error) {
+      setAutoGenByVertical(prev => ({ ...prev, [vertical]: !enabled }));
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    } else {
+      toast({ title: enabled ? "Auto-generation ON" : "Auto-generation OFF", description: vertical });
+    }
+  };
 
   const feed = data?.feed || [];
   const summary = data?.summary || { totalReady: 0, totalGenerating: 0, totalIdeasLow: 0, totalApproved: 0 };
