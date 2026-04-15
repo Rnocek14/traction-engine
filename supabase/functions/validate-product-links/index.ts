@@ -502,15 +502,27 @@ function computeFinalConfidence(
   const overlap = [...canonicalTokens].filter(t => sourceTokens.has(t)).length;
   const titleScore = canonicalTokens.size > 0 ? overlap / canonicalTokens.size : 0;
 
-  // Feature overlap
+  // Feature overlap — check features in source title AND source features
   const canonFeatures = new Set(canonical.core_features.map(f => f.toLowerCase()));
-  const titleLower = source.title.toLowerCase();
-  const featureHits = [...canonFeatures].filter(f => titleLower.includes(f)).length;
+  const sourceCombined = `${source.title.toLowerCase()} ${source.features.map(f => f.toLowerCase()).join(" ")}`;
+  const featureHits = [...canonFeatures].filter(f => sourceCombined.includes(f)).length;
   const featureScore = canonFeatures.size > 0 ? featureHits / canonFeatures.size : 0;
+
+  // Brand match
+  let brandScore = 0.5; // neutral if no canonical brand
+  if (canonical.brand) {
+    if (source.brand && source.brand.toLowerCase() === canonical.brand.toLowerCase()) {
+      brandScore = 1.0; // Strong match signal
+    } else if (source.brand && source.brand.toLowerCase() !== canonical.brand.toLowerCase()) {
+      brandScore = source.link_type === "wholesale" ? 0.5 : 0.1; // Different brand is bad for retail
+    }
+  }
 
   // Identity marker match
   let identityScore = 0;
+  let hasIdentityData = false;
   if (canonical.identity_markers.asin && source.identity_markers.asin) {
+    hasIdentityData = true;
     identityScore = canonical.identity_markers.asin === source.identity_markers.asin ? 1.0 : 0;
   }
 
@@ -524,19 +536,20 @@ function computeFinalConfidence(
     else priceScore = 0.2;
   }
 
-  // Weighted combination (35% identity, 15% type, 15% features, 10% variant, 10% brand, 5% price, 5% title, 5% LLM)
-  const weights = {
-    identity: 0.35,
-    features: 0.15,
-    title: 0.10,
-    price: 0.05,
-    llm: 0.35,
-  };
+  // Adaptive weights: when we have no ASIN, redistribute identity weight to LLM + brand + features
+  let weights;
+  if (hasIdentityData) {
+    weights = { identity: 0.35, features: 0.15, title: 0.05, brand: 0.10, price: 0.05, llm: 0.30 };
+  } else {
+    // No ASIN — rely more on LLM, brand match, and features
+    weights = { identity: 0, features: 0.20, title: 0.10, brand: 0.20, price: 0.05, llm: 0.45 };
+  }
 
   const finalScore = (
     identityScore * weights.identity +
     featureScore * weights.features +
     titleScore * weights.title +
+    brandScore * weights.brand +
     priceScore * weights.price +
     llmResult.confidence * weights.llm
   );
