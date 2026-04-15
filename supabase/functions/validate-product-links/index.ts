@@ -173,7 +173,7 @@ Extract the canonical product identity.`
   };
 }
 
-// ─── STEP 2: EXTRACT SOURCE LISTING FACTS ───
+// ─── STEP 2: EXTRACT SOURCE LISTING FACTS (prefers enriched data) ───
 
 function extractSourceListing(link: any): SourceListing {
   const url = link.url || "";
@@ -185,17 +185,51 @@ function extractSourceListing(link: any): SourceListing {
   const asinMatch = url.match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/i);
   if (asinMatch) asin = asinMatch[1].toUpperCase();
 
+  // Prefer enriched fields over thin SERP stubs
+  const isEnriched = link.source_enrichment_status === "enriched";
+  const enrichedSpecs = link.source_specs || {};
+
+  const title = (isEnriched && link.source_title_full) 
+    ? link.source_title_full 
+    : (link.title || link.extracted_product_name || "");
+
+  const brand = (isEnriched && link.source_brand) 
+    ? link.source_brand 
+    : (link.extracted_brand || null);
+
+  const features = (isEnriched && link.source_features?.length > 0) 
+    ? link.source_features 
+    : [];
+
+  const priceCents = link.structured_price_cents || link.price_cents || null;
+
+  // Extract pack count from enriched features/title
+  let packCount: number | null = null;
+  const combined = `${title} ${features.join(" ")}`;
+  const packMatch = combined.match(/(\d+)\s*(?:pack|pcs|pieces?|count|set of)/i);
+  if (packMatch) packCount = parseInt(packMatch[1]);
+
+  // Extract specs from enriched data
+  const material = enrichedSpecs.Material || enrichedSpecs.material || null;
+  const dimensions = enrichedSpecs.Dimensions || enrichedSpecs.dimensions || enrichedSpecs["Product Dimensions"] || null;
+  const model = enrichedSpecs.Model || enrichedSpecs["Model Number"] || null;
+  const sku = enrichedSpecs.SKU || enrichedSpecs.sku || null;
+
+  if (isEnriched) {
+    console.log(`[validator] Using enriched data: title="${title.slice(0, 50)}" brand="${brand}" features=${features.length} price=${priceCents}`);
+  }
+
   return {
     url,
     domain,
-    title: link.title || link.extracted_product_name || "",
-    brand: link.extracted_brand || null,
+    title,
+    brand,
     product_type: "",
-    features: [],
-    variant: { pack_count: null, color: null, size: null },
-    physical_attributes: { material: null, dimensions: null },
-    identity_markers: { model_number: null, sku: null, asin, upc: null },
-    price_cents: link.price_cents || link.structured_price_cents || null,
+    features,
+    variant: { pack_count: packCount, color: null, size: null },
+    physical_attributes: { material, dimensions },
+    identity_markers: { model_number: model, sku, asin, upc: null },
+    price_cents: priceCents,
     link_type: link.link_type || "retail",
   };
 }
