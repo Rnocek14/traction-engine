@@ -839,6 +839,8 @@ export type Database = {
           ad_readiness_score: number | null
           created_at: string
           id: string
+          image_match_confidence: number | null
+          image_match_verdict: string | null
           is_primary: boolean
           label: string | null
           low_resolution: boolean | null
@@ -854,6 +856,8 @@ export type Database = {
           ad_readiness_score?: number | null
           created_at?: string
           id?: string
+          image_match_confidence?: number | null
+          image_match_verdict?: string | null
           is_primary?: boolean
           label?: string | null
           low_resolution?: boolean | null
@@ -869,6 +873,8 @@ export type Database = {
           ad_readiness_score?: number | null
           created_at?: string
           id?: string
+          image_match_confidence?: number | null
+          image_match_verdict?: string | null
           is_primary?: boolean
           label?: string | null
           low_resolution?: boolean | null
@@ -1251,6 +1257,7 @@ export type Database = {
       }
       products: {
         Row: {
+          candidate_quality_score: number | null
           canonical_name: string | null
           category: string | null
           created_at: string
@@ -1285,6 +1292,7 @@ export type Database = {
           verticals: string[]
         }
         Insert: {
+          candidate_quality_score?: number | null
           canonical_name?: string | null
           category?: string | null
           created_at?: string
@@ -1319,6 +1327,7 @@ export type Database = {
           verticals?: string[]
         }
         Update: {
+          candidate_quality_score?: number | null
           canonical_name?: string | null
           category?: string | null
           created_at?: string
