@@ -265,7 +265,19 @@ export default function Today() {
         ) : (
           Object.entries(grouped).map(([vertical, items]) => (
             <section key={vertical} className="space-y-2">
-              <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">{vertical}</h2>
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">{vertical}</h2>
+                <div className="flex items-center gap-2">
+                  <Zap className={`w-3.5 h-3.5 ${autoGenByVertical[vertical] ? "text-primary" : "text-muted-foreground"}`} />
+                  <Label htmlFor={`auto-${vertical}`} className="text-xs text-muted-foreground cursor-pointer">Auto</Label>
+                  <Switch
+                    id={`auto-${vertical}`}
+                    checked={!!autoGenByVertical[vertical]}
+                    onCheckedChange={(v) => toggleAutoGenerate(vertical, v)}
+                    className="scale-75"
+                  />
+                </div>
+              </div>
               <div className="space-y-2">
                 {items.map((item) => (
                   <AccountRow
