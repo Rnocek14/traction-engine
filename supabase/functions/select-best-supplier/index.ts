@@ -264,21 +264,50 @@ Deno.serve(async (req) => {
     const supplierName = (winnerLink.extracted_product_name || winnerLink.title || winnerLink.platform + " listing").slice(0, 100);
     const supplierPlatform = winnerLink.platform || "Other";
 
-    const { data: supplier, error: supErr } = await supabase
+    // Check if supplier already exists for this URL
+    const { data: existingSupplier } = await supabase
       .from("product_suppliers")
-      .upsert({
-        product_id,
-        supplier_name: supplierName,
-        platform: supplierPlatform,
-        supplier_url: winnerLink.url,
-        unit_cost_cents: winner.price_cents || null,
-        verification_status: "auto_selected",
-        is_preferred: true,
-      }, { onConflict: "product_id,supplier_name" })
       .select("id")
-      .single();
+      .eq("product_id", product_id)
+      .eq("supplier_url", winnerLink.url)
+      .limit(1)
+      .maybeSingle();
 
-    if (supErr) throw new Error(`Failed to create supplier: ${supErr.message}`);
+    let supplier;
+    if (existingSupplier) {
+      // Update existing
+      const { data, error } = await supabase
+        .from("product_suppliers")
+        .update({
+          supplier_name: supplierName,
+          platform: supplierPlatform,
+          unit_cost_cents: winner.price_cents || null,
+          verification_status: "auto_selected",
+          is_preferred: true,
+        })
+        .eq("id", existingSupplier.id)
+        .select("id")
+        .single();
+      if (error) throw new Error(`Failed to update supplier: ${error.message}`);
+      supplier = data;
+    } else {
+      // Insert new
+      const { data, error } = await supabase
+        .from("product_suppliers")
+        .insert({
+          product_id,
+          supplier_name: supplierName,
+          platform: supplierPlatform,
+          supplier_url: winnerLink.url,
+          unit_cost_cents: winner.price_cents || null,
+          verification_status: "auto_selected",
+          is_preferred: true,
+        })
+        .select("id")
+        .single();
+      if (error) throw new Error(`Failed to create supplier: ${error.message}`);
+      supplier = data;
+    }
 
     // ── Unset other suppliers as preferred ──
     await supabase
