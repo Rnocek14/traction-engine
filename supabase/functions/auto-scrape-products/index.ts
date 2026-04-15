@@ -495,7 +495,9 @@ Deno.serve(async (req) => {
         products_found: discovered.length,
         products_added: added,
         quality_rejected: failed.length,
+        price_rejected: priceRejected,
         quality_threshold: qualityThreshold,
+        price_range: "$30-$80",
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
