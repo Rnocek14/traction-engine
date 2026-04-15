@@ -397,7 +397,7 @@ async function llmValidate(
       messages: [
         {
           role: "system",
-          content: `You are a strict e-commerce product identity validator.
+           content: `You are a strict e-commerce product identity validator.
 
 Your job is to determine whether a candidate listing is the EXACT SAME PRODUCT as the canonical product.
 
@@ -407,19 +407,25 @@ Be strict.
 "Likely same" is NOT enough.
 
 Treat these as meaningful differences:
-- brand (if canonical has a known brand)
-- model / version
+- brand (if canonical has a known brand AND candidate has a DIFFERENT brand)
+- model / version (if fundamentally different, not just a listing variant)
 - size if it changes the product significantly
-- color if color is core to identity
 - pack count
-- included accessories that change the bundle
 - major material differences (plastic vs glass vs metal)
-- major feature differences (RGB vs non-RGB, rechargeable vs wired)
+- major feature differences (rechargeable vs wired, touch vs switch)
 - form factor (table vs wall vs floor)
 
+DO NOT treat these as meaningful differences:
+- Color options/variants (Rose, Blue, Gold — these are the SAME product in different colors)
+- Listing title differences that are just different ways to describe the same features (e.g. "RGB" vs "16 Color" both mean multi-color)
+- Presence/absence of accessories like remote control if the core product is the same
+- Price differences within 2x range (same product, different sellers)
+- Brand matching canonical brand appearing in source = strong match signal
+
 Context matters:
+- If canonical brand = source brand, that is a STRONG match signal. Treat same-brand listings as likely same product unless features are fundamentally different.
 - For WHOLESALE links (AliExpress, Alibaba, DHgate), the brand will be different or absent — that's expected. Focus on physical form, features, and specs.
-- For RETAIL links (Amazon, Walmart), brand and exact specs matter more.`
+- For RETAIL links (Amazon, Walmart), if brand matches canonical, that's near-definitive.`
         },
         {
           role: "user",
