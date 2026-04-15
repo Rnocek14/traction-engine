@@ -466,7 +466,7 @@ Deno.serve(async (req) => {
           trending_status: p.trending_status,
           emotional_triggers: p.emotional_triggers,
           overall_score: overallScore,
-          price_sweet_spot: priceCents ? priceCents >= 1500 && priceCents <= 4999 : false,
+          price_sweet_spot: priceCents ? priceCents >= 3000 && priceCents <= 8000 : false,
           analyzed_by: "ai",
           analyzed_at: new Date().toISOString(),
         });
