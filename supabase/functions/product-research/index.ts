@@ -509,21 +509,27 @@ async function tieredSearch(
   await new Promise(r => setTimeout(r, 300));
 
   // ────────────────────────────────────────
-  // TIER 3: Wholesale exact-form search
+  // TIER 3: Wholesale precision search (uses wholesale gate, not retail gate)
   // ────────────────────────────────────────
-  console.log(`[research] === TIER 3: Wholesale exact-form ===`);
+  console.log(`[research] === TIER 3: Wholesale precision search ===`);
+  console.log(`[research] Wholesale queries (${identity.wholesaleQueries.length}): ${identity.wholesaleQueries.join(" | ")}`);
 
-  const wholesaleSites = ["aliexpress.com", "alibaba.com"];  // DHgate deprioritized — too noisy
+  const wholesaleSites = ["aliexpress.com", "alibaba.com", "dhgate.com"];
+  let wholesaleGatedOut = 0;
+
+  // Use ALL wholesale queries (up to 5) across sites
   for (const site of wholesaleSites) {
-    for (const wq of identity.wholesaleQueries.slice(0, 2)) {
+    for (const wq of identity.wholesaleQueries.slice(0, 4)) {
       const wResults = await serpGoogle(`${wq} site:${site}`, 5);
       for (const r of wResults) {
         if (r.link?.startsWith("http")) {
           if (seen.has(r.link) || !isUsefulUrl(r.link)) continue;
           seen.add(r.link);
-          const gate = passesAnchorGate(r.title || "", r.link, identity);
+          // Use WHOLESALE gate — no model guard, no excluded concepts
+          const gate = passesWholesaleGate(r.title || "", r.link, identity);
           if (!gate.passes) {
-            gatedOut++;
+            wholesaleGatedOut++;
+            if (wholesaleGatedOut <= 5) console.log(`[research] WHOLESALE GATED: "${r.title?.slice(0, 60)}" → ${gate.reason}`);
             continue;
           }
           results.push({
@@ -536,7 +542,27 @@ async function tieredSearch(
     }
   }
 
-  console.log(`[research] Tier 3 results: ${results.length} passed, ${gatedOut} gated`);
+  // Also try Google Shopping for wholesale — sometimes surfaces AliExpress results
+  if (identity.wholesaleQueries.length > 0) {
+    const wsShoppingResults = await serpShopping(identity.wholesaleQueries[0], 8);
+    for (const r of wsShoppingResults) {
+      if (r.link?.startsWith("http") && classifyLinkType(r.link) === "wholesale") {
+        if (seen.has(r.link) || !isUsefulUrl(r.link)) continue;
+        seen.add(r.link);
+        const gate = passesWholesaleGate(r.title || "", r.link, identity);
+        if (gate.passes) {
+          results.push({
+            url: r.link, title: r.title || "", price: r.price || null, thumbnail: r.thumbnail || null,
+            source: "tier3:wholesale:shopping", gateResult: gate.reason, tier: 3, isProductPage: isProductDetailPage(r.link),
+          });
+        }
+      }
+    }
+  }
+
+  const t3WholesaleCount = results.filter(r => r.tier === 3).length;
+  console.log(`[research] Tier 3 results: ${t3WholesaleCount} wholesale passed, ${wholesaleGatedOut} gated`);
+  console.log(`[research] TOTAL after T3: ${results.length} candidates`);
 
   // ────────────────────────────────────────
   // TIER 4: Fallback broader search (only if <3 results from tiers 1-3)
