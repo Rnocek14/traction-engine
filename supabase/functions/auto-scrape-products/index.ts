@@ -249,8 +249,35 @@ Only return products worth pursuing for video-commerce.`,
     }),
   });
 
-  if (!resp.ok) {
-    console.error(`[product-scrape] OpenAI scoring failed: ${resp.status}`);
+  // Retry with backoff on 429
+  if (resp.status === 429) {
+    console.warn(`[product-scrape] OpenAI 429 — retrying in 10s...`);
+    await new Promise(r => setTimeout(r, 10000));
+    const retry = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${openaiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: "Score products for dropshipping viability. Return scored array." },
+          { role: "user", content: `Category: ${category}\n\n${productList}` },
+        ],
+        tools: [resp_body_tools_ref],
+        tool_choice: { type: "function", function: { name: "score_products" } },
+        temperature: 0.2,
+      }),
+    });
+    if (!retry.ok) {
+      console.error(`[product-scrape] OpenAI scoring failed after retry: ${retry.status}`);
+      return [];
+    }
+    resp = retry;
+  } else if (!resp.ok) {
+    const errBody = await resp.text().catch(() => "");
+    console.error(`[product-scrape] OpenAI scoring failed: ${resp.status} — ${errBody.slice(0, 200)}`);
     return [];
   }
 
