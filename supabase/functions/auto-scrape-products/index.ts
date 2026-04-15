@@ -124,7 +124,8 @@ async function searchGoogleShopping(
 
   const resp = await fetch(`https://serpapi.com/search.json?${params}`);
   if (!resp.ok) {
-    console.warn(`[product-scrape] SerpAPI failed for "${query}": ${resp.status}`);
+    const errBody = await resp.text().catch(() => "");
+    console.warn(`[product-scrape] SerpAPI failed for "${query}": ${resp.status} — ${errBody.slice(0, 300)}`);
     return [];
   }
 
