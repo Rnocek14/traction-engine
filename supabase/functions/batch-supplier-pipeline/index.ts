@@ -39,12 +39,13 @@ Deno.serve(async (req) => {
     const { 
       limit = 10, 
       min_score = 85,
-      min_price_cents = 1000,
+      min_price_cents = 3000,
+      max_price_cents = 8000,
       skip_existing_suppliers = true,
       dry_run = false,
     } = await req.json().catch(() => ({}));
 
-    // Find top products that need supplier pipeline
+    // Find top products that need supplier pipeline — enforcing $30-$80 price range
     let query = supabase
       .from("products")
       .select(`
@@ -54,6 +55,7 @@ Deno.serve(async (req) => {
       .not("status", "in", '("dead","rejected")')
       .gte("product_analysis.overall_score", min_score)
       .gte("price_cents", min_price_cents)
+      .lte("price_cents", max_price_cents)
       .order("product_analysis(overall_score)", { ascending: false })
       .limit(limit);
 
