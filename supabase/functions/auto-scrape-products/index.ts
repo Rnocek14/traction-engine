@@ -1,8 +1,10 @@
 /**
- * auto-scrape-products v2 — Quality-Gated Discovery
+ * auto-scrape-products v3 — Real Product Retrieval Engine
  * 
- * Discovers trending products and scores candidate quality BEFORE insertion.
- * Only specific, identifiable products pass the quality gate.
+ * Searches Google Shopping via SerpAPI for REAL products that exist and are being sold.
+ * No AI generation of product names/brands. Every product must have a real URL.
+ * 
+ * Flow: SerpAPI Google Shopping → extract real listings → OpenAI scoring → quality gate → insert
  */
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -12,58 +14,87 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const PRODUCT_QUERIES = [
-  "viral TikTok products $30-$80 price range selling fast this week",
-  "trending TikTok Shop items $30-$70 with millions of views right now",
-  "best selling mid-price products $30-$60 going viral on social media this week",
-  "Amazon movers and shakers $30-$80 products trending on TikTok and Instagram",
-  "best selling products on TikTok Shop this week $30-$80 with high engagement",
-  "viral product demos $30-$80 on TikTok Reels with millions of views this week",
-  "trending gadgets and home products $30-$80 going viral on social media right now",
-  "dropshipping winning products $30-$80 trending on TikTok this week",
-];
-
-const CATEGORY_QUERIES: Record<string, string[]> = {
+// ─── GOOGLE SHOPPING QUERIES ───
+// These search for real products on real marketplaces
+const SHOPPING_QUERIES: Record<string, string[]> = {
   gadgets: [
-    "trending tech gadgets $30-$80 going viral on TikTok this week with strong visual demos",
-    "most satisfying gadget demos $30-$70 on TikTok and Instagram Reels this week",
-    "viral car gadgets and desk accessories $30-$60 trending on TikTok",
+    "electric spin scrubber cordless",
+    "portable neck fan rechargeable",
+    "wireless lavalier microphone phone",
+    "car phone mount magnetic dashboard",
+    "mini portable projector 1080p",
+    "desk cable organizer magnetic",
+    "smart LED desk lamp touch",
+    "portable Bluetooth speaker waterproof",
+    "electric hand warmer rechargeable",
+    "gravity phone holder car mount",
   ],
   home: [
-    "viral home products and smart devices $30-$80 trending on TikTok this week",
-    "most popular home upgrade products $30-$70 on TikTok Shop with before-after demos",
-    "trending kitchen gadgets and home tools $30-$60 going viral with satisfying demos",
+    "LED sunset lamp projector",
+    "electric milk frother handheld",
+    "smart plug WiFi outlet",
+    "portable blender rechargeable USB",
+    "steam iron handheld garment",
+    "electric wine opener rechargeable",
+    "smart water bottle temperature",
+    "ultrasonic jewelry cleaner machine",
+    "electric lighter rechargeable arc",
+    "motion sensor trash can",
   ],
   beauty: [
-    "trending beauty tools and skincare devices $30-$80 going viral on TikTok this week",
-    "best selling beauty gadgets $30-$70 on TikTok Shop with transformation demos",
-    "viral self-care devices and beauty tools $30-$60 with obvious before-after results",
-  ],
-  toys: [
-    "viral premium toys and STEM kits $30-$80 trending on TikTok this week",
-    "most popular kids electronics and creative kits $30-$60 going viral right now",
+    "LED face mask light therapy",
+    "facial cleansing brush silicone",
+    "hair dryer brush one step",
+    "jade roller gua sha set",
+    "electric dermaplaning tool face",
+    "scalp massager electric",
+    "teeth whitening LED kit",
+    "heated eyelash curler electric",
+    "micro current facial toning device",
+    "ice roller for face",
   ],
   fitness: [
-    "trending fitness gadgets and recovery tools $30-$80 on TikTok this week",
-    "viral workout equipment and massage devices $30-$70 on TikTok Shop",
-    "best selling portable fitness tools $30-$60 with strong demo videos",
+    "massage gun mini portable",
+    "resistance bands set exercise",
+    "smart jump rope digital counter",
+    "electric foam roller vibrating",
+    "posture corrector smart vibration",
+    "wrist forearm strengthener grip",
+    "ab roller wheel exercise",
+    "acupressure mat pillow set",
+  ],
+  kitchen: [
+    "electric vegetable chopper rechargeable",
+    "pour over coffee kettle gooseneck",
+    "silicone baking mat set",
+    "electric can opener one touch",
+    "herb garden indoor LED grow",
+    "vacuum sealer machine bags",
+    "electric salt pepper grinder set",
   ],
 };
 
-interface DiscoveredProduct {
+interface ShoppingResult {
+  title: string;
+  price: number; // dollars
+  source: string; // store name
+  link: string;
+  thumbnail?: string;
+  snippet?: string;
+  product_id?: string;
+}
+
+interface ScoredProduct {
   name: string;
   canonical_name: string;
   brand: string;
   form_factor: string;
   core_features: string[];
-  pack_count: number;
-  power_source: string;
-  primary_material: string;
-  excluded_lookalikes: string[];
   category: string;
-  price_range: string;
+  price_cents: number;
   source_url: string;
   image_url: string;
+  store_name: string;
   why_viral: string;
   wow_factor: number;
   social_media_potential: number;
@@ -74,140 +105,65 @@ interface DiscoveredProduct {
   emotional_triggers: string[];
 }
 
-// ─── CANDIDATE QUALITY SCORING ───
-// Scores how specific/validatable a discovered product is (0-100)
-function computeCandidateQuality(p: DiscoveredProduct): { score: number; reasons: string[] } {
-  let score = 0;
-  const reasons: string[] = [];
+// ─── SERPAPI GOOGLE SHOPPING SEARCH ───
+async function searchGoogleShopping(
+  serpApiKey: string,
+  query: string,
+  minPrice: number,
+  maxPrice: number,
+): Promise<ShoppingResult[]> {
+  const params = new URLSearchParams({
+    engine: "google_shopping",
+    q: query,
+    api_key: serpApiKey,
+    num: "20",
+    tbs: `mr:1,price:1,ppr_min:${minPrice},ppr_max:${maxPrice}`,
+    gl: "us",
+    hl: "en",
+  });
 
-  // Has brand name (20 pts)
-  if (p.brand && p.brand.length > 1) {
-    score += 20;
-    reasons.push("has_brand");
+  const resp = await fetch(`https://serpapi.com/search.json?${params}`);
+  if (!resp.ok) {
+    console.warn(`[product-scrape] SerpAPI failed for "${query}": ${resp.status}`);
+    return [];
   }
 
-  // Canonical name is specific — more than 3 words (15 pts)
-  const canonWords = (p.canonical_name || "").split(/\s+/).filter(w => w.length > 1);
-  if (canonWords.length >= 4) {
-    score += 15;
-    reasons.push("specific_name");
-  } else if (canonWords.length >= 3) {
-    score += 8;
-    reasons.push("moderate_name");
+  const data = await resp.json();
+  const results: ShoppingResult[] = [];
+
+  for (const item of data.shopping_results || []) {
+    const price = parseFloat(String(item.extracted_price || item.price || "0").replace(/[^0-9.]/g, ""));
+    if (!price || price < minPrice || price > maxPrice) continue;
+    if (!item.link && !item.product_link) continue;
+
+    results.push({
+      title: item.title || "",
+      price,
+      source: item.source || "",
+      link: item.link || item.product_link || "",
+      thumbnail: item.thumbnail || "",
+      snippet: item.snippet || "",
+      product_id: item.product_id || "",
+    });
   }
 
-  // Has core features (15 pts)
-  if (p.core_features?.length >= 3) {
-    score += 15;
-    reasons.push("rich_features");
-  } else if (p.core_features?.length >= 1) {
-    score += 7;
-    reasons.push("some_features");
-  }
-
-  // Has form factor (10 pts)
-  if (p.form_factor && p.form_factor.length > 3) {
-    score += 10;
-    reasons.push("has_form_factor");
-  }
-
-  // Has excluded lookalikes (10 pts) — shows product is well-differentiated
-  if (p.excluded_lookalikes?.length >= 2) {
-    score += 10;
-    reasons.push("has_exclusions");
-  }
-
-  // Has price range (10 pts)
-  if (p.price_range && p.price_range.includes("$")) {
-    score += 10;
-    reasons.push("has_price");
-  }
-
-  // Has real source URL (10 pts)
-  if (p.source_url && p.source_url.startsWith("http")) {
-    score += 10;
-    reasons.push("has_source_url");
-  }
-
-  // Has material info (5 pts)
-  if (p.primary_material && p.primary_material.length > 2 && p.primary_material !== "unknown") {
-    score += 5;
-    reasons.push("has_material");
-  }
-
-  // Has power source (5 pts)
-  if (p.power_source && p.power_source !== "unknown") {
-    score += 5;
-    reasons.push("has_power_source");
-  }
-
-  return { score: Math.min(score, 100), reasons };
+  return results;
 }
 
-// ─── DISCOVERY ───
-
-async function discoverProducts(
-  perplexityKey: string,
+// ─── SCORE REAL PRODUCTS WITH AI ───
+// AI evaluates real products for dropshipping viability — does NOT invent products
+async function scoreProducts(
   openaiKey: string,
-  categories: string[]
-): Promise<DiscoveredProduct[]> {
-  const queries = PRODUCT_QUERIES.sort(() => Math.random() - 0.5).slice(0, 3);
-  for (const cat of categories) {
-    const catQueries = CATEGORY_QUERIES[cat];
-    if (catQueries) {
-      queries.push(catQueries[Math.floor(Math.random() * catQueries.length)]);
-    }
-  }
+  products: ShoppingResult[],
+  category: string,
+): Promise<ScoredProduct[]> {
+  if (products.length === 0) return [];
 
-  const rawTexts: string[] = [];
+  const productList = products.map((p, i) =>
+    `[${i + 1}] "${p.title}" — $${p.price.toFixed(2)} from ${p.source}\n    URL: ${p.link}\n    Image: ${p.thumbnail || "none"}`
+  ).join("\n\n");
 
-  for (const query of queries) {
-    try {
-      const resp = await fetch("https://api.perplexity.ai/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${perplexityKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "sonar",
-          messages: [
-            {
-              role: "system",
-              content: `You are a product trend researcher for dropshipping and e-commerce. Find specific products (not brands/categories) that are going viral.
-
-CRITICAL PRICE REQUIREMENT: Only include products that retail between $30 and $80. Skip anything under $30 or over $80.
-
-For each product include: exact product name WITH BRAND if possible, approximate retail price ($30-$80 range ONLY), why it's going viral, what platform it's trending on, and a URL if available. Focus on products that are visually demonstrable in short-form video and have obvious "wow factor" or problem-solving appeal.`,
-            },
-            { role: "user", content: query },
-          ],
-          max_tokens: 3000,
-          search_recency_filter: "week",
-        }),
-      });
-
-      if (!resp.ok) {
-        console.warn(`[product-scrape] Perplexity query failed: ${resp.status}`);
-        continue;
-      }
-
-      const data = await resp.json();
-      const content = data.choices?.[0]?.message?.content || "";
-      const citations = data.citations || [];
-      rawTexts.push(`Query: ${query}\n\nResults:\n${content}\n\nSource URLs (REAL, USE THESE for source_url):\n${citations.map((c: string, i: number) => `[${i+1}] ${c}`).join("\n")}`);
-    } catch (err) {
-      console.warn(`[product-scrape] Query error:`, err);
-    }
-
-    await new Promise(r => setTimeout(r, 1500));
-  }
-
-  if (rawTexts.length === 0) return [];
-
-  const combined = rawTexts.join("\n\n---\n\n").slice(0, 20000);
-
-  const extractResp = await fetch("https://api.openai.com/v1/chat/completions", {
+  const resp = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${openaiKey}`,
@@ -218,91 +174,58 @@ For each product include: exact product name WITH BRAND if possible, approximate
       messages: [
         {
           role: "system",
-          content: `You are a product intelligence analyst for a dropshipping business. Extract individual SPECIFIC products from the research data.
+          content: `You are a product analyst for a dropshipping business. You are evaluating REAL products from Google Shopping results.
 
-CRITICAL PRICE FILTER: Only include products with retail price between $30 and $80. REJECT anything under $30 or over $80. This is the most important filter.
+CRITICAL RULES:
+- These are REAL products that exist. Do NOT change their names, brands, or URLs.
+- Use the EXACT title and URL from the listing. Do NOT invent or modify.
+- Extract the brand from the product title if present.
+- Your job is to SCORE each product for dropshipping viability, not to create new products.
 
-CRITICAL PRODUCT IDENTITY RULES:
-- Every product MUST be a specific, identifiable item — NOT a category.
-- BAD: "Crystal Lamp" (too vague — there are thousands of crystal lamps)
-- GOOD: "Leroxo Portable Crystal Touch Lamp USB Rechargeable 16-Color RGB"
-- BAD: "Mini Projector" (category, not a product)
-- GOOD: "YABER V2 Mini Projector 1080P WiFi Bluetooth 9000L"
-- Include the brand name if mentioned in the research data
-- Include distinguishing specs: size, capacity, color count, power source, material
-- Include pack count if it's a set/bundle
-- The name should be specific enough that searching it returns ONLY that exact product
+For each product, evaluate:
+- wow_factor (1-5): Would this stop someone scrolling on TikTok?
+- social_media_potential (1-5): Would people share/engage with a demo video?
+- impulse_buy_appeal (1-5): Instant buy trigger from seeing a video?
+- demonstrability_score (1-5): Can you show the value in <10 seconds?
+- competition_level (1-5): 5=oversaturated, 1=undiscovered
+- trending_status: emerging | rising | peak | declining | saturated
+- emotional_triggers: pick 2-4 from: wow, satisfaction, transformation, curiosity, gift, before_after, problem_solved, luxury_affordable, convenience
 
-SELLABILITY REQUIREMENTS — each product must have:
-- Strong visual hook: can you make someone stop scrolling in 2 seconds?
-- Obvious problem → solution OR "wow/satisfaction" factor
-- Plausible wholesale source (not luxury/designer brands)
-- Room for $10+ net profit at the retail price
+REJECTION CRITERIA — mark rejected=true for:
+- Generic commodities with no visual hook (plain cables, basic cases)
+- Products impossible to demo in short video
+- Items where you can't explain the value in one sentence
+- Consumables with no repeat visual appeal
 
-PRODUCT IDENTITY FIELDS (required for each product):
-- canonical_name: The precise product name with brand + key specs (3-10 words)
-- brand: The brand/manufacturer if known, empty string if generic/unbranded
-- form_factor: Physical shape/type (e.g. "table lamp", "handheld projector", "pendant necklace")
-- core_features: 3-6 defining features that distinguish THIS product from similar ones
-- pack_count: Number of units (1 for single, 2+ for sets)
-- power_source: "USB rechargeable" | "battery" | "plug-in" | "solar" | "none" | "unknown"
-- primary_material: Dominant material (e.g. "acrylic", "silicone", "stainless steel", "ABS plastic")
-- excluded_lookalikes: 2-4 similar products that are NOT this product (helps prevent false matches)
-
-CRITICAL - URLs:
-- source_url: Use a REAL URL from the "Source URLs" section. Do NOT make up URLs.
-- image_url: Include direct image URL if available, empty string otherwise.
-
-REJECTION RULES — do NOT include:
-- Products under $30 or over $80 retail price
-- Products with no brand AND no distinguishing specs (too vague to validate)
-- Generic category descriptions ("LED lights", "phone case")
-- Products where you cannot identify the exact item being discussed
-- Products with weak visual demo potential (boring utility items)
-- Products that are hard to explain in one sentence
-
-SCORING RUBRIC (1-5 scale):
-- wow_factor: Visual impact for short-form video demo
-- social_media_potential: Engagement/shareability
-- impulse_buy_appeal: Instant buy trigger from video
-- demonstrability_score: Can you show value in <10 seconds?
-- competition_level: 5=oversaturated, 1=undiscovered
-
-TRENDING STATUS: emerging | rising | peak | declining | saturated
-EMOTIONAL TRIGGERS: pick 2-4 from: wow, satisfaction, transformation, curiosity, gift, before_after, problem_solved, luxury_affordable, kids, pets, convenience, fear_of_missing
-
-Extract up to 15 unique products IN THE $30-$80 RANGE. Deduplicate similar items. REJECT anything too vague to identify or outside price range.`,
+Only return products worth pursuing for video-commerce.`,
         },
-        { role: "user", content: combined },
+        {
+          role: "user",
+          content: `Category: ${category}\n\nProducts to evaluate:\n\n${productList}`,
+        },
       ],
       tools: [
         {
           type: "function",
           function: {
-            name: "store_products",
-            description: "Store discovered products with precise identity",
+            name: "score_products",
+            description: "Score real products for dropshipping viability",
             parameters: {
               type: "object",
               properties: {
-                products: {
+                scored: {
                   type: "array",
                   items: {
                     type: "object",
                     properties: {
-                      name: { type: "string", description: "Specific product name with brand + specs" },
-                      canonical_name: { type: "string", description: "Precise searchable name, 3-10 words, with brand if known" },
-                      brand: { type: "string", description: "Brand/manufacturer name, empty if unknown" },
-                      form_factor: { type: "string", description: "Physical type: table lamp, pendant, handheld device, etc." },
-                      core_features: { type: "array", items: { type: "string" }, description: "3-6 defining features" },
-                      pack_count: { type: "integer", description: "Number of units (1 for single)" },
-                      power_source: { type: "string", description: "USB rechargeable, battery, plug-in, solar, none, unknown" },
-                      primary_material: { type: "string", description: "Dominant material" },
-                      excluded_lookalikes: { type: "array", items: { type: "string" }, description: "Similar but different products" },
-                      category: { type: "string", enum: ["gadgets", "home", "beauty", "toys", "fitness", "kitchen", "fashion", "pets", "outdoor", "other"] },
-                      price_range: { type: "string", description: "Approximate price like '$15-25' or '$39.99'" },
-                      source_url: { type: "string", description: "URL where product was found, or empty string" },
-                      image_url: { type: "string", description: "Direct URL to a product image if available, or empty string" },
-                      why_viral: { type: "string", description: "1-2 sentences on why this product is trending" },
+                      index: { type: "integer", description: "1-based index from the input list" },
+                      rejected: { type: "boolean", description: "true if product fails rejection criteria" },
+                      rejection_reason: { type: "string" },
+                      canonical_name: { type: "string", description: "Clean product name from listing (DO NOT invent)" },
+                      brand: { type: "string", description: "Brand extracted from title, empty if generic" },
+                      form_factor: { type: "string", description: "Physical type: handheld device, table lamp, etc." },
+                      core_features: { type: "array", items: { type: "string" }, description: "3-5 key features from the listing" },
+                      why_viral: { type: "string", description: "1-2 sentences on why this could work for video commerce" },
                       wow_factor: { type: "integer", minimum: 1, maximum: 5 },
                       social_media_potential: { type: "integer", minimum: 1, maximum: 5 },
                       impulse_buy_appeal: { type: "integer", minimum: 1, maximum: 5 },
@@ -311,41 +234,67 @@ Extract up to 15 unique products IN THE $30-$80 RANGE. Deduplicate similar items
                       trending_status: { type: "string", enum: ["emerging", "rising", "peak", "declining", "saturated"] },
                       emotional_triggers: { type: "array", items: { type: "string" } },
                     },
-                    required: ["name", "canonical_name", "form_factor", "core_features", "pack_count", "excluded_lookalikes", "category", "price_range", "wow_factor", "social_media_potential", "impulse_buy_appeal", "demonstrability_score", "competition_level", "trending_status", "emotional_triggers"],
+                    required: ["index", "rejected"],
                   },
                 },
               },
-              required: ["products"],
+              required: ["scored"],
             },
           },
         },
       ],
-      tool_choice: { type: "function", function: { name: "store_products" } },
-      temperature: 0.3,
+      tool_choice: { type: "function", function: { name: "score_products" } },
+      temperature: 0.2,
     }),
   });
 
-  if (!extractResp.ok) {
-    const err = await extractResp.text();
-    console.error(`[product-scrape] OpenAI extraction failed: ${extractResp.status} ${err}`);
+  if (!resp.ok) {
+    console.error(`[product-scrape] OpenAI scoring failed: ${resp.status}`);
     return [];
   }
 
-  const extractData = await extractResp.json();
-  const toolCall = extractData.choices?.[0]?.message?.tool_calls?.[0];
+  const data = await resp.json();
+  const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
   if (!toolCall) return [];
 
   const parsed = JSON.parse(toolCall.function.arguments);
-  return parsed.products || [];
+  const scoredResults: ScoredProduct[] = [];
+
+  for (const item of parsed.scored || []) {
+    if (item.rejected) {
+      console.log(`[product-scrape] AI rejected [${item.index}]: ${item.rejection_reason || "no reason"}`);
+      continue;
+    }
+
+    const originalProduct = products[item.index - 1];
+    if (!originalProduct) continue;
+
+    scoredResults.push({
+      name: originalProduct.title,
+      canonical_name: item.canonical_name || originalProduct.title,
+      brand: item.brand || "",
+      form_factor: item.form_factor || "",
+      core_features: item.core_features || [],
+      category,
+      price_cents: Math.round(originalProduct.price * 100),
+      source_url: originalProduct.link,
+      image_url: originalProduct.thumbnail || "",
+      store_name: originalProduct.source || "",
+      why_viral: item.why_viral || "",
+      wow_factor: item.wow_factor || 3,
+      social_media_potential: item.social_media_potential || 3,
+      impulse_buy_appeal: item.impulse_buy_appeal || 3,
+      demonstrability_score: item.demonstrability_score || 3,
+      competition_level: item.competition_level || 3,
+      trending_status: item.trending_status || "rising",
+      emotional_triggers: item.emotional_triggers || [],
+    });
+  }
+
+  return scoredResults;
 }
 
-function parsePriceCents(priceRange: string): number | null {
-  const match = priceRange.match(/\$?([\d.]+)/);
-  if (!match) return null;
-  return Math.round(parseFloat(match[1]) * 100);
-}
-
-function computeOverallScore(p: DiscoveredProduct): number {
+function computeOverallScore(p: ScoredProduct): number {
   const competitionInv = 6 - p.competition_level;
   const raw = (p.wow_factor * 0.30 + p.social_media_potential * 0.25 + p.impulse_buy_appeal * 0.20 + p.demonstrability_score * 0.15 + competitionInv * 0.10);
   return Math.round((raw / 5) * 100);
@@ -361,11 +310,11 @@ Deno.serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const perplexityKey = Deno.env.get("PERPLEXITY_API_KEY");
+    const serpApiKey = Deno.env.get("SERPAPI_API_KEY");
     const openaiKey = Deno.env.get("OPENAI_API_KEY");
 
-    if (!perplexityKey) {
-      return new Response(JSON.stringify({ error: "PERPLEXITY_API_KEY not configured" }), {
+    if (!serpApiKey) {
+      return new Response(JSON.stringify({ error: "SERPAPI_API_KEY not configured" }), {
         status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -377,92 +326,118 @@ Deno.serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    let categories = ["gadgets", "home", "beauty", "toys"];
-    let qualityThreshold = 40; // minimum quality score to accept
+    let categories = ["gadgets", "home", "beauty"];
+    let minPrice = 30;
+    let maxPrice = 80;
+    let queriesPerCategory = 3;
     try {
       const body = await req.json();
       if (body.categories) categories = body.categories;
-      if (body.quality_threshold) qualityThreshold = body.quality_threshold;
+      if (body.min_price) minPrice = body.min_price;
+      if (body.max_price) maxPrice = body.max_price;
+      if (body.queries_per_category) queriesPerCategory = body.queries_per_category;
     } catch { /* no body is fine */ }
 
-    console.log(`[product-scrape] Starting discovery. Categories: ${categories.join(", ")}. Quality threshold: ${qualityThreshold}`);
+    console.log(`[product-scrape] v3 Real Product Retrieval. Categories: ${categories.join(", ")}. Price: $${minPrice}-$${maxPrice}`);
 
-    const discovered = await discoverProducts(perplexityKey, openaiKey, categories);
-    console.log(`[product-scrape] Discovered ${discovered.length} raw candidates`);
+    // ─── SEARCH GOOGLE SHOPPING ───
+    const allResults: { category: string; products: ShoppingResult[] }[] = [];
 
-    if (discovered.length === 0) {
-      return new Response(JSON.stringify({ success: true, products_found: 0, products_added: 0, quality_rejected: 0 }), {
+    for (const cat of categories) {
+      const queries = (SHOPPING_QUERIES[cat] || [])
+        .sort(() => Math.random() - 0.5)
+        .slice(0, queriesPerCategory);
+
+      for (const query of queries) {
+        console.log(`[product-scrape] Searching: "${query}" ($${minPrice}-$${maxPrice})`);
+        const results = await searchGoogleShopping(serpApiKey, query, minPrice, maxPrice);
+        console.log(`[product-scrape] → ${results.length} results for "${query}"`);
+
+        if (results.length > 0) {
+          allResults.push({ category: cat, products: results });
+        }
+
+        // Rate limit: SerpAPI allows 5 req/s on most plans
+        await new Promise(r => setTimeout(r, 500));
+      }
+    }
+
+    const totalRaw = allResults.reduce((sum, r) => sum + r.products.length, 0);
+    console.log(`[product-scrape] Total raw shopping results: ${totalRaw}`);
+
+    if (totalRaw === 0) {
+      return new Response(JSON.stringify({ success: true, products_found: 0, products_added: 0 }), {
         status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // ─── QUALITY GATE ───
-    const qualityResults = discovered.map(p => ({
-      product: p,
-      quality: computeCandidateQuality(p),
-    }));
-
-    const passed = qualityResults.filter(r => r.quality.score >= qualityThreshold);
-    const failed = qualityResults.filter(r => r.quality.score < qualityThreshold);
-
-    for (const f of failed) {
-      console.log(`[product-scrape] QUALITY REJECTED (${f.quality.score}): "${f.product.canonical_name || f.product.name}" — missing: ${["brand","specific_name","rich_features","has_form_factor","has_exclusions"].filter(r => !f.quality.reasons.includes(r.replace("has_",""))).join(", ")}`);
+    // ─── SCORE WITH AI ───
+    const allScored: ScoredProduct[] = [];
+    for (const { category, products } of allResults) {
+      const scored = await scoreProducts(openaiKey, products, category);
+      allScored.push(...scored);
     }
-    console.log(`[product-scrape] Quality gate: ${passed.length} passed, ${failed.length} rejected (threshold=${qualityThreshold})`);
 
-    // Check for duplicates
+    console.log(`[product-scrape] ${allScored.length} products passed AI scoring`);
+
+    // ─── DEDUPLICATE AGAINST EXISTING ───
     const { data: existing } = await supabase
       .from("products")
-      .select("name, canonical_name")
-      .limit(500);
+      .select("name, canonical_name, source_url")
+      .limit(1000);
 
     const existingNames = new Set((existing || []).map((e: any) => (e.canonical_name || e.name).toLowerCase()));
-    const newProducts = passed.filter(r => {
-      const cn = (r.product.canonical_name || r.product.name).toLowerCase();
-      return !existingNames.has(cn);
+    const existingUrls = new Set((existing || []).map((e: any) => e.source_url).filter(Boolean));
+
+    const newProducts = allScored.filter(p => {
+      const cn = p.canonical_name.toLowerCase();
+      // Dedupe by name similarity or exact URL
+      if (existingUrls.has(p.source_url)) return false;
+      if (existingNames.has(cn)) return false;
+      return true;
     });
 
-    console.log(`[product-scrape] ${newProducts.length} new products (${passed.length - newProducts.length} duplicates skipped)`);
+    console.log(`[product-scrape] ${newProducts.length} new products after dedup (${allScored.length - newProducts.length} duplicates)`);
 
+    // ─── INSERT ───
     let added = 0;
     let priceRejected = 0;
-    for (const { product: p, quality } of newProducts) {
-      const priceCents = parsePriceCents(p.price_range);
 
-      // Hard price gate: reject products outside $30-$80 range
-      if (priceCents && (priceCents < 3000 || priceCents > 8000)) {
-        console.log(`[product-scrape] PRICE REJECTED: "${p.canonical_name}" — $${(priceCents/100).toFixed(2)} outside $30-$80 range`);
+    for (const p of newProducts) {
+      // Hard price gate
+      if (p.price_cents < minPrice * 100 || p.price_cents > maxPrice * 100) {
+        console.log(`[product-scrape] PRICE REJECTED: "${p.canonical_name}" — $${(p.price_cents / 100).toFixed(2)}`);
         priceRejected++;
         continue;
       }
+
+      const overallScore = computeOverallScore(p);
 
       const { data: product, error: prodErr } = await supabase
         .from("products")
         .insert({
           name: p.name,
-          canonical_name: p.canonical_name || p.name,
+          canonical_name: p.canonical_name,
           category: p.category,
-          source_url: p.source_url || null,
+          source_url: p.source_url,
           image_url: p.image_url || null,
-          price_cents: priceCents,
+          price_cents: p.price_cents,
           status: "discovered",
-          discovered_via: "scraper",
+          discovered_via: "google_shopping",
           notes: p.why_viral,
-          distinctive_attributes: p.core_features || [],
-          excluded_variants: p.excluded_lookalikes || [],
-          short_description: `${p.form_factor || ""} — ${(p.core_features || []).join(", ")}`.trim(),
-          candidate_quality_score: quality.score,
+          distinctive_attributes: p.core_features,
+          short_description: `${p.form_factor} — ${p.core_features.join(", ")}`.trim(),
+          candidate_quality_score: 80, // real products start at 80 (they exist!)
         })
         .select("id")
         .single();
 
       if (prodErr || !product) {
-        console.warn(`[product-scrape] Failed to insert product "${p.name}":`, prodErr);
+        console.warn(`[product-scrape] Insert failed for "${p.name}":`, prodErr);
         continue;
       }
 
-      const overallScore = computeOverallScore(p);
-      const { error: analysisErr } = await supabase
+      await supabase
         .from("product_analysis")
         .insert({
           product_id: product.id,
@@ -474,30 +449,26 @@ Deno.serve(async (req) => {
           trending_status: p.trending_status,
           emotional_triggers: p.emotional_triggers,
           overall_score: overallScore,
-          price_sweet_spot: priceCents ? priceCents >= 3000 && priceCents <= 8000 : false,
+          price_sweet_spot: true,
           analyzed_by: "ai",
           analyzed_at: new Date().toISOString(),
         });
 
-      if (analysisErr) {
-        console.warn(`[product-scrape] Failed to insert analysis for "${p.name}":`, analysisErr);
-      }
-
-      console.log(`[product-scrape] ✓ Added: "${p.canonical_name}" (quality=${quality.score}, reasons=${quality.reasons.join(",")})`);
+      console.log(`[product-scrape] ✓ REAL product added: "${p.canonical_name}" — $${(p.price_cents / 100).toFixed(2)} from ${p.store_name} (score=${overallScore})`);
       added++;
     }
 
-    console.log(`[product-scrape] Complete. Added ${added} products, rejected ${failed.length} for quality.`);
+    console.log(`[product-scrape] Complete. Added ${added} real products.`);
 
     return new Response(
       JSON.stringify({
         success: true,
-        products_found: discovered.length,
+        version: "v3-real-retrieval",
+        products_found: totalRaw,
+        products_scored: allScored.length,
         products_added: added,
-        quality_rejected: failed.length,
         price_rejected: priceRejected,
-        quality_threshold: qualityThreshold,
-        price_range: "$30-$80",
+        price_range: `$${minPrice}-$${maxPrice}`,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
