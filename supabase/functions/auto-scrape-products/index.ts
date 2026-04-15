@@ -151,6 +151,21 @@ async function searchGoogleShopping(
   return results;
 }
 
+// ─── FETCH WITH RETRY ───
+async function fetchWithRetry(url: string, options: RequestInit, maxRetries = 2): Promise<Response> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const resp = await fetch(url, options);
+    if (resp.status === 429 && attempt < maxRetries) {
+      const delay = (attempt + 1) * 10000; // 10s, 20s
+      console.warn(`[product-scrape] 429 rate limit — retry ${attempt + 1} in ${delay / 1000}s`);
+      await new Promise(r => setTimeout(r, delay));
+      continue;
+    }
+    return resp;
+  }
+  throw new Error("Unreachable");
+}
+
 // ─── SCORE REAL PRODUCTS WITH AI ───
 // AI evaluates real products for dropshipping viability — does NOT invent products
 async function scoreProducts(
@@ -164,18 +179,12 @@ async function scoreProducts(
     `[${i + 1}] "${p.title}" — $${p.price.toFixed(2)} from ${p.source}\n    URL: ${p.link}\n    Image: ${p.thumbnail || "none"}`
   ).join("\n\n");
 
-  const resp = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${openaiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content: `You are a product analyst for a dropshipping business. You are evaluating REAL products from Google Shopping results.
+  const requestBody = JSON.stringify({
+    model: "gpt-4o-mini",
+    messages: [
+      {
+        role: "system",
+        content: `You are a product analyst for a dropshipping business. You are evaluating REAL products from Google Shopping results.
 
 CRITICAL RULES:
 - These are REAL products that exist. Do NOT change their names, brands, or URLs.
@@ -199,83 +208,65 @@ REJECTION CRITERIA — mark rejected=true for:
 - Consumables with no repeat visual appeal
 
 Only return products worth pursuing for video-commerce.`,
-        },
-        {
-          role: "user",
-          content: `Category: ${category}\n\nProducts to evaluate:\n\n${productList}`,
-        },
-      ],
-      tools: [
-        {
-          type: "function",
-          function: {
-            name: "score_products",
-            description: "Score real products for dropshipping viability",
-            parameters: {
-              type: "object",
-              properties: {
-                scored: {
-                  type: "array",
-                  items: {
-                    type: "object",
-                    properties: {
-                      index: { type: "integer", description: "1-based index from the input list" },
-                      rejected: { type: "boolean", description: "true if product fails rejection criteria" },
-                      rejection_reason: { type: "string" },
-                      canonical_name: { type: "string", description: "Clean product name from listing (DO NOT invent)" },
-                      brand: { type: "string", description: "Brand extracted from title, empty if generic" },
-                      form_factor: { type: "string", description: "Physical type: handheld device, table lamp, etc." },
-                      core_features: { type: "array", items: { type: "string" }, description: "3-5 key features from the listing" },
-                      why_viral: { type: "string", description: "1-2 sentences on why this could work for video commerce" },
-                      wow_factor: { type: "integer", minimum: 1, maximum: 5 },
-                      social_media_potential: { type: "integer", minimum: 1, maximum: 5 },
-                      impulse_buy_appeal: { type: "integer", minimum: 1, maximum: 5 },
-                      demonstrability_score: { type: "integer", minimum: 1, maximum: 5 },
-                      competition_level: { type: "integer", minimum: 1, maximum: 5 },
-                      trending_status: { type: "string", enum: ["emerging", "rising", "peak", "declining", "saturated"] },
-                      emotional_triggers: { type: "array", items: { type: "string" } },
-                    },
-                    required: ["index", "rejected"],
+      },
+      {
+        role: "user",
+        content: `Category: ${category}\n\nProducts to evaluate:\n\n${productList}`,
+      },
+    ],
+    tools: [
+      {
+        type: "function",
+        function: {
+          name: "score_products",
+          description: "Score real products for dropshipping viability",
+          parameters: {
+            type: "object",
+            properties: {
+              scored: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    index: { type: "integer", description: "1-based index from the input list" },
+                    rejected: { type: "boolean", description: "true if product fails rejection criteria" },
+                    rejection_reason: { type: "string" },
+                    canonical_name: { type: "string", description: "Clean product name from listing (DO NOT invent)" },
+                    brand: { type: "string", description: "Brand extracted from title, empty if generic" },
+                    form_factor: { type: "string", description: "Physical type: handheld device, table lamp, etc." },
+                    core_features: { type: "array", items: { type: "string" }, description: "3-5 key features from the listing" },
+                    why_viral: { type: "string", description: "1-2 sentences on why this could work for video commerce" },
+                    wow_factor: { type: "integer", minimum: 1, maximum: 5 },
+                    social_media_potential: { type: "integer", minimum: 1, maximum: 5 },
+                    impulse_buy_appeal: { type: "integer", minimum: 1, maximum: 5 },
+                    demonstrability_score: { type: "integer", minimum: 1, maximum: 5 },
+                    competition_level: { type: "integer", minimum: 1, maximum: 5 },
+                    trending_status: { type: "string", enum: ["emerging", "rising", "peak", "declining", "saturated"] },
+                    emotional_triggers: { type: "array", items: { type: "string" } },
                   },
+                  required: ["index", "rejected"],
                 },
               },
-              required: ["scored"],
             },
+            required: ["scored"],
           },
         },
-      ],
-      tool_choice: { type: "function", function: { name: "score_products" } },
-      temperature: 0.2,
-    }),
+      },
+    ],
+    tool_choice: { type: "function", function: { name: "score_products" } },
+    temperature: 0.2,
   });
 
-  // Retry with backoff on 429
-  if (resp.status === 429) {
-    console.warn(`[product-scrape] OpenAI 429 — retrying in 10s...`);
-    await new Promise(r => setTimeout(r, 10000));
-    const retry = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${openaiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [
-          { role: "system", content: "Score products for dropshipping viability. Return scored array." },
-          { role: "user", content: `Category: ${category}\n\n${productList}` },
-        ],
-        tools: [resp_body_tools_ref],
-        tool_choice: { type: "function", function: { name: "score_products" } },
-        temperature: 0.2,
-      }),
-    });
-    if (!retry.ok) {
-      console.error(`[product-scrape] OpenAI scoring failed after retry: ${retry.status}`);
-      return [];
-    }
-    resp = retry;
-  } else if (!resp.ok) {
+  const resp = await fetchWithRetry("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${openaiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: requestBody,
+  });
+
+  if (!resp.ok) {
     const errBody = await resp.text().catch(() => "");
     console.error(`[product-scrape] OpenAI scoring failed: ${resp.status} — ${errBody.slice(0, 200)}`);
     return [];
