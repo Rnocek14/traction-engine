@@ -289,16 +289,20 @@ function applyHardRules(canonical: CanonicalProfile, source: SourceListing): Val
     }
   }
 
-  // HARD REJECT: Pack count mismatch
-  const packPatterns = [/(\d+)\s*(?:pack|pcs|pieces|set of|count)/i, /set\s*of\s*(\d+)/i, /(\d+)\s*in\s*1/i];
-  let detectedPack: number | null = null;
-  for (const p of packPatterns) {
-    const m = titleLower.match(p);
-    if (m) { detectedPack = parseInt(m[1]); break; }
-  }
-  if (detectedPack && canonical.variant.pack_count && detectedPack !== canonical.variant.pack_count) {
-    if (detectedPack > 1 && canonical.variant.pack_count === 1) {
-      return { verdict: "different_product", confidence: 0.92, matched_attributes: [], mismatched_attributes: [`pack_count:expected=${canonical.variant.pack_count},found=${detectedPack}`], reasoning: `Pack count mismatch.`, method: "hard_rule" };
+  // HARD REJECT: Pack count mismatch (RETAIL ONLY)
+  // Wholesale titles often say "2pcs", "3 pieces" to indicate quantity/MOQ, not actual pack count.
+  // Let the LLM judge wholesale pack count differences.
+  if (!isWholesale) {
+    const packPatterns = [/(\d+)\s*(?:pack|pcs|pieces|set of|count)/i, /set\s*of\s*(\d+)/i, /(\d+)\s*in\s*1/i];
+    let detectedPack: number | null = null;
+    for (const p of packPatterns) {
+      const m = titleLower.match(p);
+      if (m) { detectedPack = parseInt(m[1]); break; }
+    }
+    if (detectedPack && canonical.variant.pack_count && detectedPack !== canonical.variant.pack_count) {
+      if (detectedPack > 1 && canonical.variant.pack_count === 1) {
+        return { verdict: "different_product", confidence: 0.92, matched_attributes: [], mismatched_attributes: [`pack_count:expected=${canonical.variant.pack_count},found=${detectedPack}`], reasoning: `Pack count mismatch.`, method: "hard_rule" };
+      }
     }
   }
 
