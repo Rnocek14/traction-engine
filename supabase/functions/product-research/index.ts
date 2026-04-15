@@ -35,6 +35,11 @@ interface SearchIdentity {
   queries: string[];
   wholesaleDescription: string;
   wholesaleQueries: string[];
+  wholesaleAnchorTerms: string[];  // product-class words for wholesale gate (e.g. "lamp", "projector")
+  wholesaleMechanism: string;      // how it works: "manual pump", "USB rechargeable", "LED"
+  wholesaleFormFactor: string;     // physical shape: "handheld", "tabletop", "pendant"
+  wholesaleMaterial: string;       // dominant material: "acrylic", "stainless steel"
+  wholesaleKeySpecs: string[];     // distinguishing specs: "8 bar", "1080P", "16-color RGB"
   asin: string;                  // Amazon ASIN if known
   exactRetailTitle: string;      // Full exact product listing title for precision search
 }
@@ -174,6 +179,42 @@ function passesAnchorGate(
   return { passes: true, reason: "anchor_matched" };
 }
 
+// ─── WHOLESALE GATE (relaxed — no model guard, no excluded concepts) ───
+// For wholesale/factory listings, only check product-class anchors.
+// Brand mismatches and model variants are EXPECTED on wholesale sites.
+function passesWholesaleGate(
+  title: string,
+  url: string,
+  identity: SearchIdentity,
+): { passes: boolean; reason: string } {
+  const titleLower = (title || "").toLowerCase();
+  const urlLower = url.toLowerCase();
+  const combined = `${titleLower} ${urlLower}`;
+
+  // Use wholesale-specific anchor terms (product class words like "lamp", "projector", "espresso")
+  const wholesaleAnchors = identity.wholesaleAnchorTerms?.length > 0
+    ? identity.wholesaleAnchorTerms
+    : identity.anchorTerms;
+
+  if (wholesaleAnchors.length > 0) {
+    const hasAnchor = wholesaleAnchors.some(a => combined.includes(a.toLowerCase()));
+    if (!hasAnchor) {
+      return { passes: false, reason: `wholesale_missing_anchor:[${wholesaleAnchors.join(",")}]` };
+    }
+  }
+
+  // Only reject truly wrong product CATEGORIES (not model/brand mismatches)
+  // e.g. reject "car charger" when looking for "table lamp" — but allow brand differences
+  const hardCategoryRejects = ["replacement parts", "carrying case", "screen protector", "phone case", "charger cable"];
+  for (const reject of hardCategoryRejects) {
+    if (combined.includes(reject) && !wholesaleAnchors.some(a => reject.includes(a.toLowerCase()))) {
+      return { passes: false, reason: `wholesale_wrong_category:${reject}` };
+    }
+  }
+
+  return { passes: true, reason: "wholesale_anchor_matched" };
+}
+
 // ─── STEP 1: EXTRACT CANONICAL SEARCH IDENTITY ───
 
 async function extractSearchIdentity(productName: string, openaiKey: string, existingProduct?: any): Promise<SearchIdentity> {
@@ -218,15 +259,35 @@ Fields:
   4. Brand + key specs: YABER V2 1080P projector
 - asin: Amazon ASIN if you know it (e.g. from the product name or context). Empty string if unknown.
 - exactRetailTitle: The EXACT product listing title as it would appear on Amazon/Walmart. Be as precise as possible.
-- wholesaleDescription: Physical description for factory sourcing. NO brand names. Include: specs, dimensions, materials, connectors.
-- wholesaleQueries: 2-3 unbranded queries for AliExpress/Alibaba.`
+- wholesaleDescription: Physical description for factory sourcing. NO brand names. Include: mechanism, specs, dimensions, materials, connectors, power source.
+- wholesaleQueries: 5-6 PRECISE unbranded queries for AliExpress/Alibaba. CRITICAL RULES:
+  * Strip ALL brand names — factories don't use them
+  * Lead with MECHANISM + FORM FACTOR: "manual piston handheld espresso maker portable"
+  * Include distinguishing PHYSICAL specs: "8 bar pressure", "16 color RGB", "1080P native"
+  * Include material when relevant: "stainless steel", "acrylic", "silicone"
+  * Include power source: "USB rechargeable", "no battery manual", "solar powered"
+  * Generate queries at DIFFERENT specificity levels:
+    Query 1: Most specific physical description (mechanism + form + specs)
+    Query 2: Form factor + key differentiator
+    Query 3: Chinese factory naming conventions (e.g. "creative lamp" for novelty lamps)
+    Query 4: Function-first description (what it DOES, not what it's called)
+    Query 5: Material + size + category
+  * BAD wholesale query: "mini espresso maker" (too vague — returns electric machines)
+  * GOOD wholesale query: "manual piston handheld espresso maker portable no electricity 8 bar"
+- wholesaleAnchorTerms: 2-3 broad product-CLASS words that ANY factory listing would contain. These are ONLY for filtering obviously wrong results. E.g. for espresso maker: ["espresso", "coffee"]. For jellyfish lamp: ["lamp", "jellyfish"]. For projector: ["projector"].
+- wholesaleMechanism: How it physically works (e.g. "manual hand pump piston", "USB rechargeable LED", "gravity fed")
+- wholesaleFormFactor: Physical shape/size category (e.g. "handheld portable", "tabletop", "wall-mounted")
+- wholesaleMaterial: Dominant construction material (e.g. "stainless steel + ABS", "acrylic crystal", "silicone")
+- wholesaleKeySpecs: 3-5 specs that distinguish THIS product from similar ones (e.g. ["8 bar pressure", "no electricity", "compact size", "ground coffee compatible"])`
         },
         {
           role: "user",
           content: `Product: "${productName}"
 ${contextBlock}
 
-Extract the canonical search identity. We need to find THIS EXACT product, not similar ones. Pay special attention to model variants that should be EXCLUDED.`
+Extract the canonical search identity. We need to find THIS EXACT product, not similar ones. Pay special attention to model variants that should be EXCLUDED.
+
+For wholesale queries: think like a factory. How would a Chinese manufacturer describe this product WITHOUT using any brand name? Focus on physical mechanism, materials, and specs.`
         }
       ],
       tools: [{
@@ -247,9 +308,14 @@ Extract the canonical search identity. We need to find THIS EXACT product, not s
               asin: { type: "string", description: "Amazon ASIN if known, empty string otherwise" },
               exactRetailTitle: { type: "string", description: "Exact expected product listing title" },
               wholesaleDescription: { type: "string" },
-              wholesaleQueries: { type: "array", items: { type: "string" } },
+              wholesaleQueries: { type: "array", items: { type: "string" }, description: "5-6 unbranded factory-style queries at different specificity levels" },
+              wholesaleAnchorTerms: { type: "array", items: { type: "string" }, description: "2-3 broad product-class words for wholesale filtering" },
+              wholesaleMechanism: { type: "string", description: "How it physically works" },
+              wholesaleFormFactor: { type: "string", description: "Physical shape/size" },
+              wholesaleMaterial: { type: "string", description: "Dominant material" },
+              wholesaleKeySpecs: { type: "array", items: { type: "string" }, description: "3-5 distinguishing physical specs" },
             },
-            required: ["brandName", "modelIdentifier", "corePhrase", "modifiers", "anchorTerms", "excludedConcepts", "excludedModels", "queries", "asin", "exactRetailTitle", "wholesaleDescription", "wholesaleQueries"],
+            required: ["brandName", "modelIdentifier", "corePhrase", "modifiers", "anchorTerms", "excludedConcepts", "excludedModels", "queries", "asin", "exactRetailTitle", "wholesaleDescription", "wholesaleQueries", "wholesaleAnchorTerms", "wholesaleMechanism", "wholesaleFormFactor", "wholesaleMaterial", "wholesaleKeySpecs"],
           },
         },
       }],
@@ -269,6 +335,8 @@ Extract the canonical search identity. We need to find THIS EXACT product, not s
 
   const identity: SearchIdentity = JSON.parse(call.function.arguments);
   console.log(`[research] Identity: brand="${identity.brandName}" model="${identity.modelIdentifier}" core="${identity.corePhrase}" anchors=[${identity.anchorTerms}] excludedModels=[${identity.excludedModels}] asin="${identity.asin}"`);
+  console.log(`[research] Wholesale: mechanism="${identity.wholesaleMechanism}" form="${identity.wholesaleFormFactor}" material="${identity.wholesaleMaterial}" anchors=[${identity.wholesaleAnchorTerms}] specs=[${identity.wholesaleKeySpecs}]`);
+  console.log(`[research] Wholesale queries: ${identity.wholesaleQueries.join(" | ")}`);
   return identity;
 }
 
@@ -285,6 +353,11 @@ function fallbackIdentity(productName: string): SearchIdentity {
     queries: [`"${productName}"`],
     wholesaleDescription: productName,
     wholesaleQueries: [`"${productName}"`],
+    wholesaleAnchorTerms: words.slice(0, 2),
+    wholesaleMechanism: "",
+    wholesaleFormFactor: "",
+    wholesaleMaterial: "",
+    wholesaleKeySpecs: [],
     asin: "",
     exactRetailTitle: productName,
   };
@@ -436,21 +509,27 @@ async function tieredSearch(
   await new Promise(r => setTimeout(r, 300));
 
   // ────────────────────────────────────────
-  // TIER 3: Wholesale exact-form search
+  // TIER 3: Wholesale precision search (uses wholesale gate, not retail gate)
   // ────────────────────────────────────────
-  console.log(`[research] === TIER 3: Wholesale exact-form ===`);
+  console.log(`[research] === TIER 3: Wholesale precision search ===`);
+  console.log(`[research] Wholesale queries (${identity.wholesaleQueries.length}): ${identity.wholesaleQueries.join(" | ")}`);
 
-  const wholesaleSites = ["aliexpress.com", "alibaba.com"];  // DHgate deprioritized — too noisy
+  const wholesaleSites = ["aliexpress.com", "alibaba.com", "dhgate.com"];
+  let wholesaleGatedOut = 0;
+
+  // Use ALL wholesale queries (up to 5) across sites
   for (const site of wholesaleSites) {
-    for (const wq of identity.wholesaleQueries.slice(0, 2)) {
+    for (const wq of identity.wholesaleQueries.slice(0, 4)) {
       const wResults = await serpGoogle(`${wq} site:${site}`, 5);
       for (const r of wResults) {
         if (r.link?.startsWith("http")) {
           if (seen.has(r.link) || !isUsefulUrl(r.link)) continue;
           seen.add(r.link);
-          const gate = passesAnchorGate(r.title || "", r.link, identity);
+          // Use WHOLESALE gate — no model guard, no excluded concepts
+          const gate = passesWholesaleGate(r.title || "", r.link, identity);
           if (!gate.passes) {
-            gatedOut++;
+            wholesaleGatedOut++;
+            if (wholesaleGatedOut <= 5) console.log(`[research] WHOLESALE GATED: "${r.title?.slice(0, 60)}" → ${gate.reason}`);
             continue;
           }
           results.push({
@@ -463,7 +542,27 @@ async function tieredSearch(
     }
   }
 
-  console.log(`[research] Tier 3 results: ${results.length} passed, ${gatedOut} gated`);
+  // Also try Google Shopping for wholesale — sometimes surfaces AliExpress results
+  if (identity.wholesaleQueries.length > 0) {
+    const wsShoppingResults = await serpShopping(identity.wholesaleQueries[0], 8);
+    for (const r of wsShoppingResults) {
+      if (r.link?.startsWith("http") && classifyLinkType(r.link) === "wholesale") {
+        if (seen.has(r.link) || !isUsefulUrl(r.link)) continue;
+        seen.add(r.link);
+        const gate = passesWholesaleGate(r.title || "", r.link, identity);
+        if (gate.passes) {
+          results.push({
+            url: r.link, title: r.title || "", price: r.price || null, thumbnail: r.thumbnail || null,
+            source: "tier3:wholesale:shopping", gateResult: gate.reason, tier: 3, isProductPage: isProductDetailPage(r.link),
+          });
+        }
+      }
+    }
+  }
+
+  const t3WholesaleCount = results.filter(r => r.tier === 3).length;
+  console.log(`[research] Tier 3 results: ${t3WholesaleCount} wholesale passed, ${wholesaleGatedOut} gated`);
+  console.log(`[research] TOTAL after T3: ${results.length} candidates`);
 
   // ────────────────────────────────────────
   // TIER 4: Fallback broader search (only if <3 results from tiers 1-3)
