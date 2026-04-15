@@ -562,6 +562,29 @@ Deno.serve(async (req) => {
     // 3. Recompute product readiness
     await recomputeReadiness(supabase, product_id);
 
+    // 4. Auto-trigger image harvesting if we got confirmed links
+    if (results.confirmed > 0) {
+      try {
+        console.log(`[validator] Auto-triggering image harvest (${results.confirmed} confirmed links)...`);
+        const harvestResp = await fetch(`${supabaseUrl}/functions/v1/harvest-product-images`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${supabaseKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ product_id }),
+        });
+        if (harvestResp.ok) {
+          const harvestData = await harvestResp.json();
+          console.log(`[validator] Image harvest: ${harvestData.verified || 0} verified, ${harvestData.rejected || 0} rejected`);
+        } else {
+          console.warn(`[validator] Image harvest failed: ${harvestResp.status}`);
+        }
+      } catch (e) {
+        console.warn("[validator] Image harvest error (non-fatal):", e);
+      }
+    }
+
     console.log(`[validator] ===== Done: ${results.confirmed} confirmed, ${results.rejected} rejected, ${results.needs_review} needs_review =====`);
 
     return new Response(JSON.stringify({
