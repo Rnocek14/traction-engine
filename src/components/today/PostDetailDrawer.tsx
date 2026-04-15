@@ -471,19 +471,71 @@ export function PostDetailDrawer({ open, onOpenChange, storyJobId, ideaId }: Pos
               </div>
             )}
 
-            {/* ── Full Script ────────────────────────────── */}
-            {fullScript && (
+            {/* ── Script / Storyboard Preview ────────────── */}
+            {scenePreview.length > 0 && (
               <div className="space-y-2">
                 <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
                   <MessageSquareQuote className="h-3.5 w-3.5" />
-                  Full Narration Script
+                  {hasNarration ? "Narration Script" : "Storyboard Script"}
                 </h3>
-                <div className="bg-muted/40 border rounded-lg p-3">
-                  <p className="text-xs leading-relaxed whitespace-pre-line">{fullScript}</p>
-                  <div className="flex items-center gap-2 mt-2 pt-2 border-t">
+
+                {!hasNarration && (
+                  <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-2.5 flex items-start gap-2">
+                    <AlertCircle className="h-3.5 w-3.5 text-yellow-600 shrink-0 mt-0.5" />
+                    <p className="text-[11px] text-yellow-700">
+                      No narration lines yet — these scenes were generated before narration was enabled. 
+                      Producing will regenerate the storyboard with narration + voiceover.
+                    </p>
+                  </div>
+                )}
+
+                <div className="bg-muted/40 border rounded-lg divide-y">
+                  {scenePreview.map((sp) => (
+                    <div key={sp.index} className="p-3 space-y-1">
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className="text-[10px] shrink-0">Scene {sp.index}</Badge>
+                        {sp.beat && <Badge variant="secondary" className="text-[10px]">{sp.beat}</Badge>}
+                        <span className="text-[10px] text-muted-foreground ml-auto">{sp.duration}s</span>
+                      </div>
+
+                      {/* Narration (primary) */}
+                      {sp.narration && (
+                        <div className="flex gap-1.5">
+                          <Mic className="h-3 w-3 text-primary shrink-0 mt-0.5" />
+                          <p className="text-xs leading-relaxed italic">"{sp.narration}"</p>
+                        </div>
+                      )}
+
+                      {/* Visual direction (always show) */}
+                      {sp.prompt && (
+                        <div className="flex gap-1.5">
+                          <Camera className="h-3 w-3 text-muted-foreground shrink-0 mt-0.5" />
+                          <p className="text-[11px] text-muted-foreground leading-relaxed">{sp.prompt}</p>
+                        </div>
+                      )}
+
+                      {/* Text overlay */}
+                      {sp.text && (
+                        <div className="flex gap-1.5">
+                          <FileText className="h-3 w-3 text-muted-foreground shrink-0 mt-0.5" />
+                          <p className="text-[11px] text-muted-foreground">
+                            Overlay: <span className="font-medium text-foreground">{sp.text}</span>
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Camera */}
+                      {sp.camera && (
+                        <p className="text-[10px] text-muted-foreground pl-4">📷 {sp.camera}</p>
+                      )}
+                    </div>
+                  ))}
+
+                  <div className="p-2.5 flex items-center gap-2">
                     <Clock className="h-3 w-3 text-muted-foreground" />
                     <span className="text-[10px] text-muted-foreground">
-                      ~{totalDuration}s total · {scenes.length} scenes · ~{Math.ceil(fullScript.split(/\s+/).length / 2.5)}s narration
+                      ~{totalDuration}s total · {scenes.length} scenes
+                      {fullScript ? ` · ~${Math.ceil(fullScript.split(/\s+/).length / 2.5)}s narration` : ""}
                     </span>
                   </div>
                 </div>
