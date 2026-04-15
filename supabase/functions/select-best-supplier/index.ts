@@ -282,7 +282,7 @@ Deno.serve(async (req) => {
           supplier_name: supplierName,
           platform: supplierPlatform,
           unit_cost_cents: winner.price_cents || null,
-          verification_status: "auto_selected",
+          verification_status: "partially_verified",
           is_preferred: true,
         })
         .eq("id", existingSupplier.id)
@@ -300,7 +300,7 @@ Deno.serve(async (req) => {
           platform: supplierPlatform,
           supplier_url: winnerLink.url,
           unit_cost_cents: winner.price_cents || null,
-          verification_status: "auto_selected",
+          verification_status: "partially_verified",
           is_preferred: true,
         })
         .select("id")
