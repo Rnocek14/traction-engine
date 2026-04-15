@@ -357,8 +357,8 @@ Deno.serve(async (req) => {
           allResults.push({ category: cat, products: results });
         }
 
-        // Rate limit: SerpAPI allows 5 req/s on most plans
-        await new Promise(r => setTimeout(r, 500));
+        // Rate limit: be conservative to avoid 429s
+        await new Promise(r => setTimeout(r, 2000));
       }
     }
 
