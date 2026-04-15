@@ -83,7 +83,20 @@ function isUsefulUrl(url: string): boolean {
 
 // ─── STEP 1: EXTRACT CANONICAL SEARCH IDENTITY ───
 
-async function extractSearchIdentity(productName: string, openaiKey: string): Promise<SearchIdentity> {
+async function extractSearchIdentity(productName: string, openaiKey: string, existingProduct?: any): Promise<SearchIdentity> {
+  // Use existing canonical data if available
+  const existingFeatures = existingProduct?.distinctive_attributes || [];
+  const existingExclusions = existingProduct?.excluded_variants || [];
+  const existingCanonical = existingProduct?.canonical_name || "";
+  const existingDescription = existingProduct?.short_description || "";
+  
+  const contextBlock = existingCanonical ? `
+Known canonical name: "${existingCanonical}"
+Known features: ${existingFeatures.join(", ") || "none"}
+Known exclusions: ${existingExclusions.join(", ") || "none"}
+Description: ${existingDescription || "none"}
+Price: $${existingProduct?.price_cents ? (existingProduct.price_cents / 100).toFixed(2) : "unknown"}` : "";
+
   const resp = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${openaiKey}`, "Content-Type": "application/json" },
@@ -92,25 +105,29 @@ async function extractSearchIdentity(productName: string, openaiKey: string): Pr
       messages: [
         {
           role: "system",
-          content: `You extract a precise search identity for a product to find it on marketplaces.
+          content: `You extract a precise search identity for a SPECIFIC product to find it on marketplaces.
+
+CRITICAL: You are identifying ONE specific product, not a product category.
+- If the input is vague (e.g. "crystal lamp"), you must narrow it using any available context.
+- The corePhrase must be specific enough that searching it finds THIS product and not hundreds of similar ones.
+- Include brand, model, specs, or distinguishing features in the corePhrase when known.
 
 Rules:
 - brandName: The brand/manufacturer name if present. Empty string if the product is generic/unbranded.
-- corePhrase: The shortest phrase that uniquely identifies the product CLASS (2-4 words). Example: "diffuser necklace", "pet water fountain", "magnetic phone mount". Do NOT include the brand name here.
+- corePhrase: A SPECIFIC phrase that identifies this exact product (3-8 words). Include brand + key specs. Example: "Leroxo portable crystal touch lamp RGB USB" NOT just "crystal lamp"
 - modifiers: Additional qualifying words that narrow the product but aren't essential for category identification
 - anchorTerms: 1-3 words that MUST appear in any valid search result. These define the product class. A result missing ALL anchor terms is definitely wrong.
 - excludedConcepts: Common related products that should be EXCLUDED. These are products that share some keywords but are fundamentally different.
 - queries: Generate 3-4 tight search queries for RETAIL sites (Amazon, Walmart). Include brand name if known.
-- wholesaleDescription: Describe the product's PHYSICAL characteristics for sourcing on Chinese wholesale sites. Focus on: capacity/size specs, form factor, materials, connectors, key features. NO brand names. Example: "5000mAh mini power bank keychain USB-C built-in cable lightning connector"
-- wholesaleQueries: Generate 2-3 search queries for AliExpress/Alibaba/DHgate. These must be UNBRANDED and use generic factory terms. Use physical specs and Chinese wholesale terminology. Example: ["5000mah keychain power bank USB-C", "mini portable charger built-in cable OEM"]
-
-Think carefully: wholesale sites sell the UNBRANDED factory version. The brand name will NOT appear there.`
+- wholesaleDescription: Describe the product's PHYSICAL characteristics for sourcing on Chinese wholesale sites. Focus on: capacity/size specs, form factor, materials, connectors, key features. NO brand names.
+- wholesaleQueries: Generate 2-3 search queries for AliExpress/Alibaba/DHgate. These must be UNBRANDED and use generic factory terms.`
         },
         {
           role: "user",
           content: `Product: "${productName}"
+${contextBlock}
 
-Extract the canonical search identity with both retail and wholesale search strategies.`
+Extract the canonical search identity. Be as specific as possible — we need to find THIS exact product, not similar ones.`
         }
       ],
       tools: [{

@@ -49,6 +49,14 @@ const CATEGORY_QUERIES: Record<string, string[]> = {
 
 interface DiscoveredProduct {
   name: string;
+  canonical_name: string;
+  brand: string;
+  form_factor: string;
+  core_features: string[];
+  pack_count: number;
+  power_source: string;
+  primary_material: string;
+  excluded_lookalikes: string[];
   category: string;
   price_range: string;
   source_url: string;
