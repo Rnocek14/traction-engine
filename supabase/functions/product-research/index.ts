@@ -35,6 +35,11 @@ interface SearchIdentity {
   queries: string[];
   wholesaleDescription: string;
   wholesaleQueries: string[];
+  wholesaleAnchorTerms: string[];  // product-class words for wholesale gate (e.g. "lamp", "projector")
+  wholesaleMechanism: string;      // how it works: "manual pump", "USB rechargeable", "LED"
+  wholesaleFormFactor: string;     // physical shape: "handheld", "tabletop", "pendant"
+  wholesaleMaterial: string;       // dominant material: "acrylic", "stainless steel"
+  wholesaleKeySpecs: string[];     // distinguishing specs: "8 bar", "1080P", "16-color RGB"
   asin: string;                  // Amazon ASIN if known
   exactRetailTitle: string;      // Full exact product listing title for precision search
 }
