@@ -276,11 +276,16 @@ function applyHardRules(canonical: CanonicalProfile, source: SourceListing): Val
     }
   }
 
-  // HARD REJECT: Excluded variant terms
-  for (const excluded of canonical.excluded_variants) {
-    const exLower = excluded.toLowerCase();
-    if (titleLower.includes(exLower)) {
-      return { verdict: "different_product", confidence: 0.90, matched_attributes: [], mismatched_attributes: [`excluded_variant:${excluded}`], reasoning: `Title contains excluded variant "${excluded}".`, method: "hard_rule" };
+  // HARD REJECT: Excluded variant terms (RETAIL ONLY)
+  // Wholesale listings use different terminology — "night light" for a jellyfish lamp,
+  // "espresso machine" for an espresso maker — so excluded variants should not hard-reject wholesale.
+  // Let the LLM evaluate wholesale matches on physical product sameness instead.
+  if (!isWholesale) {
+    for (const excluded of canonical.excluded_variants) {
+      const exLower = excluded.toLowerCase();
+      if (titleLower.includes(exLower)) {
+        return { verdict: "different_product", confidence: 0.90, matched_attributes: [], mismatched_attributes: [`excluded_variant:${excluded}`], reasoning: `Title contains excluded variant "${excluded}".`, method: "hard_rule" };
+      }
     }
   }
 
