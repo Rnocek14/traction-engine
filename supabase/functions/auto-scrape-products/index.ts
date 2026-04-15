@@ -134,24 +134,44 @@ async function discoverProducts(
       messages: [
         {
           role: "system",
-          content: `You are a product intelligence analyst for a dropshipping business. Extract individual products from the research data. For each product, provide structured scoring.
+          content: `You are a product intelligence analyst for a dropshipping business. Extract individual SPECIFIC products from the research data.
+
+CRITICAL PRODUCT IDENTITY RULES:
+- Every product MUST be a specific, identifiable item — NOT a category.
+- BAD: "Crystal Lamp" (too vague — there are thousands of crystal lamps)
+- GOOD: "Leroxo Portable Crystal Touch Lamp USB Rechargeable 16-Color RGB"
+- BAD: "Mini Projector" (category, not a product)
+- GOOD: "YABER V2 Mini Projector 1080P WiFi Bluetooth 9000L"
+- Include the brand name if mentioned in the research data
+- Include distinguishing specs: size, capacity, color count, power source, material
+- Include pack count if it's a set/bundle
+- The name should be specific enough that searching it returns ONLY that exact product
+
+PRODUCT IDENTITY FIELDS (NEW — required for each product):
+- canonical_name: The precise product name with brand + key specs (3-10 words)
+- brand: The brand/manufacturer if known, empty string if generic/unbranded
+- form_factor: Physical shape/type (e.g. "table lamp", "handheld projector", "pendant necklace")
+- core_features: 3-6 defining features that distinguish THIS product from similar ones
+- pack_count: Number of units (1 for single, 2+ for sets)
+- power_source: "USB rechargeable" | "battery" | "plug-in" | "solar" | "none" | "unknown"
+- primary_material: Dominant material (e.g. "acrylic", "silicone", "stainless steel", "ABS plastic")
+- excluded_lookalikes: 2-4 similar products that are NOT this product (helps prevent false matches)
 
 CRITICAL - URLs:
-- source_url: You MUST use a REAL URL from the "Source URLs" section of the research data. Pick the most relevant source URL for each product. These are real working URLs from Perplexity citations. Do NOT make up URLs. If no relevant source URL exists, use an empty string.
-- image_url: If you can identify a direct image URL (ending in .jpg, .png, .webp) from the research data, include it. Otherwise use an empty string. Do NOT hallucinate image URLs.
+- source_url: Use a REAL URL from the "Source URLs" section. Do NOT make up URLs.
+- image_url: Include direct image URL if available, empty string otherwise.
 
 SCORING RUBRIC (1-5 scale):
-- wow_factor: How visually impressive/surprising is this product? 5=jaw-dropping demo potential, 1=boring
-- social_media_potential: How likely to generate engagement/shares? 5=guaranteed viral, 1=no social appeal
-- impulse_buy_appeal: Would someone buy this on impulse from a video? 5=instant buy, 1=needs research
-- demonstrability_score: Can you show what it does in <10 seconds? 5=instant visual payoff, 1=needs explanation
-- competition_level: How many sellers/creators already push this? 5=oversaturated, 1=undiscovered
+- wow_factor: Visual impact for short-form video demo
+- social_media_potential: Engagement/shareability
+- impulse_buy_appeal: Instant buy trigger from video
+- demonstrability_score: Can you show value in <10 seconds?
+- competition_level: 5=oversaturated, 1=undiscovered
 
-TRENDING STATUS: emerging (just appearing), rising (gaining momentum), peak (maximum attention), declining (past peak), saturated (overdone)
-
+TRENDING STATUS: emerging | rising | peak | declining | saturated
 EMOTIONAL TRIGGERS: pick 2-4 from: wow, satisfaction, transformation, curiosity, gift, before_after, problem_solved, luxury_affordable, kids, pets, convenience, fear_of_missing
 
-Extract up to 15 unique products. Deduplicate similar items.`,
+Extract up to 15 unique products. Deduplicate similar items. Reject anything too vague to identify.`,
         },
         { role: "user", content: combined },
       ],
@@ -160,7 +180,7 @@ Extract up to 15 unique products. Deduplicate similar items.`,
           type: "function",
           function: {
             name: "store_products",
-            description: "Store discovered products",
+            description: "Store discovered products with precise identity",
             parameters: {
               type: "object",
               properties: {
@@ -169,7 +189,15 @@ Extract up to 15 unique products. Deduplicate similar items.`,
                   items: {
                     type: "object",
                     properties: {
-                      name: { type: "string", description: "Specific product name" },
+                      name: { type: "string", description: "Specific product name with brand + specs" },
+                      canonical_name: { type: "string", description: "Precise searchable name, 3-10 words, with brand if known" },
+                      brand: { type: "string", description: "Brand/manufacturer name, empty if unknown" },
+                      form_factor: { type: "string", description: "Physical type: table lamp, pendant, handheld device, etc." },
+                      core_features: { type: "array", items: { type: "string" }, description: "3-6 defining features" },
+                      pack_count: { type: "integer", description: "Number of units (1 for single)" },
+                      power_source: { type: "string", description: "USB rechargeable, battery, plug-in, solar, none, unknown" },
+                      primary_material: { type: "string", description: "Dominant material" },
+                      excluded_lookalikes: { type: "array", items: { type: "string" }, description: "Similar but different products" },
                       category: { type: "string", enum: ["gadgets", "home", "beauty", "toys", "fitness", "kitchen", "fashion", "pets", "outdoor", "other"] },
                       price_range: { type: "string", description: "Approximate price like '$15-25' or '$39.99'" },
                       source_url: { type: "string", description: "URL where product was found, or empty string" },
@@ -183,7 +211,7 @@ Extract up to 15 unique products. Deduplicate similar items.`,
                       trending_status: { type: "string", enum: ["emerging", "rising", "peak", "declining", "saturated"] },
                       emotional_triggers: { type: "array", items: { type: "string" } },
                     },
-                    required: ["name", "category", "price_range", "wow_factor", "social_media_potential", "impulse_buy_appeal", "demonstrability_score", "competition_level", "trending_status", "emotional_triggers"],
+                    required: ["name", "canonical_name", "form_factor", "core_features", "pack_count", "excluded_lookalikes", "category", "price_range", "wow_factor", "social_media_potential", "impulse_buy_appeal", "demonstrability_score", "competition_level", "trending_status", "emotional_triggers"],
                   },
                 },
               },
