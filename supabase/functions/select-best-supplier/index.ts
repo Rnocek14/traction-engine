@@ -187,24 +187,24 @@ Deno.serve(async (req) => {
 
     if (linkErr) throw new Error(`Failed to fetch candidates: ${linkErr.message}`);
 
-    // First try: non-rejected candidates with data
+    // First try: non-rejected candidates with data AND minimum confidence
     let validCandidates = (candidates || []).filter((c: CandidateLink) => {
       if (!c.source_title_full && !c.price_cents && !c.structured_price_cents) return false;
       if (c.validation_status === "rejected") return false;
+      if ((c.match_confidence || 0) < min_match_confidence) return false;
       return true;
     }).slice(0, top_n);
 
     // Fallback: if no non-rejected candidates, use best-available (even rejected)
-    // This handles the case where validator is strict but candidates are real
+    // But STILL enforce minimum confidence gate
     if (validCandidates.length === 0) {
       validCandidates = (candidates || []).filter((c: CandidateLink) => {
         if (!c.source_title_full && !c.price_cents && !c.structured_price_cents) return false;
-        // Still require minimum confidence even for rejected
-        if ((c.match_confidence || 0) < 50) return false;
+        if ((c.match_confidence || 0) < min_match_confidence) return false;
         return true;
       }).slice(0, top_n);
       if (validCandidates.length > 0) {
-        console.log(`[select-best-supplier] Using ${validCandidates.length} best-available candidates (validator rejected all)`);
+        console.log(`[select-best-supplier] Using ${validCandidates.length} best-available candidates (validator rejected all, confidence >= ${min_match_confidence})`);
       }
     }
 
