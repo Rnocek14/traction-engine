@@ -152,11 +152,11 @@ async function searchGoogleShopping(
 }
 
 // ─── FETCH WITH RETRY ───
-async function fetchWithRetry(url: string, options: RequestInit, maxRetries = 2): Promise<Response> {
+async function fetchWithRetry(url: string, options: RequestInit, maxRetries = 1): Promise<Response> {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const resp = await fetch(url, options);
     if (resp.status === 429 && attempt < maxRetries) {
-      const delay = (attempt + 1) * 5000; // 5s, 10s
+      const delay = 3000; // 3s retry
       console.warn(`[product-scrape] 429 rate limit — retry ${attempt + 1} in ${delay / 1000}s`);
       await new Promise(r => setTimeout(r, delay));
       continue;
