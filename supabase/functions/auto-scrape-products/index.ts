@@ -315,6 +315,7 @@ Deno.serve(async (req) => {
         .from("products")
         .insert({
           name: p.name,
+          canonical_name: p.canonical_name || p.name,
           category: p.category,
           source_url: p.source_url || null,
           image_url: p.image_url || null,
@@ -322,6 +323,9 @@ Deno.serve(async (req) => {
           status: "discovered",
           discovered_via: "scraper",
           notes: p.why_viral,
+          distinctive_attributes: p.core_features || [],
+          excluded_variants: p.excluded_lookalikes || [],
+          short_description: `${p.form_factor || ""} — ${(p.core_features || []).join(", ")}`.trim(),
         })
         .select("id")
         .single();
