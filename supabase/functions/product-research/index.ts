@@ -259,15 +259,35 @@ Fields:
   4. Brand + key specs: YABER V2 1080P projector
 - asin: Amazon ASIN if you know it (e.g. from the product name or context). Empty string if unknown.
 - exactRetailTitle: The EXACT product listing title as it would appear on Amazon/Walmart. Be as precise as possible.
-- wholesaleDescription: Physical description for factory sourcing. NO brand names. Include: specs, dimensions, materials, connectors.
-- wholesaleQueries: 2-3 unbranded queries for AliExpress/Alibaba.`
+- wholesaleDescription: Physical description for factory sourcing. NO brand names. Include: mechanism, specs, dimensions, materials, connectors, power source.
+- wholesaleQueries: 5-6 PRECISE unbranded queries for AliExpress/Alibaba. CRITICAL RULES:
+  * Strip ALL brand names — factories don't use them
+  * Lead with MECHANISM + FORM FACTOR: "manual piston handheld espresso maker portable"
+  * Include distinguishing PHYSICAL specs: "8 bar pressure", "16 color RGB", "1080P native"
+  * Include material when relevant: "stainless steel", "acrylic", "silicone"
+  * Include power source: "USB rechargeable", "no battery manual", "solar powered"
+  * Generate queries at DIFFERENT specificity levels:
+    Query 1: Most specific physical description (mechanism + form + specs)
+    Query 2: Form factor + key differentiator
+    Query 3: Chinese factory naming conventions (e.g. "creative lamp" for novelty lamps)
+    Query 4: Function-first description (what it DOES, not what it's called)
+    Query 5: Material + size + category
+  * BAD wholesale query: "mini espresso maker" (too vague — returns electric machines)
+  * GOOD wholesale query: "manual piston handheld espresso maker portable no electricity 8 bar"
+- wholesaleAnchorTerms: 2-3 broad product-CLASS words that ANY factory listing would contain. These are ONLY for filtering obviously wrong results. E.g. for espresso maker: ["espresso", "coffee"]. For jellyfish lamp: ["lamp", "jellyfish"]. For projector: ["projector"].
+- wholesaleMechanism: How it physically works (e.g. "manual hand pump piston", "USB rechargeable LED", "gravity fed")
+- wholesaleFormFactor: Physical shape/size category (e.g. "handheld portable", "tabletop", "wall-mounted")
+- wholesaleMaterial: Dominant construction material (e.g. "stainless steel + ABS", "acrylic crystal", "silicone")
+- wholesaleKeySpecs: 3-5 specs that distinguish THIS product from similar ones (e.g. ["8 bar pressure", "no electricity", "compact size", "ground coffee compatible"])`
         },
         {
           role: "user",
           content: `Product: "${productName}"
 ${contextBlock}
 
-Extract the canonical search identity. We need to find THIS EXACT product, not similar ones. Pay special attention to model variants that should be EXCLUDED.`
+Extract the canonical search identity. We need to find THIS EXACT product, not similar ones. Pay special attention to model variants that should be EXCLUDED.
+
+For wholesale queries: think like a factory. How would a Chinese manufacturer describe this product WITHOUT using any brand name? Focus on physical mechanism, materials, and specs.`
         }
       ],
       tools: [{
@@ -288,9 +308,14 @@ Extract the canonical search identity. We need to find THIS EXACT product, not s
               asin: { type: "string", description: "Amazon ASIN if known, empty string otherwise" },
               exactRetailTitle: { type: "string", description: "Exact expected product listing title" },
               wholesaleDescription: { type: "string" },
-              wholesaleQueries: { type: "array", items: { type: "string" } },
+              wholesaleQueries: { type: "array", items: { type: "string" }, description: "5-6 unbranded factory-style queries at different specificity levels" },
+              wholesaleAnchorTerms: { type: "array", items: { type: "string" }, description: "2-3 broad product-class words for wholesale filtering" },
+              wholesaleMechanism: { type: "string", description: "How it physically works" },
+              wholesaleFormFactor: { type: "string", description: "Physical shape/size" },
+              wholesaleMaterial: { type: "string", description: "Dominant material" },
+              wholesaleKeySpecs: { type: "array", items: { type: "string" }, description: "3-5 distinguishing physical specs" },
             },
-            required: ["brandName", "modelIdentifier", "corePhrase", "modifiers", "anchorTerms", "excludedConcepts", "excludedModels", "queries", "asin", "exactRetailTitle", "wholesaleDescription", "wholesaleQueries"],
+            required: ["brandName", "modelIdentifier", "corePhrase", "modifiers", "anchorTerms", "excludedConcepts", "excludedModels", "queries", "asin", "exactRetailTitle", "wholesaleDescription", "wholesaleQueries", "wholesaleAnchorTerms", "wholesaleMechanism", "wholesaleFormFactor", "wholesaleMaterial", "wholesaleKeySpecs"],
           },
         },
       }],
@@ -310,6 +335,8 @@ Extract the canonical search identity. We need to find THIS EXACT product, not s
 
   const identity: SearchIdentity = JSON.parse(call.function.arguments);
   console.log(`[research] Identity: brand="${identity.brandName}" model="${identity.modelIdentifier}" core="${identity.corePhrase}" anchors=[${identity.anchorTerms}] excludedModels=[${identity.excludedModels}] asin="${identity.asin}"`);
+  console.log(`[research] Wholesale: mechanism="${identity.wholesaleMechanism}" form="${identity.wholesaleFormFactor}" material="${identity.wholesaleMaterial}" anchors=[${identity.wholesaleAnchorTerms}] specs=[${identity.wholesaleKeySpecs}]`);
+  console.log(`[research] Wholesale queries: ${identity.wholesaleQueries.join(" | ")}`);
   return identity;
 }
 
@@ -326,6 +353,11 @@ function fallbackIdentity(productName: string): SearchIdentity {
     queries: [`"${productName}"`],
     wholesaleDescription: productName,
     wholesaleQueries: [`"${productName}"`],
+    wholesaleAnchorTerms: words.slice(0, 2),
+    wholesaleMechanism: "",
+    wholesaleFormFactor: "",
+    wholesaleMaterial: "",
+    wholesaleKeySpecs: [],
     asin: "",
     exactRetailTitle: productName,
   };
