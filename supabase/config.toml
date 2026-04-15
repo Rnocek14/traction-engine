@@ -110,3 +110,9 @@ verify_jwt = false
 
 [functions.product-to-videos]
 verify_jwt = false
+
+[functions.validate-product-links]
+verify_jwt = false
+
+[functions.recompute-product-readiness]
+verify_jwt = false
