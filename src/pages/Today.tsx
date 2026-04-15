@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { GlobalNav } from "@/components/GlobalNav";
 import { SummaryBar } from "@/components/today/SummaryBar";
 import { AccountRow } from "@/components/today/AccountRow";
@@ -11,7 +11,7 @@ import { useTodayFeed, type PostSlot } from "@/hooks/use-today-feed";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/hooks/use-toast";
-import { LayoutList, LayoutGrid } from "lucide-react";
+import { LayoutList, LayoutGrid, Zap } from "lucide-react";
 
 export default function Today() {
   const { data, isLoading } = useTodayFeed();
