@@ -1,8 +1,12 @@
 /**
- * Product-to-Videos: Account-aware video concept generator.
+ * Product-to-Videos: UGC Ad Engine
  * 
- * Takes a product_id + account_id, fetches account identity (style, persona, audience),
- * and generates concepts tailored to that specific account's brand.
+ * Generates "starving artist" style UGC ad concepts using enriched product truth:
+ * - Confirmed links (real prices, real features)
+ * - Verified product images (real product shots)
+ * - Account identity (tone, hook style, audience)
+ * 
+ * Every video follows: Hook → Problem → Discovery → Demo → Reaction → Soft CTA
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -27,7 +31,38 @@ interface VideoConcept {
   cta: string;
 }
 
-const VIDEO_FORMATS = ["slideshow_ad", "ugc_review", "problem_solution", "comparison", "curiosity_reveal"];
+/** Enriched product profile built from confirmed links + verified images */
+interface ProductTruth {
+  name: string;
+  canonicalName: string | null;
+  category: string | null;
+  priceCents: number;
+  description: string | null;
+  purchaseUrl: string | null;
+  // From confirmed links
+  confirmedRetailPrice: number | null;
+  confirmedBrand: string | null;
+  confirmedFeatures: string[];
+  confirmedSpecs: Record<string, unknown>;
+  // From verified images
+  verifiedImages: Array<{ url: string; label: string; isPrimary: boolean; adReadiness: number | null }>;
+  // Marketing plan
+  marketingPlan: Record<string, unknown> | null;
+  distinctiveAttributes: string[];
+}
+
+const UGC_ANGLES = [
+  "accidental_discovery",   // "I randomly found this..."
+  "skeptic_converted",      // "I thought this was fake but..."
+  "problem_solver",         // "I've been struggling with X..."
+  "comparison_shock",       // "vs the $80 version..."
+  "gift_find",              // "found the perfect gift..."
+  "aesthetic_upgrade",      // "my space went from 0 to 100..."
+  "hack_reveal",            // "nobody talks about this trick..."
+  "impulse_justified",      // "okay I know I didn't need this but..."
+  "before_after",           // "watch this transformation..."
+  "obsessed_review",        // "I've used this every day for a week..."
+];
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -50,7 +85,6 @@ Deno.serve(async (req) => {
     if (prodError || !product) throw new Error("Product not found");
 
     // ─── READINESS GATE ───
-    // Block ad generation unless product identity is verified
     const readinessScore = product.readiness_score || 0;
     const readinessState = product.readiness_state || "research_only";
     if (readinessScore < 40 || readinessState === "research_only") {
@@ -69,7 +103,10 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Fetch account identity (if provided)
+    // Build enriched product truth from confirmed links + verified images
+    const productTruth = await buildProductTruth(supabase, product_id, product);
+
+    // Fetch account identity
     let accountIdentity: Record<string, unknown> | null = null;
     if (account_id) {
       const { data: acct } = await supabase
@@ -77,13 +114,10 @@ Deno.serve(async (req) => {
       accountIdentity = acct;
     }
 
-    // Fetch images
-    const images = await fetchProductImages(supabase, product_id, product.image_url);
-
     if (mode === "generate") {
-      const concepts = await generateConcepts(product, images, openaiKey, accountIdentity);
+      const concepts = await generateUGCConcepts(productTruth, openaiKey, accountIdentity);
       return new Response(
-        JSON.stringify({ success: true, concepts, image_count: images.length }),
+        JSON.stringify({ success: true, concepts, image_count: productTruth.verifiedImages.length }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -142,104 +176,203 @@ Deno.serve(async (req) => {
   }
 });
 
-async function fetchProductImages(supabase: any, productId: string, fallbackUrl?: string) {
-  // Priority: pinned_supplier > verified > any > fallback
-  for (const filter of [
-    (q: any) => q.eq("source", "pinned_supplier"),
-    (q: any) => q.or("verified.eq.true,manually_approved.eq.true"),
-    (q: any) => q,
-  ]) {
-    const query = supabase.from("product_images").select("*")
-      .eq("product_id", productId).order("is_primary", { ascending: false }).limit(8);
-    const { data } = await filter(query);
-    if (data?.length) return data;
+// ─── PRODUCT TRUTH BUILDER ───
+// Assembles real evidence from confirmed links + verified images
+
+async function buildProductTruth(
+  supabase: any,
+  productId: string,
+  product: Record<string, unknown>,
+): Promise<ProductTruth> {
+  // Fetch confirmed links with enriched data
+  const { data: confirmedLinks } = await supabase
+    .from("product_links")
+    .select("*")
+    .eq("product_id", productId)
+    .eq("validation_status", "confirmed")
+    .order("match_confidence", { ascending: false })
+    .limit(10);
+
+  // Fetch verified images (prefer high ad_readiness)
+  const { data: verifiedImages } = await supabase
+    .from("product_images")
+    .select("*")
+    .eq("product_id", productId)
+    .or("verified.eq.true,manually_approved.eq.true")
+    .order("ad_readiness_score", { ascending: false, nullsFirst: false })
+    .limit(8);
+
+  // Fall back to any images if none verified
+  let images = verifiedImages || [];
+  if (images.length === 0) {
+    const { data: anyImages } = await supabase
+      .from("product_images")
+      .select("*")
+      .eq("product_id", productId)
+      .order("is_primary", { ascending: false })
+      .limit(8);
+    images = anyImages || [];
   }
-  if (fallbackUrl) return [{ url: fallbackUrl, label: "hero", is_primary: true }];
-  return [];
+  // Last resort: product.image_url
+  if (images.length === 0 && product.image_url) {
+    images = [{ url: product.image_url, label: "hero", is_primary: true, ad_readiness_score: null }];
+  }
+
+  // Extract confirmed features from best links
+  const allFeatures: string[] = [];
+  let confirmedBrand: string | null = null;
+  let confirmedRetailPrice: number | null = null;
+  let confirmedSpecs: Record<string, unknown> = {};
+
+  for (const link of (confirmedLinks || [])) {
+    if (link.source_brand && !confirmedBrand) confirmedBrand = link.source_brand;
+    if (link.price_cents && !confirmedRetailPrice) confirmedRetailPrice = link.price_cents;
+    if (link.source_features?.length) allFeatures.push(...link.source_features);
+    if (link.source_specs) confirmedSpecs = { ...confirmedSpecs, ...link.source_specs };
+  }
+
+  // Deduplicate features
+  const uniqueFeatures = [...new Set(allFeatures.map(f => f.toLowerCase().trim()))].slice(0, 15);
+
+  return {
+    name: product.name as string,
+    canonicalName: product.canonical_name as string | null,
+    category: product.category as string | null,
+    priceCents: (product.price_cents as number) || 0,
+    description: product.short_description as string | null,
+    purchaseUrl: product.purchase_url as string | null,
+    confirmedRetailPrice,
+    confirmedBrand,
+    confirmedFeatures: uniqueFeatures,
+    confirmedSpecs,
+    verifiedImages: images.map((img: any) => ({
+      url: img.url,
+      label: img.label || "product",
+      isPrimary: !!img.is_primary,
+      adReadiness: img.ad_readiness_score,
+    })),
+    marketingPlan: product.marketing_plan as Record<string, unknown> | null,
+    distinctiveAttributes: (product.distinctive_attributes as string[]) || [],
+  };
 }
 
+// ─── ACCOUNT BLOCK ───
+
 function buildAccountBlock(acct: Record<string, unknown> | null): string {
-  if (!acct) return "No account context — generate for a general audience.";
+  if (!acct) return "";
 
   const persona = acct.persona as Record<string, unknown> | null;
   const audience = acct.audience as Record<string, unknown> | null;
-  const pillars = (acct.content_pillars as string[]) || [];
 
-  return `ACCOUNT IDENTITY — tailor ALL content to this brand:
-- Account: ${acct.account_name || acct.account_id}
-- Promise: ${acct.promise || "not set"}
-- Content Style: ${acct.content_style || "not set"}
-- Hook Style: ${acct.hook_style || "curiosity"}
-- Tone: ${persona?.tone || "informative"}, Vibe: ${persona?.vibe || "friendly"}
-- Audience: ${audience?.who || "general"} | Pain points: ${JSON.stringify((audience as any)?.pain_points || [])}
-- Content Pillars: ${pillars.join(", ") || "general"}
-- CTA Style: ${acct.cta_style || "soft"}
-- CTA Phrases: ${((acct.cta_phrases as string[]) || []).join(" | ") || "Link in bio"}
-- Monetization: ${acct.monetization_mode || "product_first"}
-
-CRITICAL: Every hook, voiceover, and caption MUST match this account's tone and style.
-If hook_style is "shock" → use surprising/alarming openers.
-If hook_style is "curiosity" → use questions or teasers.
-If hook_style is "problem" → lead with the pain point.
-If hook_style is "aesthetic" → focus on visual beauty, minimal text.
-If hook_style is "demo" → show the product in action immediately.
-If hook_style is "listicle" → use numbered format ("3 reasons...").`;
+  return `ACCOUNT VOICE:
+- Tone: ${(persona as any)?.tone || "casual"}, Vibe: ${(persona as any)?.vibe || "relatable"}
+- Audience: ${(audience as any)?.who || "18-35 impulse buyers"} 
+- Pain points: ${JSON.stringify((audience as any)?.pain_points || [])}
+- Hook style: ${acct.hook_style || "curiosity"}
+- CTA style: ${acct.cta_style || "soft"} — phrases: ${((acct.cta_phrases as string[]) || ["link in bio"]).join(" | ")}`;
 }
 
-async function generateConcepts(
-  product: Record<string, unknown>,
-  images: Array<Record<string, unknown>>,
+// ─── UGC CONCEPT GENERATOR ───
+
+async function generateUGCConcepts(
+  truth: ProductTruth,
   openaiKey: string,
   accountIdentity: Record<string, unknown> | null,
 ): Promise<VideoConcept[]> {
-  const marketingPlan = product.marketing_plan as Record<string, unknown> | null;
-  const imageList = images.map((img, i) => ({
-    index: i + 1, url: img.url, label: img.label || "hero", is_primary: img.is_primary,
-  }));
+  const price = truth.confirmedRetailPrice
+    ? `$${(truth.confirmedRetailPrice / 100).toFixed(2)}`
+    : truth.priceCents
+      ? `$${(truth.priceCents / 100).toFixed(2)}`
+      : "unknown";
+
+  const imageBlock = truth.verifiedImages.length > 0
+    ? truth.verifiedImages.map((img, i) =>
+        `  ${i + 1}. [${img.label}${img.isPrimary ? " PRIMARY" : ""}${img.adReadiness ? ` readiness:${img.adReadiness}` : ""}] ${img.url}`
+      ).join("\n")
+    : "  NO IMAGES — use only ai_generated and text_overlay scenes";
+
+  const featuresBlock = truth.confirmedFeatures.length > 0
+    ? `CONFIRMED FEATURES (from real product listings):\n${truth.confirmedFeatures.map(f => `  • ${f}`).join("\n")}`
+    : "No confirmed features available.";
+
+  const specsBlock = Object.keys(truth.confirmedSpecs).length > 0
+    ? `CONFIRMED SPECS: ${JSON.stringify(truth.confirmedSpecs)}`
+    : "";
 
   const accountBlock = buildAccountBlock(accountIdentity);
 
-  const systemPrompt = `You are a TikTok/Reels ad creative director. You generate structured video concepts that sell physical products using short-form video.
+  const systemPrompt = `You are a viral UGC creator who makes "starving artist" style product review videos. Your videos look like a real person discovered a product, tried it, and filmed their genuine reaction. They are NOT polished ads — they feel raw, authentic, and personal.
 
 ${accountBlock}
 
-CRITICAL RULES:
-1. Each video MUST visually demonstrate the product within the FIRST 2 SECONDS
-2. Use the provided product images as reference frames (image_motion scenes)
-3. Every concept must use a DIFFERENT angle
-4. Keep total video length between 15-30 seconds
-5. Scenes should be 3-5 seconds each
-6. The hook text must stop the scroll — match the account's hook_style
-7. Voiceover must match the account's tone (${(accountIdentity?.persona as any)?.tone || "conversational"})
+YOUR CREATIVE PHILOSOPHY:
+- Every video must feel like "I found this random thing and it actually works"
+- You are NOT a brand. You are a regular person sharing a discovery.
+- The viewer should feel like they're watching a friend's story, not an ad.
+- Imperfection = trust. Slight messiness = authentic.
+- Never use corporate language. Never say "introducing" or "revolutionary."
+- The product must feel SPECIFIC and REAL — use actual features, actual price, actual details.
 
-AVAILABLE FORMATS: ${VIDEO_FORMATS.join(", ")}
+MANDATORY VIDEO STRUCTURE (every concept MUST follow this):
+1. HOOK (0-2s) — Stop the scroll. Make them curious. Match the angle.
+2. PROBLEM/CONTEXT (2-5s) — Why this matters. What sucked before.
+3. DISCOVERY (5-8s) — "I found this on [platform]" / "someone told me about this"
+4. DEMO (8-18s) — Show the product. Use REAL product images. Visual proof.
+5. REACTION (18-22s) — Genuine surprise. "wait... this actually works?"
+6. SOFT CTA (22-25s) — "link's in bio if you want it" — never pushy.
 
 SCENE TYPES:
-- "image_motion": Uses a product photo with pan/zoom/motion effects (PREFERRED for product shots)
-- "ai_generated": AI-generated video clip from prompt (use for lifestyle/context shots)
-- "text_overlay": Bold text on dark background (use sparingly)
+- "image_motion": Uses a REAL product photo with pan/zoom. REQUIRED for demo scenes. This is your most powerful tool — it makes the product feel REAL.
+- "ai_generated": AI lifestyle/context shots. Use for problem/context scenes. Should look like phone-quality UGC, NOT cinematic.
+- "text_overlay": Bold text on screen. Use sparingly (max 1 per video, for hook or reaction emphasis).
 
-${images.length === 0 ? "IMPORTANT: No product images available. Use ONLY 'ai_generated' and 'text_overlay' scene types." : ""}
+CRITICAL RULES:
+1. MINIMUM 2 image_motion scenes per video using real product images
+2. Each concept must use a DIFFERENT angle from: ${UGC_ANGLES.join(", ")}
+3. Total video length: 15-25 seconds (short = higher retention)
+4. Voiceover must sound like casual speech — fragments, pauses, "like", "honestly", "wait"
+5. Caption must include 3-5 relevant hashtags
+6. The hook determines everything — it must match the angle perfectly
+7. NEVER mention AI, automation, or anything that breaks the illusion of a real review
 
-OUTPUT: Return a JSON array of exactly 5 video concepts.`;
+REFERENCE ANGLES AND HOOKS:
+- accidental_discovery: "okay I was NOT expecting this to actually work..."
+- skeptic_converted: "I literally bought this as a joke but..."
+- problem_solver: "if your [problem] is as bad as mine was..."
+- comparison_shock: "I compared this $${price} one to the $80 version and..."
+- gift_find: "I found the perfect gift and it's under $${price}..."
+- aesthetic_upgrade: "my [space] literally went from a 3 to a 10..."
+- hack_reveal: "nobody is talking about this but..."
+- impulse_justified: "okay I know I didn't NEED this but..."
+- before_after: "watch this transformation. I'm not kidding..."
+- obsessed_review: "I've used this every single day for two weeks..."
 
-  const userPrompt = `Generate 5 TikTok ad concepts for this product:
+OUTPUT: Return JSON: { "videos": [...] } with exactly 5 concepts.`;
 
-PRODUCT: ${product.name}
-${product.short_description ? `DESCRIPTION: ${product.short_description}` : ""}
-${product.category ? `CATEGORY: ${product.category}` : ""}
-PRICE: $${((product.price_cents as number) || 0) / 100}
+  const userPrompt = `Create 5 UGC ad concepts for this REAL, CONFIRMED product:
 
-${marketingPlan ? `MARKETING INSIGHTS:
-- Best Hook Type: ${(marketingPlan as any).best_hook_type || "not specified"}
-- Target Audience: ${JSON.stringify((marketingPlan as any).target_audience || {})}
-- Key Angles: ${JSON.stringify((marketingPlan as any).content_angles || [])}
-- Emotional Triggers: ${JSON.stringify((marketingPlan as any).emotional_triggers || [])}` : "No marketing plan — use your best judgment."}
+PRODUCT: ${truth.canonicalName || truth.name}
+${truth.confirmedBrand ? `BRAND: ${truth.confirmedBrand}` : ""}
+${truth.description ? `DESCRIPTION: ${truth.description}` : ""}
+${truth.category ? `CATEGORY: ${truth.category}` : ""}
+RETAIL PRICE: ${price}
+${truth.distinctiveAttributes.length > 0 ? `DISTINCTIVE ATTRIBUTES: ${truth.distinctiveAttributes.join(", ")}` : ""}
 
-${product.purchase_url ? `PURCHASE URL: ${product.purchase_url}` : "No purchase URL — use generic CTA like 'Link in bio'"}
+${featuresBlock}
+${specsBlock}
 
-AVAILABLE PRODUCT IMAGES:
-${imageList.map(img => `  ${img.index}. [${img.label}${img.is_primary ? " PRIMARY" : ""}] ${img.url}`).join("\n")}
+${truth.marketingPlan ? `MARKETING INSIGHTS:
+- Best Hook: ${(truth.marketingPlan as any).best_hook_type || "curiosity"}
+- Audience: ${JSON.stringify((truth.marketingPlan as any).target_audience || {})}
+- Angles: ${JSON.stringify((truth.marketingPlan as any).content_angles || [])}
+- Emotional Triggers: ${JSON.stringify((truth.marketingPlan as any).emotional_triggers || [])}` : ""}
+
+REAL PRODUCT IMAGES (use these in image_motion scenes — they are actual product photos):
+${imageBlock}
+
+${truth.purchaseUrl ? `PURCHASE: ${truth.purchaseUrl}` : "Use generic 'link in bio'"}
+
+IMPORTANT: These are CONFIRMED product details from real retail listings. Use the actual features and specs in your scripts to make videos feel grounded and specific. Do NOT invent features that aren't listed.
 
 Return ONLY valid JSON: { "videos": [...] }`;
 
@@ -252,7 +385,7 @@ Return ONLY valid JSON: { "videos": [...] }`;
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      temperature: 0.8,
+      temperature: 0.85,
       response_format: { type: "json_object" },
     }),
   });
@@ -269,8 +402,8 @@ Return ONLY valid JSON: { "videos": [...] }`;
 
   return videos.slice(0, 5).map(v => ({
     hook: v.hook || "Untitled hook",
-    angle: v.angle || "General",
-    format: v.format || "slideshow_ad",
+    angle: v.angle || "accidental_discovery",
+    format: v.format || "ugc_review",
     scenes: (v.scenes || []).map(s => ({
       type: s.type || "image_motion",
       referenceImageUrl: s.referenceImageUrl,
@@ -280,6 +413,6 @@ Return ONLY valid JSON: { "videos": [...] }`;
     })),
     voiceover: v.voiceover || "",
     caption: v.caption || "",
-    cta: v.cta || "Link in bio",
+    cta: v.cta || "link in bio",
   }));
 }
