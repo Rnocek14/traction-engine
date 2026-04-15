@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { GlobalNav } from "@/components/GlobalNav";
 import { SummaryBar } from "@/components/today/SummaryBar";
 import { AccountRow } from "@/components/today/AccountRow";
@@ -11,14 +11,40 @@ import { useTodayFeed, type PostSlot } from "@/hooks/use-today-feed";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/hooks/use-toast";
-import { LayoutList, LayoutGrid } from "lucide-react";
+import { LayoutList, LayoutGrid, Zap } from "lucide-react";
 
 export default function Today() {
   const { data, isLoading } = useTodayFeed();
   const [compact, setCompact] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<PostSlot | null>(null);
   const [producingIds, setProducingIds] = useState<Set<string>>(new Set());
+  const [autoGenByVertical, setAutoGenByVertical] = useState<Record<string, boolean>>({});
   const queryClient = useQueryClient();
+
+  // Load vertical_configs auto_generate flags
+  useEffect(() => {
+    supabase.from("vertical_configs").select("vertical, auto_generate").then(({ data: configs }) => {
+      if (configs) {
+        const map: Record<string, boolean> = {};
+        configs.forEach(c => { map[c.vertical] = c.auto_generate; });
+        setAutoGenByVertical(map);
+      }
+    });
+  }, []);
+
+  const toggleAutoGenerate = async (vertical: string, enabled: boolean) => {
+    setAutoGenByVertical(prev => ({ ...prev, [vertical]: enabled }));
+    const { error } = await supabase
+      .from("vertical_configs")
+      .update({ auto_generate: enabled })
+      .eq("vertical", vertical);
+    if (error) {
+      setAutoGenByVertical(prev => ({ ...prev, [vertical]: !enabled }));
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    } else {
+      toast({ title: enabled ? "Auto-generation ON" : "Auto-generation OFF", description: vertical });
+    }
+  };
 
   const feed = data?.feed || [];
   const summary = data?.summary || { totalReady: 0, totalGenerating: 0, totalIdeasLow: 0, totalApproved: 0 };
@@ -239,7 +265,19 @@ export default function Today() {
         ) : (
           Object.entries(grouped).map(([vertical, items]) => (
             <section key={vertical} className="space-y-2">
-              <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">{vertical}</h2>
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">{vertical}</h2>
+                <div className="flex items-center gap-2">
+                  <Zap className={`w-3.5 h-3.5 ${autoGenByVertical[vertical] ? "text-primary" : "text-muted-foreground"}`} />
+                  <Label htmlFor={`auto-${vertical}`} className="text-xs text-muted-foreground cursor-pointer">Auto</Label>
+                  <Switch
+                    id={`auto-${vertical}`}
+                    checked={!!autoGenByVertical[vertical]}
+                    onCheckedChange={(v) => toggleAutoGenerate(vertical, v)}
+                    className="scale-75"
+                  />
+                </div>
+              </div>
               <div className="space-y-2">
                 {items.map((item) => (
                   <AccountRow
