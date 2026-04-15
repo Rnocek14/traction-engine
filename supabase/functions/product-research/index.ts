@@ -179,6 +179,42 @@ function passesAnchorGate(
   return { passes: true, reason: "anchor_matched" };
 }
 
+// ─── WHOLESALE GATE (relaxed — no model guard, no excluded concepts) ───
+// For wholesale/factory listings, only check product-class anchors.
+// Brand mismatches and model variants are EXPECTED on wholesale sites.
+function passesWholesaleGate(
+  title: string,
+  url: string,
+  identity: SearchIdentity,
+): { passes: boolean; reason: string } {
+  const titleLower = (title || "").toLowerCase();
+  const urlLower = url.toLowerCase();
+  const combined = `${titleLower} ${urlLower}`;
+
+  // Use wholesale-specific anchor terms (product class words like "lamp", "projector", "espresso")
+  const wholesaleAnchors = identity.wholesaleAnchorTerms?.length > 0
+    ? identity.wholesaleAnchorTerms
+    : identity.anchorTerms;
+
+  if (wholesaleAnchors.length > 0) {
+    const hasAnchor = wholesaleAnchors.some(a => combined.includes(a.toLowerCase()));
+    if (!hasAnchor) {
+      return { passes: false, reason: `wholesale_missing_anchor:[${wholesaleAnchors.join(",")}]` };
+    }
+  }
+
+  // Only reject truly wrong product CATEGORIES (not model/brand mismatches)
+  // e.g. reject "car charger" when looking for "table lamp" — but allow brand differences
+  const hardCategoryRejects = ["replacement parts", "carrying case", "screen protector", "phone case", "charger cable"];
+  for (const reject of hardCategoryRejects) {
+    if (combined.includes(reject) && !wholesaleAnchors.some(a => reject.includes(a.toLowerCase()))) {
+      return { passes: false, reason: `wholesale_wrong_category:${reject}` };
+    }
+  }
+
+  return { passes: true, reason: "wholesale_anchor_matched" };
+}
+
 // ─── STEP 1: EXTRACT CANONICAL SEARCH IDENTITY ───
 
 async function extractSearchIdentity(productName: string, openaiKey: string, existingProduct?: any): Promise<SearchIdentity> {
