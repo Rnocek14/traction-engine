@@ -153,7 +153,7 @@ Deno.serve(async (req) => {
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const { product_id, top_n = 3, dry_run = false } = await req.json();
+    const { product_id, top_n = 3, dry_run = false, min_match_confidence = 60 } = await req.json();
 
     if (!product_id) {
       return new Response(JSON.stringify({ error: "product_id required" }), {
