@@ -2,11 +2,11 @@ import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ImageIcon, CheckCircle2, Trash2, ChevronLeft, ChevronRight, Star } from "lucide-react";
+import { ImageIcon, CheckCircle2, Trash2, ChevronLeft, ChevronRight, Star, Download, Loader2 } from "lucide-react";
 import { type ProductWithAnalysis } from "@/hooks/use-products";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useMutation } from "@tanstack/react-query";
 
 export interface NormalizedAsset {
   id: string;
@@ -21,9 +21,11 @@ export interface NormalizedAsset {
 
 const SOURCE_PRIORITY: Record<string, number> = {
   pinned_supplier: 0,
-  manual: 1,
-  ai_search: 2,
-  product_url: 3,
+  confirmed_retail: 1,
+  confirmed_wholesale: 2,
+  manual: 3,
+  ai_search: 4,
+  product_url: 5,
 };
 
 /** Build a normalized asset list from all available sources */
@@ -80,6 +82,21 @@ export function MarketingAssetsSection({ product }: { product: ProductWithAnalys
   const assets = buildAssetList(product);
   const current = assets[imgIdx];
 
+  const harvestImages = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke("harvest-product-images", {
+        body: { product_id: product.id },
+      });
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: (data) => {
+      toast.success(`Harvested ${data?.saved || 0} verified images`);
+      qc.invalidateQueries({ queryKey: ["product-detail"] });
+    },
+    onError: (err: Error) => toast.error("Image harvest failed", { description: err.message }),
+  });
+
   const handleVerify = async (asset: NormalizedAsset) => {
     if (asset.origin !== "product_images") return;
     const { error } = await supabase.from("product_images").update({ verified: true }).eq("id", asset.id);
@@ -118,6 +135,16 @@ export function MarketingAssetsSection({ product }: { product: ProductWithAnalys
             {totalCount} image{totalCount !== 1 ? "s" : ""}
             {verifiedCount > 0 && <> · {verifiedCount} verified</>}
           </span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs gap-1"
+            onClick={() => harvestImages.mutate()}
+            disabled={harvestImages.isPending}
+          >
+            {harvestImages.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+            Harvest Images
+          </Button>
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">

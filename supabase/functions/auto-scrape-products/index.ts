@@ -1,9 +1,8 @@
 /**
- * auto-scrape-products
+ * auto-scrape-products v2 — Quality-Gated Discovery
  * 
- * Discovers trending products from TikTok Shop, Amazon, AliExpress, etc.
- * Uses Perplexity to find product URLs and OpenAI to score them.
- * Inserts into products + product_analysis tables.
+ * Discovers trending products and scores candidate quality BEFORE insertion.
+ * Only specific, identifiable products pass the quality gate.
  */
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -71,12 +70,83 @@ interface DiscoveredProduct {
   emotional_triggers: string[];
 }
 
+// ─── CANDIDATE QUALITY SCORING ───
+// Scores how specific/validatable a discovered product is (0-100)
+function computeCandidateQuality(p: DiscoveredProduct): { score: number; reasons: string[] } {
+  let score = 0;
+  const reasons: string[] = [];
+
+  // Has brand name (20 pts)
+  if (p.brand && p.brand.length > 1) {
+    score += 20;
+    reasons.push("has_brand");
+  }
+
+  // Canonical name is specific — more than 3 words (15 pts)
+  const canonWords = (p.canonical_name || "").split(/\s+/).filter(w => w.length > 1);
+  if (canonWords.length >= 4) {
+    score += 15;
+    reasons.push("specific_name");
+  } else if (canonWords.length >= 3) {
+    score += 8;
+    reasons.push("moderate_name");
+  }
+
+  // Has core features (15 pts)
+  if (p.core_features?.length >= 3) {
+    score += 15;
+    reasons.push("rich_features");
+  } else if (p.core_features?.length >= 1) {
+    score += 7;
+    reasons.push("some_features");
+  }
+
+  // Has form factor (10 pts)
+  if (p.form_factor && p.form_factor.length > 3) {
+    score += 10;
+    reasons.push("has_form_factor");
+  }
+
+  // Has excluded lookalikes (10 pts) — shows product is well-differentiated
+  if (p.excluded_lookalikes?.length >= 2) {
+    score += 10;
+    reasons.push("has_exclusions");
+  }
+
+  // Has price range (10 pts)
+  if (p.price_range && p.price_range.includes("$")) {
+    score += 10;
+    reasons.push("has_price");
+  }
+
+  // Has real source URL (10 pts)
+  if (p.source_url && p.source_url.startsWith("http")) {
+    score += 10;
+    reasons.push("has_source_url");
+  }
+
+  // Has material info (5 pts)
+  if (p.primary_material && p.primary_material.length > 2 && p.primary_material !== "unknown") {
+    score += 5;
+    reasons.push("has_material");
+  }
+
+  // Has power source (5 pts)
+  if (p.power_source && p.power_source !== "unknown") {
+    score += 5;
+    reasons.push("has_power_source");
+  }
+
+  return { score: Math.min(score, 100), reasons };
+}
+
+// ─── DISCOVERY ───
+
 async function discoverProducts(
   perplexityKey: string,
   openaiKey: string,
   categories: string[]
 ): Promise<DiscoveredProduct[]> {
-  // Select queries: 3 general + 1 per category
   const queries = PRODUCT_QUERIES.sort(() => Math.random() - 0.5).slice(0, 3);
   for (const cat of categories) {
     const catQueries = CATEGORY_QUERIES[cat];
@@ -100,7 +170,9 @@ async function discoverProducts(
           messages: [
             {
               role: "system",
-              content: `You are a product trend researcher for dropshipping and e-commerce. Find specific products (not brands/categories) that are going viral. For each product include: exact product name, approximate price, why it's going viral, what platform it's trending on, and a URL if available. Focus on products that are visually demonstrable in short-form video.`,
+              content: `You are a product trend researcher for dropshipping and e-commerce. Find specific products (not brands/categories) that are going viral. For each product include: exact product name WITH BRAND if possible, approximate price, why it's going viral, what platform it's trending on, and a URL if available. Focus on products that are visually demonstrable in short-form video.
+
+CRITICAL: Every product must be a SPECIFIC item you can buy, not a category. Include brand name, model details, and distinguishing specs.`,
             },
             { role: "user", content: query },
           ],
@@ -122,13 +194,11 @@ async function discoverProducts(
       console.warn(`[product-scrape] Query error:`, err);
     }
 
-    // Rate limit
     await new Promise(r => setTimeout(r, 1500));
   }
 
   if (rawTexts.length === 0) return [];
 
-  // Use OpenAI to extract structured products from all the raw text
   const combined = rawTexts.join("\n\n---\n\n").slice(0, 20000);
 
   const extractResp = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -155,7 +225,7 @@ CRITICAL PRODUCT IDENTITY RULES:
 - Include pack count if it's a set/bundle
 - The name should be specific enough that searching it returns ONLY that exact product
 
-PRODUCT IDENTITY FIELDS (NEW — required for each product):
+PRODUCT IDENTITY FIELDS (required for each product):
 - canonical_name: The precise product name with brand + key specs (3-10 words)
 - brand: The brand/manufacturer if known, empty string if generic/unbranded
 - form_factor: Physical shape/type (e.g. "table lamp", "handheld projector", "pendant necklace")
@@ -169,6 +239,11 @@ CRITICAL - URLs:
 - source_url: Use a REAL URL from the "Source URLs" section. Do NOT make up URLs.
 - image_url: Include direct image URL if available, empty string otherwise.
 
+REJECTION RULES — do NOT include:
+- Products with no brand AND no distinguishing specs (too vague to validate)
+- Generic category descriptions ("LED lights", "phone case")
+- Products where you cannot identify the exact item being discussed
+
 SCORING RUBRIC (1-5 scale):
 - wow_factor: Visual impact for short-form video demo
 - social_media_potential: Engagement/shareability
@@ -179,7 +254,7 @@ SCORING RUBRIC (1-5 scale):
 TRENDING STATUS: emerging | rising | peak | declining | saturated
 EMOTIONAL TRIGGERS: pick 2-4 from: wow, satisfaction, transformation, curiosity, gift, before_after, problem_solved, luxury_affordable, kids, pets, convenience, fear_of_missing
 
-Extract up to 15 unique products. Deduplicate similar items. Reject anything too vague to identify.`,
+Extract up to 15 unique products. Deduplicate similar items. REJECT anything too vague to identify.`,
         },
         { role: "user", content: combined },
       ],
@@ -254,11 +329,12 @@ function parsePriceCents(priceRange: string): number | null {
 }
 
 function computeOverallScore(p: DiscoveredProduct): number {
-  // Weighted: wow 30%, social 25%, impulse 20%, demo 15%, competition 10% (inverted)
   const competitionInv = 6 - p.competition_level;
   const raw = (p.wow_factor * 0.30 + p.social_media_potential * 0.25 + p.impulse_buy_appeal * 0.20 + p.demonstrability_score * 0.15 + competitionInv * 0.10);
   return Math.round((raw / 5) * 100);
 }
+
+// ─── MAIN HANDLER ───
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -284,41 +360,57 @@ Deno.serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Parse optional body
     let categories = ["gadgets", "home", "beauty", "toys"];
+    let qualityThreshold = 40; // minimum quality score to accept
     try {
       const body = await req.json();
       if (body.categories) categories = body.categories;
+      if (body.quality_threshold) qualityThreshold = body.quality_threshold;
     } catch { /* no body is fine */ }
 
-    console.log(`[product-scrape] Starting discovery for categories: ${categories.join(", ")}`);
+    console.log(`[product-scrape] Starting discovery. Categories: ${categories.join(", ")}. Quality threshold: ${qualityThreshold}`);
 
     const discovered = await discoverProducts(perplexityKey, openaiKey, categories);
-    console.log(`[product-scrape] Discovered ${discovered.length} products`);
+    console.log(`[product-scrape] Discovered ${discovered.length} raw candidates`);
 
     if (discovered.length === 0) {
-      return new Response(JSON.stringify({ success: true, products_found: 0, products_added: 0 }), {
+      return new Response(JSON.stringify({ success: true, products_found: 0, products_added: 0, quality_rejected: 0 }), {
         status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Check for duplicates by name (case-insensitive)
-    const names = discovered.map(p => p.name.toLowerCase());
+    // ─── QUALITY GATE ───
+    const qualityResults = discovered.map(p => ({
+      product: p,
+      quality: computeCandidateQuality(p),
+    }));
+
+    const passed = qualityResults.filter(r => r.quality.score >= qualityThreshold);
+    const failed = qualityResults.filter(r => r.quality.score < qualityThreshold);
+
+    for (const f of failed) {
+      console.log(`[product-scrape] QUALITY REJECTED (${f.quality.score}): "${f.product.canonical_name || f.product.name}" — missing: ${["brand","specific_name","rich_features","has_form_factor","has_exclusions"].filter(r => !f.quality.reasons.includes(r.replace("has_",""))).join(", ")}`);
+    }
+    console.log(`[product-scrape] Quality gate: ${passed.length} passed, ${failed.length} rejected (threshold=${qualityThreshold})`);
+
+    // Check for duplicates
     const { data: existing } = await supabase
       .from("products")
-      .select("name")
+      .select("name, canonical_name")
       .limit(500);
 
-    const existingNames = new Set((existing || []).map((e: { name: string }) => e.name.toLowerCase()));
-    const newProducts = discovered.filter(p => !existingNames.has(p.name.toLowerCase()));
+    const existingNames = new Set((existing || []).map((e: any) => (e.canonical_name || e.name).toLowerCase()));
+    const newProducts = passed.filter(r => {
+      const cn = (r.product.canonical_name || r.product.name).toLowerCase();
+      return !existingNames.has(cn);
+    });
 
-    console.log(`[product-scrape] ${newProducts.length} new products (${discovered.length - newProducts.length} duplicates skipped)`);
+    console.log(`[product-scrape] ${newProducts.length} new products (${passed.length - newProducts.length} duplicates skipped)`);
 
     let added = 0;
-    for (const p of newProducts) {
+    for (const { product: p, quality } of newProducts) {
       const priceCents = parsePriceCents(p.price_range);
 
-      // Insert product
       const { data: product, error: prodErr } = await supabase
         .from("products")
         .insert({
@@ -334,6 +426,7 @@ Deno.serve(async (req) => {
           distinctive_attributes: p.core_features || [],
           excluded_variants: p.excluded_lookalikes || [],
           short_description: `${p.form_factor || ""} — ${(p.core_features || []).join(", ")}`.trim(),
+          candidate_quality_score: quality.score,
         })
         .select("id")
         .single();
@@ -343,7 +436,6 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      // Insert analysis
       const overallScore = computeOverallScore(p);
       const { error: analysisErr } = await supabase
         .from("product_analysis")
@@ -366,13 +458,20 @@ Deno.serve(async (req) => {
         console.warn(`[product-scrape] Failed to insert analysis for "${p.name}":`, analysisErr);
       }
 
+      console.log(`[product-scrape] ✓ Added: "${p.canonical_name}" (quality=${quality.score}, reasons=${quality.reasons.join(",")})`);
       added++;
     }
 
-    console.log(`[product-scrape] Complete. Added ${added} products.`);
+    console.log(`[product-scrape] Complete. Added ${added} products, rejected ${failed.length} for quality.`);
 
     return new Response(
-      JSON.stringify({ success: true, products_found: discovered.length, products_added: added }),
+      JSON.stringify({
+        success: true,
+        products_found: discovered.length,
+        products_added: added,
+        quality_rejected: failed.length,
+        quality_threshold: qualityThreshold,
+      }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err) {
