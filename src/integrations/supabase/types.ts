@@ -893,7 +893,9 @@ export type Database = {
       product_links: {
         Row: {
           ai_confidence: number | null
+          ai_reasoning: string | null
           ai_verdict: boolean | null
+          canonical_snapshot: Json | null
           canonical_url: string | null
           content_quality_score: number | null
           created_at: string
@@ -909,22 +911,28 @@ export type Database = {
           link_type: string
           manually_overridden: boolean | null
           match_confidence: number | null
+          matched_attributes: Json | null
           matched_tokens: string[] | null
+          mismatched_attributes: Json | null
           override_action: string | null
           platform: string
           price_cents: number | null
           product_id: string
           schema_type: string | null
+          source_snapshot: Json | null
           structured_price_cents: number | null
           title: string | null
           url: string
           validation_reasons: string[] | null
           validation_status: string | null
+          validation_version: string | null
           verified: boolean
         }
         Insert: {
           ai_confidence?: number | null
+          ai_reasoning?: string | null
           ai_verdict?: boolean | null
+          canonical_snapshot?: Json | null
           canonical_url?: string | null
           content_quality_score?: number | null
           created_at?: string
@@ -940,22 +948,28 @@ export type Database = {
           link_type?: string
           manually_overridden?: boolean | null
           match_confidence?: number | null
+          matched_attributes?: Json | null
           matched_tokens?: string[] | null
+          mismatched_attributes?: Json | null
           override_action?: string | null
           platform?: string
           price_cents?: number | null
           product_id: string
           schema_type?: string | null
+          source_snapshot?: Json | null
           structured_price_cents?: number | null
           title?: string | null
           url: string
           validation_reasons?: string[] | null
           validation_status?: string | null
+          validation_version?: string | null
           verified?: boolean
         }
         Update: {
           ai_confidence?: number | null
+          ai_reasoning?: string | null
           ai_verdict?: boolean | null
+          canonical_snapshot?: Json | null
           canonical_url?: string | null
           content_quality_score?: number | null
           created_at?: string
@@ -971,17 +985,21 @@ export type Database = {
           link_type?: string
           manually_overridden?: boolean | null
           match_confidence?: number | null
+          matched_attributes?: Json | null
           matched_tokens?: string[] | null
+          mismatched_attributes?: Json | null
           override_action?: string | null
           platform?: string
           price_cents?: number | null
           product_id?: string
           schema_type?: string | null
+          source_snapshot?: Json | null
           structured_price_cents?: number | null
           title?: string | null
           url?: string
           validation_reasons?: string[] | null
           validation_status?: string | null
+          validation_version?: string | null
           verified?: boolean
         }
         Relationships: [
