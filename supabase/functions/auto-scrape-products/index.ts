@@ -425,8 +425,16 @@ Deno.serve(async (req) => {
     console.log(`[product-scrape] ${newProducts.length} new products (${passed.length - newProducts.length} duplicates skipped)`);
 
     let added = 0;
+    let priceRejected = 0;
     for (const { product: p, quality } of newProducts) {
       const priceCents = parsePriceCents(p.price_range);
+
+      // Hard price gate: reject products outside $30-$80 range
+      if (priceCents && (priceCents < 3000 || priceCents > 8000)) {
+        console.log(`[product-scrape] PRICE REJECTED: "${p.canonical_name}" — $${(priceCents/100).toFixed(2)} outside $30-$80 range`);
+        priceRejected++;
+        continue;
+      }
 
       const { data: product, error: prodErr } = await supabase
         .from("products")
