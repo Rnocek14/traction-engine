@@ -69,12 +69,49 @@ async function buildCanonicalProfile(supabase: any, productId: string, openaiKey
 
   const { data: analysis } = await supabase.from("product_analysis").select("*").eq("product_id", productId).maybeSingle();
   
+  // Extract brand from the original product name if canonical_name dropped it
+  let inferredBrand: string | null = null;
+  const originalName = product.name || "";
+  const canonicalName = product.canonical_name || "";
+  if (originalName && canonicalName && originalName.toLowerCase() !== canonicalName.toLowerCase()) {
+    // The first word(s) of the original name that aren't in canonical_name are likely the brand
+    const origWords = originalName.split(/\s+/);
+    const canonLower = canonicalName.toLowerCase();
+    const brandWords: string[] = [];
+    for (const w of origWords) {
+      if (!canonLower.includes(w.toLowerCase())) brandWords.push(w);
+      else break; // Stop at first matching word
+    }
+    if (brandWords.length > 0 && brandWords.length <= 3) {
+      inferredBrand = brandWords.join(" ");
+    }
+  }
+
+  // Also check if enriched links consistently show a brand
+  if (!inferredBrand) {
+    const { data: enrichedLinks } = await supabase.from("product_links")
+      .select("source_brand")
+      .eq("product_id", productId)
+      .eq("source_enrichment_status", "enriched")
+      .not("source_brand", "is", null)
+      .limit(5);
+    if (enrichedLinks?.length >= 2) {
+      const brands = enrichedLinks.map((l: any) => l.source_brand?.toLowerCase());
+      const mostCommon = brands.sort((a: string, b: string) => 
+        brands.filter((v: string) => v === a).length - brands.filter((v: string) => v === b).length
+      ).pop();
+      if (mostCommon && brands.filter((b: string) => b === mostCommon).length >= 2) {
+        inferredBrand = enrichedLinks.find((l: any) => l.source_brand?.toLowerCase() === mostCommon)?.source_brand;
+      }
+    }
+  }
+
   // If we already have good canonical data, use it
   if (product.canonical_name && product.distinctive_attributes?.length > 0) {
     return {
       product_id: productId,
       canonical_name: product.canonical_name || product.name,
-      brand: null,
+      brand: inferredBrand,
       product_type: product.category || "",
       core_features: product.distinctive_attributes || [],
       variant: { pack_count: 1, color: null, size: null },
