@@ -925,7 +925,14 @@ export type Database = {
           price_cents: number | null
           product_id: string
           schema_type: string | null
+          source_brand: string | null
+          source_enriched_at: string | null
+          source_enrichment_status: string | null
+          source_features: string[] | null
+          source_image_urls: string[] | null
           source_snapshot: Json | null
+          source_specs: Json | null
+          source_title_full: string | null
           structured_price_cents: number | null
           title: string | null
           url: string
@@ -962,7 +969,14 @@ export type Database = {
           price_cents?: number | null
           product_id: string
           schema_type?: string | null
+          source_brand?: string | null
+          source_enriched_at?: string | null
+          source_enrichment_status?: string | null
+          source_features?: string[] | null
+          source_image_urls?: string[] | null
           source_snapshot?: Json | null
+          source_specs?: Json | null
+          source_title_full?: string | null
           structured_price_cents?: number | null
           title?: string | null
           url: string
@@ -999,7 +1013,14 @@ export type Database = {
           price_cents?: number | null
           product_id?: string
           schema_type?: string | null
+          source_brand?: string | null
+          source_enriched_at?: string | null
+          source_enrichment_status?: string | null
+          source_features?: string[] | null
+          source_image_urls?: string[] | null
           source_snapshot?: Json | null
+          source_specs?: Json | null
+          source_title_full?: string | null
           structured_price_cents?: number | null
           title?: string | null
           url?: string

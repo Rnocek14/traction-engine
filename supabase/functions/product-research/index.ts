@@ -603,10 +603,28 @@ Deno.serve(async (req) => {
       if (linkErr) console.warn("[research] Failed to save candidate links:", linkErr);
       else console.log(`[research] Saved ${linkRows.length} candidates for user review`);
 
-      // Auto-chain: validate links immediately after research
+      // Auto-chain: enrich links → then validate
       if (productId && linkRows.length > 0) {
         try {
-          console.log(`[research] Auto-triggering link validation for ${linkRows.length} candidates...`);
+          // Step 1: Enrich candidate links (fetch real page data)
+          console.log(`[research] Auto-triggering link enrichment for ${linkRows.length} candidates...`);
+          const enrichResp = await fetch(`${supabaseUrl}/functions/v1/enrich-product-links`, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${supabaseServiceKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ product_id: productId, max_links: 15 }),
+          });
+          if (enrichResp.ok) {
+            const enrichData = await enrichResp.json();
+            console.log(`[research] Enrichment complete: ${enrichData.enriched} enriched, ${enrichData.failed} failed`);
+          } else {
+            console.warn(`[research] Enrichment failed: ${enrichResp.status}`);
+          }
+
+          // Step 2: Validate enriched links
+          console.log(`[research] Auto-triggering link validation...`);
           const validateResp = await fetch(`${supabaseUrl}/functions/v1/validate-product-links`, {
             method: "POST",
             headers: {
@@ -622,7 +640,7 @@ Deno.serve(async (req) => {
             console.warn(`[research] Auto-validation failed: ${validateResp.status}`);
           }
         } catch (e) {
-          console.warn("[research] Auto-validation error (non-fatal):", e);
+          console.warn("[research] Auto-chain error (non-fatal):", e);
         }
       }
     }

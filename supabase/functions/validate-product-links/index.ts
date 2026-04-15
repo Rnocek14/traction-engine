@@ -69,14 +69,64 @@ async function buildCanonicalProfile(supabase: any, productId: string, openaiKey
 
   const { data: analysis } = await supabase.from("product_analysis").select("*").eq("product_id", productId).maybeSingle();
   
+  // Extract brand from the original product name if canonical_name dropped it
+  let inferredBrand: string | null = null;
+  const originalName = product.name || "";
+  const canonicalName = product.canonical_name || "";
+  if (originalName && canonicalName && originalName.toLowerCase() !== canonicalName.toLowerCase()) {
+    // The first word(s) of the original name that aren't in canonical_name are likely the brand
+    const origWords = originalName.split(/\s+/);
+    const canonLower = canonicalName.toLowerCase();
+    const brandWords: string[] = [];
+    for (const w of origWords) {
+      if (!canonLower.includes(w.toLowerCase())) brandWords.push(w);
+      else break; // Stop at first matching word
+    }
+    if (brandWords.length > 0 && brandWords.length <= 3) {
+      inferredBrand = brandWords.join(" ");
+    }
+  }
+
+  // Also check if enriched links consistently show a brand
+  if (!inferredBrand) {
+    const { data: enrichedLinks } = await supabase.from("product_links")
+      .select("source_brand")
+      .eq("product_id", productId)
+      .eq("source_enrichment_status", "enriched")
+      .not("source_brand", "is", null)
+      .limit(5);
+    if (enrichedLinks?.length >= 2) {
+      const brands = enrichedLinks.map((l: any) => l.source_brand?.toLowerCase());
+      const mostCommon = brands.sort((a: string, b: string) => 
+        brands.filter((v: string) => v === a).length - brands.filter((v: string) => v === b).length
+      ).pop();
+      if (mostCommon && brands.filter((b: string) => b === mostCommon).length >= 2) {
+        inferredBrand = enrichedLinks.find((l: any) => l.source_brand?.toLowerCase() === mostCommon)?.source_brand;
+      }
+    }
+  }
+
+  // Build richer core_features from the full product name + distinctive_attributes
+  const fullName = product.name || product.canonical_name || "";
+  const nameTokens = fullName.toLowerCase().split(/[\s,\-\/]+/).filter((w: string) => w.length > 2);
+  // Merge distinctive_attributes with meaningful name tokens (dedup)
+  const rawFeatures = [...(product.distinctive_attributes || [])];
+  const featureSet = new Set(rawFeatures.map((f: string) => f.toLowerCase()));
+  for (const t of nameTokens) {
+    if (!featureSet.has(t) && !["the", "and", "for", "with"].includes(t)) {
+      rawFeatures.push(t);
+      featureSet.add(t);
+    }
+  }
+
   // If we already have good canonical data, use it
   if (product.canonical_name && product.distinctive_attributes?.length > 0) {
     return {
       product_id: productId,
-      canonical_name: product.canonical_name || product.name,
-      brand: null,
+      canonical_name: inferredBrand ? `${inferredBrand} ${product.canonical_name}` : product.canonical_name,
+      brand: inferredBrand,
       product_type: product.category || "",
-      core_features: product.distinctive_attributes || [],
+      core_features: rawFeatures,
       variant: { pack_count: 1, color: null, size: null },
       physical_attributes: { material: null, dimensions: null },
       identity_markers: { model_number: null, sku: null, asin: null, upc: null },
@@ -173,7 +223,7 @@ Extract the canonical product identity.`
   };
 }
 
-// ─── STEP 2: EXTRACT SOURCE LISTING FACTS ───
+// ─── STEP 2: EXTRACT SOURCE LISTING FACTS (prefers enriched data) ───
 
 function extractSourceListing(link: any): SourceListing {
   const url = link.url || "";
@@ -185,17 +235,51 @@ function extractSourceListing(link: any): SourceListing {
   const asinMatch = url.match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/i);
   if (asinMatch) asin = asinMatch[1].toUpperCase();
 
+  // Prefer enriched fields over thin SERP stubs
+  const isEnriched = link.source_enrichment_status === "enriched";
+  const enrichedSpecs = link.source_specs || {};
+
+  const title = (isEnriched && link.source_title_full) 
+    ? link.source_title_full 
+    : (link.title || link.extracted_product_name || "");
+
+  const brand = (isEnriched && link.source_brand) 
+    ? link.source_brand 
+    : (link.extracted_brand || null);
+
+  const features = (isEnriched && link.source_features?.length > 0) 
+    ? link.source_features 
+    : [];
+
+  const priceCents = link.structured_price_cents || link.price_cents || null;
+
+  // Extract pack count from enriched features/title
+  let packCount: number | null = null;
+  const combined = `${title} ${features.join(" ")}`;
+  const packMatch = combined.match(/(\d+)\s*(?:pack|pcs|pieces?|count|set of)/i);
+  if (packMatch) packCount = parseInt(packMatch[1]);
+
+  // Extract specs from enriched data
+  const material = enrichedSpecs.Material || enrichedSpecs.material || null;
+  const dimensions = enrichedSpecs.Dimensions || enrichedSpecs.dimensions || enrichedSpecs["Product Dimensions"] || null;
+  const model = enrichedSpecs.Model || enrichedSpecs["Model Number"] || null;
+  const sku = enrichedSpecs.SKU || enrichedSpecs.sku || null;
+
+  if (isEnriched) {
+    console.log(`[validator] Using enriched data: title="${title.slice(0, 50)}" brand="${brand}" features=${features.length} price=${priceCents}`);
+  }
+
   return {
     url,
     domain,
-    title: link.title || link.extracted_product_name || "",
-    brand: link.extracted_brand || null,
+    title,
+    brand,
     product_type: "",
-    features: [],
-    variant: { pack_count: null, color: null, size: null },
-    physical_attributes: { material: null, dimensions: null },
-    identity_markers: { model_number: null, sku: null, asin, upc: null },
-    price_cents: link.price_cents || link.structured_price_cents || null,
+    features,
+    variant: { pack_count: packCount, color: null, size: null },
+    physical_attributes: { material, dimensions },
+    identity_markers: { model_number: model, sku, asin, upc: null },
+    price_cents: priceCents,
     link_type: link.link_type || "retail",
   };
 }
@@ -313,7 +397,7 @@ async function llmValidate(
       messages: [
         {
           role: "system",
-          content: `You are a strict e-commerce product identity validator.
+           content: `You are a strict e-commerce product identity validator.
 
 Your job is to determine whether a candidate listing is the EXACT SAME PRODUCT as the canonical product.
 
@@ -323,19 +407,25 @@ Be strict.
 "Likely same" is NOT enough.
 
 Treat these as meaningful differences:
-- brand (if canonical has a known brand)
-- model / version
+- brand (if canonical has a known brand AND candidate has a DIFFERENT brand)
+- model / version (if fundamentally different, not just a listing variant)
 - size if it changes the product significantly
-- color if color is core to identity
 - pack count
-- included accessories that change the bundle
 - major material differences (plastic vs glass vs metal)
-- major feature differences (RGB vs non-RGB, rechargeable vs wired)
+- major feature differences (rechargeable vs wired, touch vs switch)
 - form factor (table vs wall vs floor)
 
+DO NOT treat these as meaningful differences:
+- Color options/variants (Rose, Blue, Gold — these are the SAME product in different colors)
+- Listing title differences that are just different ways to describe the same features (e.g. "RGB" vs "16 Color" both mean multi-color)
+- Presence/absence of accessories like remote control if the core product is the same
+- Price differences within 2x range (same product, different sellers)
+- Brand matching canonical brand appearing in source = strong match signal
+
 Context matters:
+- If canonical brand = source brand, that is a STRONG match signal. Treat same-brand listings as likely same product unless features are fundamentally different.
 - For WHOLESALE links (AliExpress, Alibaba, DHgate), the brand will be different or absent — that's expected. Focus on physical form, features, and specs.
-- For RETAIL links (Amazon, Walmart), brand and exact specs matter more.`
+- For RETAIL links (Amazon, Walmart), if brand matches canonical, that's near-definitive.`
         },
         {
           role: "user",
@@ -412,15 +502,27 @@ function computeFinalConfidence(
   const overlap = [...canonicalTokens].filter(t => sourceTokens.has(t)).length;
   const titleScore = canonicalTokens.size > 0 ? overlap / canonicalTokens.size : 0;
 
-  // Feature overlap
+  // Feature overlap — check features in source title AND source features
   const canonFeatures = new Set(canonical.core_features.map(f => f.toLowerCase()));
-  const titleLower = source.title.toLowerCase();
-  const featureHits = [...canonFeatures].filter(f => titleLower.includes(f)).length;
+  const sourceCombined = `${source.title.toLowerCase()} ${source.features.map(f => f.toLowerCase()).join(" ")}`;
+  const featureHits = [...canonFeatures].filter(f => sourceCombined.includes(f)).length;
   const featureScore = canonFeatures.size > 0 ? featureHits / canonFeatures.size : 0;
+
+  // Brand match
+  let brandScore = 0.5; // neutral if no canonical brand
+  if (canonical.brand) {
+    if (source.brand && source.brand.toLowerCase() === canonical.brand.toLowerCase()) {
+      brandScore = 1.0; // Strong match signal
+    } else if (source.brand && source.brand.toLowerCase() !== canonical.brand.toLowerCase()) {
+      brandScore = source.link_type === "wholesale" ? 0.5 : 0.1; // Different brand is bad for retail
+    }
+  }
 
   // Identity marker match
   let identityScore = 0;
+  let hasIdentityData = false;
   if (canonical.identity_markers.asin && source.identity_markers.asin) {
+    hasIdentityData = true;
     identityScore = canonical.identity_markers.asin === source.identity_markers.asin ? 1.0 : 0;
   }
 
@@ -434,19 +536,20 @@ function computeFinalConfidence(
     else priceScore = 0.2;
   }
 
-  // Weighted combination (35% identity, 15% type, 15% features, 10% variant, 10% brand, 5% price, 5% title, 5% LLM)
-  const weights = {
-    identity: 0.35,
-    features: 0.15,
-    title: 0.10,
-    price: 0.05,
-    llm: 0.35,
-  };
+  // Adaptive weights: when we have no ASIN, redistribute identity weight to LLM + brand + features
+  let weights;
+  if (hasIdentityData) {
+    weights = { identity: 0.35, features: 0.15, title: 0.05, brand: 0.10, price: 0.05, llm: 0.30 };
+  } else {
+    // No ASIN — rely more on LLM, brand match, and features
+    weights = { identity: 0, features: 0.20, title: 0.10, brand: 0.20, price: 0.05, llm: 0.45 };
+  }
 
   const finalScore = (
     identityScore * weights.identity +
     featureScore * weights.features +
     titleScore * weights.title +
+    brandScore * weights.brand +
     priceScore * weights.price +
     llmResult.confidence * weights.llm
   );
