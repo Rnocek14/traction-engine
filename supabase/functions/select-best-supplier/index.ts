@@ -338,6 +338,23 @@ Deno.serve(async (req) => {
       });
       economicsResult = data;
       console.log(`[select-best-supplier] Economics triggered: grade=${data?.viability_grade}, net_margin=${data?.net_margin_pct}%`);
+      
+      // ── Profit gate: reject if net profit < $10 or margin < 35% ──
+      const netMarginCents = data?.net_margin_pct && product.price_cents 
+        ? Math.round(product.price_cents * data.net_margin_pct / 100)
+        : null;
+      const MIN_PROFIT_CENTS = 1000; // $10
+      const MIN_MARGIN_PCT = 35;
+      
+      if (data?.net_margin_pct !== undefined && data.net_margin_pct < MIN_MARGIN_PCT) {
+        console.warn(`[select-best-supplier] ⚠️ ${product.name}: BELOW PROFIT THRESHOLD — margin ${data.net_margin_pct}% < ${MIN_MARGIN_PCT}%`);
+        economicsResult = { ...data, profit_gate: "failed", profit_gate_reason: `margin ${data.net_margin_pct}% < ${MIN_MARGIN_PCT}%` };
+      } else if (netMarginCents !== null && netMarginCents < MIN_PROFIT_CENTS) {
+        console.warn(`[select-best-supplier] ⚠️ ${product.name}: BELOW PROFIT THRESHOLD — profit $${(netMarginCents/100).toFixed(2)} < $${(MIN_PROFIT_CENTS/100).toFixed(2)}`);
+        economicsResult = { ...data, profit_gate: "failed", profit_gate_reason: `profit $${(netMarginCents/100).toFixed(2)} < $10` };
+      } else {
+        economicsResult = { ...data, profit_gate: "passed" };
+      }
     } catch (e) {
       console.warn(`[select-best-supplier] Economics trigger failed: ${e}`);
     }
