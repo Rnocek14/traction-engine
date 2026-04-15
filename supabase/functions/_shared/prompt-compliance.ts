@@ -56,6 +56,10 @@ export const CTA_TEMPLATES: Record<ContentVertical, { style: CTAStyle; phrases: 
   ecommerce:     { style: "direct",    phrases: ["Shop now", "Link in bio", "Limited time"] },
   lifestyle:     { style: "soft",      phrases: ["Try this today", "Save for later", "Follow for more"] },
   news:          { style: "educational", phrases: ["Stay informed", "Follow for updates", "Share this story"] },
+  gadgets:       { style: "direct",    phrases: ["Link in bio", "Get yours now", "Save this find"] },
+  home:          { style: "soft",      phrases: ["Save for your next project", "Try this at home", "Follow for more finds"] },
+  toys:          { style: "soft",      phrases: ["Save this for gift ideas", "Your kids will love this", "Follow for more"] },
+  privacy:       { style: "educational", phrases: ["Protect yourself today", "Save this guide", "Follow for more tips"] },
 };
 
 // ─── Hook Category Weights ──────────────────────────────────
@@ -71,6 +75,10 @@ export const VERTICAL_HOOK_WEIGHTS: Record<ContentVertical, HookWeights> = {
   ecommerce:     { curiosity: 0.3, social_proof: 0.3, novelty: 0.2, promise: 0.2 },
   lifestyle:     { curiosity: 0.35, promise: 0.35, social_proof: 0.3 },
   news:          { curiosity: 0.35, novelty: 0.25, shock: 0.2, fear: 0.2 },
+  gadgets:       { curiosity: 0.3, novelty: 0.35, shock: 0.15, promise: 0.2 },
+  home:          { curiosity: 0.35, novelty: 0.3, social_proof: 0.2, promise: 0.15 },
+  toys:          { curiosity: 0.4, novelty: 0.35, social_proof: 0.25 },
+  privacy:       { fear: 0.3, curiosity: 0.35, authority: 0.2, novelty: 0.15 },
 };
 
 // ─── Compliance Result ──────────────────────────────────────
