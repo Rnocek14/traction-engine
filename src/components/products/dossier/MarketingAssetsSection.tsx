@@ -21,9 +21,11 @@ export interface NormalizedAsset {
 
 const SOURCE_PRIORITY: Record<string, number> = {
   pinned_supplier: 0,
-  manual: 1,
-  ai_search: 2,
-  product_url: 3,
+  confirmed_retail: 1,
+  confirmed_wholesale: 2,
+  manual: 3,
+  ai_search: 4,
+  product_url: 5,
 };
 
 /** Build a normalized asset list from all available sources */
