@@ -1,19 +1,20 @@
 /**
- * enrich-product-links v2 — Enrichment Resilience Layer
+ * enrich-product-links v3 — Tiered Enrichment Waterfall
  * 
- * Multi-strategy page fetching with Firecrawl fallback, captcha detection,
- * domain-specific extraction logic, and ASIN-based confidence boosting.
+ * Cost-optimized pipeline:
+ * 1. Direct fetch for ALL candidates (free)
+ * 2. Parse structured data from HTML cheaply
+ * 3. Firecrawl ONLY for top-ranked candidates that were blocked/thin
+ * 4. Cap Firecrawl at 3 calls per product
+ * 5. Stop early once enough supplier-quality enrichments exist
  * 
- * Fetch hierarchy:
- * 1. Direct fetch (fast, free)
- * 2. Firecrawl scrape (JS-rendered, anti-bot bypass)
- * 3. SERP title/snippet fallback (last resort)
- * 
- * Domain strategy:
- * - Amazon: ASIN extraction + bullet features (high value)
- * - Shopify/DTC: clean structured data (high value)
- * - Walmart: attempt but expect blocks (medium)
- * - eBay: low priority, noisy
+ * Fetch method tracking:
+ * - direct          = free fetch succeeded
+ * - thin_direct     = free fetch succeeded but data was thin
+ * - blocked_direct  = free fetch was blocked by anti-bot
+ * - firecrawl_used  = escalated to Firecrawl (paid)
+ * - firecrawl_cap   = would have used Firecrawl but hit cap
+ * - skipped_low     = skipped because enough enrichments already
  */
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -47,26 +48,16 @@ interface FetchResult {
 // ─── CAPTCHA / BOT DETECTION ───
 
 const BLOCK_PATTERNS = [
-  "robot or human",
-  "pardon our interruption",
-  "are you a human",
-  "captcha",
-  "verify you are human",
-  "access denied",
-  "automated access",
-  "please verify",
-  "browser verification",
-  "challenge-platform",
-  "cf-challenge",
-  "px-captcha",
-  "distil_r_captcha",
+  "robot or human", "pardon our interruption", "are you a human",
+  "captcha", "verify you are human", "access denied", "automated access",
+  "please verify", "browser verification", "challenge-platform",
+  "cf-challenge", "px-captcha", "distil_r_captcha",
 ];
 
 function isBlockedPage(html: string): boolean {
   const lower = html.slice(0, 50_000).toLowerCase();
-  // If page is very short and contains block signals
   const visibleText = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-  if (visibleText.length < 200) return true; // nearly empty page
+  if (visibleText.length < 200) return true;
   for (const p of BLOCK_PATTERNS) {
     if (lower.includes(p)) return true;
   }
@@ -75,28 +66,59 @@ function isBlockedPage(html: string): boolean {
 
 // ─── DOMAIN CLASSIFICATION ───
 
-type DomainTier = "high" | "medium" | "low";
+type DomainTier = "wholesale_priority" | "high" | "medium" | "low";
 
 interface DomainProfile {
   tier: DomainTier;
   name: string;
+  firecrawlWorthy: boolean; // only these domains justify paid Firecrawl
 }
 
 function classifyDomain(url: string): DomainProfile {
   const u = url.toLowerCase();
-  if (u.includes("amazon.com") || u.includes("amazon.co")) return { tier: "high", name: "amazon" };
-  if (u.includes("shopify.com") || u.includes(".myshopify.com")) return { tier: "high", name: "shopify" };
-  // DTC stores often have /products/ paths
-  if (u.includes("/products/") && !u.includes("walmart") && !u.includes("ebay")) return { tier: "high", name: "dtc" };
-  if (u.includes("walmart.com")) return { tier: "medium", name: "walmart" };
-  if (u.includes("target.com")) return { tier: "medium", name: "target" };
-  if (u.includes("ebay.com")) return { tier: "low", name: "ebay" };
-  // Manufacturer / brand sites
-  if (u.includes("official") || u.match(/\.(brand|store|shop)\./)) return { tier: "high", name: "brand" };
-  return { tier: "medium", name: "other" };
+  // Wholesale-priority domains — these are the ones we WANT to enrich for supplier matching
+  if (u.includes("aliexpress.com") || u.includes("aliexpress.us")) return { tier: "wholesale_priority", name: "aliexpress", firecrawlWorthy: true };
+  if (u.includes("alibaba.com") || u.includes("1688.com")) return { tier: "wholesale_priority", name: "alibaba", firecrawlWorthy: true };
+  if (u.includes("dhgate.com")) return { tier: "wholesale_priority", name: "dhgate", firecrawlWorthy: true };
+  if (u.includes("temu.com")) return { tier: "wholesale_priority", name: "temu", firecrawlWorthy: true };
+  // Retail high-value — good for retail truth
+  if (u.includes("amazon.com") || u.includes("amazon.co")) return { tier: "high", name: "amazon", firecrawlWorthy: true };
+  if (u.includes("shopify.com") || u.includes(".myshopify.com")) return { tier: "high", name: "shopify", firecrawlWorthy: false };
+  if (u.includes("/products/") && !u.includes("walmart") && !u.includes("ebay")) return { tier: "high", name: "dtc", firecrawlWorthy: false };
+  if (u.includes("walmart.com")) return { tier: "medium", name: "walmart", firecrawlWorthy: false };
+  if (u.includes("target.com")) return { tier: "medium", name: "target", firecrawlWorthy: false };
+  if (u.includes("ebay.com")) return { tier: "low", name: "ebay", firecrawlWorthy: false };
+  if (u.includes("official") || u.match(/\.(brand|store|shop)\./)) return { tier: "high", name: "brand", firecrawlWorthy: false };
+  return { tier: "medium", name: "other", firecrawlWorthy: false };
 }
 
-// ─── FETCH STRATEGY 1: DIRECT ───
+// ─── CANDIDATE RANKING ───
+// Rank candidates so best ones get expensive treatment first
+
+function rankCandidate(link: any): number {
+  let score = 0;
+  const domain = classifyDomain(link.url || "");
+  
+  // Domain priority
+  if (domain.tier === "wholesale_priority") score += 50;
+  else if (domain.tier === "high") score += 30;
+  else if (domain.tier === "medium") score += 15;
+  
+  // Link type: wholesale links are what we need most
+  if (link.link_type === "wholesale") score += 30;
+  else if (link.link_type === "retail") score += 10;
+  
+  // Match confidence from prior validation attempts
+  if (link.match_confidence) score += Math.min(link.match_confidence * 0.3, 30);
+  
+  // Already has some data — likely a real listing
+  if (link.title && link.title.length > 10) score += 5;
+  if (link.price_cents) score += 5;
+  
+  return score;
+}
+
+// ─── FETCH STRATEGY 1: DIRECT (FREE) ───
 
 async function fetchDirect(url: string): Promise<FetchResult> {
   try {
@@ -119,7 +141,6 @@ async function fetchDirect(url: string): Promise<FetchResult> {
     }
     const text = (await resp.text()).slice(0, 500_000);
     if (isBlockedPage(text)) {
-      console.log(`[enrich] Direct fetch BLOCKED for ${url.slice(0, 60)}`);
       return { html: null, method: "direct", blocked: true };
     }
     return { html: text, method: "direct", blocked: false };
@@ -128,7 +149,7 @@ async function fetchDirect(url: string): Promise<FetchResult> {
   }
 }
 
-// ─── FETCH STRATEGY 2: FIRECRAWL ───
+// ─── FETCH STRATEGY 2: FIRECRAWL (PAID) ───
 
 async function fetchFirecrawl(url: string, apiKey: string): Promise<FetchResult> {
   try {
@@ -147,7 +168,7 @@ async function fetchFirecrawl(url: string, apiKey: string): Promise<FetchResult>
     });
     if (resp.status === 402) {
       console.warn("[enrich] Firecrawl: insufficient credits");
-      const body = await resp.text();
+      await resp.text();
       return { html: null, method: "firecrawl", blocked: false };
     }
     if (!resp.ok) {
@@ -156,11 +177,9 @@ async function fetchFirecrawl(url: string, apiKey: string): Promise<FetchResult>
       return { html: null, method: "firecrawl", blocked: false };
     }
     const data = await resp.json();
-    // Firecrawl returns { success, data: { html, markdown, metadata } }
     const html = data?.data?.html || data?.html || "";
     const markdown = data?.data?.markdown || data?.markdown || "";
     if (!html && !markdown) return { html: null, method: "firecrawl", blocked: false };
-    // Use HTML if available for structured extraction, otherwise wrap markdown
     const content = html || `<html><body>${markdown}</body></html>`;
     if (isBlockedPage(content)) {
       return { html: null, method: "firecrawl", blocked: true };
@@ -172,37 +191,7 @@ async function fetchFirecrawl(url: string, apiKey: string): Promise<FetchResult>
   }
 }
 
-// ─── MULTI-STRATEGY FETCHER ───
-
-async function fetchPageResilient(
-  url: string,
-  firecrawlKey: string | null,
-  domain: DomainProfile,
-): Promise<FetchResult> {
-  // Strategy 1: Direct fetch (always try first — free and fast)
-  const direct = await fetchDirect(url);
-  if (direct.html) {
-    console.log(`[enrich] ✓ Direct fetch success for ${domain.name}`);
-    return direct;
-  }
-
-  // Strategy 2: Firecrawl (JS-rendered, anti-bot bypass)
-  if (firecrawlKey && (direct.blocked || domain.tier !== "low")) {
-    console.log(`[enrich] Trying Firecrawl for ${url.slice(0, 60)}...`);
-    const fc = await fetchFirecrawl(url, firecrawlKey);
-    if (fc.html) {
-      console.log(`[enrich] ✓ Firecrawl success for ${domain.name}`);
-      return fc;
-    }
-    if (fc.blocked) {
-      console.log(`[enrich] Firecrawl also blocked for ${domain.name}`);
-    }
-  }
-
-  return { html: null, method: "none", blocked: direct.blocked };
-}
-
-// ─── STRUCTURED EXTRACTION (same as v1 but with improvements) ───
+// ─── STRUCTURED EXTRACTION ───
 
 function extractJsonLd(html: string): Record<string, any> | null {
   const ldMatches = html.match(/<script[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);
@@ -238,7 +227,6 @@ function extractTitle(html: string): string {
 
 function extractBulletFeatures(html: string): string[] {
   const features: string[] = [];
-  // Amazon feature bullets
   const bulletSection = html.match(/id\s*=\s*["']feature-bullets["'][^>]*>([\s\S]*?)<\/div>/i);
   if (bulletSection) {
     const liMatches = bulletSection[1].match(/<li[^>]*>\s*<span[^>]*>([\s\S]*?)<\/span>/gi);
@@ -249,7 +237,6 @@ function extractBulletFeatures(html: string): string[] {
       }
     }
   }
-  // Generic product bullet lists
   if (features.length === 0) {
     const listMatches = html.match(/<ul[^>]*class\s*=\s*["'][^"']*(?:feature|spec|detail|bullet|product|description)[^"']*["'][^>]*>([\s\S]*?)<\/ul>/gi);
     if (listMatches) {
@@ -270,7 +257,6 @@ function extractBulletFeatures(html: string): string[] {
 function extractProductImages(html: string): string[] {
   const images: string[] = [];
   const seen = new Set<string>();
-  // Hi-res images
   const hiRes = html.match(/(?:hiRes|data-old-hires|data-a-dynamic-image)\s*["':]\s*["']?(https?:\/\/[^"'\s,}]+)/gi);
   if (hiRes) {
     for (const m of hiRes) {
@@ -278,11 +264,9 @@ function extractProductImages(html: string): string[] {
       if (u && !seen.has(u[1])) { seen.add(u[1]); images.push(u[1]); }
     }
   }
-  // OG image
   const og = html.match(/<meta\s+(?:property|name)\s*=\s*["']og:image["']\s+content\s*=\s*["']([^"']+)["']/i)
     || html.match(/content\s*=\s*["']([^"']+)["']\s+(?:property|name)\s*=\s*["']og:image["']/i);
   if (og && !seen.has(og[1])) { seen.add(og[1]); images.push(og[1]); }
-  // Product images
   const imgs = html.match(/<img[^>]+(?:class|id|data-)[^>]*(?:product|gallery|main|hero|primary)[^>]*src\s*=\s*["']([^"']+)["']/gi);
   if (imgs) {
     for (const m of imgs) {
@@ -384,13 +368,26 @@ function extractStructuredData(html: string, url: string): EnrichedSource {
   };
 }
 
+// ─── ENRICHMENT QUALITY SCORE ───
+
+function scoreEnrichment(e: EnrichedSource): number {
+  let score = 0;
+  if (e.title_full && e.title_full.length >= 10) score += 25;
+  if (e.brand) score += 20;
+  if (e.price_cents) score += 15;
+  if (e.features.length >= 3) score += 15;
+  else if (e.features.length >= 1) score += 8;
+  if (e.image_urls.length >= 2) score += 10;
+  else if (e.image_urls.length >= 1) score += 5;
+  if (e.asin) score += 10;
+  if (e.model || e.sku) score += 5;
+  return score;
+}
+
 // ─── LLM GAP-FILL ───
 
 async function llmEnrich(
-  html: string,
-  url: string,
-  partial: EnrichedSource,
-  openaiKey: string,
+  html: string, url: string, partial: EnrichedSource, openaiKey: string,
 ): Promise<EnrichedSource> {
   const hasTitleGap = !partial.title_full || partial.title_full.length < 10;
   const hasBrandGap = !partial.brand;
@@ -459,22 +456,6 @@ async function llmEnrich(
   }
 }
 
-// ─── ENRICHMENT QUALITY SCORE ───
-
-function scoreEnrichment(e: EnrichedSource): number {
-  let score = 0;
-  if (e.title_full && e.title_full.length >= 10) score += 25;
-  if (e.brand) score += 20;
-  if (e.price_cents) score += 15;
-  if (e.features.length >= 3) score += 15;
-  else if (e.features.length >= 1) score += 8;
-  if (e.image_urls.length >= 2) score += 10;
-  else if (e.image_urls.length >= 1) score += 5;
-  if (e.asin) score += 10;
-  if (e.model || e.sku) score += 5;
-  return score;
-}
-
 // ─── MAIN HANDLER ───
 
 Deno.serve(async (req) => {
@@ -489,21 +470,19 @@ Deno.serve(async (req) => {
     const firecrawlKey = Deno.env.get("FIRECRAWL_API_KEY") || null;
     if (!openaiKey) throw new Error("OPENAI_API_KEY not configured");
 
-    console.log(`[enrich] Firecrawl available: ${!!firecrawlKey}`);
-
     const supabase = createClient(supabaseUrl, supabaseKey);
     const body = await req.json();
-    const { product_id, link_ids, max_links = 10 } = body;
+    const { product_id, link_ids, max_links = 20, max_firecrawl = 3 } = body;
     if (!product_id) throw new Error("product_id required");
 
-    console.log(`[enrich-v2] ===== Starting resilient enrichment for ${product_id} =====`);
+    console.log(`[enrich-v3] ===== Tiered enrichment for ${product_id} | firecrawl=${!!firecrawlKey} | cap=${max_firecrawl} =====`);
 
-    // Also retry previously blocked links
+    // Fetch all unenriched/blocked/thin links
     let query = supabase
       .from("product_links")
       .select("*")
       .eq("product_id", product_id)
-      .or("source_enrichment_status.eq.pending,source_enrichment_status.is.null,source_enrichment_status.eq.blocked");
+      .or("source_enrichment_status.eq.pending,source_enrichment_status.is.null,source_enrichment_status.eq.blocked,source_enrichment_status.eq.thin");
 
     if (link_ids?.length) {
       query = query.in("id", link_ids);
@@ -518,99 +497,222 @@ Deno.serve(async (req) => {
       });
     }
 
-    console.log(`[enrich-v2] Processing ${links.length} links`);
+    // ─── PHASE 1: RANK ALL CANDIDATES ───
+    const ranked = links
+      .map(link => ({ link, rank: rankCandidate(link), domain: classifyDomain(link.url || "") }))
+      .sort((a, b) => b.rank - a.rank);
 
-    const results = { enriched: 0, failed: 0, skipped: 0, blocked: 0, firecrawl_used: 0 };
+    console.log(`[enrich-v3] ${ranked.length} candidates ranked. Top 5: ${ranked.slice(0, 5).map(r => `[${r.rank}] ${r.domain.name}:${r.link.url?.slice(0, 50)}`).join(" | ")}`);
 
-    // Sort: high-tier domains first
-    const sorted = [...links].sort((a, b) => {
-      const da = classifyDomain(a.url || "");
-      const db = classifyDomain(b.url || "");
-      const tierOrder = { high: 0, medium: 1, low: 2 };
-      return tierOrder[da.tier] - tierOrder[db.tier];
-    });
+    const results = {
+      enriched: 0,
+      failed: 0,
+      skipped: 0,
+      blocked_direct: 0,
+      thin_direct: 0,
+      firecrawl_used: 0,
+      firecrawl_capped: 0,
+      supplier_quality: 0, // enrichments with score >= 50 (enough for validation)
+    };
 
-    for (const link of sorted) {
-      try {
-        const url = link.url || "";
-        if (!url.startsWith("http")) { results.skipped++; continue; }
+    let firecrawlBudget = max_firecrawl;
+    const SUPPLIER_QUALITY_TARGET = 3; // stop early once we have this many good enrichments
 
-        const domain = classifyDomain(url);
-        console.log(`[enrich-v2] [${domain.name}/${domain.tier}] ${url.slice(0, 80)}`);
+    // ─── PHASE 2: DIRECT FETCH ALL (FREE) ───
+    // Process in rank order. Direct fetch is free so we try everyone.
+    // Track which ones need Firecrawl escalation.
+    
+    interface ProcessedLink {
+      link: any;
+      domain: DomainProfile;
+      rank: number;
+      directResult: FetchResult | null;
+      enriched: EnrichedSource | null;
+      finalScore: number;
+      needsFirecrawl: boolean;
+    }
 
-        // Skip low-tier domains if we already have enriched high-tier links
-        if (domain.tier === "low" && results.enriched >= 3) {
-          console.log(`[enrich-v2] Skipping low-tier — already have ${results.enriched} enriched`);
+    const processed: ProcessedLink[] = [];
+
+    for (const { link, rank, domain } of ranked) {
+      const url = link.url || "";
+      if (!url.startsWith("http")) {
+        results.skipped++;
+        continue;
+      }
+
+      // Early stop: enough supplier-quality enrichments already
+      if (results.supplier_quality >= SUPPLIER_QUALITY_TARGET) {
+        console.log(`[enrich-v3] Early stop — ${results.supplier_quality} supplier-quality enrichments achieved`);
+        await supabase.from("product_links").update({
+          source_enrichment_status: "skipped_sufficient",
+          fetch_method: "skipped_early",
+        }).eq("id", link.id);
+        results.skipped++;
+        continue;
+      }
+
+      console.log(`[enrich-v3] [rank=${rank}] [${domain.name}/${domain.tier}] ${url.slice(0, 80)}`);
+
+      // Direct fetch (free)
+      const direct = await fetchDirect(url);
+
+      if (direct.html) {
+        // Extract structured data cheaply
+        let enrichedData = extractStructuredData(direct.html, url);
+        const structScore = scoreEnrichment(enrichedData);
+
+        // LLM gap-fill only if structured extraction is thin
+        if (structScore < 60) {
+          enrichedData = await llmEnrich(direct.html, url, enrichedData, openaiKey);
+        }
+        const finalScore = scoreEnrichment(enrichedData);
+
+        // Determine fetch method label
+        const fetchMethod = finalScore >= 30 ? "direct" : "thin_direct";
+        if (fetchMethod === "thin_direct") results.thin_direct++;
+
+        // Save enriched data
+        await supabase.from("product_links").update({
+          source_title_full: enrichedData.title_full || null,
+          source_brand: enrichedData.brand,
+          source_features: enrichedData.features,
+          source_image_urls: enrichedData.image_urls,
+          source_specs: enrichedData.specs,
+          source_enrichment_status: finalScore >= 30 ? "enriched" : "thin",
+          source_enriched_at: new Date().toISOString(),
+          content_quality_score: finalScore,
+          fetch_method: fetchMethod,
+          extracted_product_name: enrichedData.title_full || link.extracted_product_name,
+          extracted_brand: enrichedData.brand || link.extracted_brand,
+          structured_price_cents: enrichedData.price_cents || link.structured_price_cents,
+        }).eq("id", link.id);
+
+        results.enriched++;
+        if (finalScore >= 50) results.supplier_quality++;
+
+        console.log(`[enrich-v3] ✓ [${fetchMethod}] score=${finalScore} "${enrichedData.title_full?.slice(0, 50)}" brand=${enrichedData.brand} price=$${enrichedData.price_cents ? (enrichedData.price_cents / 100).toFixed(2) : "?"}`);
+
+        processed.push({ link, domain, rank, directResult: direct, enriched: enrichedData, finalScore, needsFirecrawl: false });
+      } else {
+        // Direct fetch failed — mark as blocked/failed and queue for possible Firecrawl
+        const needsFirecrawl = direct.blocked && domain.firecrawlWorthy && rank >= 30;
+        
+        if (!needsFirecrawl) {
+          // Not worth Firecrawl — just mark the failure
+          const status = direct.blocked ? "blocked" : "failed";
+          await supabase.from("product_links").update({
+            source_enrichment_status: status,
+            source_enriched_at: new Date().toISOString(),
+            fetch_method: direct.blocked ? "blocked_direct" : "failed_direct",
+          }).eq("id", link.id);
+          if (direct.blocked) results.blocked_direct++;
+          else results.failed++;
+        } else {
+          processed.push({ link, domain, rank, directResult: direct, enriched: null, finalScore: 0, needsFirecrawl: true });
+        }
+      }
+
+      // Rate limit between direct fetches
+      await new Promise(r => setTimeout(r, 400));
+    }
+
+    // ─── PHASE 3: FIRECRAWL ESCALATION (PAID, CAPPED) ───
+    // Only for top-ranked candidates that were blocked on direct fetch
+    const firecrawlCandidates = processed
+      .filter(p => p.needsFirecrawl)
+      .sort((a, b) => b.rank - a.rank); // best candidates first
+
+    if (firecrawlCandidates.length > 0 && firecrawlKey && firecrawlBudget > 0) {
+      console.log(`[enrich-v3] ─── FIRECRAWL PHASE: ${firecrawlCandidates.length} candidates, budget=${firecrawlBudget} ───`);
+
+      for (const candidate of firecrawlCandidates) {
+        if (firecrawlBudget <= 0) {
+          // Budget exhausted — mark remaining as capped
+          await supabase.from("product_links").update({
+            source_enrichment_status: "blocked",
+            fetch_method: "firecrawl_cap",
+          }).eq("id", candidate.link.id);
+          results.firecrawl_capped++;
+          continue;
+        }
+
+        // Early stop if we already have enough
+        if (results.supplier_quality >= SUPPLIER_QUALITY_TARGET) {
+          await supabase.from("product_links").update({
+            source_enrichment_status: "skipped_sufficient",
+            fetch_method: "skipped_early",
+          }).eq("id", candidate.link.id);
           results.skipped++;
           continue;
         }
 
-        const fetchResult = await fetchPageResilient(url, firecrawlKey, domain);
+        const url = candidate.link.url;
+        console.log(`[enrich-v3] 💰 Firecrawl [budget=${firecrawlBudget}] ${url.slice(0, 80)}`);
 
-        if (fetchResult.method === "firecrawl") results.firecrawl_used++;
+        const fc = await fetchFirecrawl(url, firecrawlKey);
+        firecrawlBudget--;
+        results.firecrawl_used++;
 
-        if (!fetchResult.html) {
-          const status = fetchResult.blocked ? "blocked" : "failed";
+        if (fc.html) {
+          let enrichedData = extractStructuredData(fc.html, url);
+          const structScore = scoreEnrichment(enrichedData);
+          if (structScore < 60) {
+            enrichedData = await llmEnrich(fc.html, url, enrichedData, openaiKey);
+          }
+          const finalScore = scoreEnrichment(enrichedData);
+
           await supabase.from("product_links").update({
-            source_enrichment_status: status,
+            source_title_full: enrichedData.title_full || null,
+            source_brand: enrichedData.brand,
+            source_features: enrichedData.features,
+            source_image_urls: enrichedData.image_urls,
+            source_specs: enrichedData.specs,
+            source_enrichment_status: finalScore >= 30 ? "enriched" : "thin",
             source_enriched_at: new Date().toISOString(),
-            fetch_method: fetchResult.method,
-          }).eq("id", link.id);
-          if (fetchResult.blocked) results.blocked++;
-          else results.failed++;
-          continue;
+            content_quality_score: finalScore,
+            fetch_method: "firecrawl_used",
+            extracted_product_name: enrichedData.title_full || candidate.link.extracted_product_name,
+            extracted_brand: enrichedData.brand || candidate.link.extracted_brand,
+            structured_price_cents: enrichedData.price_cents || candidate.link.structured_price_cents,
+          }).eq("id", candidate.link.id);
+
+          results.enriched++;
+          if (finalScore >= 50) results.supplier_quality++;
+          console.log(`[enrich-v3] ✓ [firecrawl] score=${finalScore} "${enrichedData.title_full?.slice(0, 50)}"`);
+        } else {
+          await supabase.from("product_links").update({
+            source_enrichment_status: fc.blocked ? "blocked" : "failed",
+            source_enriched_at: new Date().toISOString(),
+            fetch_method: "firecrawl_used",
+          }).eq("id", candidate.link.id);
+          results.failed++;
         }
 
-        // Extract structured data
-        let enriched = extractStructuredData(fetchResult.html, url);
-        const structScore = scoreEnrichment(enriched);
-        console.log(`[enrich-v2] Structured score=${structScore}: title="${enriched.title_full?.slice(0, 50)}" brand="${enriched.brand}" asin=${enriched.asin}`);
-
-        // LLM gap-fill if structured extraction is thin
-        if (structScore < 60) {
-          enriched = await llmEnrich(fetchResult.html, url, enriched, openaiKey);
-        }
-
-        const finalScore = scoreEnrichment(enriched);
-
-        // Save enriched data
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    } else if (firecrawlCandidates.length > 0 && !firecrawlKey) {
+      console.log(`[enrich-v3] ${firecrawlCandidates.length} candidates need Firecrawl but no API key available`);
+      for (const c of firecrawlCandidates) {
         await supabase.from("product_links").update({
-          source_title_full: enriched.title_full || null,
-          source_brand: enriched.brand,
-          source_features: enriched.features,
-          source_image_urls: enriched.image_urls,
-          source_specs: enriched.specs,
-          source_enrichment_status: finalScore >= 30 ? "enriched" : "thin",
-          source_enriched_at: new Date().toISOString(),
-          content_quality_score: finalScore,
-          fetch_method: fetchResult.method,
-          extracted_product_name: enriched.title_full || link.extracted_product_name,
-          extracted_brand: enriched.brand || link.extracted_brand,
-          structured_price_cents: enriched.price_cents || link.structured_price_cents,
-        }).eq("id", link.id);
-
-        results.enriched++;
-        console.log(`[enrich-v2] ✓ [${fetchResult.method}] score=${finalScore} "${enriched.title_full?.slice(0, 50)}" brand=${enriched.brand} price=$${enriched.price_cents ? (enriched.price_cents / 100).toFixed(2) : "?"} features=${enriched.features.length} images=${enriched.image_urls.length}`);
-
-        // Rate limit
-        await new Promise(r => setTimeout(r, fetchResult.method === "firecrawl" ? 1000 : 500));
-      } catch (err) {
-        console.warn(`[enrich-v2] Error processing link ${link.id}:`, err);
-        await supabase.from("product_links").update({
-          source_enrichment_status: "failed",
-          source_enriched_at: new Date().toISOString(),
-        }).eq("id", link.id);
-        results.failed++;
+          source_enrichment_status: "blocked",
+          fetch_method: "blocked_direct",
+        }).eq("id", c.link.id);
+        results.blocked_direct++;
       }
     }
 
-    console.log(`[enrich-v2] ===== Done: ${results.enriched} enriched, ${results.blocked} blocked, ${results.failed} failed, ${results.skipped} skipped, ${results.firecrawl_used} firecrawl calls =====`);
+    console.log(`[enrich-v3] ===== DONE =====`);
+    console.log(`[enrich-v3] enriched=${results.enriched} (supplier_quality=${results.supplier_quality})`);
+    console.log(`[enrich-v3] blocked_direct=${results.blocked_direct} thin_direct=${results.thin_direct}`);
+    console.log(`[enrich-v3] firecrawl_used=${results.firecrawl_used} firecrawl_capped=${results.firecrawl_capped}`);
+    console.log(`[enrich-v3] failed=${results.failed} skipped=${results.skipped}`);
 
     return new Response(JSON.stringify({ success: true, ...results }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {
-    console.error("[enrich-v2] Error:", err);
+    console.error("[enrich-v3] Error:", err);
     return new Response(JSON.stringify({ error: String(err) }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
