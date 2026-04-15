@@ -206,7 +206,7 @@ export function selectWeightedHookCategory(
   allowedCategories: string[],
   rng: () => number = Math.random
 ): string {
-  const weights = VERTICAL_HOOK_WEIGHTS[vertical];
+  const weights = VERTICAL_HOOK_WEIGHTS[vertical] || VERTICAL_HOOK_WEIGHTS["ecommerce"];
   
   // Filter to only allowed categories
   const candidates = allowedCategories.filter(cat => cat in weights);
@@ -230,7 +230,7 @@ export function selectWeightedHookCategory(
  * Get CTA phrase for a vertical.
  */
 export function getVerticalCTA(vertical: ContentVertical, rng: () => number = Math.random): { style: CTAStyle; phrase: string } {
-  const config = CTA_TEMPLATES[vertical];
+  const config = CTA_TEMPLATES[vertical] || CTA_TEMPLATES["ecommerce"];
   const phrase = config.phrases[Math.floor(rng() * config.phrases.length)];
   return { style: config.style, phrase };
 }
