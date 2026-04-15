@@ -289,16 +289,20 @@ function applyHardRules(canonical: CanonicalProfile, source: SourceListing): Val
     }
   }
 
-  // HARD REJECT: Pack count mismatch
-  const packPatterns = [/(\d+)\s*(?:pack|pcs|pieces|set of|count)/i, /set\s*of\s*(\d+)/i, /(\d+)\s*in\s*1/i];
-  let detectedPack: number | null = null;
-  for (const p of packPatterns) {
-    const m = titleLower.match(p);
-    if (m) { detectedPack = parseInt(m[1]); break; }
-  }
-  if (detectedPack && canonical.variant.pack_count && detectedPack !== canonical.variant.pack_count) {
-    if (detectedPack > 1 && canonical.variant.pack_count === 1) {
-      return { verdict: "different_product", confidence: 0.92, matched_attributes: [], mismatched_attributes: [`pack_count:expected=${canonical.variant.pack_count},found=${detectedPack}`], reasoning: `Pack count mismatch.`, method: "hard_rule" };
+  // HARD REJECT: Pack count mismatch (RETAIL ONLY)
+  // Wholesale titles often say "2pcs", "3 pieces" to indicate quantity/MOQ, not actual pack count.
+  // Let the LLM judge wholesale pack count differences.
+  if (!isWholesale) {
+    const packPatterns = [/(\d+)\s*(?:pack|pcs|pieces|set of|count)/i, /set\s*of\s*(\d+)/i, /(\d+)\s*in\s*1/i];
+    let detectedPack: number | null = null;
+    for (const p of packPatterns) {
+      const m = titleLower.match(p);
+      if (m) { detectedPack = parseInt(m[1]); break; }
+    }
+    if (detectedPack && canonical.variant.pack_count && detectedPack !== canonical.variant.pack_count) {
+      if (detectedPack > 1 && canonical.variant.pack_count === 1) {
+        return { verdict: "different_product", confidence: 0.92, matched_attributes: [], mismatched_attributes: [`pack_count:expected=${canonical.variant.pack_count},found=${detectedPack}`], reasoning: `Pack count mismatch.`, method: "hard_rule" };
+      }
     }
   }
 
@@ -596,7 +600,7 @@ async function autoCreateSupplier(
     is_preferred: true,
     notes: `Auto-created from validated wholesale link (confidence: ${matchConfidence}%)`,
     overall_supplier_score: matchConfidence,
-  }, { onConflict: "product_id,supplier_name" }).select("id").single();
+  }, { onConflict: "product_id,supplier_url" }).select("id").single();
 
   if (error) {
     console.warn(`[validator] Failed to create supplier: ${error.message}`);
@@ -700,6 +704,18 @@ Deno.serve(async (req) => {
 
     for (const link of links) {
       try {
+        // Skip unenriched links — LLM gets garbage data and wastes tokens
+        const enrichStatus = link.source_enrichment_status || "pending";
+        if (enrichStatus !== "enriched") {
+          // For non-enriched links, require substantial data: enriched title + features
+          const hasFullTitle = link.source_title_full && link.source_title_full.length > 20;
+          const hasFeatures = link.source_features && link.source_features.length > 0;
+          if (!hasFullTitle || !hasFeatures) {
+            console.log(`[validator] ⏭️ Skipping ${link.link_type} link ${link.id} — enrichment=${enrichStatus}, insufficient data`);
+            continue;
+          }
+        }
+
         const source = extractSourceListing(link);
         const isWholesale = source.link_type === "wholesale";
 

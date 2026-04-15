@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX IF NOT EXISTS idx_product_suppliers_product_url ON public.product_suppliers(product_id, supplier_url);
