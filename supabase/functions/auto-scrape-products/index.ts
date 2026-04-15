@@ -156,7 +156,7 @@ async function fetchWithRetry(url: string, options: RequestInit, maxRetries = 2)
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const resp = await fetch(url, options);
     if (resp.status === 429 && attempt < maxRetries) {
-      const delay = (attempt + 1) * 10000; // 10s, 20s
+      const delay = (attempt + 1) * 5000; // 5s, 10s
       console.warn(`[product-scrape] 429 rate limit — retry ${attempt + 1} in ${delay / 1000}s`);
       await new Promise(r => setTimeout(r, delay));
       continue;
