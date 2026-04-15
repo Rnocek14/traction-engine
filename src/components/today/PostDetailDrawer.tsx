@@ -240,6 +240,16 @@ export function PostDetailDrawer({ open, onOpenChange, storyJobId, ideaId }: Pos
   const hasNarration = scenes.some((s: any) => s.narration_line);
   const totalDuration = scenes.reduce((sum: number, s: any) => sum + (s.duration_target || 5), 0);
   const fullScript = scenes.map((s: any) => s.narration_line).filter(Boolean).join("\n\n");
+  // Build a scene-by-scene preview showing narration OR prompt as fallback
+  const scenePreview = scenes.map((s: any, i: number) => ({
+    index: i + 1,
+    narration: s.narration_line || null,
+    prompt: s.prompt || s.visual_prompt || null,
+    text: s.onscreen_text || null,
+    duration: s.duration_target || 5,
+    camera: s.camera_direction || null,
+    beat: s.beat_role || null,
+  }));
 
   const clipsByScene = new Map<string, typeof videoJobs>();
   for (const clip of videoJobs || []) {
