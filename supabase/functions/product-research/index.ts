@@ -602,6 +602,29 @@ Deno.serve(async (req) => {
       const { error: linkErr } = await supabase.from("product_links").insert(linkRows);
       if (linkErr) console.warn("[research] Failed to save candidate links:", linkErr);
       else console.log(`[research] Saved ${linkRows.length} candidates for user review`);
+
+      // Auto-chain: validate links immediately after research
+      if (productId && linkRows.length > 0) {
+        try {
+          console.log(`[research] Auto-triggering link validation for ${linkRows.length} candidates...`);
+          const validateResp = await fetch(`${supabaseUrl}/functions/v1/validate-product-links`, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${supabaseServiceKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ product_id: productId, mode: "all_pending" }),
+          });
+          if (validateResp.ok) {
+            const validateData = await validateResp.json();
+            console.log(`[research] Validation complete: ${validateData.confirmed} confirmed, ${validateData.rejected} rejected`);
+          } else {
+            console.warn(`[research] Auto-validation failed: ${validateResp.status}`);
+          }
+        } catch (e) {
+          console.warn("[research] Auto-validation error (non-fatal):", e);
+        }
+      }
     }
 
     console.log(`[research] ===== COMPLETE: score=${overallScore}, ${candidates.length} candidates passed gate =====`);
