@@ -596,7 +596,7 @@ async function autoCreateSupplier(
     is_preferred: true,
     notes: `Auto-created from validated wholesale link (confidence: ${matchConfidence}%)`,
     overall_supplier_score: matchConfidence,
-  }, { onConflict: "product_id,supplier_name" }).select("id").single();
+  }, { onConflict: "product_id,supplier_url" }).select("id").single();
 
   if (error) {
     console.warn(`[validator] Failed to create supplier: ${error.message}`);
@@ -700,6 +700,18 @@ Deno.serve(async (req) => {
 
     for (const link of links) {
       try {
+        // Skip unenriched links — LLM gets garbage data and wastes tokens
+        const enrichStatus = link.source_enrichment_status || "pending";
+        if (enrichStatus === "pending" || enrichStatus === "blocked" || enrichStatus === "failed") {
+          // Only skip if there's no useful title data at all
+          const hasUsableData = (link.source_title_full && link.source_title_full.length > 10) || 
+                                (link.title && link.title.length > 10);
+          if (!hasUsableData) {
+            console.log(`[validator] ⏭️ Skipping ${link.link_type} link ${link.id} — enrichment=${enrichStatus}, no usable data`);
+            continue;
+          }
+        }
+
         const source = extractSourceListing(link);
         const isWholesale = source.link_type === "wholesale";
 
