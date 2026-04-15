@@ -276,16 +276,22 @@ async function serpSearch(
         const data = await resp.json();
         for (const r of (data.organic_results || [])) {
           if (r.link?.startsWith("http")) {
-            // Wholesale links skip anchor gate — they won't have brand terms
             if (seen.has(r.link) || !isUsefulUrl(r.link)) continue;
             seen.add(r.link);
+            // Wholesale links go through a relaxed anchor gate — check product type keywords only
+            const gate = passesAnchorGate(r.title || "", r.link, identity);
+            if (!gate.passes) {
+              gatedOut++;
+              console.log(`[research] WHOLESALE GATED: "${r.title?.slice(0, 60)}" → ${gate.reason}`);
+              continue;
+            }
             results.push({
               url: r.link,
               title: r.title || "",
               price: null,
               thumbnail: r.thumbnail || null,
               source: `wholesale:${site}`,
-              gateResult: "wholesale_bypass",
+              gateResult: gate.reason,
             });
           }
         }

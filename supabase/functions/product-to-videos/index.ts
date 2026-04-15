@@ -49,6 +49,26 @@ Deno.serve(async (req) => {
       .from("products").select("*").eq("id", product_id).single();
     if (prodError || !product) throw new Error("Product not found");
 
+    // ─── READINESS GATE ───
+    // Block ad generation unless product identity is verified
+    const readinessScore = product.readiness_score || 0;
+    const readinessState = product.readiness_state || "research_only";
+    if (readinessScore < 40 || readinessState === "research_only") {
+      const { count: confirmedLinks } = await supabase
+        .from("product_links")
+        .select("id", { count: "exact", head: true })
+        .eq("product_id", product_id)
+        .eq("validation_status", "confirmed");
+      
+      if (!confirmedLinks || confirmedLinks === 0) {
+        throw new Error(
+          `Product "${product.name}" is not ready for ad generation. ` +
+          `Readiness: ${readinessScore}/100 (${readinessState}). ` +
+          `Run validate-product-links first to verify product identity.`
+        );
+      }
+    }
+
     // Fetch account identity (if provided)
     let accountIdentity: Record<string, unknown> | null = null;
     if (account_id) {
