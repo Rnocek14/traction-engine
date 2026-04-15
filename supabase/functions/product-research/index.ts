@@ -455,11 +455,13 @@ Deno.serve(async (req) => {
 
     let productName = body.name || "";
     let productId = body.product_id;
+    let existingProduct: any = null;
 
     if (productId) {
       const { data: product } = await supabase.from("products").select("*").eq("id", productId).single();
       if (product) {
         productName = product.canonical_name || product.name;
+        existingProduct = product;
       }
     }
 
@@ -476,12 +478,12 @@ Deno.serve(async (req) => {
       .replace(/\s{2,}/g, " ")
       .trim();
 
-    console.log(`[research] ===== v5 RESEARCH: "${searchName}" =====`);
+    console.log(`[research] ===== v6 RESEARCH: "${searchName}" =====`);
 
-    // ─── STEP 1: Extract canonical search identity ───
-    const identity = await extractSearchIdentity(searchName, openaiKey);
+    // ─── STEP 1: Extract canonical search identity (now uses existing product data) ───
+    const identity = await extractSearchIdentity(searchName, openaiKey, existingProduct);
     
-    // Also save identity to product for debugging
+    // Save identity to product
     if (productId) {
       await supabase.from("products").update({
         distinctive_attributes: identity.anchorTerms,
