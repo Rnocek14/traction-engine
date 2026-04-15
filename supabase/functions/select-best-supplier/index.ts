@@ -175,25 +175,38 @@ Deno.serve(async (req) => {
     }
 
     // ── Get top enriched wholesale links ──
-    // Prioritize: verified > pending with high confidence > enriched
+    // Include all enrichment statuses that indicate data was fetched
     const { data: candidates, error: linkErr } = await supabase
       .from("product_links")
       .select("id, url, platform, title, extracted_product_name, price_cents, structured_price_cents, match_confidence, source_image_urls, source_features, source_specs, source_title_full, source_brand, fetch_method, validation_status")
       .eq("product_id", product_id)
       .eq("link_type", "wholesale")
-      .in("source_enrichment_status", ["done", "partial"])
+      .in("source_enrichment_status", ["done", "partial", "enriched"])
       .order("match_confidence", { ascending: false })
-      .limit(top_n * 2); // fetch extra to filter
+      .limit(top_n * 3);
 
     if (linkErr) throw new Error(`Failed to fetch candidates: ${linkErr.message}`);
 
-    const validCandidates = (candidates || []).filter((c: CandidateLink) => {
-      // Must have some enrichment data
+    // First try: non-rejected candidates with data
+    let validCandidates = (candidates || []).filter((c: CandidateLink) => {
       if (!c.source_title_full && !c.price_cents && !c.structured_price_cents) return false;
-      // Must not be rejected
       if (c.validation_status === "rejected") return false;
       return true;
     }).slice(0, top_n);
+
+    // Fallback: if no non-rejected candidates, use best-available (even rejected)
+    // This handles the case where validator is strict but candidates are real
+    if (validCandidates.length === 0) {
+      validCandidates = (candidates || []).filter((c: CandidateLink) => {
+        if (!c.source_title_full && !c.price_cents && !c.structured_price_cents) return false;
+        // Still require minimum confidence even for rejected
+        if ((c.match_confidence || 0) < 50) return false;
+        return true;
+      }).slice(0, top_n);
+      if (validCandidates.length > 0) {
+        console.log(`[select-best-supplier] Using ${validCandidates.length} best-available candidates (validator rejected all)`);
+      }
+    }
 
     if (validCandidates.length === 0) {
       return new Response(JSON.stringify({
