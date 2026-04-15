@@ -30,7 +30,8 @@ export type ContentVertical =
   | "news"
   | "gadgets"
   | "home"
-  | "toys";
+  | "toys"
+  | "privacy";
 
 // ─── Moderation Strictness ──────────────────────────────────
 
