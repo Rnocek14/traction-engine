@@ -13,36 +13,40 @@ const corsHeaders = {
 };
 
 const PRODUCT_QUERIES = [
-  "viral TikTok products this week that are selling fast",
-  "trending TikTok Shop items with millions of views right now",
-  "most popular impulse buy products going viral on social media this week",
-  "Amazon movers and shakers products trending on TikTok and Instagram",
-  "best selling products on TikTok Shop this week with high engagement",
-  "viral product demos on TikTok Reels with millions of views this week",
-  "trending gadgets and home products going viral on social media right now",
-  "dropshipping winning products trending on TikTok this week",
+  "viral TikTok products $30-$80 price range selling fast this week",
+  "trending TikTok Shop items $30-$70 with millions of views right now",
+  "best selling mid-price products $30-$60 going viral on social media this week",
+  "Amazon movers and shakers $30-$80 products trending on TikTok and Instagram",
+  "best selling products on TikTok Shop this week $30-$80 with high engagement",
+  "viral product demos $30-$80 on TikTok Reels with millions of views this week",
+  "trending gadgets and home products $30-$80 going viral on social media right now",
+  "dropshipping winning products $30-$80 trending on TikTok this week",
 ];
 
 const CATEGORY_QUERIES: Record<string, string[]> = {
   gadgets: [
-    "trending tech gadgets going viral on TikTok this week under $50",
-    "most satisfying gadget demos on TikTok and Instagram Reels this week",
+    "trending tech gadgets $30-$80 going viral on TikTok this week with strong visual demos",
+    "most satisfying gadget demos $30-$70 on TikTok and Instagram Reels this week",
+    "viral car gadgets and desk accessories $30-$60 trending on TikTok",
   ],
   home: [
-    "viral home products and LED lamps trending on TikTok this week",
-    "most popular home organization products on TikTok Shop right now",
+    "viral home products and smart devices $30-$80 trending on TikTok this week",
+    "most popular home upgrade products $30-$70 on TikTok Shop with before-after demos",
+    "trending kitchen gadgets and home tools $30-$60 going viral with satisfying demos",
   ],
   beauty: [
-    "trending beauty and skincare products going viral on TikTok this week",
-    "best selling beauty tools on TikTok Shop with demo videos",
+    "trending beauty tools and skincare devices $30-$80 going viral on TikTok this week",
+    "best selling beauty gadgets $30-$70 on TikTok Shop with transformation demos",
+    "viral self-care devices and beauty tools $30-$60 with obvious before-after results",
   ],
   toys: [
-    "viral toys and fidget products trending on TikTok this week",
-    "most popular kids toys and games going viral on social media right now",
+    "viral premium toys and STEM kits $30-$80 trending on TikTok this week",
+    "most popular kids electronics and creative kits $30-$60 going viral right now",
   ],
   fitness: [
-    "trending fitness products and workout gadgets on TikTok this week",
-    "viral fitness equipment and accessories on TikTok Shop",
+    "trending fitness gadgets and recovery tools $30-$80 on TikTok this week",
+    "viral workout equipment and massage devices $30-$70 on TikTok Shop",
+    "best selling portable fitness tools $30-$60 with strong demo videos",
   ],
 };
 
