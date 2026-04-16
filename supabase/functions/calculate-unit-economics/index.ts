@@ -121,6 +121,30 @@ Deno.serve(async (req) => {
       });
     }
 
+    // GUARDRAIL: reject obviously bogus supplier costs (mismatched scrapes)
+    // Floor: $1.00. Ceiling: 80% of retail (anything higher = suspicious match).
+    const MIN_SUPPLIER_COST_CENTS = 100;
+    const MAX_SUPPLIER_RATIO = 0.8;
+    if (supplierCostCents < MIN_SUPPLIER_COST_CENTS) {
+      return new Response(JSON.stringify({
+        error: `Supplier cost $${(supplierCostCents/100).toFixed(2)} is below $1.00 floor — likely a mismatched supplier scrape. Re-run select-best-supplier.`,
+        supplier_cost_cents: supplierCostCents,
+        guardrail: "min_cost_floor",
+      }), {
+        status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    if (supplierCostCents > retailPriceCents * MAX_SUPPLIER_RATIO) {
+      return new Response(JSON.stringify({
+        error: `Supplier cost $${(supplierCostCents/100).toFixed(2)} exceeds 80% of retail $${(retailPriceCents/100).toFixed(2)} — unviable margin.`,
+        supplier_cost_cents: supplierCostCents,
+        retail_price_cents: retailPriceCents,
+        guardrail: "max_supplier_ratio",
+      }), {
+        status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // === COMPUTE ECONOMICS ===
     
     // Gross margin = retail - supplier - shipping - packaging
