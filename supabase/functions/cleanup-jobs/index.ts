@@ -1,5 +1,6 @@
 /**
- * Cleanup failed/stuck video jobs
+ * Cleanup failed/stuck video jobs — batch delete version
+ * Deletes in batches of 5000 to avoid timeouts on large tables.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -18,19 +19,39 @@ Deno.serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Delete failed, stuck running, and queued jobs
-    const { data: deleted, error } = await supabase
-      .from("video_jobs")
-      .delete()
-      .in("status", ["failed", "running", "queued"])
-      .select("id, provider, status");
+    const statuses = ["failed", "running", "queued"];
+    let totalDeleted = 0;
+    const BATCH = 5000;
+    const MAX_ROUNDS = 200; // safety cap: 1M rows max
 
-    if (error) {
-      throw new Error(`Delete failed: ${error.message}`);
+    for (let round = 0; round < MAX_ROUNDS; round++) {
+      // Find a batch of IDs
+      const { data: batch, error: fetchErr } = await supabase
+        .from("video_jobs")
+        .select("id")
+        .in("status", statuses)
+        .limit(BATCH);
+
+      if (fetchErr) throw new Error(`Fetch batch failed: ${fetchErr.message}`);
+      if (!batch || batch.length === 0) break;
+
+      const ids = batch.map((r: any) => r.id);
+
+      const { error: delErr } = await supabase
+        .from("video_jobs")
+        .delete()
+        .in("id", ids);
+
+      if (delErr) throw new Error(`Delete batch failed: ${delErr.message}`);
+
+      totalDeleted += ids.length;
+      console.log(`[cleanup] Deleted batch ${round + 1}: ${ids.length} jobs (total: ${totalDeleted})`);
+
+      if (ids.length < BATCH) break; // last batch
     }
 
     // Also clean up orphaned script_runs from lab testing
-    const { data: deletedScripts, error: scriptsError } = await supabase
+    const { data: deletedScripts } = await supabase
       .from("script_runs")
       .delete()
       .eq("account_id", "lab-testing")
@@ -39,9 +60,8 @@ Deno.serve(async (req) => {
     return new Response(
       JSON.stringify({
         success: true,
-        deleted_jobs: deleted?.length || 0,
+        deleted_jobs: totalDeleted,
         deleted_scripts: deletedScripts?.length || 0,
-        jobs: deleted,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
