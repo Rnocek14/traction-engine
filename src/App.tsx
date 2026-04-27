@@ -34,6 +34,7 @@ const App = () => (
             <Route path="/verticals" element={<Verticals />} />
             <Route path="/verticals/:vertical" element={<VerticalDetail />} />
             <Route path="/catalog" element={<Catalog />} />
+            <Route path="/campaigns" element={<Campaigns />} />
             <Route path="/products" element={<Navigate to="/catalog?tab=products" replace />} />
             <Route path="/products/:productId" element={<ProductDossier />} />
             <Route path="/studio" element={<Review />} />
