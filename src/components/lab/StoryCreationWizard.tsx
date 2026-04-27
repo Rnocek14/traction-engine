@@ -12,13 +12,16 @@
  * 5. Build Story → navigates to /stories/:id
  */
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { useApps } from "@/hooks/use-apps";
+import { useAppAngles } from "@/hooks/use-app-angles";
+import { Target, Shuffle } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -94,7 +97,31 @@ export function StoryCreationWizard({
   const [lockedProvider, setLockedProvider] = useState<"sora" | "runway" | "luma">("sora");
   const [characterContinuityMode, setCharacterContinuityMode] = useState(false);
   const [brutalityMode, setBrutalityMode] = useState(false);
-  
+
+  // Campaign tagging — links story to an App + Angle hypothesis
+  const [appId, setAppId] = useState<string>("none");
+  const [appAngleId, setAppAngleId] = useState<string>("none");
+
+  const { data: apps = [] } = useApps();
+  const { data: angles = [] } = useAppAngles(appId === "none" ? undefined : appId);
+  const selectedAngle = useMemo(
+    () => angles.find((a) => a.id === appAngleId) ?? null,
+    [angles, appAngleId]
+  );
+
+  const handlePickApp = (v: string) => {
+    setAppId(v);
+    setAppAngleId("none"); // reset angle when app changes
+  };
+
+  const handleSeedFromAngle = () => {
+    if (!selectedAngle) return;
+    const hooks = selectedAngle.hook_examples ?? [];
+    if (hooks.length === 0) return;
+    const pick = hooks[Math.floor(Math.random() * hooks.length)];
+    setConcept(pick);
+  };
+
   const [isGenerating, setIsGenerating] = useState(false);
 
   // Generate story mutation — always calls ONE edge function, backend decides compiler
@@ -193,7 +220,9 @@ export function StoryCreationWizard({
           continuity_anchors: JSON.parse(JSON.stringify(data.anchors || {})),
           total_clips: (data.scenes || []).length,
           status: "draft",
-        }])
+          app_id: appId === "none" ? null : appId,
+          app_angle_id: appAngleId === "none" ? null : appAngleId,
+        } as never])
         .select()
         .single();
       
@@ -283,7 +312,77 @@ export function StoryCreationWizard({
               </Select>
             </div>
           </div>
-          
+
+          {/* Campaign Tagging — App + Angle */}
+          <div className="space-y-2 rounded-md border border-primary/20 bg-primary/5 p-3">
+            <div className="flex items-center gap-2">
+              <Target className="h-3.5 w-3.5 text-primary" />
+              <Label className="text-xs font-medium">Campaign tag (optional)</Label>
+              {selectedAngle && (
+                <Badge variant="outline" className="text-[9px] h-4 ml-auto">
+                  {selectedAngle.emotion}
+                </Badge>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-[10px] text-muted-foreground">App</Label>
+                <Select value={appId} onValueChange={handlePickApp}>
+                  <SelectTrigger className="h-9 text-xs">
+                    <SelectValue placeholder="None" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none" className="text-xs">— No app —</SelectItem>
+                    {apps.map((a) => (
+                      <SelectItem key={a.id} value={a.id} className="text-xs">
+                        {a.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-[10px] text-muted-foreground">Angle</Label>
+                <Select
+                  value={appAngleId}
+                  onValueChange={setAppAngleId}
+                  disabled={appId === "none" || angles.length === 0}
+                >
+                  <SelectTrigger className="h-9 text-xs">
+                    <SelectValue placeholder={appId === "none" ? "Pick app first" : "None"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none" className="text-xs">— No angle —</SelectItem>
+                    {angles.map((a) => (
+                      <SelectItem key={a.id} value={a.id} className="text-xs">
+                        {a.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            {selectedAngle && (
+              <div className="flex items-start justify-between gap-2 pt-1">
+                <p className="text-[10px] text-muted-foreground flex-1">
+                  {selectedAngle.hypothesis || "No hypothesis recorded"}
+                </p>
+                {(selectedAngle.hook_examples?.length ?? 0) > 0 && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 text-[10px] gap-1 px-2"
+                    onClick={handleSeedFromAngle}
+                  >
+                    <Shuffle className="h-3 w-3" />
+                    Seed hook
+                  </Button>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Story Type + Tier Row */}
           <div className="grid grid-cols-2 gap-3">
             {/* Story Type */}
