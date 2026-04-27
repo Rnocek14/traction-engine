@@ -125,6 +125,66 @@ export type Database = {
         }
         Relationships: []
       }
+      app_angles: {
+        Row: {
+          app_id: string
+          avg_outcome_score: number | null
+          created_at: string
+          cta_style: string
+          emotion: string
+          hook_examples: string[]
+          hypothesis: string | null
+          id: string
+          name: string
+          notes: string | null
+          status: string
+          target_audience: string | null
+          total_clicks: number
+          total_revenue_cents: number
+          total_signups: number
+          updated_at: string
+          videos_count: number
+        }
+        Insert: {
+          app_id: string
+          avg_outcome_score?: number | null
+          created_at?: string
+          cta_style?: string
+          emotion?: string
+          hook_examples?: string[]
+          hypothesis?: string | null
+          id?: string
+          name: string
+          notes?: string | null
+          status?: string
+          target_audience?: string | null
+          total_clicks?: number
+          total_revenue_cents?: number
+          total_signups?: number
+          updated_at?: string
+          videos_count?: number
+        }
+        Update: {
+          app_id?: string
+          avg_outcome_score?: number | null
+          created_at?: string
+          cta_style?: string
+          emotion?: string
+          hook_examples?: string[]
+          hypothesis?: string | null
+          id?: string
+          name?: string
+          notes?: string | null
+          status?: string
+          target_audience?: string | null
+          total_clicks?: number
+          total_revenue_cents?: number
+          total_signups?: number
+          updated_at?: string
+          videos_count?: number
+        }
+        Relationships: []
+      }
       app_funnel_events: {
         Row: {
           activations: number
@@ -253,6 +313,7 @@ export type Database = {
       }
       campaigns: {
         Row: {
+          app_angle_id: string | null
           app_id: string | null
           asset_kind: string
           created_at: string
@@ -269,6 +330,7 @@ export type Database = {
           videos_published: number
         }
         Insert: {
+          app_angle_id?: string | null
           app_id?: string | null
           asset_kind: string
           created_at?: string
@@ -285,6 +347,7 @@ export type Database = {
           videos_published?: number
         }
         Update: {
+          app_angle_id?: string | null
           app_id?: string | null
           asset_kind?: string
           created_at?: string
@@ -461,6 +524,7 @@ export type Database = {
         Row: {
           account_id: string
           angle: string | null
+          app_angle_id: string | null
           app_id: string | null
           content_category: string | null
           content_type: string
@@ -486,6 +550,7 @@ export type Database = {
         Insert: {
           account_id: string
           angle?: string | null
+          app_angle_id?: string | null
           app_id?: string | null
           content_category?: string | null
           content_type?: string
@@ -511,6 +576,7 @@ export type Database = {
         Update: {
           account_id?: string
           angle?: string | null
+          app_angle_id?: string | null
           app_id?: string | null
           content_category?: string | null
           content_type?: string
@@ -2613,6 +2679,7 @@ export type Database = {
         Row: {
           account_id: string
           active_voiceover_id: string | null
+          app_angle_id: string | null
           app_id: string | null
           assembled_at: string | null
           assembled_meta: Json | null
@@ -2643,6 +2710,7 @@ export type Database = {
         Insert: {
           account_id: string
           active_voiceover_id?: string | null
+          app_angle_id?: string | null
           app_id?: string | null
           assembled_at?: string | null
           assembled_meta?: Json | null
@@ -2673,6 +2741,7 @@ export type Database = {
         Update: {
           account_id?: string
           active_voiceover_id?: string | null
+          app_angle_id?: string | null
           app_id?: string | null
           assembled_at?: string | null
           assembled_meta?: Json | null
