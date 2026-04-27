@@ -13,7 +13,7 @@ import Review from "./pages/Review";
 import Studio from "./pages/Studio";
 import Settings from "./pages/Settings";
 import RoutingAnalytics from "./pages/RoutingAnalytics";
-import Products from "./pages/Products";
+import Catalog from "./pages/Catalog";
 import ProductDossier from "./pages/ProductDossier";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
@@ -32,7 +32,8 @@ const App = () => (
             <Route path="/" element={<Today />} />
             <Route path="/verticals" element={<Verticals />} />
             <Route path="/verticals/:vertical" element={<VerticalDetail />} />
-            <Route path="/products" element={<Products />} />
+            <Route path="/catalog" element={<Catalog />} />
+            <Route path="/products" element={<Navigate to="/catalog?tab=products" replace />} />
             <Route path="/products/:productId" element={<ProductDossier />} />
             <Route path="/studio" element={<Review />} />
             <Route path="/studio/:scriptRunId" element={<Studio />} />

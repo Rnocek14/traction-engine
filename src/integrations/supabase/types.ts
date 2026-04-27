@@ -125,41 +125,197 @@ export type Database = {
         }
         Relationships: []
       }
+      app_funnel_events: {
+        Row: {
+          activations: number
+          app_id: string
+          clicks: number
+          created_at: string
+          date: string
+          id: string
+          impressions: number
+          paid_conversions: number
+          revenue_cents: number
+          signups: number
+          source: string
+          story_job_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          activations?: number
+          app_id: string
+          clicks?: number
+          created_at?: string
+          date?: string
+          id?: string
+          impressions?: number
+          paid_conversions?: number
+          revenue_cents?: number
+          signups?: number
+          source?: string
+          story_job_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          activations?: number
+          app_id?: string
+          clicks?: number
+          created_at?: string
+          date?: string
+          id?: string
+          impressions?: number
+          paid_conversions?: number
+          revenue_cents?: number
+          signups?: number
+          source?: string
+          story_job_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "app_funnel_events_app_id_fkey"
+            columns: ["app_id"]
+            isOneToOne: false
+            referencedRelation: "apps"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "app_funnel_events_story_job_id_fkey"
+            columns: ["story_job_id"]
+            isOneToOne: false
+            referencedRelation: "story_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       apps: {
         Row: {
           created_at: string
+          cta_url: string | null
           description: string | null
+          hooks: string[]
           icon_url: string | null
           id: string
+          marketing_plan: Json
           name: string
+          notes: string | null
+          pricing_model: string | null
+          readiness_score: number
+          screenshots: string[]
           status: string
+          target_audience: string | null
           updated_at: string
           url: string | null
+          value_prop: string | null
           verticals: string[]
         }
         Insert: {
           created_at?: string
+          cta_url?: string | null
           description?: string | null
+          hooks?: string[]
           icon_url?: string | null
           id?: string
+          marketing_plan?: Json
           name: string
+          notes?: string | null
+          pricing_model?: string | null
+          readiness_score?: number
+          screenshots?: string[]
           status?: string
+          target_audience?: string | null
           updated_at?: string
           url?: string | null
+          value_prop?: string | null
           verticals?: string[]
         }
         Update: {
           created_at?: string
+          cta_url?: string | null
           description?: string | null
+          hooks?: string[]
           icon_url?: string | null
           id?: string
+          marketing_plan?: Json
           name?: string
+          notes?: string | null
+          pricing_model?: string | null
+          readiness_score?: number
+          screenshots?: string[]
           status?: string
+          target_audience?: string | null
           updated_at?: string
           url?: string | null
+          value_prop?: string | null
           verticals?: string[]
         }
         Relationships: []
+      }
+      campaigns: {
+        Row: {
+          app_id: string | null
+          asset_kind: string
+          created_at: string
+          id: string
+          name: string
+          notes: string | null
+          product_id: string | null
+          status: string
+          total_clicks: number
+          total_conversions: number
+          total_revenue_cents: number
+          updated_at: string
+          vertical: string
+          videos_published: number
+        }
+        Insert: {
+          app_id?: string | null
+          asset_kind: string
+          created_at?: string
+          id?: string
+          name: string
+          notes?: string | null
+          product_id?: string | null
+          status?: string
+          total_clicks?: number
+          total_conversions?: number
+          total_revenue_cents?: number
+          updated_at?: string
+          vertical: string
+          videos_published?: number
+        }
+        Update: {
+          app_id?: string | null
+          asset_kind?: string
+          created_at?: string
+          id?: string
+          name?: string
+          notes?: string | null
+          product_id?: string | null
+          status?: string
+          total_clicks?: number
+          total_conversions?: number
+          total_revenue_cents?: number
+          updated_at?: string
+          vertical?: string
+          videos_published?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaigns_app_id_fkey"
+            columns: ["app_id"]
+            isOneToOne: false
+            referencedRelation: "apps"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "campaigns_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       career_profiles: {
         Row: {
@@ -305,6 +461,7 @@ export type Database = {
         Row: {
           account_id: string
           angle: string | null
+          app_id: string | null
           content_category: string | null
           content_type: string
           created_at: string
@@ -329,6 +486,7 @@ export type Database = {
         Insert: {
           account_id: string
           angle?: string | null
+          app_id?: string | null
           content_category?: string | null
           content_type?: string
           created_at?: string
@@ -353,6 +511,7 @@ export type Database = {
         Update: {
           account_id?: string
           angle?: string | null
+          app_id?: string | null
           content_category?: string | null
           content_type?: string
           created_at?: string
@@ -375,6 +534,13 @@ export type Database = {
           vertical?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "content_ideas_app_id_fkey"
+            columns: ["app_id"]
+            isOneToOne: false
+            referencedRelation: "apps"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "content_ideas_product_id_fkey"
             columns: ["product_id"]
@@ -2447,6 +2613,7 @@ export type Database = {
         Row: {
           account_id: string
           active_voiceover_id: string | null
+          app_id: string | null
           assembled_at: string | null
           assembled_meta: Json | null
           assembled_status: string | null
@@ -2476,6 +2643,7 @@ export type Database = {
         Insert: {
           account_id: string
           active_voiceover_id?: string | null
+          app_id?: string | null
           assembled_at?: string | null
           assembled_meta?: Json | null
           assembled_status?: string | null
@@ -2505,6 +2673,7 @@ export type Database = {
         Update: {
           account_id?: string
           active_voiceover_id?: string | null
+          app_id?: string | null
           assembled_at?: string | null
           assembled_meta?: Json | null
           assembled_status?: string | null
@@ -2537,6 +2706,13 @@ export type Database = {
             columns: ["active_voiceover_id"]
             isOneToOne: false
             referencedRelation: "story_voiceovers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "story_jobs_app_id_fkey"
+            columns: ["app_id"]
+            isOneToOne: false
+            referencedRelation: "apps"
             referencedColumns: ["id"]
           },
           {
@@ -2873,38 +3049,47 @@ export type Database = {
       }
       vertical_configs: {
         Row: {
+          app_pct: number
           auto_generate: boolean
           created_at: string
           daily_app_target: number
           daily_growth_target: number
           daily_product_target: number
+          growth_pct: number
           growth_ratio: number
           id: string
           last_engine_run_at: string | null
+          product_pct: number
           updated_at: string
           vertical: string
         }
         Insert: {
+          app_pct?: number
           auto_generate?: boolean
           created_at?: string
           daily_app_target?: number
           daily_growth_target?: number
           daily_product_target?: number
+          growth_pct?: number
           growth_ratio?: number
           id?: string
           last_engine_run_at?: string | null
+          product_pct?: number
           updated_at?: string
           vertical: string
         }
         Update: {
+          app_pct?: number
           auto_generate?: boolean
           created_at?: string
           daily_app_target?: number
           daily_growth_target?: number
           daily_product_target?: number
+          growth_pct?: number
           growth_ratio?: number
           id?: string
           last_engine_run_at?: string | null
+          product_pct?: number
           updated_at?: string
           vertical?: string
         }

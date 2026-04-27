@@ -5,14 +5,14 @@
  */
 
 import { Link, useLocation } from "react-router-dom";
-import { Zap, Network, ShoppingBag, CalendarCheck, Settings, Sparkles } from "lucide-react";
+import { Zap, Network, Package, CalendarCheck, Settings, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AuthHeader } from "@/components/auth/AuthHeader";
 
 const NAV_ITEMS = [
   { label: "Today", path: "/", icon: CalendarCheck },
   { label: "Verticals", path: "/verticals", icon: Network },
-  { label: "Products", path: "/products", icon: ShoppingBag },
+  { label: "Catalog", path: "/catalog", icon: Package },
   { label: "Studio", path: "/studio", icon: Sparkles },
   { label: "Settings", path: "/settings", icon: Settings },
 ] as const;
