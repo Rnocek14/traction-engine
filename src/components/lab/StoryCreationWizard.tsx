@@ -312,7 +312,77 @@ export function StoryCreationWizard({
               </Select>
             </div>
           </div>
-          
+
+          {/* Campaign Tagging — App + Angle */}
+          <div className="space-y-2 rounded-md border border-primary/20 bg-primary/5 p-3">
+            <div className="flex items-center gap-2">
+              <Target className="h-3.5 w-3.5 text-primary" />
+              <Label className="text-xs font-medium">Campaign tag (optional)</Label>
+              {selectedAngle && (
+                <Badge variant="outline" className="text-[9px] h-4 ml-auto">
+                  {selectedAngle.emotion}
+                </Badge>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-[10px] text-muted-foreground">App</Label>
+                <Select value={appId} onValueChange={handlePickApp}>
+                  <SelectTrigger className="h-9 text-xs">
+                    <SelectValue placeholder="None" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none" className="text-xs">— No app —</SelectItem>
+                    {apps.map((a) => (
+                      <SelectItem key={a.id} value={a.id} className="text-xs">
+                        {a.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-[10px] text-muted-foreground">Angle</Label>
+                <Select
+                  value={appAngleId}
+                  onValueChange={setAppAngleId}
+                  disabled={appId === "none" || angles.length === 0}
+                >
+                  <SelectTrigger className="h-9 text-xs">
+                    <SelectValue placeholder={appId === "none" ? "Pick app first" : "None"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none" className="text-xs">— No angle —</SelectItem>
+                    {angles.map((a) => (
+                      <SelectItem key={a.id} value={a.id} className="text-xs">
+                        {a.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            {selectedAngle && (
+              <div className="flex items-start justify-between gap-2 pt-1">
+                <p className="text-[10px] text-muted-foreground flex-1">
+                  {selectedAngle.hypothesis || "No hypothesis recorded"}
+                </p>
+                {(selectedAngle.hook_examples?.length ?? 0) > 0 && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 text-[10px] gap-1 px-2"
+                    onClick={handleSeedFromAngle}
+                  >
+                    <Shuffle className="h-3 w-3" />
+                    Seed hook
+                  </Button>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Story Type + Tier Row */}
           <div className="grid grid-cols-2 gap-3">
             {/* Story Type */}
