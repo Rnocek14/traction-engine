@@ -152,13 +152,32 @@ Deno.serve(async (req) => {
     }
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
-    
+
     let body: ProcessRequest = {};
     try {
       body = await req.json();
     } catch {
       // Empty body is fine
     }
+
+    // ─── COST GUARD: kill switch (manual job_id bypasses) ───
+    if (!(body as { job_id?: string }).job_id) {
+      const { checkCostGuard, logApiCall } = await import("../_shared/cost-guard.ts");
+      const guard = await checkCostGuard(supabase, {
+        functionName: "process-video-luma",
+        scope: "automation",
+        estimatedCostCents: 40,
+      });
+      if (!guard.allowed) {
+        await logApiCall(supabase, {
+          provider: "internal", functionName: "process-video-luma", operation: "cron_tick",
+          status: "blocked", costCents: 0, errorMessage: guard.reason,
+        });
+        return new Response(JSON.stringify({ blocked: true, reason: guard.reason }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+    }
+
 
     // Build query for jobs to process
     let query = supabase
