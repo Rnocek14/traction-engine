@@ -3831,6 +3831,7 @@ export type Database = {
         Returns: Json
       }
       get_spend_summary: { Args: never; Returns: Json }
+      get_upcoming_work_by_account: { Args: never; Returns: Json }
       has_any_role: {
         Args: {
           _roles: Database["public"]["Enums"]["app_role"][]
