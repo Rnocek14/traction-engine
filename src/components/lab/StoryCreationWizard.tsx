@@ -97,7 +97,31 @@ export function StoryCreationWizard({
   const [lockedProvider, setLockedProvider] = useState<"sora" | "runway" | "luma">("sora");
   const [characterContinuityMode, setCharacterContinuityMode] = useState(false);
   const [brutalityMode, setBrutalityMode] = useState(false);
-  
+
+  // Campaign tagging — links story to an App + Angle hypothesis
+  const [appId, setAppId] = useState<string>("none");
+  const [appAngleId, setAppAngleId] = useState<string>("none");
+
+  const { data: apps = [] } = useApps();
+  const { data: angles = [] } = useAppAngles(appId === "none" ? undefined : appId);
+  const selectedAngle = useMemo(
+    () => angles.find((a) => a.id === appAngleId) ?? null,
+    [angles, appAngleId]
+  );
+
+  const handlePickApp = (v: string) => {
+    setAppId(v);
+    setAppAngleId("none"); // reset angle when app changes
+  };
+
+  const handleSeedFromAngle = () => {
+    if (!selectedAngle) return;
+    const hooks = selectedAngle.hook_examples ?? [];
+    if (hooks.length === 0) return;
+    const pick = hooks[Math.floor(Math.random() * hooks.length)];
+    setConcept(pick);
+  };
+
   const [isGenerating, setIsGenerating] = useState(false);
 
   // Generate story mutation — always calls ONE edge function, backend decides compiler
