@@ -781,6 +781,23 @@ Deno.serve(async (req) => {
     const supabase = createClient(supabaseUrl, serviceKey);
     const { jobId, batchMode } = await req.json();
 
+    // ─── COST GUARD: kill switch (per-job manual call bypasses) ───
+    if (batchMode && !jobId) {
+      const { checkCostGuard, logApiCall } = await import("../_shared/cost-guard.ts");
+      const guard = await checkCostGuard(supabase, {
+        functionName: "auto-rate-video", scope: "automation", estimatedCostCents: 5,
+      });
+      if (!guard.allowed) {
+        await logApiCall(supabase, {
+          provider: "internal", functionName: "auto-rate-video", operation: "cron_tick",
+          status: "blocked", costCents: 0, errorMessage: guard.reason,
+        });
+        return new Response(JSON.stringify({ blocked: true, reason: guard.reason }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+    }
+
+
     if (batchMode) {
       console.log("[auto-rate-video] Batch mode started");
       // Load dynamic allowlist once for the batch
