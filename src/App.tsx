@@ -14,6 +14,7 @@ import Studio from "./pages/Studio";
 import Settings from "./pages/Settings";
 import RoutingAnalytics from "./pages/RoutingAnalytics";
 import Catalog from "./pages/Catalog";
+import Campaigns from "./pages/Campaigns";
 import ProductDossier from "./pages/ProductDossier";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
