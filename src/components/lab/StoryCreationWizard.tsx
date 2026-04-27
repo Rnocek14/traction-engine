@@ -220,7 +220,9 @@ export function StoryCreationWizard({
           continuity_anchors: JSON.parse(JSON.stringify(data.anchors || {})),
           total_clips: (data.scenes || []).length,
           status: "draft",
-        }])
+          app_id: appId === "none" ? null : appId,
+          app_angle_id: appAngleId === "none" ? null : appAngleId,
+        } as never])
         .select()
         .single();
       
