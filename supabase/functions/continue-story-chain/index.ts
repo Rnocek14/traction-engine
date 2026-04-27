@@ -267,6 +267,37 @@ Deno.serve(async (req) => {
     // Direct invoke: story_job_id passed without scene_index (e.g. "Generate All" button)
     const isDirectInvoke = story_job_id !== undefined && scene_index === undefined;
 
+    // ───────────────────────────────────────────────────────────
+    // COST GUARD: kill switch + spend caps
+    // Manual retries / direct invokes are user-initiated and bypass the kill switch.
+    // Pure cron-mode runs respect it so a runaway loop can be paused with one click.
+    // ───────────────────────────────────────────────────────────
+    const isAutomation = !isManualRetry && !isDirectInvoke;
+    if (isAutomation) {
+      const { checkCostGuard, logApiCall } = await import("../_shared/cost-guard.ts");
+      const guard = await checkCostGuard(supabase, {
+        functionName: "continue-story-chain",
+        scope: "automation",
+        storyJobId: story_job_id ?? null,
+        estimatedCostCents: 60, // worst case: one Sora clip
+      });
+      if (!guard.allowed) {
+        await logApiCall(supabase, {
+          provider: "internal",
+          functionName: "continue-story-chain",
+          operation: "cron_tick",
+          status: "blocked",
+          costCents: 0,
+          errorMessage: guard.reason,
+        });
+        return new Response(
+          JSON.stringify({ blocked: true, reason: guard.reason }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+    }
+
+
     if (isManualRetry) {
       console.log(`[chain-continue] Manual retry: story=${story_job_id} scene=${scene_index} replace=${replace_job_id || "none"} ai_sanitized=${!!prompt_override}`);
     } else if (isDirectInvoke) {

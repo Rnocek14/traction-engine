@@ -134,6 +134,25 @@ Deno.serve(async (req) => {
     const body: ProcessRequest = await req.json().catch(() => ({}));
     const { job_id } = body;
 
+    // ─── COST GUARD: kill switch (manual job_id bypasses) ───
+    if (!job_id) {
+      const { checkCostGuard, logApiCall } = await import("../_shared/cost-guard.ts");
+      const guard = await checkCostGuard(supabase, {
+        functionName: "process-video",
+        scope: "automation",
+        estimatedCostCents: 60,
+      });
+      if (!guard.allowed) {
+        await logApiCall(supabase, {
+          provider: "internal", functionName: "process-video", operation: "cron_tick",
+          status: "blocked", costCents: 0, errorMessage: guard.reason,
+        });
+        return new Response(JSON.stringify({ blocked: true, reason: guard.reason }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+    }
+
+
     // Fetch jobs to process — prioritize newest first so new jobs aren't buried
     // behind stale ones. Also skip jobs older than 48h (likely abandoned).
     const jobs = await withRetry(async () => {

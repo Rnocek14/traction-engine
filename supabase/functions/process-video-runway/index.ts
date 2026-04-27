@@ -190,6 +190,25 @@ Deno.serve(async (req) => {
       // No body or invalid JSON - process all pending
     }
 
+    // ─── COST GUARD: kill switch (manual job_id bypasses) ───
+    if (!jobFilter) {
+      const { checkCostGuard, logApiCall } = await import("../_shared/cost-guard.ts");
+      const guard = await checkCostGuard(supabase, {
+        functionName: "process-video-runway",
+        scope: "automation",
+        estimatedCostCents: 50,
+      });
+      if (!guard.allowed) {
+        await logApiCall(supabase, {
+          provider: "internal", functionName: "process-video-runway", operation: "cron_tick",
+          status: "blocked", costCents: 0, errorMessage: guard.reason,
+        });
+        return new Response(JSON.stringify({ blocked: true, reason: guard.reason }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+    }
+
+
     // Fetch pending Runway jobs - check both provider_job_id and legacy openai_video_id
     let query = supabase
       .from("video_jobs")

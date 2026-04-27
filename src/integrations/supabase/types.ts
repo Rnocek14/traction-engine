@@ -125,6 +125,66 @@ export type Database = {
         }
         Relationships: []
       }
+      api_call_log: {
+        Row: {
+          account_id: string | null
+          app_id: string | null
+          cost_cents: number
+          created_at: string
+          error_message: string | null
+          function_name: string
+          id: string
+          input_tokens: number | null
+          latency_ms: number | null
+          metadata: Json
+          model: string | null
+          operation: string | null
+          output_tokens: number | null
+          product_id: string | null
+          provider: string
+          status: string
+          story_job_id: string | null
+        }
+        Insert: {
+          account_id?: string | null
+          app_id?: string | null
+          cost_cents?: number
+          created_at?: string
+          error_message?: string | null
+          function_name: string
+          id?: string
+          input_tokens?: number | null
+          latency_ms?: number | null
+          metadata?: Json
+          model?: string | null
+          operation?: string | null
+          output_tokens?: number | null
+          product_id?: string | null
+          provider: string
+          status?: string
+          story_job_id?: string | null
+        }
+        Update: {
+          account_id?: string | null
+          app_id?: string | null
+          cost_cents?: number
+          created_at?: string
+          error_message?: string | null
+          function_name?: string
+          id?: string
+          input_tokens?: number | null
+          latency_ms?: number | null
+          metadata?: Json
+          model?: string | null
+          operation?: string | null
+          output_tokens?: number | null
+          product_id?: string | null
+          provider?: string
+          status?: string
+          story_job_id?: string | null
+        }
+        Relationships: []
+      }
       app_angles: {
         Row: {
           app_id: string
@@ -2961,6 +3021,45 @@ export type Database = {
           },
         ]
       }
+      system_settings: {
+        Row: {
+          automation_enabled: boolean
+          daily_spend_cap_cents: number
+          id: string
+          paused_at: string | null
+          paused_by: string | null
+          paused_reason: string | null
+          per_product_cap_cents: number
+          per_story_cap_cents: number
+          singleton: boolean
+          updated_at: string
+        }
+        Insert: {
+          automation_enabled?: boolean
+          daily_spend_cap_cents?: number
+          id?: string
+          paused_at?: string | null
+          paused_by?: string | null
+          paused_reason?: string | null
+          per_product_cap_cents?: number
+          per_story_cap_cents?: number
+          singleton?: boolean
+          updated_at?: string
+        }
+        Update: {
+          automation_enabled?: boolean
+          daily_spend_cap_cents?: number
+          id?: string
+          paused_at?: string | null
+          paused_by?: string | null
+          paused_reason?: string | null
+          per_product_cap_cents?: number
+          per_story_cap_cents?: number
+          singleton?: boolean
+          updated_at?: string
+        }
+        Relationships: []
+      }
       system_task_runs: {
         Row: {
           created_at: string
@@ -3731,6 +3830,7 @@ export type Database = {
         Args: { p_days?: number; p_max_rows?: number }
         Returns: Json
       }
+      get_spend_summary: { Args: never; Returns: Json }
       has_any_role: {
         Args: {
           _roles: Database["public"]["Enums"]["app_role"][]
@@ -3745,6 +3845,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      is_automation_enabled: { Args: never; Returns: boolean }
       normalize_routing_tag: { Args: { p_tag: string }; Returns: string }
       select_topic: {
         Args: { p_pillar?: string; p_vertical: string }
