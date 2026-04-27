@@ -604,6 +604,20 @@ Style: Professional, engaging, suitable for TikTok/Reels. Smooth transitions bet
 
         if (openaiResponse.ok) {
           openaiData = await openaiResponse.json();
+          // Log paid Sora submission for cost dashboard
+          try {
+            const { logApiCall, ESTIMATED_COST_CENTS } = await import("../_shared/cost-guard.ts");
+            await logApiCall(supabase, {
+              provider: "sora",
+              model,
+              functionName: "queue-video",
+              operation: "video_submit",
+              storyJobId: (job as any).story_job_id ?? null,
+              status: "success",
+              costCents: ESTIMATED_COST_CENTS.sora_video,
+              metadata: { job_id: job.id, seconds: providerSeconds, size },
+            });
+          } catch (e) { console.warn("[queue-video] cost log failed:", (e as Error).message); }
           break; // Success!
         }
         
