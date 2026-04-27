@@ -155,6 +155,23 @@ Deno.serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+    // ─── COST GUARD: kill switch ───
+    {
+      const { checkCostGuard, logApiCall } = await import("../_shared/cost-guard.ts");
+      const guard = await checkCostGuard(supabase, {
+        functionName: "auto-scrape-trends", scope: "automation", estimatedCostCents: 5,
+      });
+      if (!guard.allowed) {
+        await logApiCall(supabase, {
+          provider: "internal", functionName: "auto-scrape-trends", operation: "cron_tick",
+          status: "blocked", costCents: 0, errorMessage: guard.reason,
+        });
+        return new Response(JSON.stringify({ blocked: true, reason: guard.reason }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+    }
+
+
     // Get active verticals from account_configs
     const { data: accounts } = await supabase
       .from("account_configs")
