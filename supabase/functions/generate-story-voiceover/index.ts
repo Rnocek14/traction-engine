@@ -199,6 +199,21 @@ Deno.serve(async (req) => {
       throw new Error("No audio returned from ElevenLabs");
     }
 
+    // Log paid ElevenLabs call for cost dashboard
+    try {
+      const { logApiCall, ESTIMATED_COST_CENTS } = await import("../_shared/cost-guard.ts");
+      await logApiCall(supabase, {
+        provider: "elevenlabs",
+        model: "eleven_multilingual_v2",
+        functionName: "generate-story-voiceover",
+        operation: "tts_with_timestamps",
+        storyJobId: (voiceover as any).story_job_id ?? null,
+        status: "success",
+        costCents: ESTIMATED_COST_CENTS.elevenlabs_voiceover,
+        metadata: { voiceover_id: voiceover.id, voice_id: voiceId, char_length: canonicalText.length },
+      });
+    } catch (e) { console.warn("[generate-story-voiceover] cost log failed:", (e as Error).message); }
+
     // Decode base64 audio
     const audioBytes = Uint8Array.from(atob(ttsData.audio_base64), c => c.charCodeAt(0));
 

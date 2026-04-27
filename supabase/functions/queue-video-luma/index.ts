@@ -297,6 +297,21 @@ Deno.serve(async (req) => {
       throw new Error(errorMessage);
     }
 
+    // Log paid Luma submission for cost dashboard
+    try {
+      const { logApiCall, ESTIMATED_COST_CENTS } = await import("../_shared/cost-guard.ts");
+      await logApiCall(supabase, {
+        provider: "luma",
+        model: lumaRequest.model,
+        functionName: "queue-video-luma",
+        operation: "video_submit",
+        storyJobId: (job as any).story_job_id ?? null,
+        status: "success",
+        costCents: ESTIMATED_COST_CENTS.luma_video,
+        metadata: { job_id: job.id, duration: lumaRequest.duration, aspect_ratio: lumaRequest.aspect_ratio },
+      });
+    } catch (e) { console.warn("[queue-video-luma] cost log failed:", (e as Error).message); }
+
     // Update job with Luma task ID - store in settings.provider_job_id (provider-neutral)
     const lumaTaskId = lumaData.id;
     

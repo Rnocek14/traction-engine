@@ -386,6 +386,20 @@ Deno.serve(async (req) => {
         if (runwayResponse.ok) {
           runwayData = await runwayResponse.json();
           finalPrompt = promptForAttempt;
+          // Log paid Runway submission for cost dashboard
+          try {
+            const { logApiCall, ESTIMATED_COST_CENTS } = await import("../_shared/cost-guard.ts");
+            await logApiCall(supabase, {
+              provider: "runway",
+              model: runwayModel,
+              functionName: "queue-video-runway",
+              operation: "video_submit",
+              storyJobId: (job as any).story_job_id ?? null,
+              status: "success",
+              costCents: ESTIMATED_COST_CENTS.runway_video,
+              metadata: { job_id: job.id, duration: runwayDuration, ratio: runwaySize, endpoint: currentEndpoint },
+            });
+          } catch (e) { console.warn("[queue-video-runway] cost log failed:", (e as Error).message); }
           break; // Success!
         }
         
