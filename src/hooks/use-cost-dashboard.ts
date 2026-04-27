@@ -93,4 +93,42 @@ export function useRecentApiCalls(limit = 50) {
   });
 }
 
+export type UpcomingWork = {
+  totals: {
+    accounts_with_backlog: number;
+    stories_pending: number;
+    videos_active: number;
+    ideas_proposed: number;
+    worst_case_cents: number;
+  };
+  accounts: Array<{
+    account_id: string;
+    stories_draft: number;
+    stories_generating: number;
+    stories_partial: number;
+    stories_total: number;
+    oldest_pending_at: string | null;
+    videos_active: number;
+    videos_queued: number;
+    videos_running: number;
+    videos_active_est_cents: number;
+    ideas_proposed: number;
+    worst_case_cents: number;
+  }>;
+};
+
+export function useUpcomingWork() {
+  return useQuery({
+    queryKey: ["upcoming-work"],
+    refetchInterval: 15_000,
+    queryFn: async () => {
+      const { data, error } = await (supabase as never as {
+        rpc: (fn: string) => Promise<{ data: UpcomingWork | null; error: Error | null }>;
+      }).rpc("get_upcoming_work_by_account");
+      if (error) throw error;
+      return data as UpcomingWork;
+    },
+  });
+}
+
 export const fmtUsd = (cents: number) => `$${(cents / 100).toFixed(2)}`;

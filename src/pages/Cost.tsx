@@ -4,6 +4,7 @@ import {
   useSystemSettings,
   useUpdateSystemSettings,
   useRecentApiCalls,
+  useUpcomingWork,
   fmtUsd,
 } from "@/hooks/use-cost-dashboard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,6 +19,7 @@ export default function Cost() {
   const { data: settings } = useSystemSettings();
   const { data: spend } = useSpendSummary();
   const { data: calls } = useRecentApiCalls(30);
+  const { data: upcoming } = useUpcomingWork();
   const update = useUpdateSystemSettings();
 
   const dailyPctUsed = useMemo(() => {
@@ -156,6 +158,86 @@ export default function Cost() {
           </Card>
         ))}
       </div>
+
+      {/* Upcoming work per account — backlog & worst-case spend if all flushed */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm flex items-center justify-between">
+            <span>Upcoming work by account</span>
+            {upcoming?.totals && (
+              <span className="text-xs text-muted-foreground font-normal">
+                {upcoming.totals.accounts_with_backlog} account(s) ·{" "}
+                {upcoming.totals.stories_pending} stories pending ·{" "}
+                {upcoming.totals.videos_active} videos active · worst-case{" "}
+                <span className={upcoming.totals.worst_case_cents > (settings?.daily_spend_cap_cents ?? 0) ? "text-destructive font-semibold" : ""}>
+                  {fmtUsd(upcoming.totals.worst_case_cents)}
+                </span>
+              </span>
+            )}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {upcoming?.accounts?.length ? (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="text-muted-foreground border-b border-border">
+                  <tr>
+                    <th className="text-left py-2 font-medium">Account</th>
+                    <th className="text-right py-2 font-medium">Ideas</th>
+                    <th className="text-right py-2 font-medium">Stories pending</th>
+                    <th className="text-right py-2 font-medium">Videos active</th>
+                    <th className="text-right py-2 font-medium">Oldest</th>
+                    <th className="text-right py-2 font-medium">Worst-case $</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {upcoming.accounts.map((a) => {
+                    const overCap = !!settings && a.worst_case_cents > settings.daily_spend_cap_cents;
+                    return (
+                      <tr key={a.account_id} className="border-b border-border/50">
+                        <td className="py-2 font-mono">{a.account_id}</td>
+                        <td className="text-right py-2">{a.ideas_proposed || "—"}</td>
+                        <td className="text-right py-2">
+                          {a.stories_total > 0 ? (
+                            <span>
+                              {a.stories_total}
+                              <span className="text-muted-foreground ml-1">
+                                ({a.stories_draft}d/{a.stories_generating}g/{a.stories_partial}p)
+                              </span>
+                            </span>
+                          ) : "—"}
+                        </td>
+                        <td className="text-right py-2">
+                          {a.videos_active > 0 ? (
+                            <span>
+                              {a.videos_active}
+                              <span className="text-muted-foreground ml-1">
+                                ({a.videos_queued}q/{a.videos_running}r)
+                              </span>
+                            </span>
+                          ) : "—"}
+                        </td>
+                        <td className="text-right py-2 text-muted-foreground">
+                          {a.oldest_pending_at ? new Date(a.oldest_pending_at).toLocaleDateString() : "—"}
+                        </td>
+                        <td className={"text-right py-2 font-medium " + (overCap ? "text-destructive" : "")}>
+                          {fmtUsd(a.worst_case_cents)}
+                          {overCap && <span className="ml-1">⚠</span>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <p className="text-[10px] text-muted-foreground mt-2">
+                Worst-case = if every pending story produced ~3 videos avg + active video jobs finished. d=draft, g=generating, p=partial, q=queued, r=running.
+              </p>
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">No backlog. Queues are empty.</p>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Provider + Function breakdown */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
