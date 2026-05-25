@@ -16,6 +16,7 @@ import RoutingAnalytics from "./pages/RoutingAnalytics";
 import Catalog from "./pages/Catalog";
 import Campaigns from "./pages/Campaigns";
 import Cost from "./pages/Cost";
+import Library from "./pages/Library";
 import ProductDossier from "./pages/ProductDossier";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
@@ -37,6 +38,7 @@ const App = () => (
             <Route path="/catalog" element={<Catalog />} />
             <Route path="/campaigns" element={<Campaigns />} />
             <Route path="/cost" element={<Cost />} />
+            <Route path="/library" element={<Library />} />
             <Route path="/products" element={<Navigate to="/catalog?tab=products" replace />} />
             <Route path="/products/:productId" element={<ProductDossier />} />
             <Route path="/studio" element={<Review />} />
