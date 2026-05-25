@@ -17,6 +17,7 @@ import Catalog from "./pages/Catalog";
 import Campaigns from "./pages/Campaigns";
 import Cost from "./pages/Cost";
 import Library from "./pages/Library";
+import StoryLibrary from "./pages/StoryLibrary";
 import ProductDossier from "./pages/ProductDossier";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
