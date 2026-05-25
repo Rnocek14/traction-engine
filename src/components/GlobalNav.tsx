@@ -5,7 +5,7 @@
  */
 
 import { Link, useLocation } from "react-router-dom";
-import { Zap, Network, Package, CalendarCheck, Settings, Sparkles, Target, DollarSign } from "lucide-react";
+import { Zap, Network, Package, CalendarCheck, Settings, Sparkles, Target, DollarSign, Library } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AuthHeader } from "@/components/auth/AuthHeader";
 
@@ -15,6 +15,7 @@ const NAV_ITEMS = [
   { label: "Catalog", path: "/catalog", icon: Package },
   { label: "Campaigns", path: "/campaigns", icon: Target },
   { label: "Studio", path: "/studio", icon: Sparkles },
+  { label: "Library", path: "/library", icon: Library },
   { label: "Cost", path: "/cost", icon: DollarSign },
   { label: "Settings", path: "/settings", icon: Settings },
 ] as const;
