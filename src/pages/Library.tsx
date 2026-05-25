@@ -286,7 +286,13 @@ export default function LibraryPage() {
 
       {/* Content */}
       <div className="max-w-7xl mx-auto px-4 py-6">
-        {isLoading ? (
+        {queryError ? (
+          <div className="text-center py-20">
+            <AlertTriangle className="h-12 w-12 text-destructive/60 mx-auto mb-4" />
+            <p className="text-destructive font-medium">Failed to load videos</p>
+            <p className="text-sm text-muted-foreground mt-1">{(queryError as Error).message}</p>
+          </div>
+        ) : isLoading ? (
           <div className="flex items-center justify-center py-20">
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
           </div>
