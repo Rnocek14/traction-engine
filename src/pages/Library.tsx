@@ -60,6 +60,7 @@ interface VideoJob {
 
 const PROVIDERS = ["all", "sora", "runway", "luma"] as const;
 const STATUSES = ["all", "done", "succeeded", "failed", "running", "queued"] as const;
+const PAGE_SIZE = 60;
 
 export default function LibraryPage() {
   const [search, setSearch] = useState("");
@@ -70,18 +71,30 @@ export default function LibraryPage() {
   const [showFilters, setShowFilters] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [page, setPage] = useState(1);
-  const PAGE_SIZE = 48;
 
-  const { data: videos, isLoading } = useQuery({
-    queryKey: ["video-library-full"],
+  const { data: videos, isLoading, error: queryError } = useQuery({
+    queryKey: ["video-library", providerFilter, statusFilter, sortBy, page],
     queryFn: async () => {
-      const { data, error } = await supabase
+      // Lightweight columns only — heavy fields (enriched_prompt, settings) loaded on demand
+      let q = supabase
         .from("video_jobs")
         .select(
-          "id, provider, status, output_url, thumbnail_url, spritesheet_url, created_at, accuracy_rating, original_prompt, enriched_prompt, settings, auto_overall_score, auto_quality_score, auto_match_score, auto_motion_score, auto_cinematic_score, auto_routing_tags, auto_best_use, error"
-        )
-        .order("created_at", { ascending: false })
-        .limit(500);
+          "id, provider, status, output_url, thumbnail_url, created_at, accuracy_rating, original_prompt, auto_overall_score, auto_routing_tags, auto_best_use, error"
+        );
+
+      if (providerFilter !== "all") q = q.eq("provider", providerFilter);
+      if (statusFilter !== "all") {
+        if (statusFilter === "done") q = q.in("status", ["done", "succeeded"]);
+        else q = q.eq("status", statusFilter);
+      }
+
+      const ascending = sortBy === "oldest";
+      const orderCol =
+        sortBy === "rating" ? "accuracy_rating" : sortBy === "score" ? "auto_overall_score" : "created_at";
+
+      const { data, error } = await q
+        .order(orderCol, { ascending, nullsFirst: false })
+        .range(0, page * PAGE_SIZE - 1);
 
       if (error) throw error;
       return (data || []) as unknown as VideoJob[];
@@ -90,54 +103,18 @@ export default function LibraryPage() {
 
   const filtered = useMemo(() => {
     if (!videos) return [];
-    let result = [...videos];
+    if (!search.trim()) return videos;
+    const qStr = search.toLowerCase();
+    return videos.filter(
+      (v) =>
+        (v.original_prompt?.toLowerCase().includes(qStr) ?? false) ||
+        (v.auto_best_use?.toLowerCase().includes(qStr) ?? false) ||
+        (v.provider?.toLowerCase().includes(qStr) ?? false)
+    );
+  }, [videos, search]);
 
-    if (providerFilter !== "all") {
-      result = result.filter((v) => v.provider === providerFilter);
-    }
-
-    if (statusFilter !== "all") {
-      result = result.filter((v) =>
-        statusFilter === "done"
-          ? v.status === "done" || v.status === "succeeded"
-          : v.status === statusFilter
-      );
-    }
-
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      result = result.filter(
-        (v) =>
-          (v.original_prompt?.toLowerCase().includes(q) ?? false) ||
-          (v.enriched_prompt?.toLowerCase().includes(q) ?? false) ||
-          (v.auto_best_use?.toLowerCase().includes(q) ?? false) ||
-          (v.provider?.toLowerCase().includes(q) ?? false)
-      );
-    }
-
-    switch (sortBy) {
-      case "oldest":
-        result.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-        break;
-      case "rating":
-        result.sort((a, b) => (b.accuracy_rating ?? 0) - (a.accuracy_rating ?? 0));
-        break;
-      case "score":
-        result.sort((a, b) => (b.auto_overall_score ?? 0) - (a.auto_overall_score ?? 0));
-        break;
-      default:
-        // newest — already sorted from DB
-        break;
-    }
-
-    return result;
-  }, [videos, providerFilter, statusFilter, search, sortBy]);
-
-  const paginated = useMemo(() => {
-    return filtered.slice(0, page * PAGE_SIZE);
-  }, [filtered, page]);
-
-  const hasMore = paginated.length < filtered.length;
+  const paginated = filtered;
+  const hasMore = (videos?.length ?? 0) >= page * PAGE_SIZE;
 
   const getProviderColor = (provider: string) => {
     switch (provider) {
@@ -309,7 +286,13 @@ export default function LibraryPage() {
 
       {/* Content */}
       <div className="max-w-7xl mx-auto px-4 py-6">
-        {isLoading ? (
+        {queryError ? (
+          <div className="text-center py-20">
+            <AlertTriangle className="h-12 w-12 text-destructive/60 mx-auto mb-4" />
+            <p className="text-destructive font-medium">Failed to load videos</p>
+            <p className="text-sm text-muted-foreground mt-1">{(queryError as Error).message}</p>
+          </div>
+        ) : isLoading ? (
           <div className="flex items-center justify-center py-20">
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
           </div>
