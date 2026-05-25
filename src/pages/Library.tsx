@@ -60,6 +60,7 @@ interface VideoJob {
 
 const PROVIDERS = ["all", "sora", "runway", "luma"] as const;
 const STATUSES = ["all", "done", "succeeded", "failed", "running", "queued"] as const;
+const PAGE_SIZE = 60;
 
 export default function LibraryPage() {
   const [search, setSearch] = useState("");
@@ -70,18 +71,30 @@ export default function LibraryPage() {
   const [showFilters, setShowFilters] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [page, setPage] = useState(1);
-  const PAGE_SIZE = 48;
 
-  const { data: videos, isLoading } = useQuery({
-    queryKey: ["video-library-full"],
+  const { data: videos, isLoading, error: queryError } = useQuery({
+    queryKey: ["video-library", providerFilter, statusFilter, sortBy, page],
     queryFn: async () => {
-      const { data, error } = await supabase
+      // Lightweight columns only — heavy fields (enriched_prompt, settings) loaded on demand
+      let q = supabase
         .from("video_jobs")
         .select(
-          "id, provider, status, output_url, thumbnail_url, spritesheet_url, created_at, accuracy_rating, original_prompt, enriched_prompt, settings, auto_overall_score, auto_quality_score, auto_match_score, auto_motion_score, auto_cinematic_score, auto_routing_tags, auto_best_use, error"
-        )
-        .order("created_at", { ascending: false })
-        .limit(500);
+          "id, provider, status, output_url, thumbnail_url, created_at, accuracy_rating, original_prompt, auto_overall_score, auto_routing_tags, auto_best_use, error"
+        );
+
+      if (providerFilter !== "all") q = q.eq("provider", providerFilter);
+      if (statusFilter !== "all") {
+        if (statusFilter === "done") q = q.in("status", ["done", "succeeded"]);
+        else q = q.eq("status", statusFilter);
+      }
+
+      const ascending = sortBy === "oldest";
+      const orderCol =
+        sortBy === "rating" ? "accuracy_rating" : sortBy === "score" ? "auto_overall_score" : "created_at";
+
+      const { data, error } = await q
+        .order(orderCol, { ascending, nullsFirst: false })
+        .range(0, page * PAGE_SIZE - 1);
 
       if (error) throw error;
       return (data || []) as unknown as VideoJob[];
