@@ -103,54 +103,18 @@ export default function LibraryPage() {
 
   const filtered = useMemo(() => {
     if (!videos) return [];
-    let result = [...videos];
+    if (!search.trim()) return videos;
+    const qStr = search.toLowerCase();
+    return videos.filter(
+      (v) =>
+        (v.original_prompt?.toLowerCase().includes(qStr) ?? false) ||
+        (v.auto_best_use?.toLowerCase().includes(qStr) ?? false) ||
+        (v.provider?.toLowerCase().includes(qStr) ?? false)
+    );
+  }, [videos, search]);
 
-    if (providerFilter !== "all") {
-      result = result.filter((v) => v.provider === providerFilter);
-    }
-
-    if (statusFilter !== "all") {
-      result = result.filter((v) =>
-        statusFilter === "done"
-          ? v.status === "done" || v.status === "succeeded"
-          : v.status === statusFilter
-      );
-    }
-
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      result = result.filter(
-        (v) =>
-          (v.original_prompt?.toLowerCase().includes(q) ?? false) ||
-          (v.enriched_prompt?.toLowerCase().includes(q) ?? false) ||
-          (v.auto_best_use?.toLowerCase().includes(q) ?? false) ||
-          (v.provider?.toLowerCase().includes(q) ?? false)
-      );
-    }
-
-    switch (sortBy) {
-      case "oldest":
-        result.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-        break;
-      case "rating":
-        result.sort((a, b) => (b.accuracy_rating ?? 0) - (a.accuracy_rating ?? 0));
-        break;
-      case "score":
-        result.sort((a, b) => (b.auto_overall_score ?? 0) - (a.auto_overall_score ?? 0));
-        break;
-      default:
-        // newest — already sorted from DB
-        break;
-    }
-
-    return result;
-  }, [videos, providerFilter, statusFilter, search, sortBy]);
-
-  const paginated = useMemo(() => {
-    return filtered.slice(0, page * PAGE_SIZE);
-  }, [filtered, page]);
-
-  const hasMore = paginated.length < filtered.length;
+  const paginated = filtered;
+  const hasMore = (videos?.length ?? 0) >= page * PAGE_SIZE;
 
   const getProviderColor = (provider: string) => {
     switch (provider) {
