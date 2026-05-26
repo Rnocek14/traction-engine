@@ -1,0 +1,1 @@
+UPDATE public.story_jobs SET title = 'Spooky Wisconsin Facts: The Beast of Bray Road' WHERE id = '3b64b2ed-49d2-4f8a-84d6-7eab92de7bde';
